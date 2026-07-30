@@ -105,10 +105,53 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             ["oldText"] = "order",
             ["newText"] = "request",
             ["dryRun"] = true,
+            ["force"] = true,
         });
 
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("expected exactly 1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_OnACsFileWithoutForce_PointsAtTheSemanticTools()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["oldText"] = "Unused",
+            ["newText"] = "Spare",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("replace_symbol_body", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_Applied_ChangesTheFileOnDiskAndIsReadableBack()
+    {
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "scratch.json");
+
+        try
+        {
+            var written = await server.CallAsync("write_text", new()
+            {
+                ["path"] = "scratch.json",
+                ["content"] = "{ \"written\": true }",
+                ["dryRun"] = false,
+            });
+
+            Assert.Contains("applied", written, StringComparison.Ordinal);
+            Assert.Equal("{ \"written\": true }", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = "scratch.json" });
+
+            Assert.Contains("\"written\": true", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]

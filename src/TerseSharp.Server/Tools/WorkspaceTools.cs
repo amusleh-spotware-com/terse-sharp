@@ -41,6 +41,11 @@ public sealed class WorkspaceTools(ToolContext context)
     public string UnloadWorkspace([Description("Solution or project path to unload.")] string path) =>
         context.Registry.Unload(path) ? "unloaded " + path : "not loaded " + path;
 
+    [McpServerTool(Name = "workspace_status")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, and any project that failed to load.")]
+    public string WorkspaceStatus([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
+        context.WithWorkspace(workspace, null, RenderStatus);
+
     [McpServerTool(Name = "list_projects")]
     [Description("List the projects of a loaded workspace: name, target framework, document count.")]
     public string ListProjects([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
@@ -48,6 +53,21 @@ public sealed class WorkspaceTools(ToolContext context)
 
     private static string? Discover() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
+
+    private static string RenderStatus(LoadedWorkspace workspace)
+    {
+        var response = new ResponseBuilder("workspace_status", workspace.SolutionPath);
+
+        response.Note(Describe(workspace));
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} lastUsedUtc={workspace.LastUsedUtc:O}"));
+
+        foreach (var failure in workspace.Load.Failures)
+            response.Line("FAILED " + failure);
+
+        return response.ToString();
+    }
 
     private static string RenderProjects(LoadedWorkspace workspace)
     {
@@ -57,9 +77,11 @@ public sealed class WorkspaceTools(ToolContext context)
         response.Summary(projects.Length, projects.Length, "projects");
 
         foreach (var project in projects)
+        {
             response.Line(string.Create(
                 CultureInfo.InvariantCulture,
                 $"{project.Name}  {project.Language}  documents={project.Documents.Count()}"));
+        }
 
         return response.ToString();
     }

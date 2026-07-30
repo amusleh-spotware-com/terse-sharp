@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release, e.g. v0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: build, verify and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build TerseSharp.slnx -c Release
+
+      - name: Test
+        run: dotnet test TerseSharp.slnx --no-build -c Release
+
+      - name: Pack
+        run: dotnet pack src/TerseSharp.Server/TerseSharp.Server.csproj --no-build -c Release -o artifacts/nupkg
+
+      - name: Show resolved version
+        run: ls -1 artifacts/nupkg
+
+      - name: Smoke test the packaged tool
+        run: |
+          dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          cd fixtures/FixtureSolution
+          terse doctor
+
+      - name: Publish to NuGet
+        if: env.NUGET_API_KEY != ''
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/nupkg/*.nupkg
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

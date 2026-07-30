@@ -3,7 +3,6 @@ namespace TerseSharp.Core;
 public enum TerseErrorCode
 {
     WorkspaceNotLoaded,
-    WorkspacePartial,
     WorkspaceNotFound,
     AmbiguousWorkspace,
     SymbolNotFound,
@@ -11,7 +10,6 @@ public enum TerseErrorCode
     DocumentNotFound,
     EditConflict,
     CompileRegression,
-    GeneratedDocument,
     OutOfWorkspace,
     ReadOnly,
     InvalidArgument,

@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore TerseSharp.slnx
+
+      - name: Build
+        run: dotnet build TerseSharp.slnx --no-restore -c Release
+
+      - name: Test
+        run: dotnet test TerseSharp.slnx --no-build -c Release --logger "trx;LogFileName=results.trx" --results-directory artifacts/test-results
+
+      - name: Verify formatting and analyzers
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info
+          dotnet format style TerseSharp.slnx --verify-no-changes --severity info
+
+      - name: Pack
+        if: matrix.os == 'ubuntu-latest'
+        run: dotnet pack src/TerseSharp.Server/TerseSharp.Server.csproj --no-build -c Release -o artifacts/nupkg
+
+      - name: Upload package
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/nupkg/*.nupkg
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: artifacts/test-results

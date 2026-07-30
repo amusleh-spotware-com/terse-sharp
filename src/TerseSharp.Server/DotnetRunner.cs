@@ -13,7 +13,7 @@ public static partial class DotnetRunner
         CancellationToken cancellationToken)
     {
         var target = project ?? workspace.SolutionPath;
-        var run = await RunAsync($"build \"{target}\" -nodeReuse:false -v q --nologo", workspace.Root, cancellationToken)
+        var run = await RunAsync(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"], workspace.Root, cancellationToken)
             .ConfigureAwait(false);
 
         return RenderBuild(target, run);
@@ -26,9 +26,9 @@ public static partial class DotnetRunner
         CancellationToken cancellationToken)
     {
         var target = project ?? workspace.SolutionPath;
-        var arguments = string.IsNullOrWhiteSpace(filter)
-            ? $"test \"{target}\" -nodeReuse:false --nologo"
-            : $"test \"{target}\" -nodeReuse:false --nologo --filter \"{filter}\"";
+        string[] arguments = string.IsNullOrWhiteSpace(filter)
+            ? ["test", target, "-nodeReuse:false", "--nologo"]
+            : ["test", target, "-nodeReuse:false", "--nologo", "--filter", filter];
 
         var run = await RunAsync(arguments, workspace.Root, cancellationToken).ConfigureAwait(false);
 
@@ -51,6 +51,8 @@ public static partial class DotnetRunner
         foreach (var diagnostic in diagnostics)
             response.Line(diagnostic);
 
+        AppendTail(response, run, diagnostics.Length);
+
         return response.ToString();
     }
 
@@ -71,8 +73,24 @@ public static partial class DotnetRunner
         foreach (var failure in failures)
             response.Line(failure);
 
+        AppendTail(response, run, failures.Length);
+
         return response.ToString();
     }
+
+    private static void AppendTail(ResponseBuilder response, ProcessRun run, int parsed)
+    {
+        if (run.ExitCode is 0 || parsed > 0)
+            return;
+
+        response.Note("FAILED with no parsable diagnostics; last output lines:");
+
+        foreach (var line in Tail(run.Output))
+            response.Line(line);
+    }
+
+    private static IEnumerable<string> Tail(string output) =>
+        output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(15);
 
     private static string Summary(string output)
     {
@@ -81,15 +99,18 @@ public static partial class DotnetRunner
         return match.Success ? match.Value.Trim() : "no test summary found";
     }
 
-    private static async Task<ProcessRun> RunAsync(string arguments, string workingDirectory, CancellationToken cancellationToken)
+    private static async Task<ProcessRun> RunAsync(string[] arguments, string workingDirectory, CancellationToken cancellationToken)
     {
-        var start = new ProcessStartInfo("dotnet", arguments)
+        var start = new ProcessStartInfo("dotnet")
         {
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+
+        foreach (var argument in arguments)
+            start.ArgumentList.Add(argument);
 
         var stopwatch = Stopwatch.StartNew();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
@@ -132,7 +153,7 @@ public static partial class DotnetRunner
 
         return new ProcessRun(
             -1,
-            string.Create(CultureInfo.InvariantCulture, $"TIMED_OUT after {stopwatch.ElapsedMilliseconds} ms; the process was killed"),
+            string.Create(CultureInfo.InvariantCulture, $"TIMED_OUT after {stopwatch.ElapsedMilliseconds} ms; the process tree was killed"),
             stopwatch.ElapsedMilliseconds);
     }
 

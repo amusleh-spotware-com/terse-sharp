@@ -14,15 +14,18 @@ public static class FileService
         if (!File.Exists(full))
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
-        return Result.Ok(Render(path, File.ReadAllLines(full), startLine, endLine));
+        return BinaryContent.Reject(full, path) ?? Result.Ok(Render(path, File.ReadAllLines(full), startLine, endLine));
     }
 
-    public static Result<string> WriteText(LoadedWorkspace workspace, string path, string content, bool dryRun)
+    public static Result<string> WriteText(LoadedWorkspace workspace, string path, string content, bool dryRun, bool force)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
         if (!resolved.IsOk)
             return Result.Fail<string>(resolved.Error!);
+
+        if (SourceFile.Reject(path, force) is { } refusal)
+            return refusal;
 
         var full = resolved.Value!;
         var before = File.Exists(full) ? File.ReadAllText(full) : string.Empty;
@@ -33,12 +36,15 @@ public static class FileService
         return Result.Ok(DiffResponse("write_text", path, before, content, dryRun));
     }
 
-    public static Result<string> EditText(LoadedWorkspace workspace, string path, string oldText, string newText, bool dryRun)
+    public static Result<string> EditText(LoadedWorkspace workspace, string path, string oldText, string newText, bool dryRun, bool force)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
         if (!resolved.IsOk)
             return Result.Fail<string>(resolved.Error!);
+
+        if (SourceFile.Reject(path, force) is { } refusal)
+            return refusal;
 
         var full = resolved.Value!;
 
@@ -71,13 +77,7 @@ public static class FileService
     private static int Count(string text, string value) =>
         string.IsNullOrEmpty(value) ? 0 : (text.Length - text.Replace(value, string.Empty, StringComparison.Ordinal).Length) / value.Length;
 
-    private static void WriteAtomic(string path, string content)
-    {
-        var temporary = path + ".terse.tmp";
-
-        File.WriteAllText(temporary, content);
-        File.Move(temporary, path, overwrite: true);
-    }
+    private static void WriteAtomic(string path, string content) => AtomicWrite.Text(path, content);
 
     private static string DiffResponse(string tool, string path, string before, string after, bool dryRun)
     {

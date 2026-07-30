@@ -39,7 +39,7 @@ public sealed class TerseServerFixture : IAsyncLifetime
         return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
     }
 
-    private static string ServerAssemblyPath()
+    public static string ServerAssemblyPath()
     {
         var configuration = Path.GetFileName(Path.GetDirectoryName(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)))!;
         var path = Path.Combine(RepositoryRoot, "src", "TerseSharp.Server", "bin", configuration, "net10.0", "terse.dll");

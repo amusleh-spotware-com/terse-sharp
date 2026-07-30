@@ -6,15 +6,16 @@ public static class DocumentLookup
 {
     public static Document? Find(LoadedWorkspace workspace, string path)
     {
-        var full = Path.GetFullPath(path);
+        var full = Path.IsPathRooted(path)
+            ? Path.GetFullPath(path)
+            : Path.GetFullPath(Path.Combine(workspace.Root, path));
 
         return workspace.Solution.Projects
             .SelectMany(project => project.Documents)
-            .FirstOrDefault(document => Matches(document, full, path));
+            .FirstOrDefault(document => Matches(document, full));
     }
 
-    private static bool Matches(Document document, string full, string original) =>
+    private static bool Matches(Document document, string full) =>
         document.FilePath is { } filePath
-        && (filePath.Equals(full, StringComparison.OrdinalIgnoreCase)
-            || filePath.EndsWith(original.Replace('/', Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase));
+        && Path.GetFullPath(filePath).Equals(full, StringComparison.OrdinalIgnoreCase);
 }

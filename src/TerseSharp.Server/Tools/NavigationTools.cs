@@ -48,8 +48,8 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Symbol id of the member.")] string symbolId,
         [Description("Optional workspace path or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, async (loaded, symbol) =>
-            Unwrap(await SourceService.OfSymbolAsync(loaded, symbol, cancellationToken).ConfigureAwait(false)), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId, async (_, symbol) =>
+            Unwrap(await SourceService.OfSymbolAsync(symbol, cancellationToken).ConfigureAwait(false)), cancellationToken);
 
     [McpServerTool(Name = "find_usages")]
     [Description("Every real reference to a symbol, resolved semantically. Use instead of Grep for a type or member name; comments and unrelated matches are excluded.")]
@@ -71,7 +71,7 @@ public sealed class NavigationTools(ToolContext context)
             ReferenceService.FindImplementationsAsync(loaded, symbol, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "get_diagnostics")]
-    [Description("Compiler and analyzer diagnostics, deduplicated. Use instead of parsing dotnet build output.")]
+    [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those.")]
     public Task<string> GetDiagnostics(
         [Description("Optional file path to scope to a single file.")] string? path = null,
         [Description("Minimum severity: error, warning, info. Default warning.")] string? minSeverity = null,
@@ -94,9 +94,11 @@ public sealed class NavigationTools(ToolContext context)
         response.Summary(found.Count, found.Count, "symbols");
 
         foreach (var symbol in found)
+        {
             response.Line(string.Create(
                 CultureInfo.InvariantCulture,
                 $"{SymbolFormat.Location(symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Describe(symbol)}"));
+        }
 
         return response.ToString();
     }
