@@ -1,0 +1,12 @@
+bin/
+obj/
+artifacts/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+TestResults/
+*.nupkg
+.terse/

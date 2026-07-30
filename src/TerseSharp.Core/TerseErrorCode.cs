@@ -1,0 +1,24 @@
+namespace TerseSharp.Core;
+
+public enum TerseErrorCode
+{
+    WorkspaceNotLoaded,
+    WorkspacePartial,
+    WorkspaceNotFound,
+    AmbiguousWorkspace,
+    SymbolNotFound,
+    AmbiguousSymbol,
+    DocumentNotFound,
+    EditConflict,
+    CompileRegression,
+    GeneratedDocument,
+    OutOfWorkspace,
+    ReadOnly,
+    InvalidArgument,
+}
+
+public sealed record TerseError(TerseErrorCode Code, string Message, string Remedy)
+{
+    public string Render() =>
+        string.Create(CultureInfo.InvariantCulture, $"ERROR {Code}\n{Message}\nremedy: {Remedy}");
+}
