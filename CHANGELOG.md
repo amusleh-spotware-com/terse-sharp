@@ -8,6 +8,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-30
+
+### Fixed
+
+- The NuGet package README rendered as literal HTML markup on nuget.org. The repository README is
+  written with centred HTML for GitHub, which nuget.org's renderer does not support, so the package
+  now ships a dedicated pure-Markdown README with absolute links.
+- Releases authenticate to nuget.org with **trusted publishing** (GitHub OIDC) rather than a stored
+  API key. The release job runs in the `production` environment with `id-token: write`.
+- The release action took its tag from `github.ref`, so a `workflow_dispatch` run would have created
+  a GitHub release named after the branch instead of the tag. The tag is resolved once for both
+  triggers and passed explicitly, which also fixes the prerelease flag on dispatched runs.
+- `PathBoundary` compared paths case-insensitively on every platform. On Linux, where the file system
+  is case-sensitive, that widened containment: `/repo` would accept a path under `/REPO`. Comparison
+  is now ordinal on Linux and case-insensitive elsewhere.
+- `SECURITY.md` claimed `--read-only` removes the mutating tools; it refuses them at call time.
+
 ## [0.1.0] - 2026-07-30
 
 First release. A Roslyn-backed MCP server that lets a coding agent navigate, read, edit and refactor
@@ -40,5 +57,6 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.0

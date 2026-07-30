@@ -26,6 +26,8 @@ Requires the **.NET 10 SDK** (see `global.json`). Nothing else — no IDE, no li
 4. Write the `[Description]` for an agent: say what it returns *and which built-in it replaces*.
 5. Add unit tests for the formatting and error paths, and one E2E test per tool.
 6. Update `CHANGELOG.md` under `## [Unreleased]`.
+7. If the change affects what users see on nuget.org, update `NUGET_README.md` too - it is a
+   separate, pure-Markdown file because nuget.org does not render the HTML the GitHub README uses.
 
 ## Response style
 
