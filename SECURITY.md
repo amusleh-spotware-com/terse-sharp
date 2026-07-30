@@ -22,6 +22,7 @@ the processes it starts.
 | Process execution | Only `dotnet build` / `dotnet test` against the loaded workspace, with a 10 minute deadline and a kill on timeout. There is no arbitrary-command tool. |
 | Client config | `terse install` writes only the `terse-sharp` entry into an MCP client config, preserving everything else, via a temp file and an atomic rename. `terse uninstall` removes exactly that entry. |
 | Secrets | None are read, stored or logged. Logs go to stderr, never stdout, which carries the MCP transport. |
+| Publishing | Releases use NuGet trusted publishing (OIDC). No long-lived API key exists in the repository or in Actions secrets, so there is none to leak. |
 
 ## What TerseSharp does not protect you from
 

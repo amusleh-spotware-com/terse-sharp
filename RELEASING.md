@@ -47,17 +47,33 @@ The `Release` workflow then, on the tag:
 3. packs `TerseSharp.<version>.nupkg`,
 4. **smoke-tests the real artifact** — installs the packed tool globally and runs `terse doctor`
    against the fixture solution, so a broken package cannot be published,
-5. pushes to NuGet.org (skipped when the `NUGET_API_KEY` secret is absent),
-6. creates a GitHub Release with auto-generated notes and the `.nupkg` attached.
+5. exchanges the GitHub OIDC token for a short-lived NuGet key and pushes to NuGet.org,
+6. creates or updates the GitHub Release with auto-generated notes and the `.nupkg` attached.
 
 A tag containing `-` (e.g. `v0.3.0-rc.1`) is marked as a GitHub prerelease automatically.
 
-## One-time setup for NuGet publishing
+## Publishing credentials: none
 
-Add a repository secret named `NUGET_API_KEY` (Settings → Secrets and variables → Actions) holding a
-nuget.org API key scoped to the `TerseSharp` package. Until that secret exists the publish step is
-skipped and the release still produces a GitHub Release with the `.nupkg` attached — so you can dry
-run the whole pipeline safely.
+Publishing uses **NuGet trusted publishing** — there is no API key anywhere, in the repo or in
+Actions secrets. The job requests a GitHub OIDC token, `NuGet/login@v1` exchanges it for a key that
+lives minutes, and that key pushes the package.
+
+nuget.org validates four things against the registered policy, all of which must keep matching:
+
+| Policy field | Value |
+|---|---|
+| Package owner | `AlgoDeveloper` |
+| Repository owner | `amusleh-spotware-com` (id `8859902`) |
+| Repository | `terse-sharp` (id `1317484693`) |
+| Workflow | `release.yml` |
+| Environment | `production` |
+
+That is why the job declares `environment: production` and `permissions: id-token: write`. Renaming
+the workflow file, the repository, or the environment breaks publishing until the policy is updated
+on nuget.org.
+
+> A newly created policy can start in a **7-day probation window**. If nothing is published inside
+> it the policy goes inactive; you can restart the window from the nuget.org UI at any time.
 
 ## How users update
 

@@ -11,21 +11,27 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
     name: build, verify and publish
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
+      - name: Resolve the tag being released
+        id: target
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ steps.target.outputs.tag }}
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -47,19 +53,28 @@ jobs:
         run: |
           dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
           export PATH="$PATH:$HOME/.dotnet/tools"
+          terse --version
           cd fixtures/FixtureSolution
           terse doctor
 
-      - name: Publish to NuGet
-        if: env.NUGET_API_KEY != ''
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: dotnet nuget push "artifacts/nupkg/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+      - name: NuGet login via trusted publishing
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: AlgoDeveloper
 
-      - name: Create GitHub release
+      - name: Publish to NuGet
+        run: >
+          dotnet nuget push "artifacts/nupkg/*.nupkg"
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Create or update the GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.target.outputs.tag }}
           files: artifacts/nupkg/*.nupkg
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(steps.target.outputs.tag, '-') }}
