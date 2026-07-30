@@ -7,25 +7,24 @@ public static class DeadCodeService
 {
     private static readonly string[] CompilerHints = ["CS0169", "CS0414", "CS0162", "CS8019", "CS0219"];
 
-    public static async Task<string> FindAsync(
+    public static async Task<IReadOnlyList<string>> FindAsync(
         LoadedWorkspace workspace,
-        int maxResults,
+        string? path,
         CancellationToken cancellationToken)
     {
         var findings = new List<string>();
 
-        foreach (var project in workspace.Solution.Projects)
+        foreach (var project in Targets(workspace, path))
             await ScanAsync(workspace, project, findings, cancellationToken).ConfigureAwait(false);
 
-        var ordered = findings.Distinct(StringComparer.Ordinal).OrderBy(text => text, StringComparer.Ordinal).ToArray();
-        var response = new ResponseBuilder("find_dead_code", workspace.SolutionPath);
+        return [.. findings.Distinct(StringComparer.Ordinal)];
+    }
 
-        response.Summary(Math.Min(maxResults, ordered.Length), ordered.Length, "findings");
+    private static IEnumerable<Project> Targets(LoadedWorkspace workspace, string? path)
+    {
+        var document = path is null ? null : DocumentLookup.Find(workspace, path);
 
-        foreach (var finding in ordered.Take(maxResults))
-            response.Line(finding);
-
-        return response.ToString();
+        return document is null ? workspace.Solution.Projects : [document.Project];
     }
 
     private static async Task ScanAsync(
@@ -43,7 +42,7 @@ public static class DeadCodeService
         {
             findings.Add(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{PositionFormat.Describe(diagnostic.Location)}  EXACT  {diagnostic.Id}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}"));
+                $"{diagnostic.Id} info DeadCode {PositionFormat.Describe(diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}"));
         }
 
         await ScanMembersAsync(workspace, compilation, findings, cancellationToken).ConfigureAwait(false);
@@ -71,7 +70,7 @@ public static class DeadCodeService
 
     private static string Describe(ISymbol symbol) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{SymbolFormat.Location(symbol)}  EXACT  unreferenced: {SymbolId.From(symbol)}");
+        $"TERSE001 info DeadCode {SymbolFormat.Location(symbol)}: '{symbol.Name}' is never referenced ({SymbolId.From(symbol)})");
 
     private static IEnumerable<ISymbol> Candidates(Compilation compilation) =>
         Types(compilation.Assembly.GlobalNamespace)

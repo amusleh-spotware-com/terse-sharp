@@ -10,7 +10,7 @@ read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 
-> **v0.2.0 — 52 tools working end to end.** Verified by 115 tests (29 unit + 86 E2E), where every E2E
+> **v0.2.1 — 51 tools working end to end.** Verified by 117 tests (29 unit + 88 E2E), where every E2E
 > test drives a real server process over the real stdio transport against a real solution and asserts
 > response values. **Not yet built:** the content-addressed index, trigram search and file watcher.
 
@@ -75,11 +75,11 @@ Prefer to configure it by hand:
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `dotnet test` | `run_tests` | failures only; a green run is one line |
 
-## The 52 tools
+## The 51 tools
 
 - **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace`, `list_projects`
 - **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`
-- **Analyze & clean** — `analyze`, `format`, `cleanup`, `find_dead_code`, `get_diagnostics`
+- **Analyze & clean** — `analyze`, `format`, `cleanup`, `get_diagnostics`
 - **Edit** — `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`
 - **Refactor** — `extract_interface`, `move_type_to_file`, `move_type_to_namespace`, `change_signature`, `undo_last_change`
 - **Projects & solutions** — `solution_projects`, `solution_add_project`, `solution_remove_project`, `project_create`, `project_properties`, `project_set_property`, `project_add_reference`, `project_remove_reference`, `package_list`, `package_add`, `package_remove`
@@ -91,10 +91,11 @@ Prefer to configure it by hand:
 
 `analyze` runs the compiler plus every analyzer your projects already reference - CA rules,
 StyleCop, SonarAnalyzer, Roslynator, anything in your `PackageReference` list - down to `info` and
-`hidden` severity, which a normal build hides. `cleanup` removes unused `using` directives, sorts
-what remains System-first and reformats to your `.editorconfig`. `find_dead_code` reports
-unreferenced private members, unused fields and unreachable code. All Roslyn: no IDE, no external
-tool, no licence, no network.
+`hidden` severity, which a normal build hides. It also reports dead code in the same list -
+unreferenced private members as `TERSE001`, plus the compiler's unused-field and unreachable-code
+hints - so one call covers everything. `cleanup` removes unused `using` directives, sorts what
+remains System-first and reformats to your `.editorconfig`. All Roslyn: no IDE, no external tool,
+no licence, no network.
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT`
 (Roslyn-resolved) or `HEURISTIC` (text/index) tag.
@@ -125,4 +126,10 @@ cannot detect.
 - [Contributing](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/CONTRIBUTING.md)
 - [Security policy](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/SECURITY.md)
 
-MIT licensed.
+## License
+
+[MIT](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE) (c) Ahmad Musleh - free
+for commercial and private use.
+
+Built on [Roslyn](https://github.com/dotnet/roslyn) and the
+[MCP C# SDK](https://github.com/modelcontextprotocol/csharp-sdk).

@@ -59,12 +59,38 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task FindDeadCode_FindsTheUnreferencedMember()
+    public async Task Analyze_ReportsDeadCodeAsPartOfItsResult()
     {
-        var text = await server.CallAsync("find_dead_code", []);
+        var text = await server.CallAsync("analyze", new() { ["minSeverity"] = "info" });
 
-        Assert.Contains("findings", text, StringComparison.Ordinal);
-        Assert.Contains("EXACT", text, StringComparison.Ordinal);
+        Assert.Contains("engines=compiler", text, StringComparison.Ordinal);
+        Assert.Contains("dead-code", text, StringComparison.Ordinal);
+        Assert.Contains("TERSE001", text, StringComparison.Ordinal);
+        Assert.Contains("is never referenced", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithDeadCodeDisabled_OmitsTheScanAndTheFindings()
+    {
+        var text = await server.CallAsync("analyze", new()
+        {
+            ["minSeverity"] = "info",
+            ["includeDeadCode"] = false,
+        });
+
+        Assert.DoesNotContain("dead-code", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("TERSE001", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_FilteredToDeadCodeOnly_ReturnsOnlyThose()
+    {
+        var text = await server.CallAsync("analyze", new() { ["ids"] = "TERSE001", ["minSeverity"] = "info" });
+
+        var records = text.Split('\n').Where(line => line.Contains(": ", StringComparison.Ordinal)).ToArray();
+
+        Assert.NotEmpty(records);
+        Assert.All(records, line => Assert.StartsWith("TERSE001", line, StringComparison.Ordinal));
     }
 
     private static int Total(string response)

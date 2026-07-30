@@ -31,7 +31,7 @@
 </p>
 
 > [!NOTE]
-> **v0.2.0 — 52 tools working end to end.** Verified by **115 tests (29 unit + 86 E2E)**, where every
+> **v0.2.1 — 51 tools working end to end.** Verified by **117 tests (29 unit + 88 E2E)**, where every
 > E2E test drives a real server process over the real stdio transport against a real solution and
 > asserts response values, and a token-budget suite asserts the response sizes below.
 > **Not yet built:** the content-addressed index, trigram search and file watcher.
@@ -102,14 +102,14 @@ dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
 
 ## 🧰 The tools
 
-52 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+51 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` (Roslyn-resolved) or `HEURISTIC` (text/index) tag.
 
 | Group | Tools |
 |---|---|
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
 | **Navigation** | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` |
-| **Analyze & clean** | `analyze` · `format` · `cleanup` · `find_dead_code` · `get_diagnostics` |
+| **Analyze & clean** | `analyze` · `format` · `cleanup` · `get_diagnostics` |
 | **Edit** | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
@@ -121,9 +121,10 @@ dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
 
 `analyze` runs the **compiler plus every analyzer your projects already reference** — the CA rules,
 StyleCop, SonarAnalyzer, Roslynator, whatever is in your `PackageReference` list — down to `info`
-and `hidden` severity, which a normal build hides. `cleanup` removes unused `using` directives,
-sorts what remains System-first and reformats to your `.editorconfig`; `find_dead_code` reports
-unreferenced private members, unused fields and unreachable code. All of it is Roslyn: **no IDE, no
+and `hidden` severity, which a normal build hides. It also reports **dead code** in the same list —
+unreferenced private members as `TERSE001`, plus the compiler's own unused-field and unreachable-code
+hints — so one call covers everything. `cleanup` removes unused `using` directives, sorts what
+remains System-first and reformats to your `.editorconfig`. All of it is Roslyn: **no IDE, no
 external tool, no licence, no network.**
 
 **What each one replaces**
@@ -214,7 +215,7 @@ built as compact text rather than JSON.
 | `terse install` / `uninstall` / `doctor` / `--skill` | ✅ |
 | Extract interface, move type, change signature, undo | ✅ |
 | Project, solution and package editing, full `.slnx` support | ✅ |
-| `analyze` / `format` / `cleanup` / `find_dead_code`, Roslyn-only | ✅ |
+| `analyze` (diagnostics + analyzers + dead code) / `format` / `cleanup`, Roslyn-only | ✅ |
 | XAML outline, names, resources, bindings, validation, search | ✅ |
 | Token budget harness | ✅ |
 | Content-addressed index, trigram search, file watcher | 🔜 |
@@ -245,11 +246,10 @@ Security policy: [SECURITY.md](SECURITY.md).
 
 ## 📄 License
 
-[MIT](LICENSE).
+[MIT](LICENSE) © Ahmad Musleh — free for commercial and private use, no attribution required beyond
+keeping the licence notice.
 
----
-
-<sub><b>Keywords for discovery:</b> MCP server for C#, Model Context Protocol .NET, Roslyn MCP,
-C# code navigation for AI agents, semantic C# refactoring MCP, dotnet MCP server, Claude Code C#
-tools, Cursor C# MCP, token-efficient code reading, find usages MCP, rename symbol MCP,
-alternative to Rider MCP, headless Roslyn workspace.</sub>
+<p align="center">
+  <sub>Built on <a href="https://github.com/dotnet/roslyn">Roslyn</a> and the
+  <a href="https://github.com/modelcontextprotocol/csharp-sdk">MCP C# SDK</a>.</sub>
+</p>

@@ -11,6 +11,7 @@ public static class AnalysisService
         string? path,
         DiagnosticSeverity minimum,
         IReadOnlyList<string> ids,
+        bool includeDeadCode,
         int maxResults,
         CancellationToken cancellationToken)
     {
@@ -20,8 +21,20 @@ public static class AnalysisService
         foreach (var project in Targets(workspace, path))
             await CollectAsync(project, found, engines, cancellationToken).ConfigureAwait(false);
 
-        return Render(path, engines, Filter(found, path, minimum, ids), maxResults);
+        var extra = includeDeadCode
+            ? await DeadCodeService.FindAsync(workspace, path, cancellationToken).ConfigureAwait(false)
+            : [];
+
+        if (includeDeadCode)
+            engines.Add("dead-code");
+
+        return Render(path, engines, Filter(found, path, minimum, ids), Keep(extra, ids), maxResults);
     }
+
+    private static string[] Keep(IReadOnlyList<string> findings, IReadOnlyList<string> ids) =>
+        ids.Count is 0
+            ? [.. findings]
+            : [.. findings.Where(finding => ids.Any(id => finding.StartsWith(id, StringComparison.OrdinalIgnoreCase)))];
 
     private static IEnumerable<Project> Targets(LoadedWorkspace workspace, string? path)
     {
@@ -97,10 +110,11 @@ public static class AnalysisService
         diagnostic.Location.GetLineSpan().Path is { Length: > 0 } actual
         && Path.GetFullPath(actual).Equals(Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
 
-    private static string Render(string? path, List<string> engines, Diagnostic[] found, int maxResults)
+    private static string Render(string? path, List<string> engines, Diagnostic[] found, string[] extra, int maxResults)
     {
         var grouped = found
             .Select(DiagnosticFormat.Key)
+            .Concat(extra)
             .GroupBy(text => text, StringComparer.Ordinal)
             .Select(group => new { Text = group.Key, Count = group.Count() })
             .OrderBy(entry => entry.Text, StringComparer.Ordinal)

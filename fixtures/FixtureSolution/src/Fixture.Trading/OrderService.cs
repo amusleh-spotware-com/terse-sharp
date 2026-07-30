@@ -13,4 +13,6 @@ public sealed class OrderService
     public bool SubmitTwice(Order order) => Submit(order) && Submit(order);
 
     public int Unused() => 7;
+
+    private int NeverCalled() => 42;
 }

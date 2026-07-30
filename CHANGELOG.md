@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-30
+
+### Changed
+
+- **`find_dead_code` is gone; `analyze` reports dead code itself.** One call now returns compiler
+  diagnostics, analyzer diagnostics and dead code in a single deduplicated list. Unreferenced private
+  members appear as `TERSE001` in category `DeadCode`, alongside the compiler's own unused-field and
+  unreachable-code hints, and can be isolated with `ids=TERSE001`. Pass `includeDeadCode=false` to
+  skip the reference scan on a very large solution.
+- README and the NuGet README are in sync; the keyword blob is gone and the license section reads
+  like one.
+
 ## [0.2.0] - 2026-07-30
 
 Doubles the tool surface from 26 to 52, all Roslyn-only.
@@ -85,7 +97,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.1
 [0.2.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.0
