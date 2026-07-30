@@ -6,7 +6,7 @@ public static class PathGuard
     {
         var full = Path.IsPathRooted(path) ? Path.GetFullPath(path) : Path.GetFullPath(Path.Combine(workspace.Root, path));
 
-        return full.StartsWith(workspace.Root, StringComparison.OrdinalIgnoreCase)
+        return PathBoundary.Contains(workspace.Root, full)
             ? Result.Ok(full)
             : Result.Fail<string>(Errors.OutOfWorkspace(full));
     }
