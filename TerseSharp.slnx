@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TerseSharp.Core/TerseSharp.Core.csproj" />
+    <Project Path="src/TerseSharp.Server/TerseSharp.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TerseSharp.E2ETests/TerseSharp.E2ETests.csproj" />
+    <Project Path="tests/TerseSharp.UnitTests/TerseSharp.UnitTests.csproj" />
+  </Folder>
+</Solution>

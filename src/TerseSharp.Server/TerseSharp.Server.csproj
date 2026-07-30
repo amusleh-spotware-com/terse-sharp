@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>terse</AssemblyName>
+    <RootNamespace>TerseSharp.Server</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>terse</ToolCommandName>
+    <PackageId>TerseSharp</PackageId>
+    <Description>Token-efficient Roslyn MCP server for C# and .NET. Navigate, read, edit and refactor a solution semantically instead of reading whole files.</Description>
+    <PackageTags>mcp;roslyn;csharp;dotnet;code-navigation;refactoring;ai-agent</PackageTags>
+    <RollForward>latestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../TerseSharp.Core/TerseSharp.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TerseSharp.UnitTests" />
+    <InternalsVisibleTo Include="TerseSharp.E2ETests" />
+  </ItemGroup>
+
+</Project>
