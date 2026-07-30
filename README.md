@@ -31,7 +31,7 @@
 </p>
 
 > [!NOTE]
-> **v0.2.1 — 51 tools working end to end.** Verified by **117 tests (29 unit + 88 E2E)**, where every
+> **v0.2.2 — 51 tools working end to end.** Verified by **117 tests (29 unit + 88 E2E)**, where every
 > E2E test drives a real server process over the real stdio transport against a real solution and
 > asserts response values, and a token-budget suite asserts the response sizes below.
 > **Not yet built:** the content-addressed index, trigram search and file watcher.
@@ -246,8 +246,7 @@ Security policy: [SECURITY.md](SECURITY.md).
 
 ## 📄 License
 
-[MIT](LICENSE) © Ahmad Musleh — free for commercial and private use, no attribution required beyond
-keeping the licence notice.
+MIT Licensed. See [LICENSE](LICENSE).
 
 <p align="center">
   <sub>Built on <a href="https://github.com/dotnet/roslyn">Roslyn</a> and the

@@ -8,6 +8,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-30
+
+### Changed
+
+- The README and NuGet README license sections just say MIT and link the licence file.
+
 ## [0.2.1] - 2026-07-30
 
 ### Changed
@@ -97,7 +103,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.2
 [0.2.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.1
 [0.2.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.1

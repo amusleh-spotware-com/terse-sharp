@@ -10,7 +10,7 @@ read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 
-> **v0.2.1 — 51 tools working end to end.** Verified by 117 tests (29 unit + 88 E2E), where every E2E
+> **v0.2.2 — 51 tools working end to end.** Verified by 117 tests (29 unit + 88 E2E), where every E2E
 > test drives a real server process over the real stdio transport against a real solution and asserts
 > response values. **Not yet built:** the content-addressed index, trigram search and file watcher.
 
@@ -128,8 +128,7 @@ cannot detect.
 
 ## License
 
-[MIT](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE) (c) Ahmad Musleh - free
-for commercial and private use.
+MIT Licensed. See [LICENSE](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE).
 
 Built on [Roslyn](https://github.com/dotnet/roslyn) and the
 [MCP C# SDK](https://github.com/modelcontextprotocol/csharp-sdk).
