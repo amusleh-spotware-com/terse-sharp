@@ -21,8 +21,9 @@ public sealed class FileTools(ToolContext context)
         [Description("File path, absolute or relative to the workspace root.")] string path,
         [Description("Full new content.")] string content,
         [Description("Return the diff without writing. Default false.")] bool dryRun = false,
+        [Description("Allow writing a .cs file, bypassing the compile-gated symbol tools. Default false.")] bool force = false,
         [Description("Optional workspace path or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, path, loaded => NavigationTools.Unwrap(FileService.WriteText(loaded, path, content, dryRun)));
+        Guarded(workspace, path, loaded => NavigationTools.Unwrap(FileService.WriteText(loaded, path, content, dryRun, force)));
 
     [McpServerTool(Name = "edit_text")]
     [Description("Replace an exact unique snippet in a file. Refuses when the match is not unique. Returns the diff.")]
@@ -31,8 +32,9 @@ public sealed class FileTools(ToolContext context)
         [Description("Exact text to replace; must occur exactly once.")] string oldText,
         [Description("Replacement text.")] string newText,
         [Description("Return the diff without writing. Default false.")] bool dryRun = false,
+        [Description("Allow editing a .cs file, bypassing the compile-gated symbol tools. Default false.")] bool force = false,
         [Description("Optional workspace path or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, path, loaded => NavigationTools.Unwrap(FileService.EditText(loaded, path, oldText, newText, dryRun)));
+        Guarded(workspace, path, loaded => NavigationTools.Unwrap(FileService.EditText(loaded, path, oldText, newText, dryRun, force)));
 
     [McpServerTool(Name = "find_files")]
     [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git and node_modules are excluded.")]

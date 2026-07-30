@@ -69,15 +69,18 @@ public static class EditGate
         var baseline = await ErrorsAsync(before, projects, cancellationToken).ConfigureAwait(false);
         var current = await ErrorsAsync(after, projects, cancellationToken).ConfigureAwait(false);
 
-        return [.. current.Except(baseline, StringComparer.Ordinal).Take(10)];
+        return [.. current.Where(entry => Appeared(baseline, entry)).Select(entry => entry.Key).Take(10)];
     }
 
-    private static async Task<HashSet<string>> ErrorsAsync(
+    private static bool Appeared(Dictionary<string, int> baseline, KeyValuePair<string, int> entry) =>
+        entry.Value > baseline.GetValueOrDefault(entry.Key);
+
+    private static async Task<Dictionary<string, int>> ErrorsAsync(
         Solution solution,
         IReadOnlyList<ProjectId> projects,
         CancellationToken cancellationToken)
     {
-        var errors = new HashSet<string>(StringComparer.Ordinal);
+        var errors = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var projectId in projects)
         {
@@ -100,13 +103,15 @@ public static class EditGate
         return project is null ? Task.FromResult<Compilation?>(null) : project.GetCompilationAsync(cancellationToken);
     }
 
-    private static void Collect(HashSet<string> errors, Diagnostic diagnostic)
+    private static void Collect(Dictionary<string, int> errors, Diagnostic diagnostic)
     {
         if (diagnostic.Severity is not DiagnosticSeverity.Error)
             return;
 
-        errors.Add(string.Create(
+        var key = string.Create(
             CultureInfo.InvariantCulture,
-            $"{diagnostic.Id} {PositionFormat.Describe(diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}"));
+            $"{diagnostic.Id} {diagnostic.Location.GetLineSpan().Path}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+
+        errors[key] = errors.GetValueOrDefault(key) + 1;
     }
 }

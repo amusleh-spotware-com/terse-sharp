@@ -34,6 +34,11 @@ public static class Errors
         string.Create(CultureInfo.InvariantCulture, $"symbol '{symbolId}' did not resolve"),
         nearest.Count is 0 ? "use search_symbols to find the id" : "nearest: " + string.Join(", ", nearest));
 
+    public static TerseError AmbiguousSymbol(string symbolId, IReadOnlyList<string> candidates) => new(
+        TerseErrorCode.AmbiguousSymbol,
+        string.Create(CultureInfo.InvariantCulture, $"symbol '{symbolId}' resolves in {candidates.Count} places"),
+        "pass workspace= to narrow it; candidates: " + string.Join(", ", candidates));
+
     public static TerseError DocumentNotFound(string path) => new(
         TerseErrorCode.DocumentNotFound,
         string.Create(CultureInfo.InvariantCulture, $"'{path}' is not a document in the loaded workspace"),

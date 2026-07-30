@@ -12,7 +12,7 @@ public sealed class BuildTools(ToolContext context)
         [Description("Optional workspace path or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, project, loaded =>
-            DotnetRunner.BuildAsync(loaded, project, cancellationToken));
+            Contained(loaded, project, resolved => DotnetRunner.BuildAsync(loaded, resolved, cancellationToken)));
 
     [McpServerTool(Name = "run_tests")]
     [Description("Run tests and return failures only: name, message and the assertion frame. A green run is one summary line.")]
@@ -22,5 +22,15 @@ public sealed class BuildTools(ToolContext context)
         [Description("Optional workspace path or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, project, loaded =>
-            DotnetRunner.TestAsync(loaded, project, filter, cancellationToken));
+            Contained(loaded, project, resolved => DotnetRunner.TestAsync(loaded, resolved, filter, cancellationToken)));
+
+    private static Task<string> Contained(LoadedWorkspace workspace, string? project, Func<string?, Task<string>> action)
+    {
+        if (string.IsNullOrWhiteSpace(project))
+            return action(null);
+
+        var resolved = PathGuard.Resolve(workspace, project);
+
+        return resolved.IsOk ? action(resolved.Value) : Task.FromResult(resolved.Error!.Render());
+    }
 }

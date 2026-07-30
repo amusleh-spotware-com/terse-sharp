@@ -61,7 +61,9 @@ public static class UnifiedDiff
 
         while (index < limit
             && string.Equals(before[^(index + 1)], after[^(index + 1)], StringComparison.Ordinal))
+        {
             index++;
+        }
 
         return index;
     }

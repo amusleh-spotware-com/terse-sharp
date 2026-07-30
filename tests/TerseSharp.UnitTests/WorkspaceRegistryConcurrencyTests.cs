@@ -5,7 +5,7 @@ namespace TerseSharp.UnitTests;
 public sealed class WorkspaceRegistryConcurrencyTests
 {
     [Fact]
-    public async Task ResolveAndUnload_RunningConcurrently_NeverThrow()
+    public async Task ResolveAndUnload_RunningConcurrently_AlwaysReturnAConsistentState()
     {
         using var registry = new WorkspaceRegistry();
 
@@ -20,8 +20,12 @@ public sealed class WorkspaceRegistryConcurrencyTests
         {
             for (var index = 0; index < 200; index++)
             {
-                registry.Resolve(null, null);
-                registry.All();
+                var resolved = registry.Resolve(null, null);
+
+                Assert.True(
+                    resolved.IsOk || resolved.Error!.Code is TerseErrorCode.WorkspaceNotLoaded,
+                    $"unexpected state: {resolved.Error?.Code}");
+                Assert.InRange(registry.All().Count, 0, 1);
             }
         }
 

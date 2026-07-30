@@ -32,9 +32,8 @@ public static class DiagnosticsService
         && (path is null || InFile(diagnostic, path));
 
     private static bool InFile(Diagnostic diagnostic, string path) =>
-        diagnostic.Location.GetLineSpan().Path.EndsWith(
-            Path.GetFileName(path),
-            StringComparison.OrdinalIgnoreCase);
+        diagnostic.Location.GetLineSpan().Path is { Length: > 0 } actual
+        && Path.GetFullPath(actual).Equals(Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
 
     private static string Render(string? path, List<Diagnostic> found, int maxResults)
     {

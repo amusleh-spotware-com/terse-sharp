@@ -10,3 +10,7 @@ artifacts/
 TestResults/
 *.nupkg
 .terse/
+
+# local working notes - specs, not shipped
+sharp-mcp-requirements.md
+sharp-mcp-design.md

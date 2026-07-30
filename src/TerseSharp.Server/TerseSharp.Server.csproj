@@ -9,8 +9,16 @@
     <PackageId>TerseSharp</PackageId>
     <Description>Token-efficient Roslyn MCP server for C# and .NET. Navigate, read, edit and refactor a solution semantically instead of reading whole files.</Description>
     <PackageTags>mcp;roslyn;csharp;dotnet;code-navigation;refactoring;ai-agent</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/amusleh-spotware-com/terse-sharp</PackageProjectUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RollForward>latestMajor</RollForward>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets/SKILL.md" LogicalName="TerseSharp.Server.Assets.SKILL.md" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" />

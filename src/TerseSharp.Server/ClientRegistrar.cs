@@ -23,6 +23,17 @@ public static class ClientRegistrar
         return string.Join("\n", lines);
     }
 
+    public static string InstallSkill()
+    {
+        var content = SkillAsset.Read();
+        var target = Path.Combine(Home(), ".claude", "skills", "terse-sharp", "SKILL.md");
+
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        File.WriteAllText(target, content);
+
+        return "installed skill -> " + target;
+    }
+
     public static string Unregister(string? client)
     {
         var lines = Select(client).Select(Remove).ToArray();
@@ -53,7 +64,9 @@ public static class ClientRegistrar
 
         var root = Load(target.ConfigPath);
 
-        Servers(root).Remove("terse-sharp");
+        if (root["mcpServers"] is not JsonObject servers || !servers.Remove("terse-sharp"))
+            return "skipped " + target.Name + " (not registered)";
+
         Save(target.ConfigPath, root);
 
         return "removed from " + target.Name;
@@ -91,10 +104,7 @@ public static class ClientRegistrar
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        var temporary = path + ".terse.tmp";
-
-        File.WriteAllText(temporary, root.ToJsonString(Indented));
-        File.Move(temporary, path, overwrite: true);
+        AtomicWrite.Text(path, root.ToJsonString(Indented));
     }
 
     private static string Home() =>

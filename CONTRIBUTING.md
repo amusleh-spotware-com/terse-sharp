@@ -1,0 +1,51 @@
+# Contributing to TerseSharp
+
+## Build and test
+
+```bash
+dotnet build TerseSharp.slnx
+dotnet test  TerseSharp.slnx
+```
+
+Requires the **.NET 10 SDK** (see `global.json`). Nothing else — no IDE, no licence, no Node.
+
+## The two rules that are not negotiable
+
+1. **A tool without an E2E test is not done.** Every advertised MCP tool has a named test in
+   `tests/TerseSharp.E2ETests` that starts a real server process, talks real stdio JSON-RPC to the
+   fixture solution, and asserts the **values** in the response — never "did not throw".
+2. **A tool that does not beat the built-in it replaces does not ship.** If `get_type_outline` is not
+   dramatically cheaper than `Read`, it has no reason to exist.
+
+## Adding a tool
+
+1. Put the logic in `TerseSharp.Core` as a pure-ish service that returns `Result<string>`.
+2. Expose it in `TerseSharp.Server/Tools/*.cs` with `[McpServerTool(Name = "snake_case_name")]`.
+3. Give **every optional parameter a C# default** (`string? workspace = null`). Without a default the
+   MCP SDK marks the parameter required and the tool fails at call time.
+4. Write the `[Description]` for an agent: say what it returns *and which built-in it replaces*.
+5. Add unit tests for the formatting and error paths, and one E2E test per tool.
+6. Update `CHANGELOG.md` under `## [Unreleased]`.
+
+## Response style
+
+Responses are data, not prose. One header line, one record per line, an explicit
+`truncated=…, total=…`, and nothing the caller did not ask for. No preamble, no explanation, no
+closing summary. Every record carries `EXACT` or `HEURISTIC`.
+
+## Code style
+
+`Directory.Build.props` sets `TreatWarningsAsErrors`, so analyzer warnings fail the build — that is
+deliberate. Immutable records, `sealed` by default, pattern matching over `if`/`else` ladders,
+explicit `IFormatProvider` on every culture-sensitive format, and no comments: make the code say it.
+
+Before opening a PR:
+
+```bash
+dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info
+dotnet format style     TerseSharp.slnx --verify-no-changes --severity info
+```
+
+## Releasing
+
+See [RELEASING.md](RELEASING.md).

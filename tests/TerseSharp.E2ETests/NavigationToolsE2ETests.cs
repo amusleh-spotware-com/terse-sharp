@@ -108,6 +108,17 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task WorkspaceStatus_ReportsCountsBranchAndNoFailures()
+    {
+        var text = await server.CallAsync("workspace_status", []);
+
+        Assert.Contains("projects=1", text, StringComparison.Ordinal);
+        Assert.Contains("branch=", text, StringComparison.Ordinal);
+        Assert.Contains("loadMs=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("FAILED", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ListWorkspaces_ReportsBranchAndWorktree()
     {
         var text = await server.CallAsync("list_workspaces", []);

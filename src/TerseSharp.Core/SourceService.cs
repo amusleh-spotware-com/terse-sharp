@@ -5,7 +5,6 @@ namespace TerseSharp.Core;
 public static class SourceService
 {
     public static async Task<Result<string>> OfSymbolAsync(
-        LoadedWorkspace workspace,
         ISymbol symbol,
         CancellationToken cancellationToken)
     {

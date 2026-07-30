@@ -20,7 +20,7 @@ public static class TextSearchService
 
     public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults)
     {
-        var files = Files(workspace.Root, glob).Take(maxResults + 1).ToArray();
+        var files = Files(workspace.Root, glob).ToArray();
         var response = new ResponseBuilder("find_files", glob);
 
         response.Summary(Math.Min(files.Length, maxResults), files.Length, "files");

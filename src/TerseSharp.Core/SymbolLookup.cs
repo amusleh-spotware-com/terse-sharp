@@ -10,14 +10,22 @@ public static class SymbolLookup
         CancellationToken cancellationToken)
     {
         var matches = await FindAllAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+        var distinct = matches.DistinctBy(Describe, StringComparer.Ordinal).ToArray();
 
-        if (matches.Count > 0)
-            return Result.Ok(matches[0]);
+        if (distinct.Length is 1)
+            return Result.Ok(distinct[0]);
+
+        if (distinct.Length > 1)
+            return Result.Fail<ISymbol>(Errors.AmbiguousSymbol(symbolId, [.. distinct.Select(Describe)]));
 
         var nearest = await NearestAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
 
         return Result.Fail<ISymbol>(Errors.SymbolNotFound(symbolId, nearest));
     }
+
+    private static string Describe(ISymbol symbol) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{symbol.ContainingAssembly?.Name ?? "-"}/{SymbolFormat.Location(symbol)}");
 
     public static async Task<IReadOnlyList<ISymbol>> FindAllAsync(
         LoadedWorkspace workspace,

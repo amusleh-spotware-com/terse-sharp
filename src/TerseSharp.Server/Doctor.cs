@@ -6,13 +6,24 @@ public static class Doctor
     {
         var lines = new List<string>
         {
-            Check("dotnet SDK", Environment.Version.ToString(), true, "install the .NET 10 SDK"),
+            SdkLine(),
             Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
             ClientLine(),
             await WorkspaceLineAsync(workspace, cancellationToken).ConfigureAwait(false)
         };
 
         return string.Join("\n", lines);
+    }
+
+    private static string SdkLine()
+    {
+        var runtime = Environment.Version;
+
+        return Check(
+            "dotnet runtime",
+            runtime.ToString(),
+            runtime.Major >= 10,
+            "install the .NET 10 SDK from https://dot.net");
     }
 
     private static string ClientLine()

@@ -14,23 +14,29 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         Func<LoadedWorkspace, ISymbol, Task<string>> action,
         CancellationToken cancellationToken)
     {
-        var resolved = Registry.Resolve(workspace, null);
+        return await ToolBoundary.RunAsync(async () =>
+        {
+            var resolved = Registry.Resolve(workspace, null);
 
-        if (!resolved.IsOk)
-            return resolved.Error!.Render();
+            if (!resolved.IsOk)
+                return resolved.Error!.Render();
 
-        var symbol = await SymbolLookup.ResolveAsync(resolved.Value!, symbolId, cancellationToken).ConfigureAwait(false);
+            var symbol = await SymbolLookup.ResolveAsync(resolved.Value!, symbolId, cancellationToken).ConfigureAwait(false);
 
-        return symbol.IsOk
-            ? await action(resolved.Value!, symbol.Value!).ConfigureAwait(false)
-            : symbol.Error!.Render();
+            return symbol.IsOk
+                ? await action(resolved.Value!, symbol.Value!).ConfigureAwait(false)
+                : symbol.Error!.Render();
+        }).ConfigureAwait(false);
     }
 
     public string WithWorkspace(string? workspace, string? pathHint, Func<LoadedWorkspace, string> action)
     {
-        var resolved = Registry.Resolve(workspace, pathHint);
+        return ToolBoundary.Run(() =>
+        {
+            var resolved = Registry.Resolve(workspace, pathHint);
 
-        return resolved.IsOk ? action(resolved.Value!) : resolved.Error!.Render();
+            return resolved.IsOk ? action(resolved.Value!) : resolved.Error!.Render();
+        });
     }
 
     public async Task<string> WithWorkspaceAsync(
@@ -38,9 +44,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         string? pathHint,
         Func<LoadedWorkspace, Task<string>> action)
     {
-        var resolved = Registry.Resolve(workspace, pathHint);
+        return await ToolBoundary.RunAsync(async () =>
+        {
+            var resolved = Registry.Resolve(workspace, pathHint);
 
-        return resolved.IsOk ? await action(resolved.Value!).ConfigureAwait(false) : resolved.Error!.Render();
+            return resolved.IsOk ? await action(resolved.Value!).ConfigureAwait(false) : resolved.Error!.Render();
+        }).ConfigureAwait(false);
     }
 
     public string? RejectWrite() => ReadOnly
