@@ -5,6 +5,8 @@ namespace TerseSharp.Server;
 
 public static partial class DotnetRunner
 {
+    private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
+
     public static async Task<string> BuildAsync(
         LoadedWorkspace workspace,
         string? project,
@@ -91,13 +93,47 @@ public static partial class DotnetRunner
 
         var stopwatch = Stopwatch.StartNew();
         using var process = Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var error = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        deadline.CancelAfter(Timeout);
+
+        var run = await DrainAsync(process, stopwatch, deadline.Token).ConfigureAwait(false);
+
+        return run ?? Abandon(process, stopwatch);
+    }
+
+    private static async Task<ProcessRun?> DrainAsync(Process process, Stopwatch stopwatch, CancellationToken cancellationToken)
+    {
+        var pending = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errors = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        try
+        {
+            var output = await pending.ConfigureAwait(false);
+            var error = await errors.ConfigureAwait(false);
+
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            stopwatch.Stop();
+
+            return new ProcessRun(process.ExitCode, output + error, stopwatch.ElapsedMilliseconds);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private static ProcessRun Abandon(Process process, Stopwatch stopwatch)
+    {
         stopwatch.Stop();
 
-        return new ProcessRun(process.ExitCode, output + error, stopwatch.ElapsedMilliseconds);
+        if (!process.HasExited)
+            process.Kill(entireProcessTree: true);
+
+        return new ProcessRun(
+            -1,
+            string.Create(CultureInfo.InvariantCulture, $"TIMED_OUT after {stopwatch.ElapsedMilliseconds} ms; the process was killed"),
+            stopwatch.ElapsedMilliseconds);
     }
 
     [GeneratedRegex(@"^.*?: (error|warning) [A-Z]+\d+:.*$", RegexOptions.Multiline)]

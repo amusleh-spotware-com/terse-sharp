@@ -4,6 +4,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
 {
     private readonly Dictionary<string, LoadedWorkspace> workspaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly Lock map = new();
     private readonly int maxWorkspaces = maxWorkspaces;
 
     public async Task<WorkspaceLoadResult> LoadAsync(string path, CancellationToken cancellationToken)
@@ -14,7 +15,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
 
         try
         {
-            if (workspaces.TryGetValue(full, out var existing))
+            if (TryGet(full) is { } existing)
             {
                 existing.Touch();
 
@@ -29,14 +30,18 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
         }
     }
 
-    public IReadOnlyList<LoadedWorkspace> All() => [.. workspaces.Values];
+    public IReadOnlyList<LoadedWorkspace> All() => Snapshot();
 
     public bool Unload(string path)
     {
         var full = Path.GetFullPath(path);
+        LoadedWorkspace? workspace;
 
-        if (!workspaces.Remove(full, out var workspace))
-            return false;
+        lock (map)
+        {
+            if (!workspaces.Remove(full, out workspace))
+                return false;
+        }
 
         workspace.Dispose();
 
@@ -45,75 +50,105 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
 
     public Result<LoadedWorkspace> Resolve(string? workspaceHint, string? pathHint)
     {
-        if (workspaces.Count is 0)
+        var loaded = Snapshot();
+
+        if (loaded.Length is 0)
             return Result.Fail<LoadedWorkspace>(Errors.NotLoaded());
 
         if (!string.IsNullOrWhiteSpace(workspaceHint))
-            return ByHint(workspaceHint);
+            return ByHint(loaded, workspaceHint);
 
-        var byPath = ByPath(pathHint);
-
-        return byPath ?? Single();
+        return ByPath(loaded, pathHint) ?? Single(loaded);
     }
 
     public void Dispose()
     {
-        foreach (var workspace in workspaces.Values)
+        foreach (var workspace in Drain())
             workspace.Dispose();
 
-        workspaces.Clear();
         gate.Dispose();
+    }
+
+    private LoadedWorkspace[] Snapshot()
+    {
+        lock (map)
+            return [.. workspaces.Values];
+    }
+
+    private LoadedWorkspace[] Drain()
+    {
+        lock (map)
+        {
+            var all = workspaces.Values.ToArray();
+
+            workspaces.Clear();
+
+            return all;
+        }
+    }
+
+    private LoadedWorkspace? TryGet(string full)
+    {
+        lock (map)
+            return workspaces.TryGetValue(full, out var existing) ? existing : null;
     }
 
     private async Task<LoadedWorkspace> AddAsync(string full, CancellationToken cancellationToken)
     {
         var loaded = await WorkspaceLoader.LoadAsync(full, cancellationToken).ConfigureAwait(false);
 
-        workspaces[full] = loaded;
-        EvictOldest();
+        foreach (var evicted in Store(full, loaded))
+            evicted.Dispose();
 
         return loaded;
     }
 
-    private void EvictOldest()
+    private LoadedWorkspace[] Store(string full, LoadedWorkspace loaded)
     {
-        while (workspaces.Count > maxWorkspaces)
+        lock (map)
         {
-            var oldest = workspaces.MinBy(entry => entry.Value.LastUsedUtc);
+            workspaces[full] = loaded;
 
-            workspaces.Remove(oldest.Key);
-            oldest.Value.Dispose();
+            var evicted = new List<LoadedWorkspace>();
+
+            while (workspaces.Count > maxWorkspaces)
+            {
+                var oldest = workspaces.MinBy(entry => entry.Value.LastUsedUtc);
+
+                workspaces.Remove(oldest.Key);
+                evicted.Add(oldest.Value);
+            }
+
+            return [.. evicted];
         }
     }
 
-    private Result<LoadedWorkspace> ByHint(string hint)
+    private static Result<LoadedWorkspace> ByHint(LoadedWorkspace[] loaded, string hint)
     {
-        var matches = workspaces.Values
-            .Where(workspace => Matches(workspace, hint))
-            .ToArray();
+        var matches = loaded.Where(workspace => Matches(workspace, hint)).ToArray();
 
         return matches.Length switch
         {
             1 => Ok(matches[0]),
-            0 => Result.Fail<LoadedWorkspace>(Errors.WorkspaceNotFound(hint, Paths())),
-            _ => Result.Fail<LoadedWorkspace>(Errors.AmbiguousWorkspace(Paths())),
+            0 => Result.Fail<LoadedWorkspace>(Errors.WorkspaceNotFound(hint, Paths(loaded))),
+            _ => Result.Fail<LoadedWorkspace>(Errors.AmbiguousWorkspace(Paths(loaded))),
         };
     }
 
-    private Result<LoadedWorkspace>? ByPath(string? pathHint)
+    private static Result<LoadedWorkspace>? ByPath(LoadedWorkspace[] loaded, string? pathHint)
     {
         if (string.IsNullOrWhiteSpace(pathHint))
             return null;
 
-        var matches = workspaces.Values.Where(workspace => workspace.Contains(pathHint)).ToArray();
+        var matches = loaded.Where(workspace => workspace.Contains(pathHint)).ToArray();
 
         return matches.Length is 1 ? Ok(matches[0]) : null;
     }
 
-    private Result<LoadedWorkspace> Single() =>
-        workspaces.Count is 1
-            ? Ok(workspaces.Values.First())
-            : Result.Fail<LoadedWorkspace>(Errors.AmbiguousWorkspace(Paths()));
+    private static Result<LoadedWorkspace> Single(LoadedWorkspace[] loaded) =>
+        loaded.Length is 1
+            ? Ok(loaded[0])
+            : Result.Fail<LoadedWorkspace>(Errors.AmbiguousWorkspace(Paths(loaded)));
 
     private static bool Matches(LoadedWorkspace workspace, string hint) =>
         workspace.SolutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase)
@@ -126,5 +161,5 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
         return Result.Ok(workspace);
     }
 
-    private string[] Paths() => [.. workspaces.Keys];
+    private static string[] Paths(LoadedWorkspace[] loaded) => [.. loaded.Select(workspace => workspace.SolutionPath)];
 }

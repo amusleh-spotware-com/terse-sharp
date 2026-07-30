@@ -26,12 +26,16 @@
   <a href="#-status--roadmap">Status</a>
 </p>
 
-> [!WARNING]
-> **Design stage — no code yet.** This repository currently holds the specification
-> ([requirements](sharp-mcp-requirements.md) · [design](sharp-mcp-design.md)) and nothing else.
-> Every number below is a **committed target with a CI gate behind it**, not a measured result of
-> shipped software. When the first phase lands, this banner is replaced by the generated benchmark
-> table. Contributors welcome — the spec is complete enough to build from.
+> [!NOTE]
+> **v0.1.0 — 25 tools working end to end; the speed and token numbers below are still targets.**
+> What runs today: workspace loading, symbol search, outlines, usages, implementations,
+> diagnostics, symbol-addressed edits, solution-wide rename, file and text tools, build and tests —
+> all verified by **44 tests (19 unit + 25 E2E)**, where every E2E test drives a real server process
+> over the real stdio transport against a real solution and asserts response values.
+> **Not yet built:** XAML, ReSharper CLT integration, project/solution/package editing, the
+> content-addressed index, debug and profiling. The tables below marked *target* are specified and
+> gated in [requirements](sharp-mcp-requirements.md) but **not yet measured** — treat them as the
+> contract, not as results.
 
 ---
 
@@ -88,9 +92,25 @@ blocker**, not a footnote.
 One command. No IDE, no licence, no Node, no Python, no language server.
 
 ```bash
-dotnet tool install -g TerseSharp     # or, on .NET 10+, run it with no install at all:
-dnx TerseSharp
+# from source, today:
+git clone https://github.com/amusleh-spotware-com/terse-sharp && cd terse-sharp
+dotnet pack src/TerseSharp.Server -c Release -o artifacts/nupkg
+dotnet tool install -g TerseSharp --add-source artifacts/nupkg
+
+# once published to nuget.org:
+dotnet tool install -g TerseSharp
 ```
+
+### The 25 tools shipping today
+
+| Group | Tools |
+|---|---|
+| Workspace | `load_workspace` · `list_workspaces` · `unload_workspace` · `list_projects` |
+| Navigation | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` |
+| Diagnostics | `get_diagnostics` |
+| Edit | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
+| Files | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
+| Build | `build` · `run_tests` |
 
 Register it with your agent — TerseSharp writes the config itself, you don't hand-edit JSON:
 
@@ -186,14 +206,14 @@ On top of that:
 
 | Phase | Scope | State |
 |---|---|---|
-| P1 | Workspace load, symbol search, outlines, compact formatter, token + comparative harness | 🔜 |
-| P2 | Semantic navigation, declaration index, **content-addressed shards, multi-workspace, worktree awareness, crash safety**, file watcher | 🔜 |
-| P3 | Symbol-addressed edits, dryRun, compile gate, rollback, undo | 🔜 |
-| P4 | Refactorings, diagnostics, code fixes | 🔜 |
+| P1 | Workspace load, symbol search, outlines, compact formatter | ✅ v0.1.0 |
+| P2 | Semantic navigation (usages, implementations), multi-workspace LRU, worktree awareness, `EXACT`/`HEURISTIC` | ✅ v0.1.0 · ⏸ content-addressed index, file watcher |
+| P3 | Symbol-addressed edits, dryRun, compile gate, rollback | ✅ v0.1.0 · ⏸ undo |
+| P4 | Solution-wide rename, diagnostics | ✅ v0.1.0 · ⏸ extract/move/change-signature, code fixes |
 | P5 | ReSharper CLT integration, `analyze` / `format` / `cleanup` | 🔜 |
-| P6 | Build, tests, projects & packages, the no-fallback file set | 🔜 |
+| P6 | Build + tests ✅ · projects & packages, full no-fallback file set | 🔜 partial |
 | P7 | XAML | 🔜 |
-| P8 | Packaging, `terse install` / `doctor`, agent skill, debug & profiling | 🔜 |
+| P8 | `terse install` / `uninstall` / `doctor` ✅ · agent skill, debug & profiling | 🔜 partial |
 
 **Every phase exits with an E2E test per tool** — driven through a real MCP client, over the real
 transport, against a real workspace, asserting values. A tool without one is not done.

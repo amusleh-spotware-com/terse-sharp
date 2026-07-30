@@ -30,8 +30,7 @@ public sealed class LoadedWorkspace : IDisposable
 
     public void Touch() => LastUsedUtc = DateTimeOffset.UtcNow;
 
-    public bool Contains(string path) =>
-        Path.GetFullPath(path).StartsWith(Root, StringComparison.OrdinalIgnoreCase);
+    public bool Contains(string path) => PathBoundary.Contains(Root, path);
 
     public bool TryApply(Solution solution) => workspace.TryApplyChanges(solution);
 
