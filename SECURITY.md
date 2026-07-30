@@ -17,7 +17,7 @@ the processes it starts.
 | Control | Behaviour |
 |---|---|
 | Path containment | Every path argument is resolved and must sit inside the loaded workspace root, compared by whole path segment. `C:\repo` does **not** contain `C:\repoEvil`. |
-| Read-only mode | `terse serve --read-only` removes every mutating tool. |
+| Read-only mode | `terse serve --read-only` makes every mutating tool refuse with `ERROR ReadOnly` and touch nothing. The tools are still listed; hiding them from `tools/list` is planned. |
 | Edit safety | Mutations support `dryRun`, return diffs rather than files, and are rolled back when they introduce a new compile error. |
 | Process execution | Only `dotnet build` / `dotnet test` against the loaded workspace, with a 10 minute deadline and a kill on timeout. There is no arbitrary-command tool. |
 | Client config | `terse install` writes only the `terse-sharp` entry into an MCP client config, preserving everything else, via a temp file and an atomic rename. `terse uninstall` removes exactly that entry. |
