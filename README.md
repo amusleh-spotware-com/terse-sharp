@@ -31,13 +31,10 @@
 </p>
 
 > [!NOTE]
-> **v0.1.0 — 26 tools working end to end.** Verified by **75 tests (29 unit + 46 E2E)**, where every
+> **v0.2.0 — 52 tools working end to end.** Verified by **115 tests (29 unit + 86 E2E)**, where every
 > E2E test drives a real server process over the real stdio transport against a real solution and
-> asserts response values.
-> **Not yet built:** XAML tooling, ReSharper CLI integration, project/package editing, the
-> content-addressed index, debug and profiling. Numbers marked *target* below are the specified
-> contract, **not measured results** — they get replaced by a generated benchmark table when the
-> harness lands.
+> asserts response values, and a token-budget suite asserts the response sizes below.
+> **Not yet built:** the content-addressed index, trigram search and file watcher.
 
 ---
 
@@ -105,17 +102,29 @@ dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
 
 ## 🧰 The tools
 
-26 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+52 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` (Roslyn-resolved) or `HEURISTIC` (text/index) tag.
 
 | Group | Tools |
 |---|---|
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
 | **Navigation** | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` |
-| **Diagnostics** | `get_diagnostics` |
+| **Analyze & clean** | `analyze` · `format` · `cleanup` · `find_dead_code` · `get_diagnostics` |
 | **Edit** | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
+| **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
+| **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
+| **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_bindings` · `xaml_validate` · `xaml_find` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
 | **Build** | `build` · `run_tests` |
+
+### Analysis without a licence
+
+`analyze` runs the **compiler plus every analyzer your projects already reference** — the CA rules,
+StyleCop, SonarAnalyzer, Roslynator, whatever is in your `PackageReference` list — down to `info`
+and `hidden` severity, which a normal build hides. `cleanup` removes unused `using` directives,
+sorts what remains System-first and reformats to your `.editorconfig`; `find_dead_code` reports
+unreferenced private members, unused fields and unreachable code. All of it is Roslyn: **no IDE, no
+external tool, no licence, no network.**
 
 **What each one replaces**
 
@@ -153,7 +162,7 @@ cannot detect.
 
 ## 📊 The numbers
 
-*Targets, each specified and CI-gated. Not yet measured — see the note at the top.*
+*Asserted by the token-budget suite in CI, not estimated.*
 
 | Question | With built-in tools | With TerseSharp | Target |
 |---|---|---|---|
@@ -203,13 +212,12 @@ built as compact text rather than JSON.
 | Solution-wide rename, diagnostics | ✅ |
 | Build, tests, non-C# file and text tools | ✅ |
 | `terse install` / `uninstall` / `doctor` / `--skill` | ✅ |
-| Extract / move / change-signature, code fixes, undo | 🔜 |
-| Project, solution and package editing | 🔜 |
-| ReSharper CLI integration (`analyze` / `format` / `cleanup`) | 🔜 |
-| XAML tooling | 🔜 |
+| Extract interface, move type, change signature, undo | ✅ |
+| Project, solution and package editing, full `.slnx` support | ✅ |
+| `analyze` / `format` / `cleanup` / `find_dead_code`, Roslyn-only | ✅ |
+| XAML outline, names, resources, bindings, validation, search | ✅ |
+| Token budget harness | ✅ |
 | Content-addressed index, trigram search, file watcher | 🔜 |
-| Debug and profiling modules | 🔜 |
-| Token and latency benchmark harnesses | 🔜 |
 
 Changes are recorded in [CHANGELOG.md](CHANGELOG.md). Versioning and the release pipeline are
 described in [RELEASING.md](RELEASING.md).
@@ -218,6 +226,8 @@ described in [RELEASING.md](RELEASING.md).
 
 - **Database / SQL tools** — DataGrip functionality bundled into Rider. No C# relevance, no token
   saving, and it would put credential storage and arbitrary SQL in a code server.
+- **Debugging and profiling** — a debugger needs a live session and a profiler needs a trace host;
+  both are separate products, and `dotnet-trace` and your IDE already do them well.
 - **Unity / Unreal editor tools** — they read a live editor's state. A headless process cannot, and
   six broken tools are worse than none.
 - **Commit / push** — git access is read-only. Your agent already has git.

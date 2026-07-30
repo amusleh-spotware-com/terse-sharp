@@ -8,6 +8,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-30
+
+Doubles the tool surface from 26 to 52, all Roslyn-only.
+
+### Added
+
+- **Analysis and cleanup, without any external tool or licence** — `analyze` runs the compiler plus
+  every analyzer the project already references, down to `info` and `hidden` severity that a normal
+  build hides; `format` applies the Roslyn formatter to your `.editorconfig`; `cleanup` removes
+  unused `using` directives, sorts the rest System-first and reformats; `find_dead_code` reports
+  unreferenced private members, unused fields and unreachable code.
+- **Refactorings** — `extract_interface`, `move_type_to_file`, `move_type_to_namespace`,
+  `change_signature`, and `undo_last_change` backed by a 10-deep solution snapshot history.
+- **Projects and solutions** — `solution_projects`, `solution_add_project`, `solution_remove_project`
+  with full `.slnx` support, `project_create`, `project_properties`, `project_set_property`,
+  `project_add_reference`, `project_remove_reference`, and Central-Package-Management-aware
+  `package_list` / `package_add` / `package_remove`.
+- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_bindings`, `xaml_validate` and
+  `xaml_find`, with WPF, Avalonia, WinUI and MAUI dialect detection. Validation reports duplicate
+  `x:Key` and `x:Name` and unresolved `StaticResource` references.
+- **Token-budget suite** — the response sizes advertised in the README are now asserted in CI rather
+  than estimated.
+
+### Changed
+
+- Debugging and profiling are dropped from the roadmap. A debugger needs a live session and a
+  profiler needs a trace host; both are separate products.
+
 ## [0.1.1] - 2026-07-30
 
 ### Fixed
@@ -57,6 +85,7 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.0

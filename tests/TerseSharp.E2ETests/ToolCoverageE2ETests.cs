@@ -11,6 +11,13 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
         "replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol",
         "read_text", "write_text", "edit_text", "find_files", "search_text", "search_regex",
         "build", "run_tests",
+        "analyze", "format", "cleanup", "find_dead_code",
+        "extract_interface", "move_type_to_file", "move_type_to_namespace", "change_signature", "undo_last_change",
+        "solution_projects", "solution_add_project", "solution_remove_project",
+        "project_create", "project_properties", "project_set_property",
+        "project_add_reference", "project_remove_reference",
+        "package_list", "package_add", "package_remove",
+        "xaml_outline", "xaml_names", "xaml_resources", "xaml_bindings", "xaml_validate", "xaml_find",
     };
 
     [Fact]

@@ -1,0 +1,14 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Orders">
+  <Window.Resources>
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF0078D4" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF000000" />
+  </Window.Resources>
+  <Grid>
+    <TextBlock x:Name="SymbolText" Text="{Binding Symbol}" Foreground="{StaticResource AccentBrush}" />
+    <TextBlock x:Name="VolumeText" Text="{Binding Volume, Mode=OneWay}" />
+    <Button x:Name="SubmitButton" Content="Submit" Background="{StaticResource MissingBrush}" />
+    <Button x:Name="SubmitButton" Content="Again" />
+  </Grid>
+</Window>
