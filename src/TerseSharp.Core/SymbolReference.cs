@@ -14,6 +14,10 @@ public static class SymbolReference
         parameterOptions: SymbolDisplayParameterOptions.IncludeType,
         miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
 
+    private static readonly SymbolDisplayFormat Qualified = new(
+        globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
+
     public static string Brief(ISymbol symbol) => symbol.ToDisplayString(Compact);
 
     public static bool IsDocumentationId(string text) =>
@@ -37,11 +41,21 @@ public static class SymbolReference
     public static bool Matches(ISymbol symbol, SymbolQuery query) =>
         MatchesContainer(symbol, query.ContainingType) && MatchesArity(symbol, query.ParameterCount);
 
-    private static bool MatchesContainer(ISymbol symbol, string? containingType) =>
-        containingType is null
-        || string.Equals(symbol.ContainingType?.Name, containingType, StringComparison.Ordinal)
-        || symbol is INamedTypeSymbol
-        && string.Equals(symbol.ContainingNamespace?.Name, containingType, StringComparison.Ordinal);
+    private static bool MatchesContainer(ISymbol symbol, string? qualifier) =>
+        qualifier is null || Containers(symbol).Any(container => IsSuffix(container, qualifier));
+
+    private static IEnumerable<string> Containers(ISymbol symbol)
+    {
+        if (symbol.ContainingType is { } type)
+            yield return type.ToDisplayString(Qualified);
+
+        if (symbol is INamedTypeSymbol && symbol.ContainingNamespace is { IsGlobalNamespace: false } space)
+            yield return space.ToDisplayString();
+    }
+
+    private static bool IsSuffix(string container, string qualifier) =>
+        string.Equals(container, qualifier, StringComparison.Ordinal)
+        || container.EndsWith("." + qualifier, StringComparison.Ordinal);
 
     private static bool MatchesArity(ISymbol symbol, int? parameterCount) =>
         parameterCount is null || symbol is IMethodSymbol method && method.Parameters.Length == parameterCount;

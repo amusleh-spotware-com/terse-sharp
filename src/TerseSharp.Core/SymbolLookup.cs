@@ -6,6 +6,8 @@ namespace TerseSharp.Core;
 
 public static class SymbolLookup
 {
+    private const int NameCap = 100;
+
     public static async Task<Result<ISymbol>> ResolveAsync(
         LoadedWorkspace workspace,
         string symbolId,
@@ -40,7 +42,11 @@ public static class SymbolLookup
                 "pass a documentation id such as M:Ns.Type.Member(Ns.Arg), or a name such as Type.Member"));
         }
 
-        var found = await SymbolSearch.FindAsync(workspace, query.Member, null, 100, cancellationToken).ConfigureAwait(false);
+        var found = await SymbolSearch.FindAsync(workspace, query.Member, null, NameCap + 1, cancellationToken).ConfigureAwait(false);
+
+        if (found.Count > NameCap)
+            return Result.Fail<ISymbol>(Errors.SaturatedName(text, NameCap));
+
         var named = found.Where(symbol => string.Equals(symbol.Name, query.Member, StringComparison.Ordinal)).ToArray();
         var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
 
@@ -51,7 +57,10 @@ public static class SymbolLookup
     {
         [var only] => Result.Ok(only),
         [] => Result.Fail<ISymbol>(Errors.SymbolNotFound(text, [.. found.Take(3).Select(SymbolReference.Brief)])),
-        _ => Result.Fail<ISymbol>(Errors.AmbiguousSymbol(text, [.. matches.Take(10).Select(symbol => SymbolId.From(symbol).Value)])),
+        _ => Result.Fail<ISymbol>(Errors.AmbiguousName(
+            text,
+            [.. matches.Take(10).Select(symbol => SymbolId.From(symbol).Value)],
+            matches.Length)),
     };
 
     private static string Describe(ISymbol symbol) => string.Create(

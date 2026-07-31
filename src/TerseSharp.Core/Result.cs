@@ -39,6 +39,18 @@ public static class Errors
         string.Create(CultureInfo.InvariantCulture, $"symbol '{symbolId}' resolves in {candidates.Count} places"),
         "pass workspace= to narrow it; candidates: " + string.Join(", ", candidates));
 
+    public static TerseError AmbiguousName(string name, IReadOnlyList<string> candidates, int total) => new(
+        TerseErrorCode.AmbiguousSymbol,
+        string.Create(CultureInfo.InvariantCulture, $"name '{name}' resolves to {total} symbols"),
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"pass one of these ids, or qualify the name with its containing type (showing {candidates.Count} of {total}): {string.Join(", ", candidates)}"));
+
+    public static TerseError SaturatedName(string name, int cap) => new(
+        TerseErrorCode.AmbiguousSymbol,
+        string.Create(CultureInfo.InvariantCulture, $"name '{name}' matches more than {cap} symbols, so it cannot be resolved safely"),
+        "qualify the name with its containing type, or pass the documentation id from search_symbols");
+
     public static TerseError DocumentNotFound(string path) => new(
         TerseErrorCode.DocumentNotFound,
         string.Create(CultureInfo.InvariantCulture, $"'{path}' is not a document in the loaded workspace"),

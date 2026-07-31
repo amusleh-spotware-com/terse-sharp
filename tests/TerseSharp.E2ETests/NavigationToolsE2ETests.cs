@@ -133,10 +133,51 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task ANameWithAParameterCount_PicksTheRightOverload()
     {
-        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "OrderService.Submit(Order)" });
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "Reconciler.Reconcile(Order)" });
 
-        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
-        Assert.Contains("Submit", text, StringComparison.Ordinal);
+        Assert.Contains("M:Fixture.Trading.Reconciler.Reconcile(Fixture.Trading.Order)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ANameWithATwoParameterCount_PicksTheOtherOverload()
+    {
+        var text = await server.CallAsync("get_symbol", new()
+        {
+            ["symbolId"] = "Reconciler.Reconcile(Order, decimal)",
+        });
+
+        Assert.Contains("System.Decimal", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AGenericArgumentComma_DoesNotInflateTheParameterCount()
+    {
+        var text = await server.CallAsync("get_symbol", new()
+        {
+            ["symbolId"] = "Reconciler.Reconcile(Dictionary<string,int>, Order)",
+        });
+
+        Assert.Contains("System.Collections.Generic.Dictionary", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnOverloadedNameWithNoParameterCount_ListsTheCandidatesAndDeclaresTheTotal()
+    {
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "Reconciler.Reconcile" });
+
+        Assert.Contains("resolves to 3 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("showing 3 of 3", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AFullyQualifiedNameResolvesTheSameAsAShortOne()
+    {
+        var text = await server.CallAsync("get_symbol", new()
+        {
+            ["symbolId"] = "Fixture.Trading.OrderService.Submit",
+        });
+
+        Assert.Contains("M:Fixture.Trading.OrderService.Submit", text, StringComparison.Ordinal);
     }
 
     [Fact]

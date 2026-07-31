@@ -99,11 +99,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   one symbol resolves; a name that matches several returns `ERROR AmbiguousSymbol` listing their full
   ids — which is the disambiguation call the agent would have had to make anyway — and a name that
   matches nothing names the nearest symbols. Documentation ids keep working exactly as before.
+  The qualifier may be as long as you like: `OrderService.Submit`, `Trading.OrderService.Submit` and
+  `Fixture.Trading.OrderService.Submit` all resolve, so pasting back an id with the `M:` removed works.
+  A name is never resolved by guessing: a qualifier only matches a containing **type** (or a namespace
+  when the symbol is itself a type), a parameter list is counted at nesting depth zero so a generic
+  argument's comma cannot select the wrong overload, the candidate list declares how many of the total
+  it is showing, and a name matching more than 100 symbols is refused outright rather than resolved
+  from a truncated search.
 - **The token budget suite covers the widest symbol, not only the narrow one.** `find_usages` was
   asserted against a 4-usage fixture symbol, which a format change that tripled the cost on a
   46-usage symbol passed unchanged. There is now a budget on the widest symbol in the fixture and an
   assertion that the default answer costs less than the `containers=true` one.
-- Test count: 226 unit and 266 E2E.
+- Test count: 229 unit and 270 E2E.
 
 ## [0.6.0] - 2026-07-31
 
