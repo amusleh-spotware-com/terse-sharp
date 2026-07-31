@@ -137,6 +137,25 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("xaml_validate", new() { ["path"] = View }, "xaml_validate"),
         ("xaml_find", new() { ["query"] = "Button" }, "OrderView.xaml"),
         ("xaml_resolve", new() { ["key"] = "AccentBrush" }, "scope="),
+        ("explore_symbol", new() { ["symbolId"] = SubmitMethod }, "usages="),
+        ("impact_of", new() { ["symbolId"] = SubmitMethod }, "projects that would recompile"),
+        ("find_registrations", new() { ["query"] = "IOrderRepository" }, "AddSingleton"),
+        ("list_endpoints", [], "MapGet"),
+        ("xaml_styles", new() { ["typeName"] = "Button" }, "targets=Button"),
+        ("xaml_localization", [], "uid="),
+        ("xaml_add_element", new()
+        {
+            ["path"] = "src/Fixture.Trading/Views/OrderView.xaml",
+            ["target"] = "Window/Grid",
+            ["markup"] = "<TextBlock Text=\"Added\" />",
+            ["dryRun"] = true,
+        }, "changedLines="),
+        ("xaml_remove_element", new()
+        {
+            ["path"] = "src/Fixture.Trading/Views/OrderView.xaml",
+            ["target"] = "#VolumeText",
+            ["dryRun"] = true,
+        }, "changedLines="),
         ("xaml_codebehind", new() { ["path"] = "src/Fixture.Trading/Views/ShellView.xaml" }, "class="),
         ("xaml_set_property", new()
         {

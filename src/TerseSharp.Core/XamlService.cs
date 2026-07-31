@@ -161,10 +161,11 @@ public static partial class XamlService
         return Result.Ok(response.ToString());
     }
 
-    public static Result<string> ValidateAll(LoadedWorkspace workspace, int maxResults)
+    public static Result<string> ValidateAll(LoadedWorkspace workspace, int maxResults, bool includeUnused)
     {
         var graph = XamlResourceGraph.Build(workspace.Root);
-        var issues = graph.Files.SelectMany(file => Collect(file, graph)).ToArray();
+        var unused = includeUnused ? XamlDeadCode.Unused(workspace.Root, graph) : [];
+        var issues = graph.Files.SelectMany(file => Collect(file, graph)).Concat(unused).ToArray();
         var response = new ResponseBuilder("xaml_validate", "solution");
 
         response.Summary(Math.Min(maxResults, issues.Length), issues.Length, "issues", "maxResults= or scope=file with path=");

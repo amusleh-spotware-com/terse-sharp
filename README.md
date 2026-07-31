@@ -26,7 +26,7 @@
   <img src="https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 10"/>
   <img src="https://img.shields.io/badge/Roslyn-semantic-512BD4.svg" alt="Roslyn"/>
   <img src="https://img.shields.io/badge/XAML-WPF_·_Avalonia_·_WinUI_·_MAUI-0078D4.svg" alt="XAML"/>
-  <img src="https://img.shields.io/badge/tools-56-26C281.svg" alt="56 tools"/>
+  <img src="https://img.shields.io/badge/tools-64-26C281.svg" alt="64 tools"/>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"/></a>
 </p>
 
@@ -216,18 +216,19 @@ because it does not depend on the model remembering.
 
 ## 🧰 The tools
 
-56 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+64 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` / `HEURISTIC` tag. Paths are workspace-relative. Truncation names the parameter that narrows it.
 
 | Group | Tools |
 |---|---|
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
-| **Navigation** | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` |
+| **Navigation** | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
+| **.NET semantics grep cannot reach** | `find_registrations` · `list_endpoints` |
 | **Analyze & clean** | `analyze` · `format` · `cleanup` · `get_diagnostics` |
 | **Edit** | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
-| **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_set_property` |
+| **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_styles` · `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` · `xaml_set_property` · `xaml_add_element` · `xaml_remove_element` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
 | **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
@@ -385,7 +386,10 @@ built as compact text rather than JSON.
 | `xaml_codebehind`, `xaml_set_property`, XAML-aware `rename_symbol` and `find_usages` | ✅ |
 | Short symbol references, name resolution, truncation steering | ✅ |
 | Token budget harness | ✅ |
-| XAML element insert/remove, style and template resolution, dead-resource detection | 🔜 |
+| `explore_symbol`, `impact_of`, `find_registrations`, `list_endpoints` | ✅ |
+| XAML element insert/remove, dead-resource detection, `terse install --guard` | ✅ |
+| `xaml_styles` (implicit + keyed + `BasedOn` chain), `xaml_localization` (`x:Uid`→resx) | ✅ |
+| Shared warm workspace daemon across processes | 🔜 |
 | Content-addressed index, trigram search, file watcher | 🔜 |
 
 Changes are recorded in [CHANGELOG.md](CHANGELOG.md). Versioning and the release pipeline are

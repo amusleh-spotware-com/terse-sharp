@@ -1,0 +1,9 @@
+<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Grid x:Name="Outer">
+    <Grid x:Name="Inner">
+      <TextBlock Text="deep" />
+    </Grid>
+    <Button x:Name="Trailing" Content="Keep me" />
+  </Grid>
+</UserControl>

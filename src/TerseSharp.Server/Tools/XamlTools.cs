@@ -54,10 +54,11 @@ public sealed class XamlTools(ToolContext context)
         [Description("Path to the XAML file. Ignored when scope is solution.")] string? path = null,
         [Description("file (default) or solution.")] string? scope = null,
         [Description("Max issues when scope is solution (200).")] int maxResults = 0,
+        [Description("With scope=solution, also report x:Key and x:Name declarations that nothing references (heuristic).")] bool includeUnused = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         string.Equals(scope, "solution", StringComparison.OrdinalIgnoreCase)
             ? context.WithWorkspace(workspace, null, loaded =>
-                NavigationTools.Unwrap(XamlService.ValidateAll(loaded, NavigationTools.Cap(maxResults, 200))))
+                NavigationTools.Unwrap(XamlService.ValidateAll(loaded, NavigationTools.Cap(maxResults, 200), includeUnused)))
             : context.WithWorkspace(workspace, path, loaded =>
                 NavigationTools.Unwrap(XamlService.Validate(loaded, path ?? string.Empty)));
 
@@ -81,6 +82,47 @@ public sealed class XamlTools(ToolContext context)
             ? Task.FromResult(refusal)
             : context.WithWorkspace(workspace, path, loaded =>
                 NavigationTools.Unwrap(XamlEditService.SetProperty(loaded, path, target, property, value, dryRun)));
+
+    [McpServerTool(Name = "xaml_add_element")]
+    [Description("Insert markup as the last child of one XAML element, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]
+    public Task<string> XamlAddElement(
+        [Description("Path to the XAML file.")] string path,
+        [Description("Parent element: path from xaml_outline, #Name or key=Key.")] string target,
+        [Description("Markup to insert, e.g. <TextBlock Text=\"Hi\" />.")] string markup,
+        [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null) =>
+        context.RejectWrite() is { } refusal
+            ? Task.FromResult(refusal)
+            : context.WithWorkspace(workspace, path, loaded =>
+                NavigationTools.Unwrap(XamlEditService.AddElement(loaded, path, target, markup, dryRun)));
+
+    [McpServerTool(Name = "xaml_remove_element")]
+    [Description("Remove one XAML element and its children, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]
+    public Task<string> XamlRemoveElement(
+        [Description("Path to the XAML file.")] string path,
+        [Description("Element: path from xaml_outline, #Name or key=Key.")] string target,
+        [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null) =>
+        context.RejectWrite() is { } refusal
+            ? Task.FromResult(refusal)
+            : context.WithWorkspace(workspace, path, loaded =>
+                NavigationTools.Unwrap(XamlEditService.RemoveElement(loaded, path, target, dryRun)));
+
+    [McpServerTool(Name = "xaml_styles")]
+    [Description("Every Style, ControlTemplate and DataTemplate that targets an element type, keyed and implicit, with its BasedOn chain resolved. Answers \"why does this control look like that\" without reading Generic.xaml and every theme dictionary.")]
+    public Task<string> XamlStyles(
+        [Description("Element type, e.g. Button.")] string typeName,
+        [Description("Workspace or worktree name.")] string? workspace = null) =>
+        context.WithWorkspace(workspace, null, loaded =>
+            NavigationTools.Unwrap(XamlStyleGraph.Render(XamlResourceGraph.Build(loaded.Root), typeName)));
+
+    [McpServerTool(Name = "xaml_localization")]
+    [Description("Every x:Uid in the workspace joined to the .resx/.resw entries that name it. A uid with no entry is reported UNRESOLVED rather than omitted, so an untranslated element is visible.")]
+    public Task<string> XamlLocalization(
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Max results (200).")] int maxResults = 0) =>
+        context.WithWorkspace(workspace, null, loaded =>
+            NavigationTools.Unwrap(TerseSharp.Core.XamlLocalization.Render(loaded, NavigationTools.Cap(maxResults, 200))));
 
     [McpServerTool(Name = "xaml_find")]
     [Description("Find XAML elements across the workspace by element type, x:Name, resource key, x:Uid or binding text. Use instead of Grep over .xaml files.")]

@@ -15,9 +15,10 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("Include unreferenced members and unreachable code. Default true; set false on a huge solution to skip the reference scan.")] bool includeDeadCode = true,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (200).")] int maxResults = 0,
+        [Description("Report only diagnostics that appeared since the previous analyze of the same scope, and which ones were fixed.")] bool sinceLast = false,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, loaded => AnalysisService.AnalyzeAsync(
-            loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), cancellationToken));
+            loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, cancellationToken));
 
     [McpServerTool(Name = "format")]
     [Description("Reformat C# to the project's .editorconfig using the Roslyn formatter. Returns the diff, never the file.")]

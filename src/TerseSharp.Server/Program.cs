@@ -7,8 +7,11 @@ var clientOption = new Option<string?>("--client") { Description = "claude-code,
 
 var skillOption = new Option<bool>("--skill") { Description = "Also install the agent skill that teaches which TerseSharp tool replaces which built-in." };
 
+var guardOption = new Option<bool>("--guard") { Description = "Also install a Claude Code PreToolUse hook that blocks Read/Grep/Edit on C#/.NET and XAML files." };
+
 var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption };
-var install = new Command("install", "Register TerseSharp with your MCP clients.") { clientOption, workspaceOption, skillOption };
+var guard = new Command("guard", "Hook entry point: reads a Claude Code PreToolUse payload on stdin and denies built-in tools on C#/.NET source.");
+var install = new Command("install", "Register TerseSharp with your MCP clients.") { clientOption, workspaceOption, skillOption, guardOption };
 var uninstall = new Command("uninstall", "Remove TerseSharp from your MCP clients.") { clientOption };
 var doctor = new Command("doctor", "Verify SDK, MSBuild, client registration and workspace load.") { workspaceOption };
 
@@ -21,7 +24,13 @@ install.SetAction(result =>
 
     if (result.GetValue(skillOption))
         Console.WriteLine(ClientRegistrar.InstallSkill());
+
+    if (result.GetValue(guardOption))
+        Console.WriteLine(ClientRegistrar.InstallGuard());
 });
+
+guard.SetAction((_, cancellationToken) =>
+    ToolGuard.RunAsync(Console.In, Console.Out, cancellationToken));
 
 uninstall.SetAction(result => Console.WriteLine(ClientRegistrar.Unregister(result.GetValue(clientOption))));
 
@@ -31,6 +40,7 @@ doctor.SetAction(async (result, cancellationToken) =>
 var root = new RootCommand("TerseSharp - token-efficient Roslyn MCP server for C# and .NET.")
 {
     serve,
+    guard,
     install,
     uninstall,
     doctor,

@@ -6,6 +6,11 @@ public static class XamlFiles
 
     public static IEnumerable<string> Enumerate(string root) => Walk(root);
 
+    public static bool IsExcluded(string file, string root) => Path
+        .GetRelativePath(root, file)
+        .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+        .Any(segment => Excluded.Contains(segment, StringComparer.OrdinalIgnoreCase));
+
     private static IEnumerable<string> Walk(string directory)
     {
         foreach (var file in Entries(directory, Directory.EnumerateFiles).Where(XamlDocument.IsXaml))

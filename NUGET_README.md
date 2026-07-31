@@ -4,7 +4,7 @@
 
 A Roslyn-powered [MCP](https://modelcontextprotocol.io) server that lets a coding agent navigate,
 read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep`, no line-number
-`Edit`, no shelling out. **56 tools. One install. No IDE, no licence, no network.**
+`Edit`, no shelling out. **64 tools. One install. No IDE, no licence, no network.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/amusleh-spotware-com/terse-sharp/ci.yml?branch=main&label=CI)](https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
@@ -116,18 +116,19 @@ Prefer to configure it by hand:
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
 
-## The 56 tools
+## The 64 tools
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT` or
 `HEURISTIC` tag. Paths are workspace-relative.
 
 - **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace`, `list_projects`
-- **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`
+- **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`, `explore_symbol`, `impact_of`
+- **.NET semantics grep cannot reach** — `find_registrations` (DI: open generics, factories, `Add*` extensions), `list_endpoints` (ASP.NET Core `Map*`)
 - **Analyze & clean** — `analyze`, `format`, `cleanup`, `get_diagnostics`
 - **Edit** — `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`
 - **Refactor** — `extract_interface`, `move_type_to_file`, `move_type_to_namespace`, `change_signature`, `undo_last_change`
 - **Projects & solutions** — `solution_projects`, `solution_add_project`, `solution_remove_project`, `project_create`, `project_properties`, `project_set_property`, `project_add_reference`, `project_remove_reference`, `package_list`, `package_add`, `package_remove`
-- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_bindings`, `xaml_validate`, `xaml_find`, `xaml_codebehind`, `xaml_set_property`
+- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_styles`, `xaml_bindings`, `xaml_validate`, `xaml_find`, `xaml_codebehind`, `xaml_localization`, `xaml_set_property`, `xaml_add_element`, `xaml_remove_element`
   — `xaml_resolve` reports every declaration of a resource key across the workspace with its scope, and
   `xaml_bindings validate=true` checks each binding path against the `x:DataType` or `d:DataContext`
   type resolved through Roslyn

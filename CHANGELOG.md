@@ -8,6 +8,47 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-01
+
+### Added
+
+- **`explore_symbol` and `impact_of` — one call where three were needed.** Orienting on a symbol meant
+  `get_symbol` + `find_usages` + `find_implementations` and assembling the answer by hand;
+  `explore_symbol` returns the signature, the XML doc, the location, the usage count split into `src`
+  and `test`, the implementation count, the XAML sites and the files it is used in. `impact_of` adds
+  the projects that would recompile, so a rename's blast radius is one call instead of three plus
+  reasoning.
+- **`find_registrations` and `list_endpoints` — the .NET questions grep structurally cannot answer.**
+  `AddScoped(typeof(IRepository<>), …)`, a factory delegate or an `AddMyFeature()` extension means the
+  concrete type never appears beside the interface, so a text search finds nothing and the agent
+  concludes the service is unregistered. `find_registrations` scans the loaded solution's syntax for
+  every container call and, when nothing matches, **says that assembly scanning or a container module
+  may be responsible** rather than implying the type is unregistered. `list_endpoints` does the same
+  for every `Map*` call.
+- **`terse guard` and `terse install --guard`.** Every token the server saves on a call the agent never
+  makes is zero, and an agent with TerseSharp installed still reaches for `Read`/`Grep` out of habit.
+  `terse install --guard` writes a Claude Code `PreToolUse` hook; `terse guard` is the hook itself —
+  it reads the payload on stdin and **denies** a built-in on a `.cs`, `.csproj`, `.xaml` or `.axaml`
+  path, naming the tool to use instead. It covers the shell too: `grep`, `cat`, `sed` and friends do
+  not escape by running in `Bash`. Malformed input allows rather than blocks, so a hook failure can
+  never wedge a session.
+- **`xaml_styles`** reports every `Style`, `ControlTemplate` and `DataTemplate` that targets an element
+  type — keyed and implicit — with the `BasedOn` chain resolved, so "why does this control look like
+  that" stops meaning "read `Generic.xaml` and every theme dictionary".
+- **`xaml_localization`** joins every `x:Uid` in the workspace to the `.resx`/`.resw` entries that name
+  it. A uid with no entry is reported `UNRESOLVED` rather than omitted, so an untranslated element is
+  visible instead of silently absent.
+- **`xaml_add_element` and `xaml_remove_element`** complete the structured XAML edit surface, addressed
+  the same way as `xaml_set_property` and refusing anything that would not parse. Adding to a
+  self-closing element is refused with the reason rather than producing invalid markup.
+- **`xaml_validate includeUnused=true`** reports `x:Key` and `x:Name` declarations that no XAML
+  attribute and no C# string literal references. It is opt-in and tagged `HEURISTIC`, because
+  reflection and `FindResource` can reach a declaration no static scan sees.
+- **`analyze sinceLast=true`** reports only the diagnostics that appeared since the previous `analyze`
+  of the same scope, plus which ones were fixed, so a red→green loop pays for the delta rather than
+  re-printing the unchanged set on every iteration.
+- Test count: 267 unit and 330 E2E.
+
 ## [0.7.0] - 2026-07-31
 
 > **This is a MAJOR change — several tools changed their response format.**
@@ -530,7 +571,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.8.0
 [0.7.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.7.0
 [0.6.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.5.0

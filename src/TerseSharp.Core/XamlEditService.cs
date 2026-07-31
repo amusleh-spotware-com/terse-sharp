@@ -13,6 +13,119 @@ public static class XamlEditService
         bool dryRun) =>
         Apply(workspace, path, "xaml_set_property", target, (text, span) => Rewrite(text, span, property, value), dryRun);
 
+    public static Result<string> RemoveElement(LoadedWorkspace workspace, string path, string target, bool dryRun) =>
+        Apply(workspace, path, "xaml_remove_element", target, Cut, dryRun);
+
+    public static Result<string> AddElement(
+        LoadedWorkspace workspace,
+        string path,
+        string target,
+        string markup,
+        bool dryRun) =>
+        Apply(workspace, path, "xaml_add_element", target, (text, span) => Nest(text, span, markup), dryRun);
+
+    private static Result<string> Cut(string text, TagSpan span)
+    {
+        var full = Whole(text, span);
+
+        return full is null
+            ? Result.Fail<string>(Errors.Invalid(
+                "the element's closing tag could not be located",
+                "remove it with edit_text, or target a self-closing element"))
+            : Result.Ok(text.Remove(full.Value.Start, full.Value.Length));
+    }
+
+    private static Result<string> Nest(string text, TagSpan span, string markup)
+    {
+        var tag = text[span.Start..span.End];
+
+        if (tag.EndsWith("/>", StringComparison.Ordinal))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "the target element is self-closing and has no content to add to",
+                "give it a child by editing the markup, or target its parent"));
+        }
+
+        var indent = Indent(text, span.Start);
+
+        return Result.Ok(text.Insert(span.End, "\n" + indent + "  " + markup.Trim()));
+    }
+
+    private static TagSpan? Whole(string text, TagSpan opening)
+    {
+        if (text[(opening.End - 2)..opening.End] is "/>")
+            return opening;
+
+        var name = Name(text, opening);
+        var closing = MatchingClose(text, opening.End, name);
+
+        return closing < 0 ? null : new TagSpan(opening.Start, closing + name.Length + 3 - opening.Start);
+    }
+
+    private static int MatchingClose(string text, int from, string name)
+    {
+        var open = string.Create(CultureInfo.InvariantCulture, $"<{name}");
+        var close = string.Create(CultureInfo.InvariantCulture, $"</{name}>");
+        var depth = 0;
+        var index = from;
+
+        while (index < text.Length)
+        {
+            var nextOpen = NextTag(text, index, open);
+            var nextClose = text.IndexOf(close, index, StringComparison.Ordinal);
+
+            if (nextClose < 0)
+                return -1;
+
+            if (nextOpen >= 0 && nextOpen < nextClose)
+            {
+                depth++;
+                index = nextOpen + open.Length;
+                continue;
+            }
+
+            if (depth is 0)
+                return nextClose;
+
+            depth--;
+            index = nextClose + close.Length;
+        }
+
+        return -1;
+    }
+
+    private static int NextTag(string text, int from, string open)
+    {
+        for (var index = text.IndexOf(open, from, StringComparison.Ordinal); index >= 0;)
+        {
+            var after = index + open.Length;
+
+            if (after >= text.Length || Boundary(text[after]))
+                return index;
+
+            index = text.IndexOf(open, after, StringComparison.Ordinal);
+        }
+
+        return -1;
+    }
+
+    private static bool Boundary(char character) => char.IsWhiteSpace(character) || character is '>' or '/';
+
+    private static int ClosingLength(string text, TagSpan opening) =>
+        Name(text, opening).Length + 3;
+
+    private static string Name(string text, TagSpan opening) => text[(opening.Start + 1)..opening.End]
+        .TrimEnd('>', '/')
+        .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+        .FirstOrDefault() ?? string.Empty;
+
+    private static string Indent(string text, int start)
+    {
+        var lineStart = text.LastIndexOf('\n', Math.Max(start - 1, 0)) + 1;
+
+        return new string(' ', start - lineStart);
+    }
+
     private static Result<string> Apply(
         LoadedWorkspace workspace,
         string path,

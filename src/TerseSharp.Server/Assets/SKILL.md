@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET or XAML in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 56 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml file is never edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET or XAML in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 64 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml file is never edited by line number.
 ---
 
 # TerseSharp
@@ -64,6 +64,12 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Read` a `.xaml.cs` to see what the markup wires | `xaml_codebehind(path)` | `x:Class` plus every handler |
 | hunting a resource through `App.xaml` | `xaml_resolve(key)` | every declaration with its scope, one call |
 | eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path type-checked through Roslyn |
+| "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep |
+| "what endpoints exist?" | `list_endpoints()` | every `Map*` with the member it sits in |
+| orienting on a symbol | `explore_symbol(symbolId)` | signature, doc, reach, implementations, XAML sites in one call |
+| judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
+| "why does this control look like that" | `xaml_styles(typeName)` | implicit and keyed styles with the `BasedOn` chain |
+| "is this element translated" | `xaml_localization()` | every `x:Uid` joined to its `.resx`/`.resw` entry |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
@@ -77,10 +83,13 @@ A silent drop is the breach, even when the reason would have been valid.
 `list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution.
 
 **Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·
-`get_symbol_source` · `find_usages` · `find_implementations`.
+`get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of`.
 
-**Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`) · `get_diagnostics` ·
-`format` · `cleanup`.
+**.NET semantics grep cannot reach** — `find_registrations` (DI) · `list_endpoints` (ASP.NET Core).
+
+**Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `sinceLast=true` reports
+only what appeared since the previous run of the same scope, plus what was fixed) ·
+`get_diagnostics` · `format` · `cleanup`.
 
 **Edit** — `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol`
 · `undo_last_change`.
@@ -92,8 +101,9 @@ A silent drop is the breach, even when the reason would have been valid.
 `project_create` · `project_properties` · `project_set_property` · `project_add_reference` ·
 `project_remove_reference` · `package_list` · `package_add` · `package_remove`.
 
-**XAML** — `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_bindings` ·
-`xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_set_property`.
+**XAML** — `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_styles` ·
+`xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` ·
+`xaml_set_property` · `xaml_add_element` · `xaml_remove_element`.
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
 
@@ -148,9 +158,13 @@ bound property and `{Binding …}` follows — but **only** where an `x:Class` o
 reference. Anything else is listed `NOT rewritten`; **read that list after every rename.**
 `find_usages` shows the same XAML sites, so check the blast radius before renaming.
 
-`xaml_set_property` addresses an element by the path `xaml_outline` prints, by `#Name` or by
-`key=Key`, edits the tag in place so formatting survives, and refuses an edit whose result would not
-parse.
+`xaml_set_property`, `xaml_add_element` and `xaml_remove_element` address an element by the path
+`xaml_outline` prints, by `#Name` or by `key=Key`, edit in place so formatting survives, and refuse an
+edit whose result would not parse. An ambiguous target is refused with the count, never guessed.
+
+`xaml_validate scope=solution includeUnused=true` also reports `x:Key` and `x:Name` declarations that
+no XAML attribute and no C# string literal references — `HEURISTIC`, because reflection can reach
+them.
 
 ## Running tests
 

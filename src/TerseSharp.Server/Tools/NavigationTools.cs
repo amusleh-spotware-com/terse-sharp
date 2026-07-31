@@ -67,6 +67,44 @@ public sealed class NavigationTools(ToolContext context)
         context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
             ReferenceService.FindUsagesAsync(loaded, symbol, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
 
+    [McpServerTool(Name = "find_registrations")]
+    [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered.")]
+    public Task<string> FindRegistrations(
+        [Description("Type name to look for, e.g. IOrderRepository.")] string query,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Max results (100).")] int maxResults = 0,
+        CancellationToken cancellationToken = default) =>
+        context.WithWorkspaceAsync(workspace, null, loaded =>
+            RegistrationService.RegistrationsAsync(loaded, query, Cap(maxResults, 100), cancellationToken));
+
+    [McpServerTool(Name = "list_endpoints")]
+    [Description("Every ASP.NET Core endpoint registration in the solution - MapGet, MapPost, MapControllers, MapHub and friends - with the member each sits in. Use instead of grepping Program.cs and every extension method it calls.")]
+    public Task<string> ListEndpoints(
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Max results (200).")] int maxResults = 0,
+        CancellationToken cancellationToken = default) =>
+        context.WithWorkspaceAsync(workspace, null, loaded =>
+            RegistrationService.EndpointsAsync(loaded, Cap(maxResults, 200), cancellationToken));
+
+    [McpServerTool(Name = "explore_symbol")]
+    [Description("One call to orient on a symbol: signature, XML doc, location, how many usages it has in src and in tests, how many implementations, how many XAML sites, and the files it is used in. Replaces get_symbol + find_usages + find_implementations when you are learning what something is.")]
+    public Task<string> ExploreSymbol(
+        [Description("Symbol id or name.")] string symbolId,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default) =>
+        context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
+            ExploreService.ExploreAsync(loaded, symbol, cancellationToken), cancellationToken);
+
+    [McpServerTool(Name = "impact_of")]
+    [Description("The blast radius of changing a symbol: every file that references it with a src/test marker, every XAML site, and every project that would recompile. Use before a rename or a signature change.")]
+    public Task<string> ImpactOf(
+        [Description("Symbol id or name.")] string symbolId,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Max records (200).")] int maxResults = 0,
+        CancellationToken cancellationToken = default) =>
+        context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
+            ExploreService.ImpactAsync(loaded, symbol, Cap(maxResults, 200), cancellationToken), cancellationToken);
+
     [McpServerTool(Name = "find_implementations")]
     [Description("Implementations of an interface or abstract member, and derived types of a base type.")]
     public Task<string> FindImplementations(

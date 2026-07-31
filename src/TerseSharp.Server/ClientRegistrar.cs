@@ -37,6 +37,65 @@ public static class ClientRegistrar
         return "installed skill -> " + target;
     }
 
+    public static string InstallGuard()
+    {
+        var target = Path.Combine(ClaudeConfigDirectory() ?? Path.Combine(Home(), ".claude"), "settings.json");
+        var root = (File.Exists(target) ? Parse(target) : null) ?? [];
+
+        Hooks(root)["PreToolUse"] = GuardMatchers(Hooks(root)["PreToolUse"] as JsonArray);
+        Save(target, root);
+
+        return "installed guard -> " + target;
+    }
+
+    private static JsonArray GuardMatchers(JsonArray? existing)
+    {
+        var kept = existing?.Select(Without).OfType<JsonNode>() ?? [];
+
+        return [.. kept, GuardEntry()];
+    }
+
+    private static JsonNode? Without(JsonNode? entry)
+    {
+        if (entry?["hooks"] is not JsonArray hooks)
+            return entry?.DeepClone();
+
+        var others = hooks.Where(hook => !IsGuard(hook)).Select(hook => hook!.DeepClone()).ToArray();
+
+        if (others.Length == hooks.Count)
+            return entry.DeepClone();
+
+        if (others.Length is 0)
+            return null;
+
+        var clone = entry.DeepClone();
+
+        clone["hooks"] = new JsonArray(others);
+
+        return clone;
+    }
+
+    private static bool IsGuard(JsonNode? hook) =>
+        hook?["command"]?.GetValue<string>()?.Contains("terse guard", StringComparison.Ordinal) is true;
+
+    private static JsonObject GuardEntry() => new()
+    {
+        ["matcher"] = "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash",
+        ["hooks"] = new JsonArray(new JsonObject
+        {
+            ["type"] = "command",
+            ["command"] = "terse guard",
+        }),
+    };
+
+    private static JsonObject Hooks(JsonObject root)
+    {
+        if (root["hooks"] is not JsonObject hooks)
+            root["hooks"] = hooks = [];
+
+        return hooks;
+    }
+
     public static string Unregister(string? client)
     {
         var lines = Select(client).Select(Remove).ToArray();

@@ -69,7 +69,7 @@ child process over stdio and throws `build TerseSharp.Server first` if it is mis
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **62 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **64 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
 `DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,
@@ -166,7 +166,7 @@ answer all four:
 4. **CHANGELOG** — under `## [Unreleased]`, with the format change spelled out.
 
 A commit that changes behaviour and leaves any of the four stale is incomplete. "I'll update the docs
-after" is the same failure as "I'll add the test after": both are how a 62-tool surface drifts away
+after" is the same failure as "I'll add the test after": both are how a 64-tool surface drifts away
 from what it claims to be. When you cannot update one of them in the same commit, say which and why in
 the commit body.
 

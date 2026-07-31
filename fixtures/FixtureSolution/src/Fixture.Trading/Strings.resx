@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="BoundView_Symbol.Text" xml:space="preserve">
+    <value>Symbol</value>
+  </data>
+  <data name="Unused_Key" xml:space="preserve">
+    <value>Nothing uses this</value>
+  </data>
+</root>

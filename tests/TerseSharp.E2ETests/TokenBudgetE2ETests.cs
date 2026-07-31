@@ -15,6 +15,30 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task ExploreSymbol_OnTheWidestSymbol_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("explore_symbol", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+
+        Assert.True(Tokens(text) <= 400, Report("explore_symbol", text));
+    }
+
+    [Fact]
+    public async Task ImpactOf_OnTheWidestSymbol_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("impact_of", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+
+        Assert.True(Tokens(text) <= 400, Report("impact_of", text));
+    }
+
+    [Fact]
+    public async Task XamlStyles_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("xaml_styles", new() { ["typeName"] = "Button" });
+
+        Assert.True(Tokens(text) <= 200, Report("xaml_styles", text));
+    }
+
+    [Fact]
     public async Task FindUsages_OnTheWidestSymbol_StaysUnderItsBudget()
     {
         var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "T:Fixture.Trading.Order" });

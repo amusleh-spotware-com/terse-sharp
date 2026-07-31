@@ -14,6 +14,7 @@ public static class AnalysisService
         IReadOnlyList<string> ids,
         bool includeDeadCode,
         int maxResults,
+        bool sinceLast,
         CancellationToken cancellationToken)
     {
         var scope = DiagnosticScope.For(workspace, path);
@@ -36,7 +37,11 @@ public static class AnalysisService
             Engines(analyzed, includeDeadCode),
             Filter(found, scope, minimum, ids),
             Keep(extra, ids),
-            maxResults);
+            maxResults,
+            sinceLast,
+            minimum,
+            ids,
+            includeDeadCode);
     }
 
     private static List<string> Engines(ConcurrentBag<string> analyzed, bool includeDeadCode)
@@ -123,7 +128,11 @@ public static class AnalysisService
         List<string> engines,
         Diagnostic[] found,
         string[] extra,
-        int maxResults)
+        int maxResults,
+        bool sinceLast,
+        DiagnosticSeverity minimum,
+        IReadOnlyList<string> ids,
+        bool includeDeadCode)
     {
         var grouped = found
             .Select(diagnostic => DiagnosticFormat.Key(root, diagnostic))
@@ -133,17 +142,39 @@ public static class AnalysisService
             .OrderBy(entry => entry.Text, StringComparer.Ordinal)
             .ToArray();
 
+        var lines = grouped
+            .Select(entry => entry.Count is 1 ? entry.Text : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}"))
+            .ToArray();
+
+        var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}");
+        var delta = DiagnosticHistory.Record(scope, lines);
+        var shown = sinceLast ? delta.Appeared : lines;
+
         var response = new ResponseBuilder("analyze", path ?? "solution");
 
         response.Summary(
-            Math.Min(maxResults, grouped.Length),
-            grouped.Length,
-            "diagnostics",
+            Math.Min(maxResults, shown.Count),
+            shown.Count,
+            sinceLast ? "new diagnostics" : "diagnostics",
             "minSeverity=, ids= or path=");
         response.Note("engines=" + string.Join("+", engines));
 
-        foreach (var entry in grouped.Take(maxResults))
-            response.Line(entry.Count is 1 ? entry.Text : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}"));
+        if (sinceLast)
+        {
+            response.Note(delta.Baseline
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"no previous analyze of this scope: this run is the baseline, all {lines.Length} diagnostic(s) are listed")
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"since the previous analyze of this scope: appeared={delta.Appeared.Count} fixed={delta.Fixed.Count} unchanged={delta.Unchanged} total={lines.Length}"));
+        }
+
+        foreach (var line in shown.Take(maxResults))
+            response.Line(line);
+
+        foreach (var line in sinceLast ? delta.Fixed.Take(maxResults) : [])
+            response.Line("FIXED " + line);
 
         return response.ToString();
     }

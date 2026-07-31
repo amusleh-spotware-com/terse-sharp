@@ -68,7 +68,7 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("OrderView.xaml", text, StringComparison.Ordinal);
         Assert.Contains("ShellView.xaml", text, StringComparison.Ordinal);
-        Assert.Contains("3 matches", text, StringComparison.Ordinal);
+        Assert.Contains("4 matches", text, StringComparison.Ordinal);
     }
 
     [Fact]
