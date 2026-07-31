@@ -271,7 +271,9 @@ built as compact text rather than JSON.
 
 1. **Semantic, never textual.** Queries take symbols, not byte patterns.
 2. **Slices, never files.** No tool returns a whole file by default.
-3. **Stable handles.** `M:Trading.OrderService.Submit(Trading.Order)` survives every edit.
+3. **Stable handles.** `M:Trading.OrderService.Submit(Trading.Order)` survives every edit, and
+   `OrderService.Submit` resolves to it when it is unambiguous — an ambiguous name lists the
+   candidates instead of guessing.
 4. **Bounded, compact responses.** Text, not JSON. Explicit truncation.
 5. **Data, never prose.** No preamble, no explanation, no closing summary.
 6. **Concise never means incomplete.** Truncation is always declared.

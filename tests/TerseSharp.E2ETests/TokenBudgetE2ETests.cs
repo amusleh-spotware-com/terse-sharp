@@ -15,6 +15,28 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task FindUsages_OnTheWidestSymbol_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+
+        Assert.True(Tokens(text) <= 500, Report("find_usages", text));
+    }
+
+    [Fact]
+    public async Task FindUsages_WithContainers_CostsMoreThanWithout_AndIsNotTheDefault()
+    {
+        var lean = await server.CallAsync("find_usages", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+
+        var full = await server.CallAsync("find_usages", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.Order",
+            ["containers"] = true,
+        });
+
+        Assert.True(Tokens(lean) < Tokens(full), Report("find_usages", lean, full));
+    }
+
+    [Fact]
     public async Task FindUsages_StaysUnderItsBudget()
     {
         var text = await server.CallAsync("find_usages", new()

@@ -92,7 +92,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   names the errors it introduces. `allowErrors=true` still skips the analysis and reports no counts;
   it is also the way to get the old cheap diff-only preview back, since the gate now compiles the
   changed projects and their dependents on `dryRun` too.
-- Test count: 212 unit and 260 E2E.
+- **A symbol can be addressed by name, not only by its documentation id.** `M:Trading.OrderService.Submit(Trading.Order)`
+  is 60 characters an agent has to reproduce byte-exactly, and one typo cost a whole round trip. Every
+  tool that takes a `symbolId` now also accepts `OrderService.Submit`, `Submit`, or
+  `OrderService.Submit(Order)` when a parameter count disambiguates an overload. A name that matches
+  one symbol resolves; a name that matches several returns `ERROR AmbiguousSymbol` listing their full
+  ids — which is the disambiguation call the agent would have had to make anyway — and a name that
+  matches nothing names the nearest symbols. Documentation ids keep working exactly as before.
+- **The token budget suite covers the widest symbol, not only the narrow one.** `find_usages` was
+  asserted against a 4-usage fixture symbol, which a format change that tripled the cost on a
+  46-usage symbol passed unchanged. There is now a budget on the widest symbol in the fixture and an
+  assertion that the default answer costs less than the `containers=true` one.
+- Test count: 226 unit and 266 E2E.
 
 ## [0.6.0] - 2026-07-31
 

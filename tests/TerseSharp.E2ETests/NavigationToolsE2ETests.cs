@@ -113,6 +113,42 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task ASymbolCanBeAddressedByNameInsteadOfItsDocumentationId()
+    {
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "OrderService.Submit" });
+
+        Assert.Contains("Fixture.Trading", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ANameThatMatchesSeveralSymbols_ListsThemInsteadOfGuessing()
+    {
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "Submit" });
+
+        Assert.Contains("ERROR AmbiguousSymbol", text, StringComparison.Ordinal);
+        Assert.Contains("M:Fixture.Trading.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ANameWithAParameterCount_PicksTheRightOverload()
+    {
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "OrderService.Submit(Order)" });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("Submit", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ANameThatMatchesNothing_NamesTheNearestSymbols()
+    {
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "OrderService.Submitt" });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task FindImplementations_ResolvesThroughTheInterface()
     {
         var text = await server.CallAsync("find_implementations", new() { ["symbolId"] = "M:Fixture.Trading.IOrderRepository.Submit(Fixture.Trading.Order)" });

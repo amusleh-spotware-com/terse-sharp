@@ -11,6 +11,9 @@ public static class SymbolLookup
         string symbolId,
         CancellationToken cancellationToken)
     {
+        if (!SymbolReference.IsDocumentationId(symbolId))
+            return await ByNameAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+
         var matches = await FindAllAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
         var distinct = matches.DistinctBy(Describe, StringComparer.Ordinal).ToArray();
 
@@ -24,6 +27,32 @@ public static class SymbolLookup
 
         return Result.Fail<ISymbol>(Errors.SymbolNotFound(symbolId, nearest));
     }
+
+    private static async Task<Result<ISymbol>> ByNameAsync(
+        LoadedWorkspace workspace,
+        string text,
+        CancellationToken cancellationToken)
+    {
+        if (SymbolReference.Parse(text) is not { } query)
+        {
+            return Result.Fail<ISymbol>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{text}' is neither a symbol id nor a name"),
+                "pass a documentation id such as M:Ns.Type.Member(Ns.Arg), or a name such as Type.Member"));
+        }
+
+        var found = await SymbolSearch.FindAsync(workspace, query.Member, null, 100, cancellationToken).ConfigureAwait(false);
+        var named = found.Where(symbol => string.Equals(symbol.Name, query.Member, StringComparison.Ordinal)).ToArray();
+        var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
+
+        return Chosen(text, matches, named);
+    }
+
+    private static Result<ISymbol> Chosen(string text, ISymbol[] matches, ISymbol[] named) => matches switch
+    {
+        [var only] => Result.Ok(only),
+        [] => Result.Fail<ISymbol>(Errors.SymbolNotFound(text, [.. named.Take(3).Select(SymbolReference.Brief)])),
+        _ => Result.Fail<ISymbol>(Errors.AmbiguousSymbol(text, [.. matches.Take(10).Select(symbol => SymbolId.From(symbol).Value)])),
+    };
 
     private static string Describe(ISymbol symbol) => string.Create(
         CultureInfo.InvariantCulture,
