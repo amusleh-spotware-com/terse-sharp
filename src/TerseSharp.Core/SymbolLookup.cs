@@ -44,13 +44,13 @@ public static class SymbolLookup
         var named = found.Where(symbol => string.Equals(symbol.Name, query.Member, StringComparison.Ordinal)).ToArray();
         var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
 
-        return Chosen(text, matches, named);
+        return Chosen(text, matches, found);
     }
 
-    private static Result<ISymbol> Chosen(string text, ISymbol[] matches, ISymbol[] named) => matches switch
+    private static Result<ISymbol> Chosen(string text, ISymbol[] matches, IReadOnlyList<ISymbol> found) => matches switch
     {
         [var only] => Result.Ok(only),
-        [] => Result.Fail<ISymbol>(Errors.SymbolNotFound(text, [.. named.Take(3).Select(SymbolReference.Brief)])),
+        [] => Result.Fail<ISymbol>(Errors.SymbolNotFound(text, [.. found.Take(3).Select(SymbolReference.Brief)])),
         _ => Result.Fail<ISymbol>(Errors.AmbiguousSymbol(text, [.. matches.Take(10).Select(symbol => SymbolId.From(symbol).Value)])),
     };
 

@@ -40,6 +40,9 @@ public sealed class SymbolReferenceTests
     [InlineData("OrderService.Submit()", 0)]
     [InlineData("OrderService.Submit(Order)", 1)]
     [InlineData("OrderService.Submit(Order, int)", 2)]
+    [InlineData("OrderService.Submit(Dictionary<string,int>)", 1)]
+    [InlineData("OrderService.Submit(Func<int,int>, CancellationToken)", 2)]
+    [InlineData("OrderService.Submit(int[], Dictionary<string, List<int>>)", 2)]
     public void Parse_ReadsTheParameterCount(string text, int expected) =>
         Assert.Equal(expected, SymbolReference.Parse(text)!.Value.ParameterCount);
 

@@ -19,7 +19,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
 
-        Assert.True(Tokens(text) <= 500, Report("find_usages", text));
+        Assert.True(Tokens(text) <= 200, Report("find_usages", text));
     }
 
     [Fact]

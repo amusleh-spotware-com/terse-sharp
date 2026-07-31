@@ -40,7 +40,8 @@ public static class SymbolReference
     private static bool MatchesContainer(ISymbol symbol, string? containingType) =>
         containingType is null
         || string.Equals(symbol.ContainingType?.Name, containingType, StringComparison.Ordinal)
-        || string.Equals(symbol.ContainingNamespace?.Name, containingType, StringComparison.Ordinal);
+        || symbol is INamedTypeSymbol
+        && string.Equals(symbol.ContainingNamespace?.Name, containingType, StringComparison.Ordinal);
 
     private static bool MatchesArity(ISymbol symbol, int? parameterCount) =>
         parameterCount is null || symbol is IMethodSymbol method && method.Parameters.Length == parameterCount;
@@ -49,6 +50,27 @@ public static class SymbolReference
     {
         var inside = parameters.Trim('(', ')').Trim();
 
-        return inside.Length is 0 ? 0 : inside.Split(',').Length;
+        if (inside.Length is 0)
+            return 0;
+
+        var depth = 0;
+        var count = 1;
+
+        foreach (var character in inside)
+        {
+            depth += Nesting(character);
+
+            if (character is ',' && depth is 0)
+                count++;
+        }
+
+        return count;
     }
+
+    private static int Nesting(char character) => character switch
+    {
+        '<' or '(' or '[' => 1,
+        '>' or ')' or ']' => -1,
+        _ => 0,
+    };
 }
