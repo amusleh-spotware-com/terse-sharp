@@ -74,10 +74,17 @@ public static class TextSearchService
         return response.ToString();
     }
 
-    private static IEnumerable<string> Files(string root, string glob) =>
-        Directory
-            .EnumerateFiles(root, string.IsNullOrWhiteSpace(glob) ? "*" : glob, SearchOption.AllDirectories)
-            .Where(file => !IsExcluded(file, root));
+    private static IEnumerable<string> Files(string root, string glob)
+    {
+        var pattern = string.IsNullOrWhiteSpace(glob) ? "*" : glob;
+
+        return Directory
+            .EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Where(file => !IsExcluded(file, root))
+            .Where(file => FileGlob.IsPathPattern(pattern)
+                ? FileGlob.Matches(Path.GetRelativePath(root, file), pattern)
+                : FileGlob.Matches(Path.GetFileName(file), pattern));
+    }
 
     private static bool IsExcluded(string file, string root) =>
         Path.GetRelativePath(root, file)

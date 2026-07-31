@@ -8,6 +8,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **A glob with a directory in it made `find_files` and `search_text` fail.** The glob went straight
+  to `Directory.EnumerateFiles` as its `searchPattern`, which rejects `**` and path separators, so
+  `**/Views/*.xaml` returned `ERROR InvalidArgument IOException: The filename, directory name, or
+  volume label syntax is incorrect` instead of matching. Path-shaped globs are now matched against
+  each file's workspace-relative path, with `**/` meaning "any directories or none", `*` and `?`
+  confined to one segment; a bare glob such as `*.csproj` still matches on the file name.
+
 ## [0.3.0] - 2026-07-31
 
 ### Added

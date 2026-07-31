@@ -28,6 +28,37 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task FindFiles_WithADirectoryGlob_MatchesOnTheRelativePath()
+    {
+        var text = await server.CallAsync("find_files", new() { ["glob"] = "**/Views/*.xaml" });
+
+        Assert.Contains("OrderView.xaml", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithADirectoryGlobThatMatchesNothing_ReportsNoneRatherThanFailing()
+    {
+        var text = await server.CallAsync("find_files", new() { ["glob"] = "**/NoSuchFolder/*.cs" });
+
+        Assert.Contains("0 files", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithADirectoryGlob_SearchesOnlyThatSubtree()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["pattern"] = "Button",
+            ["glob"] = "**/Views/OrderView.xaml",
+        });
+
+        Assert.Contains("OrderView.xaml", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SearchText_TagsResultsHeuristic()
     {
         var text = await server.CallAsync("search_text", new() { ["pattern"] = "MaxVolume", ["glob"] = "*.json" });
