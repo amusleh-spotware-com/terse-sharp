@@ -100,7 +100,7 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 
 ## 🧰 The tools
 
-53 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+54 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` (Roslyn-resolved) or `HEURISTIC` (text/index) tag. Paths are workspace-relative.
 
 | Group | Tools |
@@ -111,7 +111,7 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 | **Edit** | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
-| **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_bindings` · `xaml_validate` · `xaml_find` |
+| **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_bindings` · `xaml_validate` · `xaml_find` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
 | **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
@@ -124,6 +124,44 @@ unreferenced private members as `TERSE001`, plus the compiler's own unused-field
 hints — so one call covers everything. `cleanup` removes unused `using` directives, sorts what
 remains System-first and reformats to your `.editorconfig`. All of it is Roslyn: **no IDE, no
 external tool, no licence, no network.**
+
+### XAML that knows about your C#
+
+TerseSharp holds the XAML tree **and** the Roslyn compilation in one process, so it can answer the two
+questions a text tool cannot.
+
+**Where does this resource come from?** Resolving one `{StaticResource AccentBrush}` by hand means
+reading `App.xaml`, then every `MergedDictionaries` entry in order, then the theme dictionaries — and
+order decides the winner, so you cannot stop at the first hit:
+
+```
+xaml_resolve AccentBrush
+2 declarations (truncated=false, total=2)
+
+scanned=7 files
+src/Views/OrderView.xaml:5  HEURISTIC  SolidColorBrush  scope=local
+src/Views/Themes/Dark.xaml:4  HEURISTIC  SolidColorBrush  scope=theme
+```
+
+The same index backs `xaml_validate`: a key is reported unresolved only when it is declared in **no**
+XAML file under the workspace root, so the check does not fire on every real application.
+
+**Does this binding actually bind?** WPF has no compile-time binding check at all — a typo fails
+silently to debug output. `xaml_bindings validate=true` resolves the data context from `x:DataType`
+(Avalonia, MAUI, WinUI) or `d:DataContext="{d:DesignInstance …}"` (WPF), maps the XAML prefix through
+its `clr-namespace:`/`using:` declaration, and walks each path segment against the real symbol:
+
+```
+src/Views/BoundView.xaml:7   EXACT  TextBlock.Text  {Binding Symbol}           OK Symbol on Fixture.Trading.Views.OrderViewModel
+src/Views/BoundView.xaml:9   EXACT  TextBlock.Text  {Binding Symbl}            ERROR no member 'Symbl' of 'Symbl' on …OrderViewModel; nearest 'Symbol'
+src/Views/BoundView.xaml:10  EXACT  TextBlock.Text  {Binding Selected.Symbol}  OK Selected.Symbol on …OrderViewModel
+```
+
+With no data context in scope the record says `UNRESOLVED_CONTEXT` and stays `HEURISTIC`. It never
+reports an error it cannot prove — a false "your binding is broken" costs more than no answer.
+
+Dialects are detected from the real markup namespace (`https://github.com/avaloniaui`,
+`.../dotnet/2021/maui`, the WinUI `using:` prefix form, WPF), with a fixture per dialect in CI.
 
 ### Tests an agent can act on
 
@@ -249,6 +287,8 @@ built as compact text rather than JSON.
 | Project, solution and package editing, full `.slnx` support | ✅ |
 | `analyze` (diagnostics + analyzers + dead code) / `format` / `cleanup`, Roslyn-only | ✅ |
 | XAML outline, names, resources, bindings, validation, search | ✅ |
+| XAML resource graph (`xaml_resolve`), typed binding validation, dialect fixtures | ✅ |
+| XAML structured edits, code-behind bridge, XAML-aware rename and `find_usages` | 🔜 |
 | Token budget harness | ✅ |
 | Content-addressed index, trigram search, file watcher | 🔜 |
 

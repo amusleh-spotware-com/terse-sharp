@@ -1,0 +1,10 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Fixture.Trading.Views;assembly=Fixture.Trading"
+        x:DataType="vm:OrderViewModel"
+        Title="Avalonia Orders">
+  <StackPanel>
+    <TextBlock Text="{Binding Symbol}" />
+    <TextBlock Text="{CompiledBinding Missing}" />
+  </StackPanel>
+</Window>

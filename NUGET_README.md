@@ -75,7 +75,7 @@ Prefer to configure it by hand:
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
 
-## The 53 tools
+## The 54 tools
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT` or
 `HEURISTIC` tag. Paths are workspace-relative.
@@ -86,7 +86,10 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
 - **Edit** — `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`
 - **Refactor** — `extract_interface`, `move_type_to_file`, `move_type_to_namespace`, `change_signature`, `undo_last_change`
 - **Projects & solutions** — `solution_projects`, `solution_add_project`, `solution_remove_project`, `project_create`, `project_properties`, `project_set_property`, `project_add_reference`, `project_remove_reference`, `package_list`, `package_add`, `package_remove`
-- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_bindings`, `xaml_validate`, `xaml_find`
+- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_bindings`, `xaml_validate`, `xaml_find`
+  — `xaml_resolve` reports every declaration of a resource key across the workspace with its scope, and
+  `xaml_bindings validate=true` checks each binding path against the `x:DataType` or `d:DataContext`
+  type resolved through Roslyn
 - **Files** — `read_text`, `write_text`, `edit_text`, `find_files`, `search_text`, `search_regex`
 - **Build & test** — `build`, `run_tests`, `rerun_failed`, `list_tests`
 

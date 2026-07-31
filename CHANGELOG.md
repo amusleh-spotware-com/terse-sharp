@@ -8,6 +8,73 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+> **This is a MAJOR change.** `xaml_bindings`, `xaml_outline`, `xaml_names`, `xaml_find` and
+> `xaml_validate` all changed their response format: records are workspace-relative rather than
+> file-name-only, `xaml_bindings` and `xaml_outline` carry a `dialect=` note, `xaml_bindings` gains a
+> trailing verdict column when `validate=true`, `xaml_find` reports `HEURISTIC` where it used to report
+> `EXACT`, and `xaml_outline`'s `total` now counts the whole tree rather than what it printed.
+
+### Fixed
+
+- **Dialect detection could not fire for Avalonia or MAUI.** `DetectDialect` matched substrings that do
+  not occur in either framework's root namespace — `avaloniaui.net` (the documentation site, not the
+  markup namespace `https://github.com/avaloniaui`) and `dotnet/maui` (the real one is
+  `http://schemas.microsoft.com/dotnet/2021/maui`). Every Avalonia and MAUI file was reported as
+  `dialect=wpf`, and so was every WinUI file that did not happen to declare a `Microsoft.UI.Xaml`
+  prefix. Detection now matches the real namespaces, treats the UWP/WinUI `using:` prefix form as
+  WinUI, and falls back to Avalonia for `.axaml`/`.paml`. No fixture existed for any dialect but WPF,
+  which is why no test could fail; there is one per dialect now.
+- **`xaml_validate` reported a resource as unresolved when it was declared in another file.**
+  Resolution was file-local, so on any real application — where keys live in `App.xaml`,
+  `Themes/Generic.xaml` or a chain of `MergedDictionaries` — `XAML003` fired on keys that resolve
+  perfectly at runtime. A confident false error is worse than no check: it sends an agent hunting for
+  a declaration that exists and invites it to "fix" working markup. `XAML003` now consults every XAML
+  file under the workspace root and reports a key only when it is declared nowhere.
+- **`xaml_bindings` printed the file name instead of the workspace-relative path**, so two views of
+  the same name were indistinguishable. Every XAML record is workspace-relative now, like the rest of
+  the surface.
+- **`xaml_find` tagged a substring match on an element's type name `EXACT`.** `EXACT` means
+  Roslyn-resolved; a text match is `HEURISTIC` and now says so.
+- **`xaml_outline` counted elements it did not print.** With a `depth` cut the summary reported the
+  whole tree as shown, so `truncated` read `false` on a truncated answer.
+- **`xaml_find` aborted on one unreadable file or denied directory.** It walked with a single
+  `EnumerateFiles`, the same defect fixed for `search_text` in 0.4.0. Enumeration is isolated per
+  directory now, and `bin`, `obj`, `.git` and `node_modules` are pruned during the walk rather than
+  filtered afterwards.
+
+### Added
+
+- **`xaml_resolve` — where a resource key actually comes from.** One call reports every declaration of
+  an `x:Key` across the workspace with its file, line, type and scope (`local`, `app`, `theme`),
+  ordered nearest-first, instead of the agent reading `App.xaml` and each merged dictionary in turn.
+  A key declared nowhere says so explicitly rather than answering with an empty list.
+- **`xaml_bindings validate=true` — binding paths checked against the real type.** The data context is
+  resolved from `x:DataType` (Avalonia, MAUI, WinUI) or `d:DataContext="{d:DesignInstance …}"` (WPF),
+  including inheritance from an ancestor element, the XAML prefix is mapped through its
+  `clr-namespace:`/`using:` declaration, and each path segment is resolved against the Roslyn symbol —
+  nested paths included. A missing member is reported with the nearest member name as a suggestion.
+  WPF has no compile-time binding check at all, so this is the only static answer available there.
+  When no data context is in scope, or the declared type is not in the solution, the record says
+  `UNRESOLVED_CONTEXT` and stays `HEURISTIC` — it never reports an error it cannot prove.
+- **`xaml_validate scope=solution`** checks every XAML file in one call and reports how many it read.
+- **`xaml_outline filter=named|keyed`** lists only the elements that carry an `x:Name` or an `x:Key`,
+  so a large `ResourceDictionary` does not have to be printed in full.
+- **`x:Uid` is a first-class citizen.** `xaml_names` reports it alongside `x:Name`, and `xaml_find`
+  takes `kind=uid` — the link between XAML and its localization keys was previously invisible.
+- **The binding validator refuses to guess.** A path it cannot resolve member by member — `{Binding .}`,
+  an indexer, a WPF current-item `/` path, an attached property in parentheses — is reported
+  `UNSUPPORTED`, never `ERROR`. Interfaces are searched through `AllInterfaces`, so an interface-typed
+  data context does not report every valid binding as missing. A prefixed type name whose `xmlns` does
+  not resolve, or whose simple name is ambiguous across the solution, answers `UNRESOLVED_CONTEXT`
+  rather than validating against a same-named type from an unrelated namespace.
+- **A XAML file that cannot be parsed is never silently dropped.** It would otherwise remove its keys
+  from the resource index and make every one of them look unresolved. `xaml_validate` and `xaml_resolve`
+  report how many files were unreadable and switch unresolved-resource checking off while any are;
+  `scope=solution` reports the unparseable file itself as `XAML000`.
+- **The XAML walk does not follow directory junctions or symlinks**, which a self-referential link would
+  otherwise turn into an unbounded traversal.
+- Test count: 198 unit and 254 E2E.
+
 ## [0.6.0] - 2026-07-31
 
 ### Fixed
