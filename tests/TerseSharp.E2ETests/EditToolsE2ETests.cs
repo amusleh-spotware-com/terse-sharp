@@ -97,6 +97,34 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task ReplaceSymbol_WithSeveralMembers_IsRefusedInsteadOfSilentlyKeepingTheFirst()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+            ["declaration"] = "public bool Submit(Order order) => repository.Submit(order);\npublic int Extra() => 1;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("not exactly one member", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithSeveralMembers_IsRefused()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int One() => 1;\npublic int Two() => 2;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("not exactly one member", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EditText_WithAnAmbiguousMatch_IsRefused()
     {
         var text = await server.CallAsync("edit_text", new()

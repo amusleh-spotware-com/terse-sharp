@@ -37,11 +37,11 @@ public static class SymbolEditService
         if (target is null)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
-        var parsed = SyntaxFactory.ParseMemberDeclaration(declaration);
+        var parsed = MemberDeclaration.Parse(declaration);
 
-        return parsed is null
-            ? Result.Fail<string>(Errors.Invalid("the declaration did not parse", "pass a complete member declaration"))
-            : await SwapAsync(workspace, target, parsed.WithTriviaFrom(target.Node), options, cancellationToken).ConfigureAwait(false);
+        return parsed.IsOk
+            ? await SwapAsync(workspace, target, parsed.Value!.WithTriviaFrom(target.Node), options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(parsed.Error!);
     }
 
     public static async Task<Result<string>> AddMemberAsync(
@@ -56,11 +56,11 @@ public static class SymbolEditService
         if (target is null || target.Node is not TypeDeclarationSyntax type)
             return Result.Fail<string>(Errors.Invalid("the target is not a type declaration", "pass a type symbol id"));
 
-        var member = SyntaxFactory.ParseMemberDeclaration(declaration);
+        var member = MemberDeclaration.Parse(declaration);
 
-        return member is null
-            ? Result.Fail<string>(Errors.Invalid("the declaration did not parse", "pass a complete member declaration"))
-            : await SwapAsync(workspace, target, type.AddMembers(member), options, cancellationToken).ConfigureAwait(false);
+        return member.IsOk
+            ? await SwapAsync(workspace, target, type.AddMembers(member.Value!), options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(member.Error!);
     }
 
     public static async Task<Result<string>> DeleteAsync(

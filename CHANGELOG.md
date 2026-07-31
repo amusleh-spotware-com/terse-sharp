@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ### Fixed
 
+- **`replace_symbol` and `add_member` silently dropped every member after the first.**
+  `SyntaxFactory.ParseMemberDeclaration` returns only the first member and reports the rest as
+  diagnostics on the node, which were never inspected. A declaration holding four methods replaced one
+  and discarded three, answering `replace_symbol applied` with `0 files changed` — an agent that did
+  not re-read the file believed the edit had landed. Both tools now refuse a declaration that is not
+  exactly one member, with `ERROR InvalidArgument` naming the parse errors.
 - **A glob with a directory in it made `find_files` and `search_text` fail.** The glob went straight
   to `Directory.EnumerateFiles` as its `searchPattern`, which rejects `**` and path separators, so
   `**/Views/*.xaml` returned `ERROR InvalidArgument IOException: The filename, directory name, or
