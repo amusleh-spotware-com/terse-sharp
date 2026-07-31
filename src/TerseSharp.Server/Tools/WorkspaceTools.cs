@@ -47,7 +47,11 @@ public sealed class WorkspaceTools(ToolContext context)
     {
         await context.ReadyAsync().ConfigureAwait(false);
 
-        return context.Registry.Unload(path) ? "unloaded " + path : "not loaded " + path;
+        var response = new ResponseBuilder("unload_workspace", path);
+
+        response.Note(context.Registry.Unload(path) ? "unloaded" : "not loaded");
+
+        return response.ToString();
     }
 
     [McpServerTool(Name = "workspace_status")]

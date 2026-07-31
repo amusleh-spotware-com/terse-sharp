@@ -23,9 +23,9 @@ public static class PositionFormat
         string.Create(CultureInfo.InvariantCulture, $"{path}:{position.Line + 1}:{position.Character + 1}");
 
     public static string Relative(string root, string? path) =>
-        path is { Length: > 0 } file && PathBoundary.Contains(root, file)
-            ? Path.GetRelativePath(root, file)
-            : path ?? "-";
+        path is not { Length: > 0 } file
+            ? "-"
+            : PathBoundary.Contains(root, file) ? Path.GetRelativePath(root, file) : file;
 
     public static string Range(Location location)
     {

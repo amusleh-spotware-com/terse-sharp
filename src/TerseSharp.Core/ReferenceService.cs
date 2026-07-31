@@ -28,6 +28,7 @@ public static class ReferenceService
     public static async Task<string> FindImplementationsAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
+        int maxResults,
         CancellationToken cancellationToken)
     {
         var implementations = await SymbolFinder
@@ -35,11 +36,12 @@ public static class ReferenceService
             .ConfigureAwait(false);
 
         var found = implementations.ToArray();
+        var shown = Math.Min(maxResults, found.Length);
         var response = new ResponseBuilder("find_implementations", SymbolId.From(symbol).Value);
 
-        response.Summary(found.Length, found.Length, "implementations");
+        response.Summary(shown, found.Length, "implementations");
 
-        foreach (var implementation in found)
+        foreach (var implementation in found.Take(shown))
             response.Line(Describe(workspace.Root, implementation));
 
         return response.ToString();

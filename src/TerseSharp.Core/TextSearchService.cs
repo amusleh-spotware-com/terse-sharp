@@ -7,6 +7,8 @@ public static class TextSearchService
 {
     private const int MaxLineLength = 200;
 
+    private const long MaxSearchableBytes = 16L * 1024 * 1024;
+
     private static readonly string[] ExcludedDirectories = [".git", "bin", "obj", "node_modules", ".vs", ".idea"];
 
     private static readonly FrozenSet<string> BinaryExtensions = new[]
@@ -22,11 +24,29 @@ public static class TextSearchService
         var matcher = TextMatcher.Create(pattern, regex);
         var hits = new List<string>(Math.Min(maxResults, 512));
         var total = 0;
+        var skipped = 0;
 
         foreach (var file in Files(workspace.Root, glob).Where(IsSearchable))
-            total += Scan(file, matcher, hits, maxResults);
+        {
+            if (TooLarge(file.FullPath))
+                skipped++;
+            else
+                total += Scan(file, matcher, hits, maxResults);
+        }
 
-        return Render(regex ? "search_regex" : "search_text", pattern, hits, total);
+        return Render(regex ? "search_regex" : "search_text", pattern, hits, total, skipped);
+    }
+
+    private static bool TooLarge(string path)
+    {
+        try
+        {
+            return new FileInfo(path).Length > MaxSearchableBytes;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     private static bool IsSearchable(SourceCandidate file) =>
@@ -81,11 +101,14 @@ public static class TextSearchService
         ? line
         : string.Create(CultureInfo.InvariantCulture, $"{line[..MaxLineLength]}... (+{line.Length - MaxLineLength} chars)");
 
-    private static string Render(string tool, string pattern, List<string> hits, int total)
+    private static string Render(string tool, string pattern, List<string> hits, int total, int skipped)
     {
         var response = new ResponseBuilder(tool, pattern);
 
         response.Summary(hits.Count, total, "matches");
+
+        if (skipped > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));
 
         foreach (var hit in hits)
             response.Line(hit);

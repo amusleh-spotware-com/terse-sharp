@@ -1,46 +1,32 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
 
 namespace TerseSharp.E2ETests;
 
 public sealed class TerseServerFixture : IAsyncLifetime
 {
-    private const int ShutdownTimeoutMilliseconds = 10_000;
-
-    private Process? server;
-    private McpClient? client;
+    private TerseServerProcess? server;
 
     public static string RepositoryRoot { get; } = FindRepositoryRoot();
 
     public static string FixtureRoot { get; } = Path.Combine(RepositoryRoot, "fixtures", "FixtureSolution");
 
-    public McpClient Client => client ?? throw new InvalidOperationException("the client is not connected");
+    public McpClient Client => Server.Client;
 
-    public async ValueTask InitializeAsync()
-    {
-        server = StartServer();
+    private TerseServerProcess Server => server ?? throw new InvalidOperationException("the client is not connected");
 
-        var transport = new StreamClientTransport(server.StandardInput.BaseStream, server.StandardOutput.BaseStream);
-
-        client = await McpClient.CreateAsync(transport, cancellationToken: TestContext.Current.CancellationToken);
-    }
+    public async ValueTask InitializeAsync() => server = await TerseServerProcess.StartAsync(
+        FixtureRoot,
+        [ServerAssemblyPath(), "serve", "--workspace", Path.Combine(FixtureRoot, "FixtureSolution.slnx")],
+        TestContext.Current.CancellationToken);
 
     public async ValueTask DisposeAsync()
     {
-        if (client is not null)
-            await client.DisposeAsync();
-
-        Terminate(server);
+        if (server is not null)
+            await server.StopAsync();
     }
 
-    public async Task<string> CallAsync(string tool, Dictionary<string, object?> arguments)
-    {
-        var result = await Client.CallToolAsync(tool, arguments, cancellationToken: TestContext.Current.CancellationToken);
-
-        return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
-    }
+    public Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
+        Server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
 
     public static string ServerAssemblyPath()
     {
@@ -48,70 +34,6 @@ public sealed class TerseServerFixture : IAsyncLifetime
         var path = Path.Combine(RepositoryRoot, "src", "TerseSharp.Server", "bin", configuration, "net10.0", "terse.dll");
 
         return File.Exists(path) ? path : throw new FileNotFoundException("build TerseSharp.Server first", path);
-    }
-
-    private static Process StartServer()
-    {
-        var start = new ProcessStartInfo("dotnet")
-        {
-            WorkingDirectory = FixtureRoot,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            UseShellExecute = false,
-        };
-
-        foreach (var argument in ServerArguments())
-            start.ArgumentList.Add(argument);
-
-        return Process.Start(start) ?? throw new InvalidOperationException("the terse server did not start");
-    }
-
-    private static string[] ServerArguments() =>
-        [ServerAssemblyPath(), "serve", "--workspace", Path.Combine(FixtureRoot, "FixtureSolution.slnx")];
-
-    private static void Terminate(Process? server)
-    {
-        if (server is null)
-            return;
-
-        CloseInput(server);
-
-        if (!server.WaitForExit(ShutdownTimeoutMilliseconds))
-            KillTree(server);
-
-        server.Dispose();
-    }
-
-    private static void CloseInput(Process server)
-    {
-        try
-        {
-            server.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-    }
-
-    private static void KillTree(Process server)
-    {
-        try
-        {
-            server.Kill(entireProcessTree: true);
-            server.WaitForExit(ShutdownTimeoutMilliseconds);
-        }
-        catch (InvalidOperationException)
-        {
-        }
-        catch (NotSupportedException)
-        {
-        }
-        catch (Win32Exception)
-        {
-        }
     }
 
     private static string FindRepositoryRoot()

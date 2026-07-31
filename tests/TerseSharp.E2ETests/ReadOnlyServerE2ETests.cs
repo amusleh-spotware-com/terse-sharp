@@ -1,33 +1,21 @@
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
-
 namespace TerseSharp.E2ETests;
 
 public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
 {
-    private McpClient client = null!;
+    private TerseServerProcess server = null!;
 
-    public async ValueTask InitializeAsync()
-    {
-        var transport = new StdioClientTransport(new StdioClientTransportOptions
-        {
-            Name = "terse-sharp-readonly",
-            Command = "dotnet",
-            Arguments =
-            [
-                TerseServerFixture.ServerAssemblyPath(),
-                "serve",
-                "--read-only",
-                "--workspace",
-                Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
-            ],
-            WorkingDirectory = TerseServerFixture.FixtureRoot,
-        });
+    public async ValueTask InitializeAsync() => server = await TerseServerProcess.StartAsync(
+        TerseServerFixture.FixtureRoot,
+        [
+            TerseServerFixture.ServerAssemblyPath(),
+            "serve",
+            "--read-only",
+            "--workspace",
+            Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+        ],
+        TestContext.Current.CancellationToken);
 
-        client = await McpClient.CreateAsync(transport, cancellationToken: TestContext.Current.CancellationToken);
-    }
-
-    public async ValueTask DisposeAsync() => await client.DisposeAsync();
+    public async ValueTask DisposeAsync() => await server.StopAsync();
 
     [Fact]
     public async Task ReadTools_StillWork()
@@ -63,10 +51,56 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         Assert.Equal(before, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
     }
 
-    private async Task<string> CallAsync(string tool, Dictionary<string, object?> arguments)
-    {
-        var result = await client.CallToolAsync(tool, arguments, cancellationToken: TestContext.Current.CancellationToken);
+    private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
+        server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
 
-        return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
+    public static TheoryData<string> MutatingTools() =>
+    [
+        "write_text", "edit_text",
+        "replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol",
+        "format", "cleanup",
+        "extract_interface", "move_type_to_file", "move_type_to_namespace", "change_signature",
+        "undo_last_change",
+        "solution_add_project", "solution_remove_project",
+        "project_create", "project_set_property", "project_add_reference", "project_remove_reference",
+        "package_add", "package_remove",
+    ];
+
+    [Theory]
+    [MemberData(nameof(MutatingTools))]
+    public async Task EveryMutatingTool_IsRefusedBeforeItLooksAtItsArguments(string tool)
+    {
+        var text = await CallAsync(tool, Arguments(tool));
+
+        Assert.Contains("ERROR ReadOnly", text, StringComparison.Ordinal);
     }
+
+    private static Dictionary<string, object?> Arguments(string tool) => tool switch
+    {
+        "write_text" => new() { ["path"] = "readonly.json", ["content"] = "{}" },
+        "edit_text" => new() { ["path"] = "appsettings.json", ["oldText"] = "MaxVolume", ["newText"] = "X" },
+        "replace_symbol_body" => new() { ["symbolId"] = Unused, ["body"] = "{ return 1; }" },
+        "replace_symbol" => new() { ["symbolId"] = Unused, ["declaration"] = "public int Unused() => 1;" },
+        "add_member" => new() { ["typeSymbolId"] = ServiceType, ["declaration"] = "public int A() => 1;" },
+        "delete_symbol" => new() { ["symbolId"] = Unused },
+        "rename_symbol" => new() { ["symbolId"] = Unused, ["newName"] = "Spare" },
+        "format" or "cleanup" => new() { ["path"] = "src/Fixture.Trading/Order.cs" },
+        "extract_interface" => new() { ["typeSymbolId"] = ServiceType, ["interfaceName"] = "IOrderService" },
+        "move_type_to_file" => new() { ["typeSymbolId"] = ServiceType },
+        "move_type_to_namespace" => new() { ["typeSymbolId"] = ServiceType, ["targetNamespace"] = "Other" },
+        "change_signature" => new() { ["symbolId"] = Unused, ["parameters"] = "int factor" },
+        "undo_last_change" => [],
+        "solution_add_project" or "solution_remove_project" => new() { ["project"] = ProjectFile },
+        "project_create" => new() { ["project"] = "src/New/New.csproj" },
+        "project_set_property" => new() { ["project"] = ProjectFile, ["name"] = "LangVersion", ["value"] = "preview" },
+        "project_add_reference" or "project_remove_reference" => new() { ["project"] = ProjectFile, ["target"] = ProjectFile },
+        "package_add" => new() { ["project"] = ProjectFile, ["package"] = "Serilog", ["version"] = "4.0.0" },
+        _ => new() { ["project"] = ProjectFile, ["package"] = "Serilog" },
+    };
+
+    private const string ProjectFile = "src/Fixture.Trading/Fixture.Trading.csproj";
+
+    private const string ServiceType = "T:Fixture.Trading.OrderService";
+
+    private const string Unused = "M:Fixture.Trading.OrderService.Unused";
 }

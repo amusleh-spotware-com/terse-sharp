@@ -8,6 +8,60 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-31
+
+### Fixed
+
+- **Central Package Management was inferred from a file name.** Any `Directory.Packages.props` on the
+  way up made `package_add` write the version there and leave the reference version-less — even when
+  the file sets `ManagePackageVersionsCentrally` to `false`, or does not set it at all, in which case
+  NuGet is not managing versions centrally and a version-less `PackageReference` does not restore.
+  The property must now say so, and only the nearest file is consulted, as MSBuild does. The property
+  is an ordinary MSBuild property, so the project file and every `Directory.Build.props` up to the
+  workspace root are consulted too; a value that is an unresolved MSBuild expression is treated as
+  enabled, because writing a version into a CPM project fails the restore with NU1008.
+- **`find_implementations` had no result cap.** Every other listing tool declares `truncated`/`total`
+  and caps; this one returned every implementation of an interface, which on a wide abstraction is an
+  unbounded response. It takes `maxResults` (default 100) like its siblings.
+- **A single enormous line could blow the `read_text` response budget** by its own length, because the
+  budget was charged after the line was appended. A line that would exceed the remaining budget is now
+  truncated with a `(+N chars)` marker.
+- **A multi-gigabyte file could exhaust memory during a text search.** `StreamReader.ReadLine`
+  materialises one line at a time, which is no protection against a file with no newlines. Content
+  search skips files over 16 MB and says how many it skipped; `find_files` still lists them.
+- **`PositionFormat.Relative` returned an empty string** for a diagnostic with no file, where the rest
+  of the codebase renders `-`.
+- **Two more E2E suites leaked a server process each.** The fixture leak fixed in 0.4.0 was fixed only
+  in the shared fixture; `CompileGateE2ETests` and `ReadOnlyServerE2ETests` each start their own
+  server and still relied on disposing the client alone. All three now go through one
+  `TerseServerProcess` helper that owns the process and kills the tree on teardown — including when
+  the MCP handshake itself fails, which is the case that used to strand a server holding MSBuild
+  locks on the fixtures.
+
+### Changed
+
+- **`undo_last_change` and `unload_workspace` answer with a header line** like every other tool,
+  instead of a bare sentence. This is a response-format change; the text of the outcome is unchanged
+  and still on its own line.
+
+### Added
+
+- **A positive-path matrix over the whole tool surface.** `ToolHappyPathE2ETests` calls every tool
+  with valid arguments and asserts a non-`ERROR` response headed by the tool's own name. Until now the
+  robustness sweep only proved that tools *fail* well — a server that answered `ERROR` to everything
+  would have passed it. A completeness test forces every advertised tool to be either on the matrix or
+  in a named exclusion list, so a new tool cannot arrive untested. Mutating tools run with
+  `dryRun: true`. Each case asserts a record only that tool can produce, so a tool that resolves
+  nothing and returns an empty body fails; a header alone is not a pass. The four process-spawning
+  tools and four whose success path the fixture cannot express are listed explicitly, and a second
+  test fails if that list names a tool the server no longer advertises.
+- **A read-only sweep.** Every one of the 22 mutating tools is called against a `--read-only` server
+  and must answer `ERROR ReadOnly`, so a new mutating tool that forgets its `RejectWrite()` gate is
+  caught rather than silently writing.
+- **Negative coverage for `build`, `run_tests` and `list_tests`**, which every sweep had excluded:
+  a project outside the workspace, and `test` combined with `filter`.
+- Test count: 167 unit and 237 E2E.
+
 ## [0.5.0] - 2026-07-31
 
 ### Fixed
@@ -337,7 +391,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.4.0
 [0.3.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.3.1

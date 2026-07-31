@@ -88,6 +88,6 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("undo_last_change", []);
 
-        Assert.Contains("undo", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("nothing to undo", text, StringComparison.Ordinal);
     }
 }

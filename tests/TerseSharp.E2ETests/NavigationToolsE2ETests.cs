@@ -81,7 +81,20 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("find_implementations", new() { ["symbolId"] = "M:Fixture.Trading.IOrderRepository.Submit(Fixture.Trading.Order)" });
 
         Assert.Contains("InMemoryOrderRepository", text, StringComparison.Ordinal);
-        Assert.Contains("truncated=false, total=1", text, StringComparison.Ordinal);
+        Assert.Contains("NullOrderRepository", text, StringComparison.Ordinal);
+        Assert.Contains("truncated=false, total=2", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindImplementations_WithMaxResultsOne_TruncatesButStillCountsThemAll()
+    {
+        var text = await server.CallAsync("find_implementations", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.IOrderRepository.Submit(Fixture.Trading.Order)",
+            ["maxResults"] = 1,
+        });
+
+        Assert.Contains("1 implementations (truncated=true, total=2)", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -55,7 +55,16 @@ public sealed class RefactorTools(ToolContext context)
     public Task<string> UndoLastChange([Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } rejection
             ? Task.FromResult(rejection)
-            : context.WithWorkspace(workspace, null, loaded => loaded.Undo());
+            : context.WithWorkspace(workspace, null, Undone);
+
+    private static string Undone(LoadedWorkspace workspace)
+    {
+        var response = new ResponseBuilder("undo_last_change", workspace.Git.WorktreeName);
+
+        response.Note(workspace.Undo());
+
+        return response.ToString();
+    }
 
     private static EditOptions Options(string tool, bool dryRun) => new(tool, dryRun, AllowErrors: false);
 

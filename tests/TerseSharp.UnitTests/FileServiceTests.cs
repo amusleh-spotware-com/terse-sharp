@@ -70,4 +70,31 @@ public sealed class FileServiceTests
 
         return name;
     }
+
+    [Fact]
+    public async Task ReadText_WithASingleLineOverTheResponseBudget_TruncatesItAndSaysByHowMuch()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+        var name = "terse-wide-" + Guid.NewGuid().ToString("N") + ".txt";
+        var path = Path.Combine(lease.Workspace.Root, name);
+
+        File.WriteAllText(path, new string('x', 200_000));
+
+        try
+        {
+            var result = FileService.ReadText(lease.Workspace, name, 0, 0, 2000, TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsOk, result.Error?.Message);
+            Assert.Contains("... (+", result.Value!, StringComparison.Ordinal);
+            Assert.True(result.Value!.Length < 200_000, "the response was not truncated");
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

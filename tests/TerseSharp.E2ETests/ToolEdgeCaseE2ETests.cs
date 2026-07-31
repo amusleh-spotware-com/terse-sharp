@@ -332,4 +332,60 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR OutOfWorkspace", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Build_ForAProjectOutsideTheWorkspace_IsRefusedBeforeSpawningAnything()
+    {
+        var text = await server.CallAsync("build", new()
+        {
+            ["project"] = "../../src/TerseSharp.Core/TerseSharp.Core.csproj",
+        });
+
+        Assert.Contains("ERROR OutOfWorkspace", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithBothATestAndAFilter_IsRefused()
+    {
+        var text = await server.CallAsync("run_tests", new()
+        {
+            ["test"] = "Some.Test",
+            ["filter"] = "Category=Fast",
+        });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("cannot be combined", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListTests_ForAProjectOutsideTheWorkspace_IsRefused()
+    {
+        var text = await server.CallAsync("list_tests", new()
+        {
+            ["project"] = "../../tests/TerseSharp.UnitTests/TerseSharp.UnitTests.csproj",
+            ["timeoutSeconds"] = 10,
+        });
+
+        Assert.Contains("ERROR OutOfWorkspace", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_SkipsAFileTooLargeToScanAndSaysHowMany()
+    {
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "terse-huge.txt");
+
+        await File.WriteAllTextAsync(path, new string('q', 17 * 1024 * 1024), TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("search_text", new() { ["pattern"] = "qqqq", ["glob"] = "*.txt" });
+
+            Assert.Contains("skipped 1 files over 16 MB", text, StringComparison.Ordinal);
+            Assert.Contains("0 matches", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

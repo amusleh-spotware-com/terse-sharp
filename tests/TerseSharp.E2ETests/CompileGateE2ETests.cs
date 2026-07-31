@@ -1,6 +1,3 @@
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
-
 namespace TerseSharp.E2ETests;
 
 public sealed class CompileGateE2ETests : IAsyncLifetime
@@ -11,27 +8,22 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
     private static readonly string CalculatorPath =
         Path.Combine(BrokenRoot, "src", "Fixture.Broken", "Calculator.cs");
 
-    private McpClient client = null!;
+    private TerseServerProcess server = null!;
     private string original = null!;
 
     public async ValueTask InitializeAsync()
     {
         original = await File.ReadAllTextAsync(CalculatorPath);
 
-        var transport = new StdioClientTransport(new StdioClientTransportOptions
-        {
-            Name = "terse-sharp-broken",
-            Command = "dotnet",
-            Arguments = [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", Path.Combine(BrokenRoot, "BrokenSolution.slnx")],
-            WorkingDirectory = BrokenRoot,
-        });
-
-        client = await McpClient.CreateAsync(transport, cancellationToken: TestContext.Current.CancellationToken);
+        server = await TerseServerProcess.StartAsync(
+            BrokenRoot,
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", Path.Combine(BrokenRoot, "BrokenSolution.slnx")],
+            TestContext.Current.CancellationToken);
     }
 
     public async ValueTask DisposeAsync()
     {
-        await client.DisposeAsync();
+        await server.StopAsync();
         await File.WriteAllTextAsync(CalculatorPath, original);
     }
 
@@ -70,10 +62,6 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Equal(before, await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken));
     }
 
-    private async Task<string> CallAsync(string tool, Dictionary<string, object?> arguments)
-    {
-        var result = await client.CallToolAsync(tool, arguments, cancellationToken: TestContext.Current.CancellationToken);
-
-        return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
-    }
+    private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
+        server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
 }

@@ -252,6 +252,13 @@ public static class ProjectFile
 
     private static string? CentralVersionsFile(string? root, string projectPath)
     {
+        var nearest = NearestVersionsFile(root, projectPath);
+
+        return nearest is not null && ManagesVersionsCentrally(root, projectPath, nearest) ? nearest : null;
+    }
+
+    private static string? NearestVersionsFile(string? root, string projectPath)
+    {
         var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(projectPath))!);
 
         while (directory is not null && (root is null || PathBoundary.Contains(root, directory.FullName)))
@@ -265,6 +272,53 @@ public static class ProjectFile
         }
 
         return null;
+    }
+
+    private static bool ManagesVersionsCentrally(string? root, string projectPath, string versionsFile) =>
+        PropertySources(root, projectPath, versionsFile)
+            .Select(CentralManagementSetting)
+            .OfType<bool>()
+            .Any(enabled => enabled);
+
+    private static IEnumerable<string> PropertySources(string? root, string projectPath, string versionsFile)
+    {
+        yield return versionsFile;
+        yield return Path.GetFullPath(projectPath);
+
+        foreach (var file in BuildPropertyFiles(root, projectPath))
+            yield return file;
+    }
+
+    private static IEnumerable<string> BuildPropertyFiles(string? root, string projectPath)
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(projectPath))!);
+
+        while (directory is not null && (root is null || PathBoundary.Contains(root, directory.FullName)))
+        {
+            var candidate = Path.Combine(directory.FullName, "Directory.Build.props");
+
+            if (File.Exists(candidate))
+                yield return candidate;
+
+            directory = directory.Parent;
+        }
+    }
+
+    private static bool? CentralManagementSetting(string file)
+    {
+        try
+        {
+            var value = XDocument.Load(file)
+                .Descendants("ManagePackageVersionsCentrally")
+                .Select(element => element.Value.Trim())
+                .LastOrDefault();
+
+            return value is null ? null : !bool.TryParse(value, out var enabled) || enabled;
+        }
+        catch (System.Xml.XmlException)
+        {
+            return null;
+        }
     }
 
     private static Result<string> Save(

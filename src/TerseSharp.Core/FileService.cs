@@ -130,13 +130,19 @@ public static class FileService
 
             if (range.Covers(number) && lines.Count < range.MaxLines && budget > 0)
             {
-                budget -= line.Length;
-                lines.Add(string.Create(CultureInfo.InvariantCulture, $"{number}: {line}"));
+                var text = Fit(line, budget);
+
+                budget -= text.Length;
+                lines.Add(string.Create(CultureInfo.InvariantCulture, $"{number}: {text}"));
             }
         }
 
         return new LineSelection(lines, number);
     }
+
+    private static string Fit(string line, int budget) => line.Length <= budget
+        ? line
+        : string.Create(CultureInfo.InvariantCulture, $"{line[..budget]}... (+{line.Length - budget} chars)");
 
     private readonly record struct LineRange(int Start, int End, int MaxLines)
     {

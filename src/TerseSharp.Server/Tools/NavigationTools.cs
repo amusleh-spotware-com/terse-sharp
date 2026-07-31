@@ -69,9 +69,10 @@ public sealed class NavigationTools(ToolContext context)
     public Task<string> FindImplementations(
         [Description("Symbol id of the interface, abstract member or base type.")] string symbolId,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Max results (100).")] int maxResults = 0,
         CancellationToken cancellationToken = default) =>
         context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            ReferenceService.FindImplementationsAsync(loaded, symbol, cancellationToken), cancellationToken);
+            ReferenceService.FindImplementationsAsync(loaded, symbol, Cap(maxResults, 100), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "get_diagnostics")]
     [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those.")]
