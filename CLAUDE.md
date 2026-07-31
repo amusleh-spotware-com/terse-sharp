@@ -12,6 +12,32 @@ Prime directive, stated in the README and used to settle design arguments: **sav
 speed**. A tool that does not beat the built-in it replaces does not ship, and a tool without an E2E
 test is not done.
 
+## 🚫 HARD GATE — develop TerseSharp with TerseSharp
+
+Every read, search, edit, refactor, build and test **of this repository** goes through the installed
+`terse` MCP server: `get_file_outline` / `get_symbol_source` instead of `Read`, `search_symbols` /
+`find_usages` instead of `Grep`, `find_files` instead of `Glob`, `replace_symbol_body` /
+`replace_symbol` / `add_member` instead of `Edit`, `read_text` / `edit_text` / `write_text` for
+`.md`, `.csproj`, `.slnx` and `.json`, `build` and `run_tests` instead of shelling out to `dotnet`.
+
+This is not style. This repo is the one place where the server is driven by the agent that also
+maintains it, so **every session is the product's own usability test**. Friction you route around
+with a built-in is a defect you never see: the fallback is silent, it feels faster in the moment, and
+it is exactly the failure mode measured in competing servers (agents that cannot find or trust a tool
+fall back to the shell and spend *more* tokens than with no MCP at all).
+
+Dropping to a built-in or to `Bash` is allowed only when:
+
+1. The `terse` server is not connected in this session, or errored after a real attempt on the actual
+   target — a rejected glob means fix the glob, not abandon the server.
+2. The task is verifying a **just-built** binary whose behaviour differs from the running server (the
+   connected `terse` is whatever was installed, not `HEAD` — say which binary answered).
+3. Neither the server nor any tool exposes the action: `git` plumbing, `dotnet pack`, `dotnet format`,
+   `dotnet tool install`, running the server by hand over stdio.
+
+Say which of the three applies **at the call**, in one clause. A silent drop is the breach, and the
+same drop is a candidate for the improvement backlog below.
+
 ## Commands
 
 ```bash
@@ -43,7 +69,7 @@ child process over stdio and throws `build TerseSharp.Server first` if it is mis
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **56 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **62 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
 `DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,
@@ -140,11 +166,15 @@ answer all four:
 4. **CHANGELOG** — under `## [Unreleased]`, with the format change spelled out.
 
 A commit that changes behaviour and leaves any of the four stale is incomplete. "I'll update the docs
-after" is the same failure as "I'll add the test after": both are how a 54-tool surface drifts away
+after" is the same failure as "I'll add the test after": both are how a 62-tool surface drifts away
 from what it claims to be. When you cannot update one of them in the same commit, say which and why in
 the commit body.
 
 ## Adding or changing a tool
+
+Before step 1, check `IMPROVEMENTS.md` and the ranking rule in the continuous-improvement gate below:
+**improving an existing tool or its response format beats adding a tool**, and the new tool has to
+beat the one it splits, not merely be useful.
 
 1. Logic in `TerseSharp.Core`, returning `Result<string>`; the `Tools` class only wires it up.
 2. `[McpServerTool(Name = "snake_case_name")]` plus a `[Description]` written for an agent — say what
@@ -179,6 +209,50 @@ from an accident.
 (`UNRESOLVED_CONTEXT`, `AmbiguousSymbol`, `SaturatedName`, `HEURISTIC`, `WARNING … would be rolled
 back`) rather than returning a confident wrong answer. A false positive costs an agent more than no
 answer, because it cannot detect it.
+
+## 🚫 HARD GATE — continuous improvement: every task ends with a tool-usage review
+
+The prime directive is not satisfied by the tools that exist; it is satisfied by the tools that *keep
+getting cheaper*. So before declaring **any** task in this repo done — feature, bug fix, docs,
+release chore — review the tool calls **this task itself made** and answer all five in writing:
+
+1. **Round trips.** Which answer cost ≥2 calls that one call could have returned? Name the sequence
+   (`get_file_outline` → `get_symbol_source` → `find_usages` is a composite waiting to exist).
+2. **Payload.** Which response carried tokens you never used — redundant symbol ids, absolute paths,
+   echoed source, columns you did not read, a truncated list you had to re-query wider?
+3. **Fallbacks.** Where did you reach for `Read`/`Grep`/`Glob`/`Edit`/`Bash`, and *which* missing,
+   failing, undiscoverable or untrusted tool caused it? **Every fallback is a product defect** —
+   log it as one, even when the built-in worked fine.
+4. **Failures.** Which call errored, returned `ERROR` without a remedy you could act on, needed a
+   retry with different arguments, or answered something it could not prove?
+5. **Unanswerable.** Which question about the code did no tool answer that Roslyn *could* have —
+   DI registrations, generated code, call hierarchy, XAML↔C# bridging, metadata symbols?
+
+The review is **measured, not impressionistic**: count the calls, and state the response size you are
+objecting to. "It felt verbose" is not a finding; "the id is 62% of every outline line, ~700 tokens
+per 10-member outline" is.
+
+Every finding becomes one line in `IMPROVEMENTS.md` — observed cost, the tool, the proposed change,
+the expected saving. Then either fix it in the same task when it is cheap and in scope, or leave it
+logged with a reason. Silently dropping it is the one outcome that is not allowed. Ranking rules:
+
+- **Improving an existing tool or its response format beats adding a tool.** The surface already
+  costs every session in tool-list tokens and in selection accuracy; a 57th tool must beat the one it
+  splits, not merely be useful.
+- **A saving that is not measured is not a saving.** Any accepted improvement lands with an assertion
+  in `TokenBudgetE2ETests` against the *widest* fixture case, so the next format change cannot quietly
+  give it back.
+- **Fixing a fallback outranks a new capability.** An agent that falls back to `Grep` spends more
+  tokens than one with no MCP at all — that is the measured failure mode of competing servers, and it
+  is the only failure that scales with every session.
+- A shipped improvement carries the docs gate with it: README, NUGET_README, `SKILL.md`, CHANGELOG.
+  A tool the skill does not teach saves nobody anything.
+
+An empty review is legitimate **only** when it names what was checked and why each of the five came
+back clean. Banned rationalizations: "the task worked, so the tools are fine" · "that fallback was
+just this once" · "the agent should have known which tool to call" (interface design beats
+instructions — if the agent guessed wrong, the schema or the description is the defect) · "too small
+to log" · "I'll note it next time".
 
 ## Code style
 
