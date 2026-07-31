@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-31
+
 ### Fixed
 
 - **`replace_symbol` and `add_member` silently dropped every member after the first.**
@@ -177,7 +179,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.3.1
 [0.3.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.3.0
 [0.2.2]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.2
 [0.2.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.1
