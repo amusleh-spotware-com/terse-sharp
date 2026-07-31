@@ -10,10 +10,6 @@ read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 
-> **v0.2.2 — 51 tools working end to end.** Verified by 132 tests (39 unit + 93 E2E), where every E2E
-> test drives a real server process over the real stdio transport against a real solution and asserts
-> response values. **Not yet built:** the content-addressed index, trigram search and file watcher.
-
 ## Why
 
 An agent working a C# solution spends most of its context on the wrong shape of data:

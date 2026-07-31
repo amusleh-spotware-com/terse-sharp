@@ -30,12 +30,6 @@
   <a href="RELEASING.md">Releasing</a>
 </p>
 
-> [!NOTE]
-> **v0.2.2 — 51 tools working end to end.** Verified by **132 tests (39 unit + 93 E2E)**, where every
-> E2E test drives a real server process over the real stdio transport against a real solution and
-> asserts response values, and a token-budget suite asserts the response sizes below.
-> **Not yet built:** the content-addressed index, trigram search and file watcher.
-
 ---
 
 ## 🤔 Why
