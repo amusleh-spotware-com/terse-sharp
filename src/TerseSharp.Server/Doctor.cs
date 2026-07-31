@@ -28,14 +28,21 @@ public static class Doctor
 
     private static string ClientLine()
     {
-        var registered = ClientRegistrar.Known().Where(target => File.Exists(target.ConfigPath)).ToArray();
+        var registered = Described(ClientConfigState.Registered);
+        var invalid = Described(ClientConfigState.Invalid);
+        var detail = registered.Length is 0 ? "terse-sharp not registered" : string.Join(", ", registered);
 
         return Check(
             "clients",
-            registered.Length is 0 ? "none found" : string.Join(", ", registered.Select(target => target.Name)),
-            registered.Length > 0,
-            "run: terse install");
+            invalid.Length is 0 ? detail : detail + "; invalid JSON in " + string.Join(", ", invalid),
+            registered.Length is not 0 && invalid.Length is 0,
+            invalid.Length is 0 ? "run: terse install" : "repair the invalid config, then run: terse install");
     }
+
+    private static string[] Described(ClientConfigState state) =>
+        [.. ClientRegistrar.Known().Where(target => ClientRegistrar.State(target) == state).Select(Describe)];
+
+    private static string Describe(ClientTarget target) => target.Name + " -> " + target.ConfigPath;
 
     private static async Task<string> WorkspaceLineAsync(string? workspace, CancellationToken cancellationToken)
     {

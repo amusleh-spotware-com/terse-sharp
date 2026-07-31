@@ -10,7 +10,7 @@ read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 
-> **v0.2.2 — 51 tools working end to end.** Verified by 117 tests (29 unit + 88 E2E), where every E2E
+> **v0.2.2 — 51 tools working end to end.** Verified by 132 tests (39 unit + 93 E2E), where every E2E
 > test drives a real server process over the real stdio transport against a real solution and asserts
 > response values. **Not yet built:** the content-addressed index, trigram search and file watcher.
 
@@ -48,6 +48,10 @@ terse doctor                        # verify SDK, MSBuild, workspace load, clien
 
 With no arguments the server walks up from the current directory, finds your `.sln` / `.slnx` /
 `.slnf` / `.csproj`, and loads it.
+
+Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set —
+`terse install` and `terse doctor` follow it, `--skill` lands in `$CLAUDE_CONFIG_DIR/skills` (else
+`~/.claude/skills`), and `doctor` prints the config path it read.
 
 Prefer to configure it by hand:
 

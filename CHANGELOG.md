@@ -8,6 +8,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **`terse install` honours `CLAUDE_CONFIG_DIR`.** Claude Code reads `$CLAUDE_CONFIG_DIR/.claude.json`
+  when that variable is set, so registering into `~/.claude.json` left the server invisible to the
+  agent. The skill from `install --skill` follows the same directory (`$CLAUDE_CONFIG_DIR/skills`).
+- **`terse doctor` verifies registration, not file existence.** The `clients` line now reports only
+  clients whose config actually contains the `terse-sharp` entry, and names the config path it read.
+  A config that is not valid JSON is reported as such instead of ending the whole diagnostic.
+- **`terse install` with no `--client` no longer exits silently.** A client whose config directory
+  does not exist yet is still registered, and a run that matches nothing says `no MCP clients matched`
+  rather than printing an empty line.
+- **A client config that is not valid JSON is skipped, not overwritten.** `install` and `uninstall`
+  report `skipped <client> (not valid JSON: <path>)` and carry on with the other clients instead of
+  ending on an unhandled parser exception; `doctor` reports the registered clients and the invalid
+  files in the same line.
+
 ## [0.2.2] - 2026-07-30
 
 ### Changed

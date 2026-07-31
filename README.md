@@ -31,7 +31,7 @@
 </p>
 
 > [!NOTE]
-> **v0.2.2 — 51 tools working end to end.** Verified by **117 tests (29 unit + 88 E2E)**, where every
+> **v0.2.2 — 51 tools working end to end.** Verified by **132 tests (39 unit + 93 E2E)**, where every
 > E2E test drives a real server process over the real stdio transport against a real solution and
 > asserts response values, and a token-budget suite asserts the response sizes below.
 > **Not yet built:** the content-addressed index, trigram search and file watcher.
@@ -99,6 +99,10 @@ dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
 }
 ```
 </details>
+
+Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set —
+`terse install` and `terse doctor` follow it, `--skill` lands in `$CLAUDE_CONFIG_DIR/skills` (else
+`~/.claude/skills`), and `doctor` prints the config path it read.
 
 ## 🧰 The tools
 

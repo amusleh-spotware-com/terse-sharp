@@ -5,12 +5,16 @@ namespace TerseSharp.UnitTests;
 
 public sealed class ClientRegistrarTests : IDisposable
 {
+    private const string Malformed = "{ // a comment\n}";
+
     private readonly string home = Path.Combine(Path.GetTempPath(), "terse-tests", Guid.NewGuid().ToString());
+    private readonly string? previousConfigDirectory = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
 
     public ClientRegistrarTests()
     {
         Directory.CreateDirectory(home);
         Environment.SetEnvironmentVariable("TERSE_HOME", home);
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", null);
     }
 
     [Fact]
@@ -68,13 +72,134 @@ public sealed class ClientRegistrarTests : IDisposable
             Load()["mcpServers"]!["terse-sharp"]!["args"]!.AsArray().Select(node => node!.GetValue<string>()));
     }
 
+    [Fact]
+    public void Register_WhenClaudeConfigDirectoryIsSet_WritesIntoThatDirectory()
+    {
+        var configDirectory = Path.Combine(home, "profile");
+
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
+
+        ClientRegistrar.Register("claude-code", null);
+
+        Assert.False(File.Exists(ClaudeConfig));
+        Assert.NotNull(LoadFrom(Path.Combine(configDirectory, ".claude.json"))["mcpServers"]!["terse-sharp"]);
+    }
+
+    [Fact]
+    public void Unregister_WhenClaudeConfigDirectoryIsSet_RemovesFromThatDirectory()
+    {
+        var configDirectory = Path.Combine(home, "profile");
+
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
+
+        ClientRegistrar.Register("claude-code", null);
+        ClientRegistrar.Unregister("claude-code");
+
+        Assert.Null(LoadFrom(Path.Combine(configDirectory, ".claude.json"))["mcpServers"]!["terse-sharp"]);
+    }
+
+    [Fact]
+    public void InstallSkill_WhenClaudeConfigDirectoryIsSet_WritesUnderThatDirectory()
+    {
+        var configDirectory = Path.Combine(home, "profile");
+
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
+
+        ClientRegistrar.InstallSkill();
+
+        Assert.True(File.Exists(Path.Combine(configDirectory, "skills", "terse-sharp", "SKILL.md")));
+    }
+
+    [Fact]
+    public void InstallSkill_WithoutClaudeConfigDirectory_WritesUnderTheHomeClaudeDirectory()
+    {
+        ClientRegistrar.InstallSkill();
+
+        Assert.True(File.Exists(Path.Combine(home, ".claude", "skills", "terse-sharp", "SKILL.md")));
+    }
+
+    [Fact]
+    public void State_MovesToRegisteredOnlyOnceTheEntryExistsInTheConfigInUse()
+    {
+        var configDirectory = Path.Combine(home, "profile");
+
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
+
+        var target = ClaudeCode();
+
+        Assert.Equal(ClientConfigState.NotFound, ClientRegistrar.State(target));
+
+        Directory.CreateDirectory(configDirectory);
+        File.WriteAllText(target.ConfigPath, """{"mcpServers":{"other":{"command":"x"}}}""");
+
+        Assert.Equal(ClientConfigState.NotRegistered, ClientRegistrar.State(target));
+
+        ClientRegistrar.Register("claude-code", null);
+
+        Assert.Equal(ClientConfigState.Registered, ClientRegistrar.State(target));
+    }
+
+    [Fact]
+    public void State_ReportsInvalidForAConfigThatIsNotValidJson()
+    {
+        File.WriteAllText(ClaudeConfig, Malformed);
+
+        Assert.Equal(ClientConfigState.Invalid, ClientRegistrar.State(ClaudeCode()));
+    }
+
+    [Fact]
+    public void Register_WithoutAClientAndAnUncreatedClaudeConfigDirectory_StillRegistersClaudeCode()
+    {
+        var configDirectory = Path.Combine(home, "profile");
+
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
+
+        ClientRegistrar.Register(null, null);
+
+        Assert.Equal(ClientConfigState.Registered, ClientRegistrar.State(ClaudeCode()));
+    }
+
+    [Fact]
+    public void Register_WhenNoClientMatches_SaysSoInsteadOfReturningNothing()
+    {
+        Assert.Equal("no MCP clients matched", ClientRegistrar.Register("emacs", null));
+    }
+
+    [Fact]
+    public void Register_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
+    {
+        File.WriteAllText(ClaudeConfig, Malformed);
+
+        var message = ClientRegistrar.Register("claude-code", null);
+
+        Assert.Contains("skipped claude-code", message, StringComparison.Ordinal);
+        Assert.Equal(Malformed, File.ReadAllText(ClaudeConfig));
+    }
+
+    [Fact]
+    public void Unregister_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
+    {
+        File.WriteAllText(ClaudeConfig, Malformed);
+
+        var message = ClientRegistrar.Unregister("claude-code");
+
+        Assert.Contains("skipped claude-code", message, StringComparison.Ordinal);
+        Assert.Equal(Malformed, File.ReadAllText(ClaudeConfig));
+    }
+
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("TERSE_HOME", null);
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", previousConfigDirectory);
         Directory.Delete(home, recursive: true);
     }
 
+    private static ClientTarget ClaudeCode() =>
+        ClientRegistrar.Known().Single(target => target.Name is "claude-code");
+
+    private static JsonObject LoadFrom(string path) => JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+
     private string ClaudeConfig => Path.Combine(home, ".claude.json");
 
-    private JsonObject Load() => JsonNode.Parse(File.ReadAllText(ClaudeConfig))!.AsObject();
+    private JsonObject Load() => LoadFrom(ClaudeConfig);
 }
