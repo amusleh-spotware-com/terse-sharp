@@ -10,6 +10,7 @@ public static class OutlineService
         LoadedWorkspace workspace,
         string path,
         bool signatures,
+        string ids,
         CancellationToken cancellationToken)
     {
         var document = DocumentLookup.Find(workspace, path);
@@ -17,21 +18,28 @@ public static class OutlineService
         if (document is null)
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
+        if (Rejected(ids) is { } refusal)
+            return refusal;
+
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
         var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
 
         if (root is null || model is null)
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
-        return Result.Ok(Render("get_file_outline", path, Declarations(root), model, signatures));
+        return Result.Ok(Render("get_file_outline", path, Declarations(root), model, signatures, ids));
     }
 
     public static async Task<Result<string>> TypeAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
         bool signatures,
+        string ids,
         CancellationToken cancellationToken)
     {
+        if (Rejected(ids) is { } refusal)
+            return refusal;
+
         var reference = symbol.DeclaringSyntaxReferences.FirstOrDefault();
 
         if (reference is null)
@@ -45,8 +53,15 @@ public static class OutlineService
 
         return model is null || node is not MemberDeclarationSyntax declaration || !IsTypeDeclaration(declaration)
             ? Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []))
-            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, signatures));
+            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, signatures, ids));
     }
+
+    private static Result<string>? Rejected(string ids) =>
+        ids is "short" or "full"
+            ? null
+            : Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"ids='{ids}' is not a known value"),
+                "pass ids=short for names every tool accepts, or ids=full for documentation ids"));
 
     private static MemberDeclarationSyntax[] Declarations(SyntaxNode root) =>
         [.. root.DescendantNodes().OfType<MemberDeclarationSyntax>().Where(IsTypeDeclaration)];
@@ -59,14 +74,15 @@ public static class OutlineService
         string argument,
         MemberDeclarationSyntax[] declarations,
         SemanticModel model,
-        bool signatures)
+        bool signatures,
+        string ids)
     {
         var response = new ResponseBuilder(tool, argument);
 
         response.Summary(declarations.Length, declarations.Length, "types");
 
         foreach (var declaration in declarations)
-            AppendType(response, declaration, model, signatures);
+            AppendType(response, declaration, model, signatures, ids);
 
         return response.ToString();
     }
@@ -75,7 +91,8 @@ public static class OutlineService
         ResponseBuilder response,
         MemberDeclarationSyntax declaration,
         SemanticModel model,
-        bool signatures)
+        bool signatures,
+        string ids)
     {
         var symbol = model.GetDeclaredSymbol(declaration);
 
@@ -84,10 +101,10 @@ public static class OutlineService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"{SymbolId.From(symbol)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
+            $"{Reference(symbol, ids)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
 
         foreach (var member in Members(declaration))
-            AppendMember(response, member, model, signatures);
+            AppendMember(response, member, model, signatures, ids);
     }
 
     private static IEnumerable<MemberDeclarationSyntax> Members(MemberDeclarationSyntax declaration) => declaration switch
@@ -101,7 +118,8 @@ public static class OutlineService
         ResponseBuilder response,
         MemberDeclarationSyntax member,
         SemanticModel model,
-        bool signatures)
+        bool signatures,
+        string ids)
     {
         var symbol = model.GetDeclaredSymbol(member);
 
@@ -110,8 +128,13 @@ public static class OutlineService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"  {SymbolId.From(symbol)}  {Signature(symbol, signatures)} :{PositionFormat.LineRange(member)}"));
+            $"  {Reference(symbol, ids)}  {Signature(symbol, signatures)} :{PositionFormat.LineRange(member)}"));
     }
+
+    private static string Reference(ISymbol symbol, string ids) =>
+        string.Equals(ids, "full", StringComparison.OrdinalIgnoreCase) || !SymbolReference.RoundTrips(symbol)
+            ? SymbolId.From(symbol).Value
+            : SymbolReference.Brief(symbol);
 
     private static string Signature(ISymbol symbol, bool signatures) => signatures
         ? string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)} ")

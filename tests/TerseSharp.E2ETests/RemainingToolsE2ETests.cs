@@ -8,7 +8,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:Fixture.Trading.OrderService" });
 
-        Assert.Contains("M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.Submit(Order)", text, StringComparison.Ordinal);
         Assert.DoesNotContain("repository.Submit(order)", text, StringComparison.Ordinal);
     }
 

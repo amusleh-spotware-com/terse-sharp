@@ -43,11 +43,14 @@ child process over stdio and throws `build TerseSharp.Server first` if it is mis
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-`src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **54 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
 `DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,
-`ProjectFile`/`SolutionFile`.
+`XamlBindingService`, `XamlResourceGraph`, `ProjectFile`/`SolutionFile`. Supporting value types:
+`SymbolReference` (short names and the query they parse into), `UsageContainer` (the declaration a
+usage sits in, from syntax alone), `TestScope` (`src`/`test` per project), `XamlFiles` (the guarded
+workspace walk).
 
 `src/TerseSharp.Server` — `Program.cs` (System.CommandLine: `serve`/`install`/`uninstall`/`doctor`;
 bare args default to `serve`), `McpHost` (generic host + stdio transport + `WithToolsFromAssembly`),
@@ -90,11 +93,51 @@ Never throw a bare message and never return prose. Failures go through `Errors.*
 All mutations funnel through `EditGate.ApplyAsync`, which diffs only the changed documents, compares
 error counts before/after, **rolls back any edit that introduces a new compile error** (unless
 `allowErrors: true`) in the changed projects **and every project that transitively depends on them**,
-and returns the unified diff plus a changed-line count — never file contents.
-`dryRun` returns the diff and writes nothing. Symbols are addressed by Roslyn documentation-comment
-ids (`M:Trading.OrderService.Submit(Trading.Order)`) via `SymbolId`, so edits are immune to line
-drift. Paths are checked with `PathBoundary.Contains`, which compares whole segments (`C:\repo` does
-not contain `C:\repoEvil`).
+and returns the unified diff plus a changed-line count — never file contents. Every mutation and
+every `dryRun` also reports `errors=N (+D) warnings=N (+D)`; a `dryRun` that *would* be rolled back
+says so and names the errors, because the delta alone is not a rollback oracle (one error can
+disappear as another appears). `allowErrors: true` skips the analysis entirely and is the way back to
+a cheap diff-only preview. Paths are checked with `PathBoundary.Contains`, which compares whole
+segments (`C:\repo` does not contain `C:\repoEvil`).
+
+### Addressing a symbol
+
+Symbols are addressed by Roslyn documentation-comment ids (`M:Trading.OrderService.Submit(Trading.Order)`)
+via `SymbolId`, so edits are immune to line drift — **or** by name: `OrderService.Submit`,
+`Fixture.Trading.OrderService.Submit`, `Submit`, and `Reconcile(Dictionary<string,int>, Order)` when a
+parameter list is needed to pick an overload. `SymbolLookup` routes on `SymbolReference.IsDocumentationId`.
+The name path never guesses: a qualifier must match a trailing run of the containing type's fully
+qualified name (a namespace only when the symbol is itself a type), parameters are split at nesting
+depth zero and compared by type name, an ambiguous name returns `AmbiguousSymbol` declaring how many
+of the total it lists, and a name whose search saturates its cap is refused rather than resolved from
+a truncated set. Outlines print the short form by default (`ids=full` for documentation ids) **only
+where it round-trips** — `SymbolReference.RoundTrips` keeps the documentation id for constructors,
+destructors, operators, indexers, explicit interface implementations, generic methods and members of
+generic types, because a name cannot address those. An E2E test feeds every reference an outline
+prints back into `get_symbol` and asserts none errors.
+
+## 🚫 HARD GATE — the docs ship with the change, not after it
+
+`README.md`, `NUGET_README.md` and `src/TerseSharp.Server/Assets/SKILL.md` are **part of the tool
+surface**, not documentation about it. The README is what a user reads before installing, the NuGet
+README is what nuget.org renders, and `SKILL.md` is shipped by `terse install --skill` and loaded into
+an agent's context — a stale skill actively teaches the wrong call.
+
+Before any commit that adds, removes or changes a tool, a parameter, a default or a response format,
+answer all four:
+
+1. **README** — tool table, tool count, the "what each one replaces" table, the numbers table, and the
+   Status table (move the row out of 🔜 when it ships).
+2. **NUGET_README** — the same, in pure Markdown; it is a separate file and diverges silently.
+3. **SKILL.md** — the swap table and the working rules. A new tool that an agent is not told about
+   might as well not exist; a changed response format that the skill still describes the old way is
+   worse than no skill.
+4. **CHANGELOG** — under `## [Unreleased]`, with the format change spelled out.
+
+A commit that changes behaviour and leaves any of the four stale is incomplete. "I'll update the docs
+after" is the same failure as "I'll add the test after": both are how a 54-tool surface drifts away
+from what it claims to be. When you cannot update one of them in the same commit, say which and why in
+the commit body.
 
 ## Adding or changing a tool
 
@@ -110,13 +153,27 @@ not contain `C:\repoEvil`).
    paths. Fixtures are intentionally outside `TerseSharp.slnx`.
    `ToolRobustnessE2ETests` then covers the new tool automatically: it reads `tools/list` and calls
    every tool with garbage, empty and missing arguments, asserting a structured answer with a
-   `remedy:` line and that nothing is written outside the workspace.
+   `remedy:` line and that nothing is written outside the workspace. A listing tool also belongs in
+   `TokenBudgetE2ETests` — budget it against the **widest** symbol or file in the fixture, because a
+   budget measured on a narrow one cannot see a regression (a format change that tripled the cost of
+   `find_usages` passed a 4-usage assertion unchanged).
 6. Unit tests for formatting and error paths.
 7. Update `CHANGELOG.md` under `## [Unreleased]`, the tool tables in `README.md`, and `NUGET_README.md`
    (a separate pure-Markdown copy — nuget.org does not render the GitHub README's HTML).
 
 Removing or renaming a tool, making a parameter required, or changing a response format is a
-**MAJOR** version change: the tool surface is a public contract (see `RELEASING.md`).
+**MAJOR** version change: the tool surface is a public contract (see `RELEASING.md`). Record the
+format change in `CHANGELOG.md` at the time you make it — the banner at the top of the release notes
+is assembled from those entries, and a format change that is not written down is indistinguishable
+from an accident.
+
+### The rule the reviews keep enforcing
+
+**Never answer something you cannot prove.** An empty result, a `(+0)` delta, a resolved name, an
+`EXACT` tag — each is a claim. Where the claim cannot be supported, say so in the response
+(`UNRESOLVED_CONTEXT`, `AmbiguousSymbol`, `SaturatedName`, `HEURISTIC`, `WARNING … would be rolled
+back`) rather than returning a confident wrong answer. A false positive costs an agent more than no
+answer, because it cannot detect it.
 
 ## Code style
 

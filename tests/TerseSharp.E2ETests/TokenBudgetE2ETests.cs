@@ -11,7 +11,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderBook.cs"),
             TestContext.Current.CancellationToken);
 
-        Assert.True(Tokens(outline) * 3 < Tokens(whole) * 2, Report("get_file_outline", outline, whole));
+        Assert.True(Tokens(outline) * 2 < Tokens(whole), Report("get_file_outline", outline, whole));
     }
 
     [Fact]

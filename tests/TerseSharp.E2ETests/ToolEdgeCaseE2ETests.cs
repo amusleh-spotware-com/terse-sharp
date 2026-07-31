@@ -151,7 +151,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         });
 
         Assert.True(lean.Length < full.Length, $"lean={lean.Length} full={full.Length}");
-        Assert.Contains("M:Fixture.Trading.OrderBook.TotalVolume(System.String)", lean, StringComparison.Ordinal);
+        Assert.Contains("OrderBook.TotalVolume(string)", lean, StringComparison.Ordinal);
         Assert.DoesNotContain("decimal TotalVolume(string symbol)", lean, StringComparison.Ordinal);
     }
 

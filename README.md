@@ -98,6 +98,52 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 `terse install` and `terse doctor` follow it, `--skill` lands in `$CLAUDE_CONFIG_DIR/skills` (else
 `~/.claude/skills`), and `doctor` prints the config path it read.
 
+## 🔒 Making your agent actually use it
+
+The most expensive failure mode is not a slow tool — it is an agent that has TerseSharp installed and
+reaches for `Read`, `Grep` and line-`Edit` anyway out of habit. Every token the server saves on a call
+the agent never makes is zero. Three levels, weakest to strongest:
+
+**1. Ship the skill** (teaches the swaps, costs nothing until it is needed):
+
+```bash
+terse install --skill
+```
+
+**2. Write the rule into the agent's instructions.** Put a gate at the top of your `CLAUDE.md`,
+`AGENTS.md` or `.cursorrules` — phrased as a hard rule with the loopholes named, because a soft
+preference loses to habit:
+
+```markdown
+## 🚫 HARD GATE — C#/.NET goes through terse-sharp, built-ins LAST
+
+Before EVERY `Read`, `Grep`, `Glob`, `Edit`, `Write` or code-touching `Bash` call, answer:
+**"Is the target a `.cs`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml` or `.axaml` file?"**
+If yes → you are FORBIDDEN from the built-in. No "just this once", no "Grep is faster".
+
+| Never | Always |
+|---|---|
+| `Read` a `.cs` / `.xaml` | `get_file_outline` · `get_symbol_source` · `xaml_outline` |
+| `Grep` a type or member | `search_symbols` · `find_usages` · `find_implementations` |
+| `Glob` / `ls` | `find_files` |
+| `Edit` a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` · `rename_symbol` |
+| `Bash: dotnet build` / `test` | `build` · `run_tests` |
+
+**CLI text tools are built-ins too.** `grep`, `rg`, `find`, `cat`, `head`, `sed`, `awk`, `ls` do not
+escape this gate because they run in a shell.
+
+A tool returning `ERROR` once is not a licence to switch toolchains — read the `remedy:` line and fix
+the call. `AmbiguousSymbol`, `UNRESOLVED_CONTEXT` and `HEURISTIC` mean *narrow the question*, not
+*fall back to Grep*.
+
+When you do drop to a built-in, say why in the same message — a silent drop is the breach.
+```
+
+**3. Enforce it in the harness.** Claude Code can *block* the call rather than ask nicely — a
+`PreToolUse` hook in `.claude/settings.json` that denies `Read`/`Grep`/`Edit` on C# paths and names
+the tool to use instead. That is the only level that survives a long session, because it does not
+depend on the model remembering.
+
 ## 🧰 The tools
 
 54 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
@@ -203,6 +249,7 @@ all never reports `0 failures`.
 |---|---|---|
 | `Read` a `.cs` file | `get_file_outline` | types + members + line ranges, no bodies |
 | `Read` to see one method | `get_symbol_source` | that member only |
+| quoting a 200-character symbol id | `OrderService.Submit(Order)` | every reference an outline prints resolves back; ids are kept where a name cannot address the member |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
 | `Grep` to find callers | `find_usages` | real references, each naming the member it sits in and whether it is `src` or `test` |
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
@@ -241,6 +288,7 @@ cannot detect.
 | Question | With built-in tools | With TerseSharp | Target |
 |---|---|---|---|
 | What's on this 2,000-line type? | `Read` → ~6,000 tok | `get_type_outline` → ~450 tok | **13×** |
+| …and the outline itself | ids were ~60% of every member line | short references, `ids=full` opts back in | **~2×** |
 | Who calls this method? | `Grep` + follow-ups → ~4,000 tok | `find_usages` → ~200 tok | **20×** |
 | Rename across the solution | ~5,000 tok, misses interface impls | `rename_symbol` → ~150 tok, correct | **30×** |
 | Why is the build red? | ~8,000 tok of MSBuild output | `build` → ~600 tok | **13×** |
@@ -274,7 +322,8 @@ built as compact text rather than JSON.
 3. **Stable handles.** `M:Trading.OrderService.Submit(Trading.Order)` survives every edit, and
    `OrderService.Submit` resolves to it when it is unambiguous — an ambiguous name lists the
    candidates instead of guessing.
-4. **Bounded, compact responses.** Text, not JSON. Explicit truncation.
+4. **Bounded, compact responses.** Text, not JSON. Truncation is explicit, and says which parameter
+   narrows it.
 5. **Data, never prose.** No preamble, no explanation, no closing summary.
 6. **Concise never means incomplete.** Truncation is always declared.
 

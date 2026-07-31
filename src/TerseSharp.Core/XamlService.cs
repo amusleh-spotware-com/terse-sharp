@@ -13,7 +13,7 @@ public static partial class XamlService
             var total = document.Elements().Count();
             var response = new ResponseBuilder("xaml_outline", relative);
 
-            response.Summary(shown.Length, total, "elements");
+            response.Summary(shown.Length, total, "elements", "depth= or filter=named|keyed");
             response.Note("dialect=" + document.Dialect);
 
             foreach (var element in shown)
@@ -146,7 +146,7 @@ public static partial class XamlService
         var issues = graph.Files.SelectMany(file => Collect(file, graph)).ToArray();
         var response = new ResponseBuilder("xaml_validate", "solution");
 
-        response.Summary(Math.Min(maxResults, issues.Length), issues.Length, "issues");
+        response.Summary(Math.Min(maxResults, issues.Length), issues.Length, "issues", "maxResults= or scope=file with path=");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"scanned={graph.FileCount} files"));
 
         foreach (var issue in issues.Take(maxResults))
@@ -174,7 +174,7 @@ public static partial class XamlService
 
         var response = new ResponseBuilder("xaml_find", query);
 
-        response.Summary(Math.Min(maxResults, hits.Count), hits.Count, "matches");
+        response.Summary(Math.Min(maxResults, hits.Count), hits.Count, "matches", "kind= or maxResults=");
 
         foreach (var hit in hits.Take(maxResults))
             response.Line(hit);

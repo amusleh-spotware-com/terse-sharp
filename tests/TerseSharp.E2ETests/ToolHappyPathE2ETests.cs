@@ -92,7 +92,7 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("list_projects", [], "Fixture.Trading"),
         ("search_symbols", new() { ["query"] = "OrderService" }, "T:Fixture.Trading.OrderService"),
         ("get_symbol", new() { ["symbolId"] = ServiceType }, "class public"),
-        ("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" }, "M:Fixture.Trading.OrderService.Submit"),
+        ("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" }, "OrderService.Submit(Order)"),
         ("get_type_outline", new() { ["symbolId"] = ServiceType }, "PendingCount"),
         ("get_symbol_source", new() { ["symbolId"] = SubmitMethod }, "repository.Submit(order)"),
         ("find_usages", new() { ["symbolId"] = SubmitMethod }, "OrderRouter.cs"),

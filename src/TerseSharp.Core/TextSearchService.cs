@@ -57,7 +57,7 @@ public static class TextSearchService
         var files = Files(workspace.Root, glob).ToArray();
         var response = new ResponseBuilder("find_files", glob);
 
-        response.Summary(Math.Min(files.Length, maxResults), files.Length, "files");
+        response.Summary(Math.Min(files.Length, maxResults), files.Length, "files", "a narrower glob= or maxResults=");
 
         foreach (var file in files.Take(maxResults))
             response.Line(file.RelativePath);
@@ -105,7 +105,7 @@ public static class TextSearchService
     {
         var response = new ResponseBuilder(tool, pattern);
 
-        response.Summary(hits.Count, total, "matches");
+        response.Summary(hits.Count, total, "matches", "glob= or maxResults=");
 
         if (skipped > 0)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));

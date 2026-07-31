@@ -16,10 +16,13 @@ or grepping for a type name, costs 10-30x more tokens and returns matches that a
 | `Read` to see one method | `get_symbol_source(symbolId)` | that member only |
 | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies |
 | `Grep` for a type or member name | `search_symbols(query)` | declarations only; supports CamelHump (`OSvc` finds `OrderService`) |
-| `Grep` to find callers | `find_usages(symbolId)` | real references; excludes comments, strings and unrelated matches |
+| `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test`; `containers=true` also names the member each usage sits in |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
 | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `node_modules` excluded; `**/Views/*.xaml` spans directories, `*` and `?` stop at a separator |
 | `Grep` in non-code files | `search_text` / `search_regex` | results tagged `HEURISTIC` |
+| `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
+| hunting a resource through `App.xaml` and every merged dictionary | `xaml_resolve(key)` | every declaration of the key with its scope, in one call |
+| eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path checked against the `x:DataType`/`d:DataContext` type through Roslyn |
 | `Edit` a `.cs` file | `replace_symbol_body` / `replace_symbol` / `add_member` | addressed by symbol id, so line drift cannot break it |
 | find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, includes interfaces, overrides and doc crefs |
 | `Edit` a non-`.cs` file | `edit_text(path, oldText, newText)` | refuses an ambiguous match |
@@ -32,19 +35,34 @@ or grepping for a type name, costs 10-30x more tokens and returns matches that a
 
 1. **Start with `load_workspace`** (or let the server auto-discover). `workspace_status` shows what is
    loaded, on which git branch and worktree.
-2. **Pass symbol ids back, do not re-search.** Every result carries one, e.g.
-   `M:Trading.OrderService.Submit(Trading.Order)`. It stays valid across edits.
+2. **Pass the reference back, do not re-search.** An outline prints `OrderService.Submit(Order)`;
+   every tool that takes a `symbolId` accepts that name, the full documentation id
+   (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
+   A name that matches several symbols returns `AmbiguousSymbol` listing their ids — pick one, do not
+   guess. Members a short name cannot address (constructors, operators, indexers, generics, explicit
+   interface implementations) keep their documentation id in the outline; `ids=full` prints ids for
+   everything.
 3. **Read the confidence tag.** `EXACT` came from the Roslyn semantic model. `HEURISTIC` came from a
    text or index match — verify before acting on it.
 4. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff and nothing is
    written.
-5. **Edits are compile-gated.** An edit that introduces a new compile error is rolled back and the
-   error returned. Pass `allowErrors: true` only when you are mid-refactor on purpose.
+5. **Edits are compile-gated, and every edit reports its diagnostics.** Each mutation and each
+   `dryRun` carries `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents, so
+   you do not need a separate `analyze` afterwards. A `dryRun` that *would* be rolled back says
+   `WARNING … would be rolled back` and names the errors — the `(+0)` delta alone is not proof it is
+   safe. An edit that introduces a new compile error is rolled back and the error returned. Pass
+   `allowErrors: true` only when you are mid-refactor on purpose; it also skips the analysis.
 6. **Several worktrees or repos open?** Pass `workspace:` with a path or worktree name. If it is
    ambiguous the server returns `AMBIGUOUS_WORKSPACE` and lists them rather than guessing — never
    assume it picked the right one.
-7. **Truncation is explicit.** `truncated=true, total=N` means there are more; raise `maxResults`
-   rather than assuming you saw everything.
+7. **Truncation is explicit and tells you what to do.** `truncated=true, total=N` means there are
+   more, and the same line names the parameter that narrows it — `- narrow with glob=`,
+   `- narrow with minSeverity=, ids= or path=`. Follow that rather than re-running with a bigger
+   `maxResults` and paying for the whole list.
+8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT` on a binding, `HEURISTIC`
+   on a text match, `AmbiguousSymbol` on a name, `SaturatedName` when a name matches too many symbols
+   to be safe — each means *the server declined to guess*, not that the thing does not exist. Narrow
+   the question instead of treating it as a negative result.
 
 ## Running tests
 
@@ -73,6 +91,27 @@ produced no results at all reports `FAILED …, no test results were produced` a
 
 ## When a tool refuses
 
-Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest ids;
+Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest names;
+`AmbiguousSymbol` lists the candidate ids and says how many of the total it is showing;
+`SaturatedName` means the name matched too many symbols to resolve safely — qualify it;
 `OutOfWorkspace` means the path escaped the workspace root; `ReadOnly` means the server runs with
-`--read-only`.
+`--read-only`. Read the `remedy:` line and fix the call — do not fall back to `Read`/`Grep`, which is
+the one outcome this server exists to prevent.
+
+## XAML
+
+`xaml_outline` (`depth=`, `filter=named|keyed`), `xaml_names` (`x:Name` and `x:Uid`), `xaml_resources`,
+`xaml_resolve(key)`, `xaml_bindings(path, validate)`, `xaml_validate(path | scope: "solution")` and
+`xaml_find(query, kind)` cover WPF, Avalonia (`.axaml`), WinUI and MAUI; the dialect is detected from
+the root markup namespace and reported on every outline and validation.
+
+`xaml_validate` reports duplicate `x:Key`/`x:Name` and resources that resolve to **no** declaration
+anywhere under the workspace root — a key defined in `App.xaml` or a merged dictionary is not an
+error. If any XAML file fails to parse it says so and switches resource checking off rather than
+reporting every key in that file as missing.
+
+`xaml_bindings(validate: true)` resolves the data context from `x:DataType` or
+`d:DataContext="{d:DesignInstance …}"`, including inheritance from an ancestor, and walks each path
+segment against the real symbol. WPF has no compile-time binding check at all, so this is the only
+static answer available there. `UNRESOLVED_CONTEXT` means the context could not be determined — it is
+not a claim that the binding is wrong.

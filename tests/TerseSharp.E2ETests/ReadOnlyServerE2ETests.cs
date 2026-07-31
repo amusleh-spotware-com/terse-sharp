@@ -22,7 +22,7 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
     {
         var text = await CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
 
-        Assert.Contains("T:Fixture.Trading.OrderService", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService  class", text, StringComparison.Ordinal);
     }
 
     [Fact]

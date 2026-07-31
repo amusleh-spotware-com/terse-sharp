@@ -23,17 +23,20 @@ public sealed class SymbolReferenceTests
     [Fact]
     public void Parse_ForABareName_TakesTheMemberOnly()
     {
-        var query = SymbolReference.Parse("Submit");
+        var query = SymbolReference.Parse("Submit")!.Value;
 
-        Assert.Equal(new SymbolQuery(null, "Submit", null), query);
+        Assert.Null(query.ContainingType);
+        Assert.Equal("Submit", query.Member);
+        Assert.Null(query.Parameters);
     }
 
     [Fact]
     public void Parse_ForAQualifiedName_SplitsTheContainingType()
     {
-        var query = SymbolReference.Parse("OrderService.Submit");
+        var query = SymbolReference.Parse("OrderService.Submit")!.Value;
 
-        Assert.Equal(new SymbolQuery("OrderService", "Submit", null), query);
+        Assert.Equal("OrderService", query.ContainingType);
+        Assert.Equal("Submit", query.Member);
     }
 
     [Theory]
@@ -43,8 +46,16 @@ public sealed class SymbolReferenceTests
     [InlineData("OrderService.Submit(Dictionary<string,int>)", 1)]
     [InlineData("OrderService.Submit(Func<int,int>, CancellationToken)", 2)]
     [InlineData("OrderService.Submit(int[], Dictionary<string, List<int>>)", 2)]
-    public void Parse_ReadsTheParameterCount(string text, int expected) =>
-        Assert.Equal(expected, SymbolReference.Parse(text)!.Value.ParameterCount);
+    public void Parse_CountsParametersAtNestingDepthZero(string text, int expected) =>
+        Assert.Equal(expected, SymbolReference.Parse(text)!.Value.Parameters!.Count);
+
+    [Fact]
+    public void Parse_KeepsEachParameterTypeText()
+    {
+        var query = SymbolReference.Parse("Reconcile(Dictionary<string, int>, Order)")!.Value;
+
+        Assert.Equal(["Dictionary<string, int>", "Order"], query.Parameters);
+    }
 
     [Fact]
     public void Parse_ForAnEmptyName_ReturnsNull() =>

@@ -135,7 +135,11 @@ public static class AnalysisService
 
         var response = new ResponseBuilder("analyze", path ?? "solution");
 
-        response.Summary(Math.Min(maxResults, grouped.Length), grouped.Length, "diagnostics");
+        response.Summary(
+            Math.Min(maxResults, grouped.Length),
+            grouped.Length,
+            "diagnostics",
+            "minSeverity=, ids= or path=");
         response.Note("engines=" + string.Join("+", engines));
 
         foreach (var entry in grouped.Take(maxResults))

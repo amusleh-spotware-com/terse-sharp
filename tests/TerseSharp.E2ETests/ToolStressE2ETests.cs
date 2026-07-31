@@ -83,7 +83,7 @@ public sealed class ToolStressE2ETests(TerseServerFixture server)
             new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" }));
 
         Assert.Single(answers.Distinct(StringComparer.Ordinal));
-        Assert.All(answers, answer => Assert.Contains("T:Fixture.Trading.OrderBook", answer, StringComparison.Ordinal));
+        Assert.All(answers, answer => Assert.Contains("OrderBook  class", answer, StringComparison.Ordinal));
     }
 
     private Task<string> Call(int index) => (index % 5) switch

@@ -41,7 +41,7 @@ public static class ReferenceService
         var shown = Math.Min(maxResults, found.Length);
         var response = new ResponseBuilder("find_implementations", SymbolId.From(symbol).Value);
 
-        response.Summary(shown, found.Length, "implementations");
+        response.Summary(shown, found.Length, "implementations", "a more specific symbol, or raise maxResults=");
 
         foreach (var implementation in found.Take(shown))
             response.Line(Describe(workspace.Root, implementation));
@@ -65,7 +65,11 @@ public static class ReferenceService
         var files = locations.Select(location => location.Document.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
         var response = new ResponseBuilder("find_usages", SymbolId.From(symbol).Value);
 
-        response.Summary(shown, locations.Length, string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"));
+        response.Summary(
+            shown,
+            locations.Length,
+            string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"),
+            "a more specific symbol, or raise maxResults=");
 
         var grouped = await GroupAsync(root, locations.Take(shown), containers, cancellationToken).ConfigureAwait(false);
 

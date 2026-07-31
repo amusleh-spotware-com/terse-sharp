@@ -8,12 +8,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
-> **This is a MAJOR change.** `xaml_bindings`, `xaml_outline`, `xaml_names`, `xaml_find` and
-> `xaml_validate` all changed their response format, and `find_usages` gained two columns: records are
-> workspace-relative rather than
-> file-name-only, `xaml_bindings` and `xaml_outline` carry a `dialect=` note, `xaml_bindings` gains a
-> trailing verdict column when `validate=true`, `xaml_find` reports `HEURISTIC` where it used to report
-> `EXACT`, and `xaml_outline`'s `total` now counts the whole tree rather than what it printed.
+> **This is a MAJOR change — several tools changed their response format.**
+> `get_file_outline` and `get_type_outline` print short member references instead of documentation
+> comment ids (`ids=full` restores them); `find_usages` gained a `src`/`test` column and an optional
+> `in <Type>.<Member>` one; every mutation and `dryRun` carries `errors=N (+D) warnings=N (+D)`; a
+> truncated listing appends `- narrow with <parameter>`; and the XAML tools print workspace-relative
+> paths, carry a `dialect=` note, report `HEURISTIC` where `xaml_find` used to claim `EXACT`, and count
+> the whole tree in `total` rather than only what they printed.
 
 ### Fixed
 
@@ -110,7 +111,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   asserted against a 4-usage fixture symbol, which a format change that tripled the cost on a
   46-usage symbol passed unchanged. There is now a budget on the widest symbol in the fixture and an
   assertion that the default answer costs less than the `containers=true` one.
-- Test count: 229 unit and 270 E2E.
+- **Outlines name members the short way, and the name they print is a name every tool accepts.**
+  `get_file_outline` and `get_type_outline` emitted a documentation comment id on every line —
+  `M:TerseSharp.Core.ReferenceService.FindUsagesAsync(TerseSharp.Core.LoadedWorkspace,Microsoft.CodeAnalysis.ISymbol,System.Int32,System.Threading.CancellationToken)~System.Threading.Tasks.Task{System.String}`
+  is 205 characters against 125 for the signature beside it, so roughly 60% of every member line was
+  an id derivable from the rest of the line. They now print `ReferenceService.FindUsagesAsync(LoadedWorkspace, ISymbol, int, CancellationToken)`,
+  which resolves back to the same symbol through the name resolution above. The short form is used
+  **only where it round-trips**: a constructor, destructor, operator, indexer, explicit interface
+  implementation, generic method or member of a generic type keeps its documentation id, because a
+  name cannot address those — an E2E test feeds every reference each outline prints back into
+  `get_symbol` and asserts none of them errors. `ids=full` prints documentation ids for everything,
+  and any other value is refused rather than silently treated as `short`. The outline budget test
+  tightened from two thirds of the file it replaces to half. This is a response-format change.
+- **A truncated answer names the parameter that narrows it.** `truncated=true, total=412` told an
+  agent it was missing results without saying what to do, so the usual next move was to re-run with a
+  bigger `maxResults` and pay for the whole list. Every listing tool now appends
+  `- narrow with <parameter>` when, and only when, it truncated: `glob=` for text search, `severity=`,
+  `ids=` or `path=` for diagnostics, `depth=` or `filter=` for a XAML outline, `kind=` for XAML search.
+- Test count: 232 unit and 274 E2E.
 
 ## [0.6.0] - 2026-07-31
 

@@ -112,6 +112,13 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
 - **`dryRun` on every mutation** returns the unified diff and writes nothing.
 - **Compile-gated** — an edit that introduces a *new* compile error is rolled back and the error
   returned. Pre-existing errors never block an edit. `allowErrors: true` opts out.
+- **Short symbol references** — an outline prints `OrderService.Submit(Order)` rather than a
+  200-character documentation id, and every tool that takes a `symbolId` accepts that name back.
+  A member a short name cannot address unambiguously — a constructor, operator, indexer, generic or
+  explicit interface implementation — keeps its documentation id, so every reference an outline prints
+  resolves. `ids=full` prints ids for everything; an ambiguous name lists the candidates rather than
+  guessing.
+- **Truncation that steers** — a truncated listing says which parameter narrows it.
 - **Diff-only responses** — mutations return the diff, a changed-line count and
   `errors=N (+D) warnings=N (+D)`, never the file. A `dryRun` that would be rolled back says so and
   names the errors it would introduce.

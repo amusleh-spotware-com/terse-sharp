@@ -6,6 +6,22 @@ namespace TerseSharp.UnitTests;
 public sealed class ResponseBuilderTests
 {
     [Fact]
+    public void Summary_WhenTruncated_NamesTheParameterThatNarrowsIt()
+    {
+        var text = new ResponseBuilder("search_text", "Order").Summary(2, 9, "matches", "glob=").ToString();
+
+        Assert.Contains("truncated=true, total=9) - narrow with glob=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Summary_WhenNotTruncated_SaysNothingAboutNarrowing()
+    {
+        var text = new ResponseBuilder("search_text", "Order").Summary(9, 9, "matches", "glob=").ToString();
+
+        Assert.DoesNotContain("narrow with", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Summary_WhenTotalExceedsShown_MarksTruncated()
     {
         var text = new ResponseBuilder("find_usages", "M:A.B").Summary(2, 9, "usages").ToString();

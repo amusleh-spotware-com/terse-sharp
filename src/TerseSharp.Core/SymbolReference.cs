@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
 
-public readonly record struct SymbolQuery(string? ContainingType, string Member, int? ParameterCount);
+public readonly record struct SymbolQuery(string? ContainingType, string Member, IReadOnlyList<string>? Parameters);
 
 public static class SymbolReference
 {
@@ -18,7 +18,35 @@ public static class SymbolReference
         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
         typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces);
 
+    private static readonly SymbolDisplayFormat ParameterType = new(
+        globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+        miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
+
     public static string Brief(ISymbol symbol) => symbol.ToDisplayString(Compact);
+
+    public static bool RoundTrips(ISymbol symbol) =>
+        IsAddressableName(symbol) && !IsGeneric(symbol) && ContainerIsAddressable(symbol);
+
+    private static bool IsAddressableName(ISymbol symbol) => symbol switch
+    {
+        IMethodSymbol method => method.MethodKind is MethodKind.Ordinary && method.ExplicitInterfaceImplementations.IsEmpty,
+        IPropertySymbol property => !property.IsIndexer && property.ExplicitInterfaceImplementations.IsEmpty,
+        IEventSymbol @event => @event.ExplicitInterfaceImplementations.IsEmpty,
+        IFieldSymbol or INamedTypeSymbol => true,
+        _ => false,
+    };
+
+    private static bool IsGeneric(ISymbol symbol) => symbol switch
+    {
+        IMethodSymbol method => method.IsGenericMethod,
+        INamedTypeSymbol type => type.IsGenericType,
+        _ => false,
+    };
+
+    private static bool ContainerIsAddressable(ISymbol symbol) =>
+        symbol.ContainingType is not { IsGenericType: true };
 
     public static bool IsDocumentationId(string text) =>
         text.Length > 2 && text[1] is ':' && char.IsUpper(text[0]);
@@ -35,11 +63,11 @@ public static class SymbolReference
             : new SymbolQuery(
                 separator < 0 ? null : name[..separator],
                 separator < 0 ? name : name[(separator + 1)..],
-                open < 0 ? null : Arity(trimmed[open..]));
+                open < 0 ? null : Split(trimmed[open..]));
     }
 
     public static bool Matches(ISymbol symbol, SymbolQuery query) =>
-        MatchesContainer(symbol, query.ContainingType) && MatchesArity(symbol, query.ParameterCount);
+        MatchesContainer(symbol, query.ContainingType) && MatchesParameters(symbol, query.Parameters);
 
     private static bool MatchesContainer(ISymbol symbol, string? qualifier) =>
         qualifier is null || Containers(symbol).Any(container => IsSuffix(container, qualifier));
@@ -57,28 +85,47 @@ public static class SymbolReference
         string.Equals(container, qualifier, StringComparison.Ordinal)
         || container.EndsWith("." + qualifier, StringComparison.Ordinal);
 
-    private static bool MatchesArity(ISymbol symbol, int? parameterCount) =>
-        parameterCount is null || symbol is IMethodSymbol method && method.Parameters.Length == parameterCount;
+    private static bool MatchesParameters(ISymbol symbol, IReadOnlyList<string>? parameters)
+    {
+        if (parameters is null)
+            return true;
 
-    private static int Arity(string parameters)
+        if (symbol is not IMethodSymbol method || method.Parameters.Length != parameters.Count)
+            return false;
+
+        return !parameters.Where((text, index) => !MatchesType(method.Parameters[index], text)).Any();
+    }
+
+    private static bool MatchesType(IParameterSymbol parameter, string text) =>
+        text.Length is 0 || IsSuffix(Normalize(parameter.Type.ToDisplayString(ParameterType)), Normalize(text));
+
+    private static string Normalize(string text) => text.Replace(" ", string.Empty, StringComparison.Ordinal);
+
+    private static string[] Split(string parameters)
     {
         var inside = parameters.Trim('(', ')').Trim();
 
         if (inside.Length is 0)
-            return 0;
+            return [];
 
+        var parts = new List<string>();
         var depth = 0;
-        var count = 1;
+        var start = 0;
 
-        foreach (var character in inside)
+        for (var index = 0; index < inside.Length; index++)
         {
-            depth += Nesting(character);
+            depth += Nesting(inside[index]);
 
-            if (character is ',' && depth is 0)
-                count++;
+            if (inside[index] is ',' && depth is 0)
+            {
+                parts.Add(inside[start..index].Trim());
+                start = index + 1;
+            }
         }
 
-        return count;
+        parts.Add(inside[start..].Trim());
+
+        return [.. parts];
     }
 
     private static int Nesting(char character) => character switch

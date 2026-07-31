@@ -16,11 +16,16 @@ public sealed class ResponseBuilder
         text.Append('\n');
     }
 
-    public ResponseBuilder Summary(int shown, int total, string unit)
-    {
-        var truncated = total > shown ? "true" : "false";
+    public ResponseBuilder Summary(int shown, int total, string unit) => Summary(shown, total, unit, null);
 
-        text.Append(CultureInfo.InvariantCulture, $"{shown} {unit} (truncated={truncated}, total={total})\n\n");
+    public ResponseBuilder Summary(int shown, int total, string unit, string? narrowWith)
+    {
+        var truncated = total > shown;
+        var steer = truncated && narrowWith is { Length: > 0 } ? " - narrow with " + narrowWith : string.Empty;
+
+        text.Append(
+            CultureInfo.InvariantCulture,
+            $"{shown} {unit} (truncated={(truncated ? "true" : "false")}, total={total}){steer}\n\n");
 
         return this;
     }

@@ -39,10 +39,22 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
 
-        Assert.Contains("T:Fixture.Trading.OrderService", text, StringComparison.Ordinal);
-        Assert.Contains("M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)", text, StringComparison.Ordinal);
-        Assert.Contains("P:Fixture.Trading.OrderService.PendingCount", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService  class", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.Submit(Order)", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.PendingCount", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("M:Fixture.Trading.OrderService.Submit", text, StringComparison.Ordinal);
         Assert.DoesNotContain("repository.Submit(order)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_KeepsTheDocumentationIdForAMemberAShortNameCannotAddress()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/Awkward.cs" });
+
+        Assert.Contains("M:Fixture.Trading.Awkward.#ctor(System.Int32)", text, StringComparison.Ordinal);
+        Assert.Contains("M:Fixture.Trading.Awkward.Echo", text, StringComparison.Ordinal);
+        Assert.Contains("M:Fixture.Trading.Awkward.op_Addition", text, StringComparison.Ordinal);
+        Assert.Contains("Awkward.Ordinary(int)", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -50,9 +62,9 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
 
-        Assert.Contains("T:Fixture.Trading.OrderSide", text, StringComparison.Ordinal);
-        Assert.Contains("F:Fixture.Trading.OrderSide.Buy", text, StringComparison.Ordinal);
-        Assert.Contains("T:Fixture.Trading.OrderSubmitted", text, StringComparison.Ordinal);
+        Assert.Contains("OrderSide  enum", text, StringComparison.Ordinal);
+        Assert.Contains("OrderSide.Buy", text, StringComparison.Ordinal);
+        Assert.Contains("OrderSubmitted  delegate", text, StringComparison.Ordinal);
         Assert.DoesNotContain("0 types", text, StringComparison.Ordinal);
     }
 
@@ -110,6 +122,63 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("  src  ", text, StringComparison.Ordinal);
         Assert.DoesNotContain("  test  ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EveryReferenceAnOutlinePrints_ResolvesBackToASymbol()
+    {
+        foreach (var file in new[] { "OrderService.cs", "Awkward.cs", "OrderBook.cs", "Reconciler.cs" })
+        {
+            var outline = await server.CallAsync("get_file_outline", new()
+            {
+                ["path"] = "src/Fixture.Trading/" + file,
+            });
+
+            foreach (var reference in References(outline))
+            {
+                var symbol = await server.CallAsync("get_symbol", new() { ["symbolId"] = reference });
+
+                Assert.DoesNotContain("ERROR", symbol, StringComparison.Ordinal);
+            }
+        }
+    }
+
+    private static IEnumerable<string> References(string outline) => outline
+        .Split('\n')
+        .Skip(2)
+        .Where(line => line.Trim().Length > 0)
+        .Select(line => line.Trim().Split("  ", StringSplitOptions.RemoveEmptyEntries)[0]);
+
+    [Fact]
+    public async Task TheReferencesAnOutlinePrints_ResolveWhenFedStraightBackToAnotherTool()
+    {
+        var outline = await server.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+        });
+
+        var reference = outline
+            .Split('\n')
+            .First(line => line.Contains("OrderService.Submit(", StringComparison.Ordinal))
+            .Trim()
+            .Split("  ", StringSplitOptions.RemoveEmptyEntries)[0];
+
+        var symbol = await server.CallAsync("get_symbol", new() { ["symbolId"] = reference });
+
+        Assert.DoesNotContain("ERROR", symbol, StringComparison.Ordinal);
+        Assert.Contains("M:Fixture.Trading.OrderService.Submit", symbol, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithFullIds_StillEmitsDocumentationIds()
+    {
+        var text = await server.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ids"] = "full",
+        });
+
+        Assert.Contains("M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)", text, StringComparison.Ordinal);
     }
 
     [Fact]

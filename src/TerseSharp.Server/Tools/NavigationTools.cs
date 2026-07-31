@@ -21,20 +21,22 @@ public sealed class NavigationTools(ToolContext context)
     public Task<string> GetFileOutline(
         [Description("Path to the .cs file.")] string path,
         [Description("Include member signatures. false gives ids and line ranges only, ~40% cheaper.")] bool signatures = true,
+        [Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, async loaded =>
-            Unwrap(await OutlineService.FileAsync(loaded, path, signatures, cancellationToken).ConfigureAwait(false)));
+            Unwrap(await OutlineService.FileAsync(loaded, path, signatures, ids ?? "short", cancellationToken).ConfigureAwait(false)));
 
     [McpServerTool(Name = "get_type_outline")]
     [Description("List a type's members with signatures and line ranges, without the bodies. The cheapest way to learn what a class offers.")]
     public Task<string> GetTypeOutline(
         [Description("Type id, e.g. T:Trading.OrderService.")] string symbolId,
         [Description("Include member signatures. false gives ids and line ranges only, ~40% cheaper.")] bool signatures = true,
+        [Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithSymbolAsync(workspace, symbolId, async (loaded, symbol) =>
-            Unwrap(await OutlineService.TypeAsync(loaded, symbol, signatures, cancellationToken).ConfigureAwait(false)), cancellationToken);
+            Unwrap(await OutlineService.TypeAsync(loaded, symbol, signatures, ids ?? "short", cancellationToken).ConfigureAwait(false)), cancellationToken);
 
     [McpServerTool(Name = "get_symbol")]
     [Description("Signature, kind, accessibility, location and XML doc of one symbol.")]
