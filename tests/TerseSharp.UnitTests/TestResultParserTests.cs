@@ -142,6 +142,22 @@ public sealed class TestResultParserTests
     }
 
     [Fact]
+    public void Parse_AFrameUnderAPosixRoot_IsMadeRelativeOnEveryPlatform()
+    {
+        var failure = PosixFailure("InsideTests");
+
+        Assert.Equal("tests/Sample.cs:12", failure.Frame);
+    }
+
+    [Fact]
+    public void Parse_APosixSiblingThatExtendsTheRoot_IsNotReported()
+    {
+        var failure = PosixFailure("OutsideTests");
+
+        Assert.Null(failure.Frame);
+    }
+
+    [Fact]
     public void Parse_SeveralReports_OrdersEveryFailureByName()
     {
         var report = TestResultParser.Parse([Fixtures.Trx("xunit-mtp.trx"), Fixtures.Trx("duplicate-messages.trx")], Fixtures.TrxRoot);
@@ -150,6 +166,11 @@ public sealed class TestResultParserTests
     }
 
     private static TestRunReport Parse(string name) => TestResultParser.Parse([Fixtures.Trx(name)], Fixtures.TrxRoot);
+
+    private static TestFailure PosixFailure(string test) =>
+        TestResultParser.Parse([Fixtures.Trx("posix-frame.trx")], "/home/runner/work/repo")
+            .Failures
+            .Single(failure => failure.Name.Contains(test, StringComparison.Ordinal));
 
     private static TestFailure Failure(string name, string test) =>
         Parse(name).Failures.Single(failure => failure.Name.EndsWith(test, StringComparison.Ordinal));

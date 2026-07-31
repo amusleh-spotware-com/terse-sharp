@@ -81,10 +81,15 @@ public static partial class TestResultParser
         return null;
     }
 
-    private static string? Relative(string file, string workspaceRoot) =>
-        Path.IsPathFullyQualified(file) && PathBoundary.Contains(workspaceRoot, file)
-            ? file[workspaceRoot.Length..].TrimStart('\\', '/').Replace('\\', '/')
-            : null;
+    private static string? Relative(string file, string workspaceRoot)
+    {
+        var root = Normalized(workspaceRoot);
+        var candidate = Normalized(file);
+
+        return candidate.StartsWith(root + '/', PathBoundary.Comparison) ? candidate[(root.Length + 1)..] : null;
+    }
+
+    private static string Normalized(string path) => path.Replace('\\', '/').TrimEnd('/');
 
     private static string Outcome(XElement result) => Value(result, "outcome");
 
