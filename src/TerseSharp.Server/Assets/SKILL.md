@@ -1,125 +1,187 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing or refactoring C#/.NET code in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in tool, so a .cs file is never read whole and a symbol is never found by text search.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET or XAML in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 56 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml file is never edited by line number.
 ---
 
-# TerseSharp — use these instead of the built-ins
+# TerseSharp
 
-TerseSharp answers C# questions **semantically** from a Roslyn workspace. Reading a `.cs` file whole,
-or grepping for a type name, costs 10-30x more tokens and returns matches that are not references.
+TerseSharp answers C# and XAML questions **semantically**, from a Roslyn workspace that is already
+loaded. Reading a `.cs` file whole, or grepping for a type name, costs 10-30x more tokens and returns
+matches that are not references.
 
-## Replace the built-in on the left with the tool on the right
+## 🚫 HARD GATE — the built-ins are the last resort, not the first
+
+Before **every** `Read`, `Grep`, `Glob`, `Edit`, `Write` or code-touching `Bash` call, answer one
+question:
+
+> **Is the target a `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`,
+> `.axaml` or `.paml` file, or a question about C# symbols, references, diagnostics, builds or tests?**
+
+**If yes, the built-in is forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for
+it in the table below.
+
+**The shell does not launder it.** `grep`, `rg`, `find`, `cat`, `head`, `tail`, `sed`, `awk`, `ls`,
+`type`, `dotnet build`, `dotnet test` run through `Bash` are built-ins too and are covered by the same
+gate.
+
+**Banned reasoning.** Every one of these has produced a breach: "just this once" · "Grep is faster" ·
+"I only need one line" · "the workspace looked stale" · "the tool errored so I'll use Grep" · "I
+already started with Read, I'll stay consistent" · "it's a tiny file" · "I'll just check quickly".
+
+**An `ERROR` is not permission to switch toolchains.** Every failure carries a `remedy:` line — read it
+and fix the *call*. A rejected glob means fix the glob. `AmbiguousSymbol` means pick a candidate.
+`UNRESOLVED_CONTEXT` and `HEURISTIC` mean narrow the question. None of them means "fall back to Grep".
+
+**If you do drop to a built-in, say so in the same message, with the reason.** The only valid reasons:
+the file is outside any loaded workspace, or the server is genuinely unreachable after a real attempt.
+A silent drop is the breach, even when the reason would have been valid.
+
+**Tripwires — stop and re-read this gate if any fires:**
+- You are about to `Read` a `.cs` or `.xaml` file.
+- Your built-in calls on C# outnumber your TerseSharp calls for this task.
+- You have used only `search_text` and no `search_symbols`, `find_usages` or `get_file_outline` — you
+  are text-grepping through a semantic server.
+- You are about to `Edit` a `.xaml` by line number.
+
+## Replace the built-in on the left
 
 | Instead of | Use | Why |
 |---|---|---|
 | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies |
 | `Read` to see one method | `get_symbol_source(symbolId)` | that member only |
 | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies |
-| `Grep` for a type or member name | `search_symbols(query)` | declarations only; supports CamelHump (`OSvc` finds `OrderService`) |
-| `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test`; `containers=true` also names the member each usage sits in |
+| `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
+| `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
-| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `node_modules` excluded; `**/Views/*.xaml` spans directories, `*` and `?` stop at a separator |
-| `Grep` in non-code files | `search_text` / `search_regex` | results tagged `HEURISTIC` |
+| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `node_modules` excluded |
+| `Grep` in non-code files | `search_text` / `search_regex` | tagged `HEURISTIC` |
+| `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response |
+| `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated |
+| `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | refuses an ambiguous match |
+| find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
-| hunting a resource through `App.xaml` and every merged dictionary | `xaml_resolve(key)` | every declaration of the key with its scope, in one call |
-| eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path checked against the `x:DataType`/`d:DataContext` type through Roslyn |
-| reading a `.xaml.cs` to see what the markup wires up | `xaml_codebehind(path)` | the `x:Class` and every event handler with its element and event |
-| `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element path, `#Name` or `key=Key`; formatting preserved, malformed results refused |
-| `Edit` a `.cs` file | `replace_symbol_body` / `replace_symbol` / `add_member` | addressed by symbol id, so line drift cannot break it |
-| find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, includes interfaces, overrides and doc crefs |
-| `Edit` a non-`.cs` file | `edit_text(path, oldText, newText)` | refuses an ambiguous match |
+| `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element, formatting preserved |
+| `Read` a `.xaml.cs` to see what the markup wires | `xaml_codebehind(path)` | `x:Class` plus every handler |
+| hunting a resource through `App.xaml` | `xaml_resolve(key)` | every declaration with its scope, one call |
+| eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path type-checked through Roslyn |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
-| `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
-| re-running the ones that broke | `rerun_failed` | replays the previous run's failures, nothing else |
-| `dotnet test --list-tests` | `list_tests(contains)` | names only, without running them |
+| `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
+| re-running what broke | `rerun_failed` | replays the previous failures only |
+| `dotnet test --list-tests` | `list_tests(contains)` | names without running |
+| `dotnet format` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
+| editing a `.csproj` by hand | `project_*` · `package_*` · `solution_*` | CPM-aware, containment-checked |
+
+## The whole surface, by job
+
+**Workspace** — `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` ·
+`list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution.
+
+**Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·
+`get_symbol_source` · `find_usages` · `find_implementations`.
+
+**Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`) · `get_diagnostics` ·
+`format` · `cleanup`.
+
+**Edit** — `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol`
+· `undo_last_change`.
+
+**Refactor** — `extract_interface` · `move_type_to_file` · `move_type_to_namespace` ·
+`change_signature`.
+
+**Projects** — `solution_projects` · `solution_add_project` · `solution_remove_project` ·
+`project_create` · `project_properties` · `project_set_property` · `project_add_reference` ·
+`project_remove_reference` · `package_list` · `package_add` · `package_remove`.
+
+**XAML** — `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_bindings` ·
+`xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_set_property`.
+
+**Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
+
+**Build and test** — `build` · `run_tests` · `rerun_failed` · `list_tests`.
 
 ## Working rules
 
-1. **Start with `load_workspace`** (or let the server auto-discover). `workspace_status` shows what is
-   loaded, on which git branch and worktree.
-2. **Pass the reference back, do not re-search.** An outline prints `OrderService.Submit(Order)`;
-   every tool that takes a `symbolId` accepts that name, the full documentation id
-   (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
-   A name that matches several symbols returns `AmbiguousSymbol` listing their ids — pick one, do not
-   guess. Members a short name cannot address (constructors, operators, indexers, generics, explicit
-   interface implementations) keep their documentation id in the outline; `ids=full` prints ids for
-   everything.
-3. **Read the confidence tag.** `EXACT` came from the Roslyn semantic model. `HEURISTIC` came from a
+1. **Address a symbol by the name a response printed.** An outline prints
+   `OrderService.Submit(Order)`; every tool taking a `symbolId` accepts that, the full documentation
+   id (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
+   A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
+   guess**. Constructors, operators, indexers, generics and explicit interface implementations keep
+   their documentation id in outlines, because a name cannot address them.
+2. **Read the confidence tag.** `EXACT` came from the Roslyn semantic model. `HEURISTIC` came from a
    text or index match — verify before acting on it.
-4. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff and nothing is
-   written.
-5. **Edits are compile-gated, and every edit reports its diagnostics.** Each mutation and each
-   `dryRun` carries `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents, so
-   you do not need a separate `analyze` afterwards. A `dryRun` that *would* be rolled back says
-   `WARNING … would be rolled back` and names the errors — the `(+0)` delta alone is not proof it is
-   safe. An edit that introduces a new compile error is rolled back and the error returned. Pass
-   `allowErrors: true` only when you are mid-refactor on purpose; it also skips the analysis.
-6. **Several worktrees or repos open?** Pass `workspace:` with a path or worktree name. If it is
-   ambiguous the server returns `AMBIGUOUS_WORKSPACE` and lists them rather than guessing — never
-   assume it picked the right one.
-7. **Truncation is explicit and tells you what to do.** `truncated=true, total=N` means there are
-   more, and the same line names the parameter that narrows it — `- narrow with glob=`,
-   `- narrow with minSeverity=, ids= or path=`. Follow that rather than re-running with a bigger
-   `maxResults` and paying for the whole list.
-8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT` on a binding, `HEURISTIC`
-   on a text match, `AmbiguousSymbol` on a name, `SaturatedName` when a name matches too many symbols
-   to be safe — each means *the server declined to guess*, not that the thing does not exist. Narrow
-   the question instead of treating it as a negative result.
-
-## Running tests
-
-`run_tests` reports `passed= failed= skipped= total= durationMs=` on every run, then one block per
-failure: the message, the expected and actual values, and one workspace-relative `file:line` frame.
-Fix the test from that block — do not shell out to `dotnet test` for the stack trace.
-
-| Goal | Call |
-|---|---|
-| whole solution | `run_tests` |
-| one project | `run_tests(project)` |
-| one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
-| one case of a parameterized test | `run_tests(test)` with the case name — runs the whole theory, since the runner's `FullyQualifiedName` carries no arguments |
-| a raw VSTest expression | `run_tests(filter)` |
-| skip the rebuild | `run_tests(noBuild: true)` |
-| only what just failed | `rerun_failed` |
-| the slowest N | `run_tests(slowest: 10)` |
-| names without running | `list_tests(contains)` |
-
-`test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs `…SubmitsTwice`)
-runs both — check `total=` to see what actually ran, and use `filter="FullyQualifiedName=<name>"` when
-you need exactly one.
-
-`total=0` with a `WARNING` line means **nothing ran** — a filter typo, not a green suite. A run that
-produced no results at all reports `FAILED …, no test results were produced` and never `0 failures`.
-
-## When a tool refuses
-
-Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest names;
-`AmbiguousSymbol` lists the candidate ids and says how many of the total it is showing;
-`SaturatedName` means the name matched too many symbols to resolve safely — qualify it;
-`OutOfWorkspace` means the path escaped the workspace root; `ReadOnly` means the server runs with
-`--read-only`. Read the `remedy:` line and fix the call — do not fall back to `Read`/`Grep`, which is
-the one outcome this server exists to prevent.
+3. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff, the diagnostic
+   counts, and nothing is written.
+4. **Every edit reports its diagnostics.** Each mutation and each `dryRun` carries
+   `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents — you do not need a
+   separate `analyze` afterwards. A `dryRun` that *would* be rolled back says
+   `WARNING … would be rolled back` and names the errors; a `(+0)` delta alone is **not** proof the
+   edit is safe.
+5. **Edits are compile-gated.** An edit introducing a new compile error is rolled back and the error
+   returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
+6. **Truncation tells you what to do.** `truncated=true, total=N` is followed by
+   `- narrow with <parameter>`. Follow that, rather than re-running with a bigger `maxResults` and
+   paying for the whole list.
+7. **Several worktrees or repos open?** Pass `workspace:`. An ambiguous request returns
+   `AmbiguousWorkspace` listing the candidates rather than guessing — never assume it picked right.
+8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT`, `HEURISTIC`,
+   `AmbiguousSymbol`, `SaturatedName` all mean *the server declined to guess*, not that the thing does
+   not exist. Narrow the question; do not treat it as a negative result.
 
 ## XAML
 
-`xaml_outline` (`depth=`, `filter=named|keyed`), `xaml_names` (`x:Name` and `x:Uid`), `xaml_resources`,
-`xaml_resolve(key)`, `xaml_bindings(path, validate)`, `xaml_validate(path | scope: "solution")` and
-`xaml_find(query, kind)` cover WPF, Avalonia (`.axaml`), WinUI and MAUI; the dialect is detected from
-the root markup namespace and reported on every outline and validation.
+Covers **WPF, Avalonia (`.axaml`), WinUI and MAUI**; the dialect is detected from the root markup
+namespace and reported on every outline and validation.
 
 `xaml_validate` reports duplicate `x:Key`/`x:Name` and resources that resolve to **no** declaration
 anywhere under the workspace root — a key defined in `App.xaml` or a merged dictionary is not an
-error. If any XAML file fails to parse it says so and switches resource checking off rather than
-reporting every key in that file as missing.
-
-`rename_symbol` rewrites XAML too. Renaming a code-behind handler updates the `Click="…"` that names
-it, and renaming a bound property updates `{Binding …}` — but **only** where an `x:Class` or an
-`x:DataType`/`d:DataContext` proves the binding refers to that member. A binding with no declared
-context is reported `NOT rewritten` rather than rewritten on a guess, so check that list after a
-rename. `find_usages` shows the same XAML sites, so the blast radius is visible before you rename.
+error. Pass `scope: "solution"` to check every file. If a XAML file fails to parse it says so and
+switches resource checking off rather than reporting every key in that file as missing.
 
 `xaml_bindings(validate: true)` resolves the data context from `x:DataType` or
 `d:DataContext="{d:DesignInstance …}"`, including inheritance from an ancestor, and walks each path
 segment against the real symbol. WPF has no compile-time binding check at all, so this is the only
 static answer available there. `UNRESOLVED_CONTEXT` means the context could not be determined — it is
 not a claim that the binding is wrong.
+
+`rename_symbol` rewrites XAML too: rename a code-behind handler and the `Click="…"` follows, rename a
+bound property and `{Binding …}` follows — but **only** where an `x:Class` or `x:DataType` proves the
+reference. Anything else is listed `NOT rewritten`; **read that list after every rename.**
+`find_usages` shows the same XAML sites, so check the blast radius before renaming.
+
+`xaml_set_property` addresses an element by the path `xaml_outline` prints, by `#Name` or by
+`key=Key`, edits the tag in place so formatting survives, and refuses an edit whose result would not
+parse.
+
+## Running tests
+
+`run_tests` reports `passed= failed= skipped= total= durationMs=` on every run, then one block per
+failure: the message, expected and actual values, and one workspace-relative `file:line` frame. Fix
+the test from that block — do not shell out to `dotnet test` for the stack trace.
+
+| Goal | Call |
+|---|---|
+| whole solution | `run_tests` |
+| one project | `run_tests(project)` |
+| one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
+| a raw VSTest expression | `run_tests(filter)` |
+| skip the rebuild | `run_tests(noBuild: true)` |
+| only what just failed | `rerun_failed` |
+| the slowest N | `run_tests(slowest: 10)` |
+| names without running | `list_tests(contains)` |
+
+`test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs
+`…SubmitsTwice`) runs both — check `total=`, and use `filter="FullyQualifiedName=<name>"` for exactly
+one.
+
+`total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
+produced no results reports `FAILED …, no test results were produced` and never `0 failures`.
+
+## When a tool refuses
+
+Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest names;
+`AmbiguousSymbol` lists the candidates and says how many of the total it shows; `SaturatedName` means
+the name matched too many symbols to resolve safely — qualify it; `OutOfWorkspace` means the path
+escaped the workspace root; `ReadOnly` means the server runs with `--read-only`.
+
+Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one outcome this server
+exists to prevent.

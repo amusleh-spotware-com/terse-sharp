@@ -129,9 +129,14 @@ answer all four:
 1. **README** — tool table, tool count, the "what each one replaces" table, the numbers table, and the
    Status table (move the row out of 🔜 when it ships).
 2. **NUGET_README** — the same, in pure Markdown; it is a separate file and diverges silently.
-3. **SKILL.md** — the swap table and the working rules. A new tool that an agent is not told about
-   might as well not exist; a changed response format that the skill still describes the old way is
-   worse than no skill.
+3. **SKILL.md** — `src/TerseSharp.Server/Assets/SKILL.md`, an **embedded resource shipped by
+   `terse install --skill` and loaded straight into an agent's context**. It must name **every** tool
+   in the surface-by-job list, and its swap table, working rules and hard gate must describe the tools
+   as they behave *now*. A new tool the skill does not mention might as well not exist — the agent
+   will never call it. A changed response format the skill still describes the old way is **worse than
+   no skill**, because the agent acts on the wrong contract. When a tool is added, renamed, removed, or
+   changes a parameter, a default or its output: update the skill in the same commit, and re-read the
+   whole file to check nothing else it claims has quietly become false.
 4. **CHANGELOG** — under `## [Unreleased]`, with the format change spelled out.
 
 A commit that changes behaviour and leaves any of the four stale is incomplete. "I'll update the docs
