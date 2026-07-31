@@ -61,4 +61,9 @@ public static class Errors
 
     public static TerseError Invalid(string message, string remedy) =>
         new(TerseErrorCode.InvalidArgument, message, remedy);
+
+    public static TerseError Cancelled() => new(
+        TerseErrorCode.Cancelled,
+        "the call was cancelled before it produced a result",
+        "retry, or narrow the request with a path or maxResults");
 }

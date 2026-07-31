@@ -10,6 +10,10 @@ public sealed class LoadedWorkspace : IDisposable
     private readonly MSBuildWorkspace workspace;
     private readonly List<Solution> history = [];
     private readonly Lock historyGate = new();
+    private readonly Lock leaseGate = new();
+
+    private int leases;
+    private bool retired;
 
     internal LoadedWorkspace(MSBuildWorkspace workspace, WorkspaceLoadResult load, GitContext git)
     {
@@ -36,16 +40,30 @@ public sealed class LoadedWorkspace : IDisposable
 
     public bool Contains(string path) => PathBoundary.Contains(Root, path);
 
+    public WorkspaceLease Lease()
+    {
+        lock (leaseGate)
+            leases++;
+
+        return new WorkspaceLease(this);
+    }
+
     public bool TryApply(Solution solution)
     {
-        var previous = workspace.CurrentSolution;
+        lock (historyGate)
+        {
+            var previous = workspace.CurrentSolution;
 
-        if (!workspace.TryApplyChanges(solution))
-            return false;
+            if (!workspace.TryApplyChanges(solution))
+                return false;
 
-        Remember(previous);
+            history.Add(previous);
 
-        return true;
+            if (history.Count > HistoryDepth)
+                history.RemoveAt(0);
+
+            return true;
+        }
     }
 
     public string Undo()
@@ -65,16 +83,38 @@ public sealed class LoadedWorkspace : IDisposable
         }
     }
 
-    private void Remember(Solution previous)
+    public void Dispose()
     {
-        lock (historyGate)
-        {
-            history.Add(previous);
+        if (Retire())
+            workspace.Dispose();
+    }
 
-            if (history.Count > HistoryDepth)
-                history.RemoveAt(0);
+    internal void Release()
+    {
+        if (Returned())
+            workspace.Dispose();
+    }
+
+    private bool Retire()
+    {
+        lock (leaseGate)
+        {
+            if (retired)
+                return false;
+
+            retired = true;
+
+            return leases is 0;
         }
     }
 
-    public void Dispose() => workspace.Dispose();
+    private bool Returned()
+    {
+        lock (leaseGate)
+        {
+            leases--;
+
+            return retired && leases is 0;
+        }
+    }
 }

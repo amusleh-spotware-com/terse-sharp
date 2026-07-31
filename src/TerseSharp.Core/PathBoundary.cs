@@ -14,4 +14,9 @@ public static class PathBoundary
         return full.Equals(normalizedRoot, Comparison)
             || full.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, Comparison);
     }
+
+    public static bool SameFile(string? left, string? right) =>
+        left is { Length: > 0 } first
+        && right is { Length: > 0 } second
+        && Path.GetFullPath(first).Equals(Path.GetFullPath(second), Comparison);
 }

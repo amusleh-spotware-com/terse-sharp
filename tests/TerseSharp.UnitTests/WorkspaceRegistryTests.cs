@@ -63,6 +63,40 @@ public sealed class WorkspaceRegistryTests
         var result = registry.Resolve(null, null);
 
         Assert.True(result.IsOk);
-        Assert.Equal(Path.GetFullPath(Fixtures.SolutionPath), result.Value!.SolutionPath);
+        Assert.Equal(Path.GetFullPath(Fixtures.SolutionPath), result.Value!.Workspace.SolutionPath);
+
+        result.Value!.Dispose();
+    }
+
+    [Fact]
+    public async Task Unload_WhileALeaseIsHeld_LeavesTheWorkspaceUsable()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        var resolved = registry.Resolve(null, null);
+
+        Assert.True(registry.Unload(Fixtures.SolutionPath));
+        Assert.NotEmpty(resolved.Value!.Workspace.Solution.Projects);
+
+        resolved.Value!.Dispose();
+    }
+
+    [Fact]
+    public async Task Unload_AfterTheLastLeaseIsReleased_DisposesTheWorkspace()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        var resolved = registry.Resolve(null, null);
+        var workspace = resolved.Value!.Workspace;
+
+        Assert.True(registry.Unload(Fixtures.SolutionPath));
+
+        resolved.Value!.Dispose();
+
+        Assert.Empty(workspace.Solution.Projects);
     }
 }

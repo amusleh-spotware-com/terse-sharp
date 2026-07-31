@@ -65,11 +65,13 @@ Every tool method is a one-liner delegating to `ToolContext`:
 - `ToolContext.RejectWrite()` is the `--read-only` gate; every mutating tool must call it first.
 - `ToolBoundary.Run(Async)` catches expected exceptions and renders them; unexpected ones rethrow.
 
-`WorkspaceRegistry` (LRU, default 4) owns the loaded `MSBuildWorkspace`s. Resolution is deliberate:
+`WorkspaceRegistry` (LRU, default 4) owns the loaded `MSBuildWorkspace`s. `Resolve` hands out a
+`WorkspaceLease`; an evicted or unloaded workspace is disposed only once the last lease is released,
+so a call in flight never loses its solution. Resolution is deliberate:
 an explicit `workspace` hint, else a path hint that lands inside exactly one root, else the single
 loaded workspace, else `ERROR AmbiguousWorkspace` listing candidates — **never a guess**, because an
 answer from the wrong worktree is undetectable by the agent. `LoadedWorkspace` carries `GitContext`
-(branch + worktree name) and one undo snapshot for `undo_last_change`.
+(branch + worktree name) and up to ten undo snapshots for `undo_last_change`.
 
 ### Errors and responses
 
@@ -83,7 +85,8 @@ Never throw a bare message and never return prose. Failures go through `Errors.*
 
 All mutations funnel through `EditGate.ApplyAsync`, which diffs only the changed documents, compares
 error counts before/after, **rolls back any edit that introduces a new compile error** (unless
-`allowErrors: true`), and returns the unified diff plus a changed-line count — never file contents.
+`allowErrors: true`) in the changed projects **and every project that transitively depends on them**,
+and returns the unified diff plus a changed-line count — never file contents.
 `dryRun` returns the diff and writes nothing. Symbols are addressed by Roslyn documentation-comment
 ids (`M:Trading.OrderService.Submit(Trading.Order)`) via `SymbolId`, so edits are immune to line
 drift. Paths are checked with `PathBoundary.Contains`, which compares whole segments (`C:\repo` does

@@ -17,9 +17,11 @@ public static class AnalysisService
     {
         var found = new List<Diagnostic>();
         var engines = new List<string> { "compiler" };
+        var scope = DiagnosticScope.For(workspace, path);
+        var document = path is null ? null : DocumentLookup.Find(workspace, path);
 
-        foreach (var project in Targets(workspace, path))
-            await CollectAsync(project, found, engines, cancellationToken).ConfigureAwait(false);
+        foreach (var project in Targets(workspace, document))
+            await CollectAsync(project, document, found, engines, cancellationToken).ConfigureAwait(false);
 
         var extra = includeDeadCode
             ? await DeadCodeService.FindAsync(workspace, path, cancellationToken).ConfigureAwait(false)
@@ -28,7 +30,7 @@ public static class AnalysisService
         if (includeDeadCode)
             engines.Add("dead-code");
 
-        return Render(path, engines, Filter(found, path, minimum, ids), Keep(extra, ids), maxResults);
+        return Render(path, engines, Filter(found, scope, minimum, ids), Keep(extra, ids), maxResults);
     }
 
     private static string[] Keep(IReadOnlyList<string> findings, IReadOnlyList<string> ids) =>
@@ -36,15 +38,12 @@ public static class AnalysisService
             ? [.. findings]
             : [.. findings.Where(finding => ids.Any(id => finding.StartsWith(id, StringComparison.OrdinalIgnoreCase)))];
 
-    private static IEnumerable<Project> Targets(LoadedWorkspace workspace, string? path)
-    {
-        var document = path is null ? null : DocumentLookup.Find(workspace, path);
-
-        return document is null ? workspace.Solution.Projects : [document.Project];
-    }
+    private static IEnumerable<Project> Targets(LoadedWorkspace workspace, Document? document) =>
+        document is null ? workspace.Solution.Projects : [document.Project];
 
     private static async Task CollectAsync(
         Project project,
+        Document? document,
         List<Diagnostic> found,
         List<string> engines,
         CancellationToken cancellationToken)
@@ -62,7 +61,7 @@ public static class AnalysisService
             return;
 
         AddEngine(engines, project);
-        found.AddRange(await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false));
+        found.AddRange(await RunAsync(compilation, project, analyzers, document, cancellationToken).ConfigureAwait(false));
     }
 
     private static void AddEngine(List<string> engines, Project project)
@@ -77,6 +76,7 @@ public static class AnalysisService
         Compilation compilation,
         Project project,
         ImmutableArray<DiagnosticAnalyzer> analyzers,
+        Document? document,
         CancellationToken cancellationToken)
     {
         var options = new CompilationWithAnalyzersOptions(
@@ -87,7 +87,26 @@ public static class AnalysisService
 
         var withAnalyzers = compilation.WithAnalyzers(analyzers, options);
 
-        return await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
+        return document is null
+            ? await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false)
+            : await ForDocumentAsync(withAnalyzers, document, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<ImmutableArray<Diagnostic>> ForDocumentAsync(
+        CompilationWithAnalyzers withAnalyzers,
+        Document document,
+        CancellationToken cancellationToken)
+    {
+        var tree = await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
+        var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+
+        if (tree is null || model is null)
+            return [];
+
+        var syntax = await withAnalyzers.GetAnalyzerSyntaxDiagnosticsAsync(tree, cancellationToken).ConfigureAwait(false);
+        var semantic = await withAnalyzers.GetAnalyzerSemanticDiagnosticsAsync(model, null, cancellationToken).ConfigureAwait(false);
+
+        return [.. syntax, .. semantic];
     }
 
     private static ImmutableArray<DiagnosticAnalyzer> Analyzers(Project project) =>
@@ -95,20 +114,16 @@ public static class AnalysisService
 
     private static Diagnostic[] Filter(
         List<Diagnostic> found,
-        string? path,
+        DiagnosticScope scope,
         DiagnosticSeverity minimum,
         IReadOnlyList<string> ids) =>
-        [.. found.Where(diagnostic => Keep(diagnostic, path, minimum, ids))];
+        [.. found.Where(diagnostic => Keep(diagnostic, scope, minimum, ids))];
 
-    private static bool Keep(Diagnostic diagnostic, string? path, DiagnosticSeverity minimum, IReadOnlyList<string> ids) =>
+    private static bool Keep(Diagnostic diagnostic, DiagnosticScope scope, DiagnosticSeverity minimum, IReadOnlyList<string> ids) =>
         diagnostic.Severity >= minimum
         && !diagnostic.IsSuppressed
         && (ids.Count is 0 || ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
-        && (path is null || InFile(diagnostic, path));
-
-    private static bool InFile(Diagnostic diagnostic, string path) =>
-        diagnostic.Location.GetLineSpan().Path is { Length: > 0 } actual
-        && Path.GetFullPath(actual).Equals(Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
+        && scope.Includes(diagnostic.Location);
 
     private static string Render(string? path, List<string> engines, Diagnostic[] found, string[] extra, int maxResults)
     {

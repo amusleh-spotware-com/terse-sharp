@@ -6,12 +6,12 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     [Fact]
     public async Task GetFileOutline_CostsAFractionOfReadingTheFile()
     {
-        var outline = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+        var outline = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
         var whole = await File.ReadAllTextAsync(
-            Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs"),
+            Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderBook.cs"),
             TestContext.Current.CancellationToken);
 
-        Assert.True(Tokens(outline) < Tokens(whole) * 2, Report("get_file_outline", outline, whole));
+        Assert.True(Tokens(outline) * 3 < Tokens(whole) * 2, Report("get_file_outline", outline, whole));
     }
 
     [Fact]

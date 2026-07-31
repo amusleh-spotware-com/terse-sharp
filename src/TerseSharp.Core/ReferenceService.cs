@@ -19,6 +19,7 @@ public static class ReferenceService
             .SelectMany(reference => reference.Locations)
             .Where(location => !location.IsImplicit)
             .OrderBy(location => location.Document.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(location => location.Location.SourceSpan.Start)
             .ToArray();
 
         return Render(symbol, locations, maxResults);
@@ -56,15 +57,25 @@ public static class ReferenceService
 
         response.Summary(shown, locations.Length, string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"));
 
-        foreach (var location in locations.Take(shown))
-            response.Line(DescribeLocation(location));
+        foreach (var group in locations.Take(shown).GroupBy(UsageGroup.Of))
+            response.Line(Describe(group.Key, group));
 
         return response.ToString();
     }
 
-    private static string DescribeLocation(ReferenceLocation location) => string.Create(
+    private static string Describe(UsageGroup group, IEnumerable<ReferenceLocation> locations) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{PositionFormat.Describe(location.Location)}  {ConfidenceTag.Of(ConfidenceOf(location))}  {ClassifyKind(location)}");
+        $"{group.Path}  {group.Confidence}  {group.Kind}  {Positions(locations)}");
+
+    private static string Positions(IEnumerable<ReferenceLocation> locations) =>
+        string.Join(", ", locations.Select(Position));
+
+    private static string Position(ReferenceLocation location)
+    {
+        var start = location.Location.GetLineSpan().StartLinePosition;
+
+        return string.Create(CultureInfo.InvariantCulture, $"{start.Line + 1}:{start.Character + 1}");
+    }
 
     private static string ClassifyKind(ReferenceLocation location) =>
         location.CandidateReason is CandidateReason.None
@@ -73,4 +84,12 @@ public static class ReferenceService
 
     private static Confidence ConfidenceOf(ReferenceLocation location) =>
         location.CandidateReason is CandidateReason.None ? Confidence.Exact : Confidence.Heuristic;
+
+    private readonly record struct UsageGroup(string Path, string Confidence, string Kind)
+    {
+        public static UsageGroup Of(ReferenceLocation location) => new(
+            location.Location.GetLineSpan().Path,
+            ConfidenceTag.Of(ConfidenceOf(location)),
+            ClassifyKind(location));
+    }
 }

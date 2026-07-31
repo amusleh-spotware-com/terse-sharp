@@ -2,7 +2,14 @@ namespace TerseSharp.Core;
 
 public static class FileService
 {
-    public static Result<string> ReadText(LoadedWorkspace workspace, string path, int startLine, int endLine)
+    private const int MaxResponseCharacters = 128 * 1024;
+
+    public static Result<string> ReadText(
+        LoadedWorkspace workspace,
+        string path,
+        int startLine,
+        int endLine,
+        int maxLines)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
@@ -14,7 +21,8 @@ public static class FileService
         if (!File.Exists(full))
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
-        return BinaryContent.Reject(full, path) ?? Result.Ok(Render(path, File.ReadAllLines(full), startLine, endLine));
+        return BinaryContent.Reject(full, path)
+            ?? Result.Ok(Render(path, full, new LineRange(startLine, endLine, maxLines)));
     }
 
     public static Result<string> WriteText(LoadedWorkspace workspace, string path, string content, bool dryRun, bool force)
@@ -90,17 +98,43 @@ public static class FileService
         return response.ToString();
     }
 
-    private static string Render(string path, string[] lines, int startLine, int endLine)
+    private static string Render(string path, string full, LineRange range)
     {
-        var from = Math.Max(1, startLine);
-        var to = endLine <= 0 ? lines.Length : Math.Min(endLine, lines.Length);
+        var selection = Collect(full, range);
         var response = new ResponseBuilder("read_text", path);
 
-        response.Summary(Math.Max(0, to - from + 1), lines.Length, "lines");
+        response.Summary(selection.Lines.Count, selection.TotalLines, "lines");
 
-        for (var index = from; index <= to; index++)
-            response.Line(string.Create(CultureInfo.InvariantCulture, $"{index}: {lines[index - 1]}"));
+        foreach (var line in selection.Lines)
+            response.Line(line);
 
         return response.ToString();
     }
+
+    private static LineSelection Collect(string full, LineRange range)
+    {
+        var lines = new List<string>(Math.Min(range.MaxLines, 512));
+        var budget = MaxResponseCharacters;
+        var number = 0;
+
+        foreach (var line in File.ReadLines(full))
+        {
+            number++;
+
+            if (range.Covers(number) && lines.Count < range.MaxLines && budget > 0)
+            {
+                budget -= line.Length;
+                lines.Add(string.Create(CultureInfo.InvariantCulture, $"{number}: {line}"));
+            }
+        }
+
+        return new LineSelection(lines, number);
+    }
+
+    private readonly record struct LineRange(int Start, int End, int MaxLines)
+    {
+        public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
+    }
+
+    private readonly record struct LineSelection(IReadOnlyList<string> Lines, int TotalLines);
 }

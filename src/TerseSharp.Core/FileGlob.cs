@@ -17,6 +17,9 @@ public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
     public bool MatchesFile(string root, string file) =>
         Matches(MatchesPath ? Path.GetRelativePath(root, file) : Path.GetFileName(file));
 
+    public bool MatchesRelative(string relativePath) =>
+        Matches(MatchesPath ? relativePath : Path.GetFileName(relativePath));
+
     private static string Translate(string glob)
     {
         var text = new StringBuilder("^");

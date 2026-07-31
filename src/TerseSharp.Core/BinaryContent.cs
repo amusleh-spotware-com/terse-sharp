@@ -2,22 +2,10 @@ namespace TerseSharp.Core;
 
 public static class BinaryContent
 {
-    private const int MaxBytes = 64 * 1024;
     private const int ProbeBytes = 8000;
 
-    public static Result<string>? Reject(string fullPath, string displayPath)
-    {
-        var file = new FileInfo(fullPath);
-
-        if (file.Length > MaxBytes)
-            return TooLarge(displayPath, file.Length);
-
-        return LooksBinary(fullPath) ? Binary(displayPath, file.Length) : null;
-    }
-
-    private static Result<string> TooLarge(string path, long length) => Result.Fail<string>(Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"'{path}' is {length} bytes, over the {MaxBytes} byte cap"),
-        "pass startLine and endLine to read a range"));
+    public static Result<string>? Reject(string fullPath, string displayPath) =>
+        LooksBinary(fullPath) ? Binary(displayPath, new FileInfo(fullPath).Length) : null;
 
     private static Result<string> Binary(string path, long length) => Result.Fail<string>(Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"'{path}' looks binary ({length} bytes)"),

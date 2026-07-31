@@ -48,17 +48,20 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
         return true;
     }
 
-    public Result<LoadedWorkspace> Resolve(string? workspaceHint, string? pathHint)
+    public Result<WorkspaceLease> Resolve(string? workspaceHint, string? pathHint)
     {
-        var loaded = Snapshot();
+        lock (map)
+        {
+            var loaded = workspaces.Values.ToArray();
 
-        if (loaded.Length is 0)
-            return Result.Fail<LoadedWorkspace>(Errors.NotLoaded());
+            if (loaded.Length is 0)
+                return Result.Fail<WorkspaceLease>(Errors.NotLoaded());
 
-        if (!string.IsNullOrWhiteSpace(workspaceHint))
-            return ByHint(loaded, workspaceHint);
+            if (!string.IsNullOrWhiteSpace(workspaceHint))
+                return ByHint(loaded, workspaceHint);
 
-        return ByPath(loaded, pathHint) ?? Single(loaded);
+            return ByPath(loaded, pathHint) ?? Single(loaded);
+        }
     }
 
     public void Dispose()
@@ -123,19 +126,19 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
         }
     }
 
-    private static Result<LoadedWorkspace> ByHint(LoadedWorkspace[] loaded, string hint)
+    private static Result<WorkspaceLease> ByHint(LoadedWorkspace[] loaded, string hint)
     {
         var matches = loaded.Where(workspace => Matches(workspace, hint)).ToArray();
 
         return matches.Length switch
         {
             1 => Ok(matches[0]),
-            0 => Result.Fail<LoadedWorkspace>(Errors.WorkspaceNotFound(hint, Paths(loaded))),
-            _ => Result.Fail<LoadedWorkspace>(Errors.AmbiguousWorkspace(Paths(loaded))),
+            0 => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Paths(loaded))),
+            _ => Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Paths(loaded))),
         };
     }
 
-    private static Result<LoadedWorkspace>? ByPath(LoadedWorkspace[] loaded, string? pathHint)
+    private static Result<WorkspaceLease>? ByPath(LoadedWorkspace[] loaded, string? pathHint)
     {
         if (string.IsNullOrWhiteSpace(pathHint))
             return null;
@@ -145,20 +148,20 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
         return matches.Length is 1 ? Ok(matches[0]) : null;
     }
 
-    private static Result<LoadedWorkspace> Single(LoadedWorkspace[] loaded) =>
+    private static Result<WorkspaceLease> Single(LoadedWorkspace[] loaded) =>
         loaded.Length is 1
             ? Ok(loaded[0])
-            : Result.Fail<LoadedWorkspace>(Errors.AmbiguousWorkspace(Paths(loaded)));
+            : Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Paths(loaded)));
 
     private static bool Matches(LoadedWorkspace workspace, string hint) =>
         workspace.SolutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase)
         || workspace.Git.WorktreeName.Equals(hint, StringComparison.OrdinalIgnoreCase);
 
-    private static Result<LoadedWorkspace> Ok(LoadedWorkspace workspace)
+    private static Result<WorkspaceLease> Ok(LoadedWorkspace workspace)
     {
         workspace.Touch();
 
-        return Result.Ok(workspace);
+        return Result.Ok(workspace.Lease());
     }
 
     private static string[] Paths(LoadedWorkspace[] loaded) => [.. loaded.Select(workspace => workspace.SolutionPath)];

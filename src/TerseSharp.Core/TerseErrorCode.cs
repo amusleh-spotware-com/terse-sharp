@@ -13,6 +13,7 @@ public enum TerseErrorCode
     OutOfWorkspace,
     ReadOnly,
     InvalidArgument,
+    Cancelled,
 }
 
 public sealed record TerseError(TerseErrorCode Code, string Message, string Remedy)

@@ -8,6 +8,95 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-31
+
+### Fixed
+
+- **`read_text` refused every file over 64 KB, including when a line range was asked for.** The size
+  check ran before the range was applied, so a 194 KB file answered
+  `'…' is 194048 bytes, over the 65536 byte cap` with the remedy `pass startLine and endLine to read
+  a range` — advice the caller had already followed. An agent that hit this had no way forward inside
+  the server and fell back to reading the file with a built-in tool, which is the one outcome this
+  project exists to prevent. The cap is gone: `read_text` streams the file, returns the lines asked
+  for, and truncates instead of refusing. It never materialises the whole file, so a multi-gigabyte
+  file costs a scan rather than the memory.
+- **`analyze` scoped to one file reported findings from other files, all of them generated.**
+  `analyze path=src/…/FileGlob.cs` answered with five `CS8019` diagnostics, every one of them in
+  `obj/Debug/net10.0/*.g.cs`, and none in the file that was asked about: the dead-code findings never
+  received the path filter, and generated output was never excluded. The tool that the "check every
+  file you touched" workflow depends on was returning pure noise. Dead-code findings now honour the
+  path, and `obj/`, `bin/`, `*.g.cs`, `*.designer.cs`, `AssemblyInfo.cs` and `AssemblyAttributes.cs`
+  are excluded from `analyze` and `get_diagnostics` alike.
+- **`get_file_outline` could not see enums or delegates.** The outline collected
+  `TypeDeclarationSyntax` only, so a file declaring nothing but an enum answered `0 types` and an
+  agent reasonably concluded the file was empty — then read it with a built-in tool. Enums, their
+  members, and delegate declarations are now listed.
+- **One unreadable file failed an entire search.** `search_text`, `search_regex` and `find_files`
+  walked with a single `EnumerateFiles`, so an `IOException` on one locked file — or a denied
+  directory — aborted the whole call. Directory and file enumeration, opening and reading are each
+  isolated now; an unreadable entry is skipped and the search completes.
+- **A workspace evicted while a call was using it was disposed under that call's feet.** LRU eviction
+  and `unload_workspace` disposed the `MSBuildWorkspace` immediately, so an in-flight tool call could
+  observe a cleared solution or an `ObjectDisposedException` that carried no error code and no remedy.
+  `WorkspaceRegistry.Resolve` now hands out a `WorkspaceLease`; disposal waits for the last lease to
+  be released. `ObjectDisposedException` and `OperationCanceledException` are also rendered as proper
+  `ERROR` records rather than escaping as untyped failures.
+- **The compile gate ignored the projects an edit could break.** `EditGate` compared error counts only
+  in the projects holding the changed documents, so changing a public signature broke every dependent
+  project while the edit was reported as applied. The gate now also compiles the projects that
+  transitively depend on the changed ones.
+- **The undo history could interleave.** `TryApply` recorded the previous solution outside the lock
+  that guards the history, so two concurrent edits could record the wrong snapshot. Applying and
+  recording are one critical section now.
+- **The E2E suite left orphaned `terse serve` processes behind**, whose file locks then broke the next
+  build. The fixture owns the server process itself and kills the process tree on teardown.
+
+### Changed
+
+- **`find_usages` groups its results per file.** A file with twelve usages was twelve lines, each
+  repeating the full path; it is now one line — `path  EXACT  ref  12:5, 40:9, 77:3` — with a separate
+  line per distinct confidence and reference kind. This is a response-format change.
+- **`read_text` takes `maxLines`** (default 2000) and caps a response at 128 KB of text, reporting the
+  cut through the existing `truncated`/`total` fields instead of returning an unbounded file.
+- **Search results no longer carry a whole minified line.** A match line over 200 characters is cut
+  and annotated with how many characters were dropped.
+- **`search_regex` runs on the non-backtracking engine** where the pattern allows it, so a
+  catastrophic pattern costs linear time rather than a two-second timeout per line; patterns needing
+  backreferences or lookaround fall back to the backtracking engine with that timeout.
+- **`get_symbol_source` returns every part of a partial declaration** instead of an arbitrary one.
+- **`MsBuildBootstrap` prefers the MSBuild instance matching the running runtime's major version**
+  rather than the highest installed, so a preview SDK on the machine no longer breaks workspace load.
+- **`build` names a locked output file when it sees one**, pointing at `unload_workspace` instead of
+  leaving MSB3021/MSB3027 to be read out of raw build output.
+
+### Performance
+
+- **Dead-code analysis no longer searches the whole solution per member.** `analyze` runs with
+  `includeDeadCode` on by default and issued one solution-wide `FindReferencesAsync` for every private
+  member — on a solution with thousands of private members, thousands of full-solution searches. A
+  private member can only be referenced inside its containing type's declaring documents, so the
+  search is scoped to those.
+- **Searches no longer walk `.git`, `bin`, `obj` and `node_modules` before discarding them.** The walk
+  prunes excluded directories as it descends instead of enumerating everything and filtering after,
+  skips known-binary extensions without opening them, stops on the first NUL byte, and computes each
+  file's relative path once instead of three times.
+- **Resolving a symbol id no longer compiles every project.** `SymbolLookup` narrows to the projects
+  whose declaration index contains the name before asking for a compilation, falling back to the full
+  set when the name cannot be derived from the id.
+- **`analyze` on a single file runs its analyzers on that file** through the syntax- and
+  semantic-diagnostic entry points rather than over the whole project.
+- **`DocumentLookup` compares file names before normalising paths**, replacing one `Path.GetFullPath`
+  per document in the solution with one per same-named document.
+- **Server GC and TieredPGO are enabled** for the server process, which holds Roslyn compilations.
+
+### Fixed — test integrity
+
+- **The token-budget test could not fail.** `get_file_outline` was asserted to cost less than *twice*
+  the file it replaces, which passes even if the outline is larger than the file. The assertion is now
+  a real budget — two thirds of the file — measured against a body-heavy fixture rather than an
+  eighteen-line one. On that fixture the outline costs 261 tokens against 456 for the file: a 43%
+  saving, well short of what the fully-qualified ids in every member line could allow.
+
 ## [0.3.1] - 2026-07-31
 
 ### Fixed
@@ -179,7 +268,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.4.0
 [0.3.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.3.1
 [0.3.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.3.0
 [0.2.2]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.2

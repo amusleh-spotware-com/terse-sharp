@@ -11,9 +11,10 @@ public sealed class FileTools(ToolContext context)
         [Description("File path, absolute or relative to the workspace root.")] string path,
         [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
         [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
+        [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
         [Description("Optional workspace path or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, path, loaded =>
-            NavigationTools.Unwrap(FileService.ReadText(loaded, path, startLine, endLine)));
+            NavigationTools.Unwrap(FileService.ReadText(loaded, path, startLine, endLine, Lines(maxLines))));
 
     [McpServerTool(Name = "write_text")]
     [Description("Create or overwrite a non-C# file atomically. Returns the diff, not the file.")]
@@ -69,4 +70,6 @@ public sealed class FileTools(ToolContext context)
         context.RejectWrite() is { } rejection
             ? Task.FromResult(rejection)
             : context.WithWorkspace(workspace, path, action);
+
+    private static int Lines(int requested) => requested <= 0 ? 2000 : Math.Min(requested, 20000);
 }

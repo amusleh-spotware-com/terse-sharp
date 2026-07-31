@@ -10,6 +10,10 @@ public static class ToolBoundary
         {
             return action();
         }
+        catch (OperationCanceledException)
+        {
+            return Errors.Cancelled().Render();
+        }
         catch (Exception exception) when (IsExpected(exception))
         {
             return Describe(exception);
@@ -22,6 +26,10 @@ public static class ToolBoundary
         {
             return await action().ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            return Errors.Cancelled().Render();
+        }
         catch (Exception exception) when (IsExpected(exception))
         {
             return Describe(exception);
@@ -30,7 +38,8 @@ public static class ToolBoundary
 
     private static bool IsExpected(Exception exception) => exception is
         ArgumentException or InvalidOperationException or InvalidCastException or NotSupportedException
-        or IOException or UnauthorizedAccessException or RegexMatchTimeoutException or FormatException;
+        or IOException or UnauthorizedAccessException or RegexMatchTimeoutException or FormatException
+        or ObjectDisposedException;
 
     private static string Describe(Exception exception) =>
         Errors.Invalid(

@@ -8,20 +8,31 @@ public static class SourceService
         ISymbol symbol,
         CancellationToken cancellationToken)
     {
-        var reference = symbol.DeclaringSyntaxReferences.FirstOrDefault();
+        var references = symbol.DeclaringSyntaxReferences;
 
-        if (reference is null)
+        if (references.Length is 0)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
+        var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value);
+
+        foreach (var reference in references)
+            await AppendAsync(response, reference, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(response.ToString());
+    }
+
+    private static async Task AppendAsync(
+        ResponseBuilder response,
+        SyntaxReference reference,
+        CancellationToken cancellationToken)
+    {
         var node = await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
         var span = node.GetLocation().GetLineSpan();
-        var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value);
 
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"{span.Path}:{span.StartLinePosition.Line + 1}-{span.EndLinePosition.Line + 1}"));
-
-        return Result.Ok(response.Line(node.ToFullString().Trim()).ToString());
+        response.Line(node.ToFullString().Trim());
     }
 
     public static string Describe(ISymbol symbol)

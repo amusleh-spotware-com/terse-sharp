@@ -1,19 +1,30 @@
+using System.Collections.Frozen;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
 
 public static class TextSearchService
 {
+    private const int MaxLineLength = 200;
+
     private static readonly string[] ExcludedDirectories = [".git", "bin", "obj", "node_modules", ".vs", ".idea"];
+
+    private static readonly FrozenSet<string> BinaryExtensions = new[]
+    {
+        ".dll", ".exe", ".pdb", ".so", ".dylib", ".lib", ".obj", ".res", ".resources", ".cache",
+        ".zip", ".7z", ".gz", ".tar", ".nupkg", ".snupkg", ".bin", ".dat", ".db", ".sqlite",
+        ".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp", ".webp", ".pdf",
+        ".ttf", ".otf", ".woff", ".woff2", ".eot", ".mp3", ".mp4", ".wav", ".snk", ".pfx",
+    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     public static string Search(LoadedWorkspace workspace, string pattern, string glob, bool regex, int maxResults)
     {
-        var matcher = regex ? new Regex(pattern, RegexOptions.Compiled, TimeSpan.FromSeconds(2)) : null;
-        var hits = new List<string>(maxResults);
+        var matcher = TextMatcher.Create(pattern, regex);
+        var hits = new List<string>(Math.Min(maxResults, 512));
         var total = 0;
 
         foreach (var file in Files(workspace.Root, glob))
-            total += Scan(file, workspace.Root, pattern, matcher, hits, maxResults);
+            total += Scan(file, matcher, hits, maxResults);
 
         return Render(regex ? "search_regex" : "search_text", pattern, hits, total);
     }
@@ -26,41 +37,46 @@ public static class TextSearchService
         response.Summary(Math.Min(files.Length, maxResults), files.Length, "files");
 
         foreach (var file in files.Take(maxResults))
-            response.Line(Path.GetRelativePath(workspace.Root, file));
+            response.Line(file.RelativePath);
 
         return response.ToString();
     }
 
-    private static int Scan(
-        string file,
-        string root,
-        string pattern,
-        Regex? matcher,
-        List<string> hits,
-        int maxResults)
+    private static int Scan(SourceCandidate file, TextMatcher matcher, List<string> hits, int maxResults)
     {
         var found = 0;
-        var relative = Path.GetRelativePath(root, file);
         var lineNumber = 0;
 
-        foreach (var line in File.ReadLines(file))
+        foreach (var line in ReadLines(file.FullPath))
         {
             lineNumber++;
 
-            if (!Matches(line, pattern, matcher))
+            if (line.Contains('\0'))
+                break;
+
+            if (!matcher.Matches(line))
                 continue;
 
             found++;
-
-            if (hits.Count < maxResults)
-                hits.Add(string.Create(CultureInfo.InvariantCulture, $"{relative}:{lineNumber}  HEURISTIC  {line.Trim()}"));
+            Collect(hits, maxResults, file.RelativePath, lineNumber, line);
         }
 
         return found;
     }
 
-    private static bool Matches(string line, string pattern, Regex? matcher) =>
-        matcher is null ? line.Contains(pattern, StringComparison.Ordinal) : matcher.IsMatch(line);
+    private static void Collect(List<string> hits, int maxResults, string relativePath, int lineNumber, string line)
+    {
+        if (hits.Count >= maxResults)
+            return;
+
+        hits.Add(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{relativePath}:{lineNumber}  HEURISTIC  {Shorten(line.Trim())}"));
+    }
+
+    private static string Shorten(string line) => line.Length <= MaxLineLength
+        ? line
+        : string.Create(CultureInfo.InvariantCulture, $"{line[..MaxLineLength]}... (+{line.Length - MaxLineLength} chars)");
 
     private static string Render(string tool, string pattern, List<string> hits, int total)
     {
@@ -74,18 +90,120 @@ public static class TextSearchService
         return response.ToString();
     }
 
-    private static IEnumerable<string> Files(string root, string glob)
+    private static IEnumerable<SourceCandidate> Files(string root, string glob)
     {
         var matcher = FileGlob.Compile(string.IsNullOrWhiteSpace(glob) ? "*" : glob);
 
-        return Directory
-            .EnumerateFiles(root, "*", SearchOption.AllDirectories)
-            .Where(file => !IsExcluded(file, root))
-            .Where(file => matcher.MatchesFile(root, file));
+        return Walk(root).Where(file => matcher.MatchesRelative(file.RelativePath));
     }
 
-    private static bool IsExcluded(string file, string root) =>
-        Path.GetRelativePath(root, file)
-            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .Any(segment => ExcludedDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase));
+    private static IEnumerable<SourceCandidate> Walk(string root)
+    {
+        var pending = new Stack<string>();
+
+        pending.Push(root);
+
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+
+            foreach (var child in Subdirectories(directory))
+                pending.Push(child);
+
+            foreach (var file in TextFiles(directory))
+                yield return new SourceCandidate(file, Path.GetRelativePath(root, file));
+        }
+    }
+
+    private static IEnumerable<string> Subdirectories(string directory) =>
+        Entries(directory, Directory.EnumerateDirectories)
+            .Where(child => !ExcludedDirectories.Contains(Path.GetFileName(child), StringComparer.OrdinalIgnoreCase));
+
+    private static IEnumerable<string> TextFiles(string directory) =>
+        Entries(directory, Directory.EnumerateFiles)
+            .Where(file => !BinaryExtensions.Contains(Path.GetExtension(file)));
+
+    private static string[] Entries(string directory, Func<string, IEnumerable<string>> enumerate)
+    {
+        try
+        {
+            return [.. enumerate(directory)];
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private static IEnumerable<string> ReadLines(string file)
+    {
+        using var reader = TryOpen(file);
+
+        if (reader is null)
+            yield break;
+
+        while (TryReadLine(reader) is { } line)
+            yield return line;
+    }
+
+    private static StreamReader? TryOpen(string file)
+    {
+        try
+        {
+            return new StreamReader(File.Open(
+                file,
+                new FileStreamOptions
+                {
+                    Mode = FileMode.Open,
+                    Access = FileAccess.Read,
+                    Share = FileShare.ReadWrite | FileShare.Delete,
+                }));
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string? TryReadLine(StreamReader reader)
+    {
+        try
+        {
+            return reader.ReadLine();
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    private readonly record struct SourceCandidate(string FullPath, string RelativePath);
+
+    private readonly record struct TextMatcher(string Pattern, Regex? Expression)
+    {
+        public static TextMatcher Create(string pattern, bool regex) => new(pattern, regex ? Compile(pattern) : null);
+
+        public bool Matches(string line) =>
+            Expression is null ? line.Contains(Pattern, StringComparison.Ordinal) : Expression.IsMatch(line);
+
+        private static Regex Compile(string pattern)
+        {
+            try
+            {
+                return new Regex(pattern, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
+            }
+            catch (NotSupportedException)
+            {
+                return new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
+            }
+        }
+    }
 }

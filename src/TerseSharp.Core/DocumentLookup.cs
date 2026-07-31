@@ -9,13 +9,14 @@ public static class DocumentLookup
         var full = Path.IsPathRooted(path)
             ? Path.GetFullPath(path)
             : Path.GetFullPath(Path.Combine(workspace.Root, path));
+        var name = Path.GetFileName(full);
 
         return workspace.Solution.Projects
             .SelectMany(project => project.Documents)
-            .FirstOrDefault(document => Matches(document, full));
+            .FirstOrDefault(document => Matches(document, full, name));
     }
 
-    private static bool Matches(Document document, string full) =>
-        document.FilePath is { } filePath
-        && Path.GetFullPath(filePath).Equals(full, StringComparison.OrdinalIgnoreCase);
+    private static bool Matches(Document document, string full, string name) =>
+        string.Equals(document.Name, name, PathBoundary.Comparison)
+        && PathBoundary.SameFile(document.FilePath, full);
 }

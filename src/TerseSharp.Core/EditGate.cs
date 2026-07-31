@@ -65,11 +65,21 @@ public static class EditGate
         IReadOnlyList<DocumentId> changed,
         CancellationToken cancellationToken)
     {
-        var projects = changed.Select(id => id.ProjectId).Distinct().ToArray();
+        var projects = Affected(before, changed);
         var baseline = await ErrorsAsync(before, projects, cancellationToken).ConfigureAwait(false);
         var current = await ErrorsAsync(after, projects, cancellationToken).ConfigureAwait(false);
 
         return [.. current.Where(entry => Appeared(baseline, entry)).Select(entry => entry.Key).Take(10)];
+    }
+
+    private static ProjectId[] Affected(Solution solution, IReadOnlyList<DocumentId> changed)
+    {
+        var graph = solution.GetProjectDependencyGraph();
+
+        return [.. changed
+            .Select(id => id.ProjectId)
+            .SelectMany(id => graph.GetProjectsThatTransitivelyDependOnThisProject(id).Append(id))
+            .Distinct()];
     }
 
     private static bool Appeared(Dictionary<string, int> baseline, KeyValuePair<string, int> entry) =>

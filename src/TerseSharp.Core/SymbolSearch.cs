@@ -12,11 +12,12 @@ public static class SymbolSearch
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var found = new List<ISymbol>(maxResults);
+        var ceiling = Math.Max(maxResults * 8, 256);
+        var found = new List<ISymbol>(Math.Min(ceiling, 1024));
 
         foreach (var project in workspace.Solution.Projects)
         {
-            if (found.Count >= maxResults)
+            if (found.Count >= ceiling)
                 break;
 
             var matches = await SymbolFinder

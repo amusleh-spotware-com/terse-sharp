@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace TerseSharp.Core;
 
@@ -33,8 +34,9 @@ public static class SymbolLookup
         CancellationToken cancellationToken)
     {
         var found = new List<ISymbol>();
+        var candidates = await CandidatesAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
 
-        foreach (var project in workspace.Solution.Projects)
+        foreach (var project in candidates)
         {
             var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
 
@@ -45,6 +47,27 @@ public static class SymbolLookup
         }
 
         return found;
+    }
+
+    private static async Task<IReadOnlyList<Project>> CandidatesAsync(
+        LoadedWorkspace workspace,
+        string symbolId,
+        CancellationToken cancellationToken)
+    {
+        var name = LastSegment(symbolId);
+        var narrowed = new List<Project>();
+
+        foreach (var project in workspace.Solution.Projects)
+        {
+            var declarations = await SymbolFinder
+                .FindSourceDeclarationsAsync(project, name, ignoreCase: false, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (declarations.Any())
+                narrowed.Add(project);
+        }
+
+        return narrowed.Count is 0 ? [.. workspace.Solution.Projects] : narrowed;
     }
 
     private static async Task<string[]> NearestAsync(
@@ -60,9 +83,12 @@ public static class SymbolLookup
 
     private static string LastSegment(string symbolId)
     {
-        var withoutParameters = symbolId.Split('(')[0];
+        var withoutPrefix = symbolId.Length > 2 && symbolId[1] is ':' ? symbolId[2..] : symbolId;
+        var withoutParameters = withoutPrefix.Split('(')[0];
         var separator = withoutParameters.LastIndexOf('.');
+        var name = separator < 0 ? withoutParameters : withoutParameters[(separator + 1)..];
+        var arity = name.IndexOf('`', StringComparison.Ordinal);
 
-        return separator < 0 ? withoutParameters : withoutParameters[(separator + 1)..];
+        return arity < 0 ? name : name[..arity];
     }
 }

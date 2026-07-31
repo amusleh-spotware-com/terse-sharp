@@ -13,6 +13,9 @@
     <PackageProjectUrl>https://github.com/amusleh-spotware-com/terse-sharp</PackageProjectUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <RollForward>latestMajor</RollForward>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>

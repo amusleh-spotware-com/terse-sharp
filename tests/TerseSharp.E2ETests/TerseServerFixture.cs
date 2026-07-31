@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
@@ -5,6 +6,9 @@ namespace TerseSharp.E2ETests;
 
 public sealed class TerseServerFixture : IAsyncLifetime
 {
+    private const int ShutdownTimeoutMilliseconds = 10_000;
+
+    private Process? server;
     private McpClient? client;
 
     public static string RepositoryRoot { get; } = FindRepositoryRoot();
@@ -15,13 +19,9 @@ public sealed class TerseServerFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        var transport = new StdioClientTransport(new StdioClientTransportOptions
-        {
-            Name = "terse-sharp",
-            Command = "dotnet",
-            Arguments = [ServerAssemblyPath(), "serve", "--workspace", Path.Combine(FixtureRoot, "FixtureSolution.slnx")],
-            WorkingDirectory = FixtureRoot,
-        });
+        server = StartServer();
+
+        var transport = new StreamClientTransport(server.StandardInput.BaseStream, server.StandardOutput.BaseStream);
 
         client = await McpClient.CreateAsync(transport, cancellationToken: TestContext.Current.CancellationToken);
     }
@@ -30,6 +30,8 @@ public sealed class TerseServerFixture : IAsyncLifetime
     {
         if (client is not null)
             await client.DisposeAsync();
+
+        Terminate(server);
     }
 
     public async Task<string> CallAsync(string tool, Dictionary<string, object?> arguments)
@@ -45,6 +47,67 @@ public sealed class TerseServerFixture : IAsyncLifetime
         var path = Path.Combine(RepositoryRoot, "src", "TerseSharp.Server", "bin", configuration, "net10.0", "terse.dll");
 
         return File.Exists(path) ? path : throw new FileNotFoundException("build TerseSharp.Server first", path);
+    }
+
+    private static Process StartServer()
+    {
+        var start = new ProcessStartInfo("dotnet")
+        {
+            WorkingDirectory = FixtureRoot,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+        };
+
+        foreach (var argument in ServerArguments())
+            start.ArgumentList.Add(argument);
+
+        return Process.Start(start) ?? throw new InvalidOperationException("the terse server did not start");
+    }
+
+    private static string[] ServerArguments() =>
+        [ServerAssemblyPath(), "serve", "--workspace", Path.Combine(FixtureRoot, "FixtureSolution.slnx")];
+
+    private static void Terminate(Process? server)
+    {
+        if (server is null)
+            return;
+
+        CloseInput(server);
+
+        if (!server.WaitForExit(ShutdownTimeoutMilliseconds))
+            KillTree(server);
+
+        server.Dispose();
+    }
+
+    private static void CloseInput(Process server)
+    {
+        try
+        {
+            server.StandardInput.Close();
+        }
+        catch (IOException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private static void KillTree(Process server)
+    {
+        try
+        {
+            server.Kill(entireProcessTree: true);
+            server.WaitForExit(ShutdownTimeoutMilliseconds);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (NotSupportedException)
+        {
+        }
     }
 
     private static string FindRepositoryRoot()

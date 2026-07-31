@@ -34,10 +34,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
             if (!resolved.IsOk)
                 return resolved.Error!.Render();
 
-            var symbol = await SymbolLookup.ResolveAsync(resolved.Value!, symbolId, cancellationToken).ConfigureAwait(false);
+            using var lease = resolved.Value!;
+
+            var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, symbolId, cancellationToken).ConfigureAwait(false);
 
             return symbol.IsOk
-                ? await action(resolved.Value!, symbol.Value!).ConfigureAwait(false)
+                ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)
                 : symbol.Error!.Render();
         }).ConfigureAwait(false);
     }
@@ -50,7 +52,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         {
             var resolved = Registry.Resolve(workspace, pathHint);
 
-            return resolved.IsOk ? action(resolved.Value!) : resolved.Error!.Render();
+            if (!resolved.IsOk)
+                return resolved.Error!.Render();
+
+            using var lease = resolved.Value!;
+
+            return action(lease.Workspace);
         });
     }
 
@@ -65,7 +72,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         {
             var resolved = Registry.Resolve(workspace, pathHint);
 
-            return resolved.IsOk ? await action(resolved.Value!).ConfigureAwait(false) : resolved.Error!.Render();
+            if (!resolved.IsOk)
+                return resolved.Error!.Render();
+
+            using var lease = resolved.Value!;
+
+            return await action(lease.Workspace).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
 

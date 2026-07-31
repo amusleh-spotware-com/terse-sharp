@@ -12,6 +12,7 @@ public static class DiagnosticsService
         CancellationToken cancellationToken)
     {
         var found = new List<Diagnostic>();
+        var scope = DiagnosticScope.For(workspace, path);
 
         foreach (var project in workspace.Solution.Projects)
         {
@@ -20,20 +21,16 @@ public static class DiagnosticsService
             if (compilation is null)
                 continue;
 
-            found.AddRange(compilation.GetDiagnostics(cancellationToken).Where(diagnostic => Keep(diagnostic, path, minimum)));
+            found.AddRange(compilation.GetDiagnostics(cancellationToken).Where(diagnostic => Keep(diagnostic, scope, minimum)));
         }
 
         return Render(path, found, maxResults);
     }
 
-    private static bool Keep(Diagnostic diagnostic, string? path, DiagnosticSeverity minimum) =>
+    private static bool Keep(Diagnostic diagnostic, DiagnosticScope scope, DiagnosticSeverity minimum) =>
         diagnostic.Severity >= minimum
         && !diagnostic.IsSuppressed
-        && (path is null || InFile(diagnostic, path));
-
-    private static bool InFile(Diagnostic diagnostic, string path) =>
-        diagnostic.Location.GetLineSpan().Path is { Length: > 0 } actual
-        && Path.GetFullPath(actual).Equals(Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase);
+        && scope.Includes(diagnostic.Location);
 
     private static string Render(string? path, List<Diagnostic> found, int maxResults)
     {

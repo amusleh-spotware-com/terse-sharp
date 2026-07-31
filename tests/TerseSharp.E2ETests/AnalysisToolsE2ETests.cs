@@ -93,6 +93,32 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.All(records, line => Assert.StartsWith("TERSE001", line, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task Analyze_ScopedToAFile_ExcludesDeadCodeFoundInOtherFiles()
+    {
+        var text = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/Order.cs",
+            ["minSeverity"] = "info",
+        });
+
+        Assert.DoesNotContain("NeverCalled", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_ScopedToTheFileHoldingIt_StillReportsThatDeadCode()
+    {
+        var text = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["minSeverity"] = "info",
+        });
+
+        Assert.Contains("NeverCalled", text, StringComparison.Ordinal);
+        Assert.Contains("TERSE001", text, StringComparison.Ordinal);
+    }
+
     private static int Total(string response)
     {
         var digits = response[(response.IndexOf("total=", StringComparison.Ordinal) + "total=".Length)..]

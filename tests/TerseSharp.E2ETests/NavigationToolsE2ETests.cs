@@ -46,6 +46,17 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task GetFileOutline_ListsEnumsAndDelegates()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+
+        Assert.Contains("T:Fixture.Trading.OrderSide", text, StringComparison.Ordinal);
+        Assert.Contains("F:Fixture.Trading.OrderSide.Buy", text, StringComparison.Ordinal);
+        Assert.Contains("T:Fixture.Trading.OrderSubmitted", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 types", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetSymbolSource_ReturnsOnlyThatMember()
     {
         var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)" });

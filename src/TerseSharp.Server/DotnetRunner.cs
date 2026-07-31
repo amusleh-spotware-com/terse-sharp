@@ -107,12 +107,23 @@ public static partial class DotnetRunner
         response.Summary(diagnostics.Length, diagnostics.Length, "diagnostics");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}"));
 
+        AppendLockWarning(response, run);
+
         foreach (var diagnostic in diagnostics)
             response.Line(diagnostic);
 
         AppendTail(response, run, diagnostics.Length);
 
         return response.ToString();
+    }
+
+    private static void AppendLockWarning(ResponseBuilder response, ProcessRun run)
+    {
+        if (run.ExitCode is 0 || !LockedOutput().IsMatch(run.Output))
+            return;
+
+        response.Note("WARNING a locked output file blocked the build; the loaded workspace holds MSBuild file locks");
+        response.Note("remedy: unload_workspace, retry build, then load_workspace");
     }
 
     private static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request)
@@ -301,6 +312,9 @@ public static partial class DotnetRunner
 
     [GeneratedRegex(@"^.*?: (error|warning) [A-Z]+\d+:.*$", RegexOptions.Multiline)]
     private static partial Regex DiagnosticLine();
+
+    [GeneratedRegex(@"MSB3021|MSB3027|being used by another process", RegexOptions.IgnoreCase)]
+    private static partial Regex LockedOutput();
 }
 
 internal sealed record ProcessRun(int ExitCode, string Output, long ElapsedMilliseconds, bool TimedOut = false);

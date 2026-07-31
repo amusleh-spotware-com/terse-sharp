@@ -26,9 +26,7 @@ public static class MsBuildBootstrap
         if (MSBuildLocator.IsRegistered)
             return "already-registered";
 
-        var instance = MSBuildLocator.QueryVisualStudioInstances()
-            .OrderByDescending(candidate => candidate.Version)
-            .FirstOrDefault();
+        var instance = Best(MSBuildLocator.QueryVisualStudioInstances());
 
         if (instance is null)
             return "no-msbuild-found";
@@ -36,5 +34,13 @@ public static class MsBuildBootstrap
         MSBuildLocator.RegisterInstance(instance);
 
         return string.Create(CultureInfo.InvariantCulture, $"{instance.Name} {instance.Version} at {instance.MSBuildPath}");
+    }
+
+    private static VisualStudioInstance? Best(IEnumerable<VisualStudioInstance> candidates)
+    {
+        var ordered = candidates.OrderByDescending(candidate => candidate.Version).ToArray();
+
+        return Array.Find(ordered, candidate => candidate.Version.Major == Environment.Version.Major)
+            ?? ordered.FirstOrDefault();
     }
 }
