@@ -58,15 +58,15 @@ Fix the test from that block — do not shell out to `dotnet test` for the stack
 | one project | `run_tests(project)` |
 | one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
 | one case of a parameterized test | `run_tests(test)` with the case name — runs the whole theory, since the runner's `FullyQualifiedName` carries no arguments |
-
-`test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs `…SubmitsTwice`)
-runs both — check `total=` to see what actually ran, and use `filter="FullyQualifiedName=<name>"` when
-you need exactly one.
 | a raw VSTest expression | `run_tests(filter)` |
 | skip the rebuild | `run_tests(noBuild: true)` |
 | only what just failed | `rerun_failed` |
 | the slowest N | `run_tests(slowest: 10)` |
 | names without running | `list_tests(contains)` |
+
+`test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs `…SubmitsTwice`)
+runs both — check `total=` to see what actually ran, and use `filter="FullyQualifiedName=<name>"` when
+you need exactly one.
 
 `total=0` with a `WARNING` line means **nothing ran** — a filter typo, not a green suite. A run that
 produced no results at all reports `FAILED …, no test results were produced` and never `0 failures`.
