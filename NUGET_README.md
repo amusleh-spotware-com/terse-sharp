@@ -77,6 +77,12 @@ terse install --skill               # also install the agent skill
 terse doctor                        # verify SDK, MSBuild, workspace load, client registration
 ```
 
+**🎮 Unity:** works on Unity game code too — Unity generates a real `.sln` with
+`Assembly-CSharp.csproj`, so outlines, `find_usages`, symbol-addressed edits and compile-gated rename
+across your `MonoBehaviour`s all work. Open the project in the editor once so the project files exist.
+Scene graph, inspector values and play-mode state are out of scope: TerseSharp answers questions about
+your **C# code**, not the editor.
+
 With no arguments the server walks up from the current directory, finds your `.sln` / `.slnx` /
 `.slnf` / `.csproj`, and loads it.
 

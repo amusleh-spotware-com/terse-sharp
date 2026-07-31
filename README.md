@@ -129,6 +129,33 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 `terse install` and `terse doctor` follow it, `--skill` lands in `$CLAUDE_CONFIG_DIR/skills` (else
 `~/.claude/skills`), and `doctor` prints the config path it read.
 
+<details>
+<summary><b>🎮 Unity projects</b></summary>
+
+Unity generates a real `.sln` with `Assembly-CSharp.csproj` and friends, so TerseSharp works on Unity
+game code exactly as it does on any other solution — outlines, `find_usages`, symbol-addressed edits,
+compile-gated rename across your `MonoBehaviour`s, `analyze` with whatever analyzers your project
+references.
+
+```bash
+cd /path/to/UnityProject      # the folder holding the generated .sln
+terse install
+```
+
+Two things to know:
+
+- **Open the project in the Unity editor once first**, or run *Assets → Open C# Project*, so the
+  `.sln` and `.csproj` files exist. TerseSharp reads them; it does not generate them.
+- **Editor state is out of scope.** TerseSharp is a headless Roslyn server — it will not read your
+  scene graph, inspector values, `ScriptableObject` assets or play-mode state, and it does not drive
+  the editor. It answers questions about your **C# code**. For scene and asset work, use a
+  Unity-specific MCP alongside it.
+
+Regenerate the project files after adding assemblies or packages, then call `load_workspace` again (or
+restart the server) so the new projects are picked up.
+
+</details>
+
 ---
 
 ## 🔒 Make your agent actually use it
@@ -371,8 +398,9 @@ described in [RELEASING.md](RELEASING.md).
 - **Debugging and profiling** — a debugger needs a live session and a profiler needs a trace host;
   both are separate products, and `dotnet-trace` and your IDE already do them well.
 - **Live XAML visual-tree inspection** — needs a running app. Avalonia's DevTools MCP does it properly.
-- **Unity / Unreal editor tools** — they read a live editor's state. A headless process cannot, and six
-  broken tools are worse than none.
+- **Unity / Unreal *editor* tools** — scene graph, inspector, play-mode state. Those read a live
+  editor, which a headless process cannot, and six broken tools are worse than none. The **C# code**
+  in a Unity project is fully supported — see the Unity note under [Install](#-install).
 - **Commit / push** — git access is read-only. Your agent already has git.
 - **Arbitrary shell execution** — only `dotnet build` / `dotnet test`, deadlined and killed on timeout.
 - **VB.NET / F# language tools** — C# first; they load without breaking navigation and language tools
