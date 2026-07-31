@@ -18,7 +18,7 @@ or grepping for a type name, costs 10-30x more tokens and returns matches that a
 | `Grep` for a type or member name | `search_symbols(query)` | declarations only; supports CamelHump (`OSvc` finds `OrderService`) |
 | `Grep` to find callers | `find_usages(symbolId)` | real references; excludes comments, strings and unrelated matches |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
-| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `node_modules` excluded |
+| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `node_modules` excluded; `**/Views/*.xaml` spans directories, `*` and `?` stop at a separator |
 | `Grep` in non-code files | `search_text` / `search_regex` | results tagged `HEURISTIC` |
 | `Edit` a `.cs` file | `replace_symbol_body` / `replace_symbol` / `add_member` | addressed by symbol id, so line drift cannot break it |
 | find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, includes interfaces, overrides and doc crefs |

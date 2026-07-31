@@ -39,7 +39,7 @@ public sealed class FileTools(ToolContext context)
     [McpServerTool(Name = "find_files")]
     [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git and node_modules are excluded.")]
     public Task<string> FindFiles(
-        [Description("Glob such as *.csproj or *Tests.cs.")] string glob,
+        [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string glob,
         [Description("Optional workspace path or worktree name.")] string? workspace = null,
         [Description("Maximum results, default 100.")] int maxResults = 0) =>
         context.WithWorkspace(workspace, null, loaded =>
@@ -49,7 +49,7 @@ public sealed class FileTools(ToolContext context)
     [Description("Literal text search across the workspace. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
     public Task<string> SearchText(
         [Description("Literal text to find.")] string pattern,
-        [Description("Optional file glob, e.g. *.json.")] string? glob = null,
+        [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Optional workspace path or worktree name.")] string? workspace = null,
         [Description("Maximum results, default 100.")] int maxResults = 0) =>
         context.WithWorkspace(workspace, null, loaded =>
@@ -59,7 +59,7 @@ public sealed class FileTools(ToolContext context)
     [Description("Regular-expression search across the workspace. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
         [Description(".NET regular expression.")] string pattern,
-        [Description("Optional file glob, e.g. *.cs.")] string? glob = null,
+        [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Optional workspace path or worktree name.")] string? workspace = null,
         [Description("Maximum results, default 100.")] int maxResults = 0) =>
         context.WithWorkspace(workspace, null, loaded =>

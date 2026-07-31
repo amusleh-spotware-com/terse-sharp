@@ -6,7 +6,7 @@ namespace TerseSharp.Core;
 public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
 {
     public static FileGlob Compile(string glob) => new(
-        new Regex(Translate(glob), RegexOptions.NonBacktracking | RegexOptions.IgnoreCase),
+        new Regex(Translate(glob), RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
         IsPathPattern(glob));
 
     public static bool IsPathPattern(string glob) =>

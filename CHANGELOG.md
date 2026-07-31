@@ -23,6 +23,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   each file's workspace-relative path, with `**/` meaning "any directories or none", `*` and `?`
   confined to one segment; a bare glob such as `*.csproj` still matches on the file name.
 
+### Changed
+
+- **A bare glob now follows glob rules rather than Win32 wildcard rules.** Matching no longer goes
+  through `Directory.EnumerateFiles`, so the DOS quirks it inherited are gone: `*.*` matches only
+  names that contain a dot (it used to match every file, extensionless ones included), `Order?.cs`
+  no longer matches `Order.cs` (`?` now requires exactly one character), and a trailing `.` is
+  literal. Common globs — `*.cs`, `*`, `Order*.cs`, `*.c?` — are unaffected.
+
 ## [0.3.0] - 2026-07-31
 
 ### Added

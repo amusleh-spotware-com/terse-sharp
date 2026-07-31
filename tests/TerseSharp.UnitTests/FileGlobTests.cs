@@ -44,6 +44,15 @@ public sealed class FileGlobTests
     public void IsPathPattern_ABareFileGlob_IsFalse(string glob) =>
         Assert.False(FileGlob.IsPathPattern(glob));
 
+    [Theory]
+    [InlineData("Order.cs", "*.*", true)]
+    [InlineData("README", "*.*", false)]
+    [InlineData("Order.cs", "Order?.cs", false)]
+    [InlineData("Order1.cs", "Order?.cs", true)]
+    [InlineData("README", "*.", false)]
+    public void Matches_ADosWildcardQuirk_FollowsGlobRulesNotWin32(string path, string glob, bool expected) =>
+        Assert.Equal(expected, FileGlob.Compile(glob).Matches(path));
+
     [Fact]
     public void Matches_ARegexMetacharacterInTheGlob_IsTakenLiterally()
     {

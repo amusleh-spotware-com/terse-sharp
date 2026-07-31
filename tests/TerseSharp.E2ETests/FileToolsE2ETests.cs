@@ -33,6 +33,8 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("find_files", new() { ["glob"] = "**/Views/*.xaml" });
 
         Assert.Contains("OrderView.xaml", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Order.cs", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("appsettings.json", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
@@ -55,6 +57,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         });
 
         Assert.Contains("OrderView.xaml", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(".cs:", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
