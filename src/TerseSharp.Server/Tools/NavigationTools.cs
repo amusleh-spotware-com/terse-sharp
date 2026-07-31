@@ -55,14 +55,15 @@ public sealed class NavigationTools(ToolContext context)
             Unwrap(await SourceService.OfSymbolAsync(loaded.Root, symbol, cancellationToken).ConfigureAwait(false)), cancellationToken);
 
     [McpServerTool(Name = "find_usages")]
-    [Description("Every real reference to a symbol, resolved semantically. Use instead of Grep for a type or member name; comments and unrelated matches are excluded.")]
+    [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded.")]
     public Task<string> FindUsages(
         [Description("Symbol id to find references for.")] string symbolId,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
+        [Description("Also name the member each usage sits in, one line per member instead of per file (default false).")] bool containers = false,
         CancellationToken cancellationToken = default) =>
         context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            ReferenceService.FindUsagesAsync(loaded, symbol, Cap(maxResults, 100), cancellationToken), cancellationToken);
+            ReferenceService.FindUsagesAsync(loaded, symbol, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_implementations")]
     [Description("Implementations of an interface or abstract member, and derived types of a base type.")]

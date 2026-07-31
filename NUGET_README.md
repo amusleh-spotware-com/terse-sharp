@@ -69,7 +69,7 @@ Prefer to configure it by hand:
 | `Read` a `.cs` file | `get_file_outline` | types + members + line ranges, no bodies |
 | `Read` to see one method | `get_symbol_source` | that member only |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
-| `Grep` to find callers | `find_usages` | real references; no comments, no string matches |
+| `Grep` to find callers | `find_usages` | real references, one line per file with a `src`/`test` marker; `containers=true` also names the member each usage sits in |
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs |
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
@@ -112,7 +112,9 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
 - **`dryRun` on every mutation** returns the unified diff and writes nothing.
 - **Compile-gated** — an edit that introduces a *new* compile error is rolled back and the error
   returned. Pre-existing errors never block an edit. `allowErrors: true` opts out.
-- **Diff-only responses** — mutations return the diff and a changed-line count, never the file.
+- **Diff-only responses** — mutations return the diff, a changed-line count and
+  `errors=N (+D) warnings=N (+D)`, never the file. A `dryRun` that would be rolled back says so and
+  names the errors it would introduce.
 - **Workspace containment** — paths compare by whole segment, so root `C:\repo` does not contain
   `C:\repoEvil`.
 - **`--read-only`** makes every mutating tool refuse and touch nothing.

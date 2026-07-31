@@ -76,6 +76,43 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task FindUsages_NamesTheMemberEachUsageSitsIn()
+    {
+        var text = await server.CallAsync("find_usages", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+            ["containers"] = true,
+        });
+
+        Assert.Contains("in OrderRouter.", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("in -", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindUsages_WithoutContainers_StaysOneLinePerFile()
+    {
+        var text = await server.CallAsync("find_usages", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+        });
+
+        Assert.DoesNotContain("  in ", text, StringComparison.Ordinal);
+        Assert.Equal(2, text.Split('\n').Count(line => line.Contains("EXACT", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task FindUsages_MarksEachCallSiteAsProductionOrTestCode()
+    {
+        var text = await server.CallAsync("find_usages", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+        });
+
+        Assert.Contains("  src  ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("  test  ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task FindImplementations_ResolvesThroughTheInterface()
     {
         var text = await server.CallAsync("find_implementations", new() { ["symbolId"] = "M:Fixture.Trading.IOrderRepository.Submit(Fixture.Trading.Order)" });

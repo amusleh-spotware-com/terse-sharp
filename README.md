@@ -204,7 +204,7 @@ all never reports `0 failures`.
 | `Read` a `.cs` file | `get_file_outline` | types + members + line ranges, no bodies |
 | `Read` to see one method | `get_symbol_source` | that member only |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
-| `Grep` to find callers | `find_usages` | real references; no comments, no string matches |
+| `Grep` to find callers | `find_usages` | real references, each naming the member it sits in and whether it is `src` or `test` |
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
@@ -217,7 +217,10 @@ all never reports `0 failures`.
 - **`dryRun` on every mutation** returns the unified diff and writes nothing.
 - **Compile-gated.** An edit that introduces a *new* compile error is rolled back and the error
   returned. `allowErrors: true` opts out when you're mid-refactor on purpose.
-- **Diff-only responses.** Mutations return the diff and a changed-line count, never the file.
+- **Diff-only responses.** Mutations return the diff, a changed-line count and
+  `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents — never the file. On
+  `dryRun` that makes the preview say whether the edit would break the build, so no separate `analyze`
+  call is needed after an edit.
 - **Workspace containment.** Every path is compared by whole path segment: root `C:\repo` does not
   contain `C:\repoEvil`.
 - **`--read-only`** makes every mutating tool refuse with `ERROR ReadOnly` and touch nothing. (They

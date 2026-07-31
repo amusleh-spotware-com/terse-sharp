@@ -8,6 +8,20 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
 
     [Fact]
+    public async Task ReplaceSymbolBody_WithDryRun_ReportsTheDiagnosticCountsTheEditWouldLeave()
+    {
+        var text = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = UnusedMethod,
+            ["body"] = "{ return 9; }",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.Contains("warnings=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReplaceSymbolBody_WithDryRun_ReturnsDiffAndLeavesTheFileUntouched()
     {
         var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);

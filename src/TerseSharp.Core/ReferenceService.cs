@@ -9,6 +9,7 @@ public static class ReferenceService
         LoadedWorkspace workspace,
         ISymbol symbol,
         int maxResults,
+        bool containers,
         CancellationToken cancellationToken)
     {
         var references = await SymbolFinder
@@ -22,7 +23,8 @@ public static class ReferenceService
             .ThenBy(location => location.Location.SourceSpan.Start)
             .ToArray();
 
-        return Render(workspace.Root, symbol, locations, maxResults);
+        return await RenderAsync(workspace.Root, symbol, locations, maxResults, containers, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public static async Task<string> FindImplementationsAsync(
@@ -51,7 +53,13 @@ public static class ReferenceService
         CultureInfo.InvariantCulture,
         $"{SymbolFormat.Location(root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Describe(symbol)}");
 
-    private static string Render(string root, ISymbol symbol, ReferenceLocation[] locations, int maxResults)
+    private static async Task<string> RenderAsync(
+        string root,
+        ISymbol symbol,
+        ReferenceLocation[] locations,
+        int maxResults,
+        bool containers,
+        CancellationToken cancellationToken)
     {
         var shown = Math.Min(maxResults, locations.Length);
         var files = locations.Select(location => location.Document.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
@@ -59,15 +67,54 @@ public static class ReferenceService
 
         response.Summary(shown, locations.Length, string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"));
 
-        foreach (var group in locations.Take(shown).GroupBy(location => UsageGroup.Of(root, location)))
-            response.Line(Describe(group.Key, group));
+        var grouped = await GroupAsync(root, locations.Take(shown), containers, cancellationToken).ConfigureAwait(false);
+
+        foreach (var group in grouped.GroupBy(entry => entry.Group))
+            response.Line(Describe(group.Key, group.Select(entry => entry.Location)));
 
         return response.ToString();
     }
 
-    private static string Describe(UsageGroup group, IEnumerable<ReferenceLocation> locations) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"{group.Path}  {group.Confidence}  {group.Kind}  {Positions(locations)}");
+    private static async Task<List<UsageEntry>> GroupAsync(
+        string root,
+        IEnumerable<ReferenceLocation> locations,
+        bool containers,
+        CancellationToken cancellationToken)
+    {
+        var entries = new List<UsageEntry>();
+        var roots = new Dictionary<DocumentId, SyntaxNode?>();
+
+        foreach (var location in locations)
+        {
+            var syntax = containers
+                ? await RootOfAsync(roots, location.Document, cancellationToken).ConfigureAwait(false)
+                : null;
+
+            entries.Add(new UsageEntry(UsageGroup.Of(root, location, syntax), location));
+        }
+
+        return entries;
+    }
+
+    private static async Task<SyntaxNode?> RootOfAsync(
+        Dictionary<DocumentId, SyntaxNode?> roots,
+        Document document,
+        CancellationToken cancellationToken)
+    {
+        if (roots.TryGetValue(document.Id, out var cached))
+            return cached;
+
+        return roots[document.Id] = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string Describe(UsageGroup group, IEnumerable<ReferenceLocation> locations)
+    {
+        var container = group.Container is null ? string.Empty : "in " + group.Container + "  ";
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{group.Path}  {group.Confidence}  {group.Kind}  {group.Scope}  {container}{Positions(locations)}");
+    }
 
     private static string Positions(IEnumerable<ReferenceLocation> locations) =>
         string.Join(", ", locations.Select(Position));
@@ -87,11 +134,15 @@ public static class ReferenceService
     private static Confidence ConfidenceOf(ReferenceLocation location) =>
         location.CandidateReason is CandidateReason.None ? Confidence.Exact : Confidence.Heuristic;
 
-    private readonly record struct UsageGroup(string Path, string Confidence, string Kind)
+    private readonly record struct UsageEntry(UsageGroup Group, ReferenceLocation Location);
+
+    private readonly record struct UsageGroup(string Path, string Confidence, string Kind, string Scope, string? Container)
     {
-        public static UsageGroup Of(string root, ReferenceLocation location) => new(
+        public static UsageGroup Of(string root, ReferenceLocation location, SyntaxNode? syntax) => new(
             PositionFormat.Relative(root, location.Location.GetLineSpan().Path),
             ConfidenceTag.Of(ConfidenceOf(location)),
-            ClassifyKind(location));
+            ClassifyKind(location),
+            TestScope.Of(location.Document.Project),
+            UsageContainer.Of(syntax, location.Location.SourceSpan));
     }
 }

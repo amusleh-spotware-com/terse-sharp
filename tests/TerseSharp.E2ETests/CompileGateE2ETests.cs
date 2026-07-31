@@ -28,6 +28,34 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AnEdit_ReportsTheDiagnosticCountsAndTheDeltaItCaused()
+    {
+        var text = await CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["body"] = "{ return 3; }",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=1 (+0) warnings=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("would be rolled back", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADryRunThatWouldBreakTheBuild_SaysSoInsteadOfReportingAZeroDelta()
+    {
+        var text = await CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["body"] = "{ return undefinedSymbol; }",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("CS0103", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EditingAValidMember_AppliesEvenThoughTheFileAlreadyHasAnUnrelatedError()
     {
         var text = await CallAsync("replace_symbol_body", new()

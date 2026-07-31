@@ -9,7 +9,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 ## [Unreleased]
 
 > **This is a MAJOR change.** `xaml_bindings`, `xaml_outline`, `xaml_names`, `xaml_find` and
-> `xaml_validate` all changed their response format: records are workspace-relative rather than
+> `xaml_validate` all changed their response format, and `find_usages` gained two columns: records are
+> workspace-relative rather than
 > file-name-only, `xaml_bindings` and `xaml_outline` carry a `dialect=` note, `xaml_bindings` gains a
 > trailing verdict column when `validate=true`, `xaml_find` reports `HEURISTIC` where it used to report
 > `EXACT`, and `xaml_outline`'s `total` now counts the whole tree rather than what it printed.
@@ -73,7 +74,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `scope=solution` reports the unparseable file itself as `XAML000`.
 - **The XAML walk does not follow directory junctions or symlinks**, which a self-referential link would
   otherwise turn into an unbounded traversal.
-- Test count: 198 unit and 254 E2E.
+- **`find_usages` names the member each usage sits in, and whether it is production or test code.**
+  A record was `path  EXACT  ref  12:5, 40:9` — enough to find the file, never enough to end the
+  investigation, so the agent opened the file anyway. It is now
+  `path  EXACT  ref  src  12:5, 40:9`, and with `containers=true`
+  `path  EXACT  ref  src  in OrderRouter.Route  12:5, 40:9`. The containing declaration comes from the
+  document's syntax tree, which is already parsed, so it costs no compilation; the `src`/`test` column
+  comes from whether the owning project references a test framework. Naming the member splits the
+  answer into one line per member rather than per file, which on a widely-used symbol measured 3× the
+  tokens, so it is off by default. This is a response-format change.
+- **Every edit reports the diagnostics it leaves behind.** `EditGate` already compiled the changed
+  projects and their dependents to decide whether to roll back, then threw the numbers away. Each
+  mutation — and each `dryRun` — now carries `errors=N (+D) warnings=N (+D)`, so an agent stops issuing
+  a separate `analyze` after every edit, and `dryRun` becomes a real preview. The delta alone is not a
+  rollback oracle — one error can disappear while another appears, leaving `(+0)` on an edit that would
+  be refused — so a `dryRun` that would be rolled back also says `WARNING … would be rolled back` and
+  names the errors it introduces. `allowErrors=true` still skips the analysis and reports no counts;
+  it is also the way to get the old cheap diff-only preview back, since the gate now compiles the
+  changed projects and their dependents on `dryRun` too.
+- Test count: 212 unit and 260 E2E.
 
 ## [0.6.0] - 2026-07-31
 
