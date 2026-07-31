@@ -15,8 +15,9 @@ public sealed class FileGlobTests
     [InlineData("src/Trading/Order.cs", "src/**")]
     [InlineData("Order.cs", "**/Order.cs")]
     [InlineData("src\\Trading\\Order.cs", "**/Order.cs")]
+    [InlineData("a/b/c/d/e/f/Order.cs", "**/**/**/Order.cs")]
     public void Matches_APatternThatCoversThePath_IsTrue(string path, string glob) =>
-        Assert.True(FileGlob.Matches(path, glob), glob + " should match " + path);
+        Assert.True(FileGlob.Compile(glob).Matches(path), glob + " should match " + path);
 
     [Theory]
     [InlineData("src/Trading/Order.cs", "*.cs")]
@@ -24,8 +25,10 @@ public sealed class FileGlobTests
     [InlineData("src/Trading/Order.cs", "**/Order.xaml")]
     [InlineData("src/Trading/OrderService.cs", "**/Order.cs")]
     [InlineData("Order.cs", "*.xaml")]
+    [InlineData("Order.csx", "*.cs")]
+    [InlineData("Order.cs", "**/src/*.cs")]
     public void Matches_APatternThatDoesNotCoverThePath_IsFalse(string path, string glob) =>
-        Assert.False(FileGlob.Matches(path, glob), glob + " should not match " + path);
+        Assert.False(FileGlob.Compile(glob).Matches(path), glob + " should not match " + path);
 
     [Theory]
     [InlineData("**/Apps/Automate2App/AutomateApp.xaml")]
@@ -44,7 +47,7 @@ public sealed class FileGlobTests
     [Fact]
     public void Matches_ARegexMetacharacterInTheGlob_IsTakenLiterally()
     {
-        Assert.True(FileGlob.Matches("Order(1).cs", "Order(1).cs"));
-        Assert.False(FileGlob.Matches("Orderx1y.cs", "Order(1).cs"));
+        Assert.True(FileGlob.Compile("Order(1).cs").Matches("Order(1).cs"));
+        Assert.False(FileGlob.Compile("Order(1).cs").Matches("Orderx1y.cs"));
     }
 }

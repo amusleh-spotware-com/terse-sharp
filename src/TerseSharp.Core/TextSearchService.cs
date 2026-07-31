@@ -76,14 +76,12 @@ public static class TextSearchService
 
     private static IEnumerable<string> Files(string root, string glob)
     {
-        var pattern = string.IsNullOrWhiteSpace(glob) ? "*" : glob;
+        var matcher = FileGlob.Compile(string.IsNullOrWhiteSpace(glob) ? "*" : glob);
 
         return Directory
             .EnumerateFiles(root, "*", SearchOption.AllDirectories)
             .Where(file => !IsExcluded(file, root))
-            .Where(file => FileGlob.IsPathPattern(pattern)
-                ? FileGlob.Matches(Path.GetRelativePath(root, file), pattern)
-                : FileGlob.Matches(Path.GetFileName(file), pattern));
+            .Where(file => matcher.MatchesFile(root, file));
     }
 
     private static bool IsExcluded(string file, string root) =>

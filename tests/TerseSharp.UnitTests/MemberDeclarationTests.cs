@@ -54,4 +54,20 @@ public sealed class MemberDeclarationTests
 
         Assert.True(result.IsOk);
     }
+
+    [Theory]
+    [InlineData("public required int Volume { get; init; }")]
+    [InlineData("public static T Widen<T>(T value) where T : struct, IEquatable<T> => value;")]
+    [InlineData("public string Text => \"\"\"a raw \"string\" literal\"\"\";")]
+    [InlineData("public event EventHandler<OrderEventArgs>? Filled;")]
+    [InlineData("public sealed record Money(decimal Amount, string Currency);")]
+    [InlineData("public sealed class Repository(IClock clock) { }")]
+    [InlineData("public int this[int index] => index;")]
+    [InlineData("public static explicit operator int(Order order) => 0;")]
+    [InlineData("[Obsolete(\"use Submit\")]\npublic void Send() { }")]
+    [InlineData("public async Task<int> CountAsync(CancellationToken cancellationToken) => await Task.FromResult(0);")]
+    [InlineData("private const string Separator = \";\";")]
+    [InlineData("public partial void OnChanged();")]
+    public void Parse_AnUncommonButLegalSingleMember_IsStillAccepted(string declaration) =>
+        Assert.True(MemberDeclaration.Parse(declaration).IsOk, declaration);
 }

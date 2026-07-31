@@ -3,13 +3,19 @@ using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
 
-public static class FileGlob
+public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
 {
+    public static FileGlob Compile(string glob) => new(
+        new Regex(Translate(glob), RegexOptions.NonBacktracking | RegexOptions.IgnoreCase),
+        IsPathPattern(glob));
+
     public static bool IsPathPattern(string glob) =>
         glob.Contains('/', StringComparison.Ordinal) || glob.Contains('\\', StringComparison.Ordinal);
 
-    public static bool Matches(string relativePath, string glob) =>
-        Regex.IsMatch(relativePath.Replace('\\', '/'), Translate(glob), RegexOptions.IgnoreCase);
+    public bool Matches(string path) => Pattern.IsMatch(path.Replace('\\', '/'));
+
+    public bool MatchesFile(string root, string file) =>
+        Matches(MatchesPath ? Path.GetRelativePath(root, file) : Path.GetFileName(file));
 
     private static string Translate(string glob)
     {
