@@ -26,7 +26,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   received the path filter, and generated output was never excluded. The tool that the "check every
   file you touched" workflow depends on was returning pure noise. Dead-code findings now honour the
   path, and `obj/`, `bin/`, `*.g.cs`, `*.designer.cs`, `AssemblyInfo.cs` and `AssemblyAttributes.cs`
-  are excluded from `analyze` and `get_diagnostics` alike.
+  are excluded from `analyze` and `get_diagnostics` alike — **except at `Error` severity**, where a
+  generated file's diagnostic is a real build break and is always reported, and except when the
+  generated file is the one named in `path`.
 - **`get_file_outline` could not see enums or delegates.** The outline collected
   `TypeDeclarationSyntax` only, so a file declaring nothing but an enum answered `0 types` and an
   agent reasonably concluded the file was empty — then read it with a built-in tool. Enums, their
@@ -78,13 +80,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   search is scoped to those.
 - **Searches no longer walk `.git`, `bin`, `obj` and `node_modules` before discarding them.** The walk
   prunes excluded directories as it descends instead of enumerating everything and filtering after,
-  skips known-binary extensions without opening them, stops on the first NUL byte, and computes each
-  file's relative path once instead of three times.
+  stops on the first NUL byte, and computes each file's relative path once instead of three times.
+  `search_text` and `search_regex` additionally skip known-binary extensions without opening them;
+  `find_files` still lists those files, because locating a `.png` is not the same as reading one.
 - **Resolving a symbol id no longer compiles every project.** `SymbolLookup` narrows to the projects
   whose declaration index contains the name before asking for a compilation, falling back to the full
   set when the name cannot be derived from the id.
-- **`analyze` on a single file runs its analyzers on that file** through the syntax- and
-  semantic-diagnostic entry points rather than over the whole project.
 - **`DocumentLookup` compares file names before normalising paths**, replacing one `Path.GetFullPath`
   per document in the solution with one per same-named document.
 - **Server GC and TieredPGO are enabled** for the server process, which holds Roslyn compilations.

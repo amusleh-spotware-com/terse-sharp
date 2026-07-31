@@ -26,6 +26,9 @@ public sealed class WorkspaceRegistryConcurrencyTests
                     resolved.IsOk || resolved.Error!.Code is TerseErrorCode.WorkspaceNotLoaded,
                     $"unexpected state: {resolved.Error?.Code}");
                 Assert.InRange(registry.All().Count, 0, 1);
+
+                if (resolved.IsOk)
+                    resolved.Value!.Dispose();
             }
         }
 

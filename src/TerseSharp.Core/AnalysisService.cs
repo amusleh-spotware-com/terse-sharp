@@ -21,7 +21,7 @@ public static class AnalysisService
         var document = path is null ? null : DocumentLookup.Find(workspace, path);
 
         foreach (var project in Targets(workspace, document))
-            await CollectAsync(project, document, found, engines, cancellationToken).ConfigureAwait(false);
+            await CollectAsync(project, found, engines, cancellationToken).ConfigureAwait(false);
 
         var extra = includeDeadCode
             ? await DeadCodeService.FindAsync(workspace, path, cancellationToken).ConfigureAwait(false)
@@ -43,7 +43,6 @@ public static class AnalysisService
 
     private static async Task CollectAsync(
         Project project,
-        Document? document,
         List<Diagnostic> found,
         List<string> engines,
         CancellationToken cancellationToken)
@@ -61,7 +60,7 @@ public static class AnalysisService
             return;
 
         AddEngine(engines, project);
-        found.AddRange(await RunAsync(compilation, project, analyzers, document, cancellationToken).ConfigureAwait(false));
+        found.AddRange(await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false));
     }
 
     private static void AddEngine(List<string> engines, Project project)
@@ -76,7 +75,6 @@ public static class AnalysisService
         Compilation compilation,
         Project project,
         ImmutableArray<DiagnosticAnalyzer> analyzers,
-        Document? document,
         CancellationToken cancellationToken)
     {
         var options = new CompilationWithAnalyzersOptions(
@@ -87,26 +85,7 @@ public static class AnalysisService
 
         var withAnalyzers = compilation.WithAnalyzers(analyzers, options);
 
-        return document is null
-            ? await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false)
-            : await ForDocumentAsync(withAnalyzers, document, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async Task<ImmutableArray<Diagnostic>> ForDocumentAsync(
-        CompilationWithAnalyzers withAnalyzers,
-        Document document,
-        CancellationToken cancellationToken)
-    {
-        var tree = await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
-        var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
-
-        if (tree is null || model is null)
-            return [];
-
-        var syntax = await withAnalyzers.GetAnalyzerSyntaxDiagnosticsAsync(tree, cancellationToken).ConfigureAwait(false);
-        var semantic = await withAnalyzers.GetAnalyzerSemanticDiagnosticsAsync(model, null, cancellationToken).ConfigureAwait(false);
-
-        return [.. syntax, .. semantic];
+        return await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static ImmutableArray<DiagnosticAnalyzer> Analyzers(Project project) =>
@@ -123,7 +102,7 @@ public static class AnalysisService
         diagnostic.Severity >= minimum
         && !diagnostic.IsSuppressed
         && (ids.Count is 0 || ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
-        && scope.Includes(diagnostic.Location);
+        && scope.Includes(diagnostic);
 
     private static string Render(string? path, List<string> engines, Diagnostic[] found, string[] extra, int maxResults)
     {

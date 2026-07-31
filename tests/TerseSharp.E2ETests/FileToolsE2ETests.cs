@@ -79,6 +79,23 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task FindFiles_LocatesABinaryFile()
+    {
+        var text = await server.CallAsync("find_files", new() { ["glob"] = "*.png" });
+
+        Assert.Contains("logo.png", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 files", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_SkipsBinaryFilesThatFindFilesStillLists()
+    {
+        var text = await server.CallAsync("search_text", new() { ["pattern"] = "PNG" });
+
+        Assert.DoesNotContain("logo.png", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReadText_ForAMissingFile_ReturnsDocumentNotFound()
     {
         var text = await server.CallAsync("read_text", new() { ["path"] = "nope.json" });

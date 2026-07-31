@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -106,6 +107,9 @@ public sealed class TerseServerFixture : IAsyncLifetime
         {
         }
         catch (NotSupportedException)
+        {
+        }
+        catch (Win32Exception)
         {
         }
     }

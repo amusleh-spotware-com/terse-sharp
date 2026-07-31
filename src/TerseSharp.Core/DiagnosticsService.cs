@@ -30,7 +30,7 @@ public static class DiagnosticsService
     private static bool Keep(Diagnostic diagnostic, DiagnosticScope scope, DiagnosticSeverity minimum) =>
         diagnostic.Severity >= minimum
         && !diagnostic.IsSuppressed
-        && scope.Includes(diagnostic.Location);
+        && scope.Includes(diagnostic);
 
     private static string Render(string? path, List<Diagnostic> found, int maxResults)
     {

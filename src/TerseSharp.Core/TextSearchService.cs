@@ -23,11 +23,14 @@ public static class TextSearchService
         var hits = new List<string>(Math.Min(maxResults, 512));
         var total = 0;
 
-        foreach (var file in Files(workspace.Root, glob))
+        foreach (var file in Files(workspace.Root, glob).Where(IsSearchable))
             total += Scan(file, matcher, hits, maxResults);
 
         return Render(regex ? "search_regex" : "search_text", pattern, hits, total);
     }
+
+    private static bool IsSearchable(SourceCandidate file) =>
+        !BinaryExtensions.Contains(Path.GetExtension(file.FullPath));
 
     public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults)
     {
@@ -110,7 +113,7 @@ public static class TextSearchService
             foreach (var child in Subdirectories(directory))
                 pending.Push(child);
 
-            foreach (var file in TextFiles(directory))
+            foreach (var file in Entries(directory, Directory.EnumerateFiles))
                 yield return new SourceCandidate(file, Path.GetRelativePath(root, file));
         }
     }
@@ -118,10 +121,6 @@ public static class TextSearchService
     private static IEnumerable<string> Subdirectories(string directory) =>
         Entries(directory, Directory.EnumerateDirectories)
             .Where(child => !ExcludedDirectories.Contains(Path.GetFileName(child), StringComparer.OrdinalIgnoreCase));
-
-    private static IEnumerable<string> TextFiles(string directory) =>
-        Entries(directory, Directory.EnumerateFiles)
-            .Where(file => !BinaryExtensions.Contains(Path.GetExtension(file)));
 
     private static string[] Entries(string directory, Func<string, IEnumerable<string>> enumerate)
     {

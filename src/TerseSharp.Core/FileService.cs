@@ -4,12 +4,15 @@ public static class FileService
 {
     private const int MaxResponseCharacters = 128 * 1024;
 
+    private const int MaxScannedLines = 5_000_000;
+
     public static Result<string> ReadText(
         LoadedWorkspace workspace,
         string path,
         int startLine,
         int endLine,
-        int maxLines)
+        int maxLines,
+        CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
@@ -22,7 +25,7 @@ public static class FileService
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
         return BinaryContent.Reject(full, path)
-            ?? Result.Ok(Render(path, full, new LineRange(startLine, endLine, maxLines)));
+            ?? Result.Ok(Render(path, full, new LineRange(startLine, endLine, maxLines), cancellationToken));
     }
 
     public static Result<string> WriteText(LoadedWorkspace workspace, string path, string content, bool dryRun, bool force)
@@ -98,9 +101,9 @@ public static class FileService
         return response.ToString();
     }
 
-    private static string Render(string path, string full, LineRange range)
+    private static string Render(string path, string full, LineRange range, CancellationToken cancellationToken)
     {
-        var selection = Collect(full, range);
+        var selection = Collect(full, range, cancellationToken);
         var response = new ResponseBuilder("read_text", path);
 
         response.Summary(selection.Lines.Count, selection.TotalLines, "lines");
@@ -111,7 +114,7 @@ public static class FileService
         return response.ToString();
     }
 
-    private static LineSelection Collect(string full, LineRange range)
+    private static LineSelection Collect(string full, LineRange range, CancellationToken cancellationToken)
     {
         var lines = new List<string>(Math.Min(range.MaxLines, 512));
         var budget = MaxResponseCharacters;
@@ -119,7 +122,11 @@ public static class FileService
 
         foreach (var line in File.ReadLines(full))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             number++;
+
+            if (number > MaxScannedLines)
+                break;
 
             if (range.Covers(number) && lines.Count < range.MaxLines && budget > 0)
             {

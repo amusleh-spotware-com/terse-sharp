@@ -12,7 +12,7 @@ public static class SymbolSearch
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var ceiling = Math.Max(maxResults * 8, 256);
+        var ceiling = Math.Max(Math.Min(maxResults, 1024) * 8, 256);
         var found = new List<ISymbol>(Math.Min(ceiling, 1024));
 
         foreach (var project in workspace.Solution.Projects)

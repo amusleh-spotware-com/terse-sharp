@@ -19,7 +19,7 @@ public sealed class FileServiceTests
 
         try
         {
-            var result = FileService.ReadText(lease.Workspace, name, 4000, 4002, 2000);
+            var result = FileService.ReadText(lease.Workspace, name, 4000, 4002, 2000, TestContext.Current.CancellationToken);
 
             Assert.True(result.IsOk, result.Error?.Message);
             Assert.Contains("4000: line 4000 ", result.Value!, StringComparison.Ordinal);
@@ -44,7 +44,7 @@ public sealed class FileServiceTests
 
         try
         {
-            var result = FileService.ReadText(lease.Workspace, name, 0, 0, 10);
+            var result = FileService.ReadText(lease.Workspace, name, 0, 0, 10, TestContext.Current.CancellationToken);
 
             Assert.True(result.IsOk, result.Error?.Message);
             Assert.Contains("10 lines (truncated=true, total=5000)", result.Value!, StringComparison.Ordinal);
