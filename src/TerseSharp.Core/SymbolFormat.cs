@@ -39,4 +39,11 @@ public static class SymbolFormat
 
         return location is null ? "-" : PositionFormat.Describe(location);
     }
+
+    public static string Location(string root, ISymbol symbol)
+    {
+        var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
+
+        return location is null ? "-" : PositionFormat.Describe(root, location);
+    }
 }

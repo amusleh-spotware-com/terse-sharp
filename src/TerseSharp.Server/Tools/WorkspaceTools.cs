@@ -52,12 +52,12 @@ public sealed class WorkspaceTools(ToolContext context)
 
     [McpServerTool(Name = "workspace_status")]
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, and any project that failed to load.")]
-    public Task<string> WorkspaceStatus([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
+    public Task<string> WorkspaceStatus([Description("Workspace or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, null, RenderStatus);
 
     [McpServerTool(Name = "list_projects")]
     [Description("List the projects of a loaded workspace: name, target framework, document count.")]
-    public Task<string> ListProjects([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
+    public Task<string> ListProjects([Description("Workspace or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, null, RenderProjects);
 
     private static string? Discover() =>

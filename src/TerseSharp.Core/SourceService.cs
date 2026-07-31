@@ -5,6 +5,7 @@ namespace TerseSharp.Core;
 public static class SourceService
 {
     public static async Task<Result<string>> OfSymbolAsync(
+        string root,
         ISymbol symbol,
         CancellationToken cancellationToken)
     {
@@ -16,12 +17,13 @@ public static class SourceService
         var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value);
 
         foreach (var reference in references)
-            await AppendAsync(response, reference, cancellationToken).ConfigureAwait(false);
+            await AppendAsync(root, response, reference, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(response.ToString());
     }
 
     private static async Task AppendAsync(
+        string root,
         ResponseBuilder response,
         SyntaxReference reference,
         CancellationToken cancellationToken)
@@ -31,11 +33,11 @@ public static class SourceService
 
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
-            $"{span.Path}:{span.StartLinePosition.Line + 1}-{span.EndLinePosition.Line + 1}"));
+            $"{PositionFormat.Relative(root, span.Path)}:{span.StartLinePosition.Line + 1}-{span.EndLinePosition.Line + 1}"));
         response.Line(node.ToFullString().Trim());
     }
 
-    public static string Describe(ISymbol symbol)
+    public static string Describe(string root, ISymbol symbol)
     {
         var response = new ResponseBuilder("get_symbol", SymbolId.From(symbol).Value);
 
@@ -44,7 +46,7 @@ public static class SourceService
             $"{SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)}"));
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
-            $"at {SymbolFormat.Location(symbol)} in {symbol.ContainingNamespace?.ToDisplayString() ?? "-"}"));
+            $"at {SymbolFormat.Location(root, symbol)} in {symbol.ContainingNamespace?.ToDisplayString() ?? "-"}"));
 
         var documentation = symbol.GetDocumentationCommentXml(CultureInfo.InvariantCulture);
 

@@ -85,6 +85,33 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         ? new TerseError(TerseErrorCode.ReadOnly, "the server is running with --read-only", "restart without --read-only").Render()
         : null;
 
+    public async Task<string> WithTargetAsync(
+        string? workspace,
+        string? pathHint,
+        Func<WorkspaceTarget, Task<string>> action)
+    {
+        await ready.ConfigureAwait(false);
+
+        return await ToolBoundary.RunAsync(async () =>
+        {
+            var target = Target(workspace, pathHint);
+
+            return target.IsOk ? await action(target.Value!).ConfigureAwait(false) : target.Error!.Render();
+        }).ConfigureAwait(false);
+    }
+
+    private Result<WorkspaceTarget> Target(string? workspace, string? pathHint)
+    {
+        var resolved = Registry.Resolve(workspace, pathHint);
+
+        if (!resolved.IsOk)
+            return Result.Fail<WorkspaceTarget>(resolved.Error!);
+
+        using var lease = resolved.Value!;
+
+        return Result.Ok(new WorkspaceTarget(lease.Workspace.SolutionPath, lease.Workspace.Root));
+    }
+
     public void Dispose() => Registry.Dispose();
 
     private async Task ObserveAsync(Task load)

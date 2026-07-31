@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 
@@ -33,20 +34,22 @@ public static class SymbolLookup
         string symbolId,
         CancellationToken cancellationToken)
     {
-        var found = new List<ISymbol>();
         var candidates = await CandidatesAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+        var perProject = new ISymbol[candidates.Count][];
 
-        foreach (var project in candidates)
-        {
-            var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, candidates.Count),
+            ParallelWork.Options(cancellationToken),
+            async (index, token) =>
+            {
+                var compilation = await candidates[index].GetCompilationAsync(token).ConfigureAwait(false);
 
-            if (compilation is null)
-                continue;
+                perProject[index] = compilation is null
+                    ? []
+                    : [.. DocumentationCommentId.GetSymbolsForDeclarationId(symbolId, compilation)];
+            }).ConfigureAwait(false);
 
-            found.AddRange(DocumentationCommentId.GetSymbolsForDeclarationId(symbolId, compilation));
-        }
-
-        return found;
+        return [.. perProject.SelectMany(found => found)];
     }
 
     private static async Task<IReadOnlyList<Project>> CandidatesAsync(
@@ -55,19 +58,24 @@ public static class SymbolLookup
         CancellationToken cancellationToken)
     {
         var name = LastSegment(symbolId);
-        var narrowed = new List<Project>();
+        var projects = workspace.Solution.Projects.ToArray();
+        var matched = new bool[projects.Length];
 
-        foreach (var project in workspace.Solution.Projects)
-        {
-            var declarations = await SymbolFinder
-                .FindSourceDeclarationsAsync(project, name, ignoreCase: false, cancellationToken)
-                .ConfigureAwait(false);
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, projects.Length),
+            ParallelWork.Options(cancellationToken),
+            async (index, token) =>
+            {
+                var declarations = await SymbolFinder
+                    .FindSourceDeclarationsAsync(projects[index], name, ignoreCase: false, token)
+                    .ConfigureAwait(false);
 
-            if (declarations.Any())
-                narrowed.Add(project);
-        }
+                matched[index] = declarations.Any();
+            }).ConfigureAwait(false);
 
-        return narrowed.Count is 0 ? [.. workspace.Solution.Projects] : narrowed;
+        var narrowed = projects.Where((_, index) => matched[index]).ToArray();
+
+        return narrowed.Length is 0 ? projects : narrowed;
     }
 
     private static async Task<string[]> NearestAsync(

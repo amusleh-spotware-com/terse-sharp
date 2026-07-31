@@ -10,13 +10,9 @@ public static class ToolBoundary
         {
             return action();
         }
-        catch (OperationCanceledException)
-        {
-            return Errors.Cancelled().Render();
-        }
         catch (Exception exception) when (IsExpected(exception))
         {
-            return Describe(exception);
+            return Render(exception);
         }
     }
 
@@ -26,20 +22,33 @@ public static class ToolBoundary
         {
             return await action().ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            return Errors.Cancelled().Render();
-        }
         catch (Exception exception) when (IsExpected(exception))
         {
-            return Describe(exception);
+            return Render(exception);
         }
     }
 
-    private static bool IsExpected(Exception exception) => exception is
+    private static bool IsExpected(Exception exception) => exception switch
+    {
+        AggregateException aggregate => aggregate.Flatten().InnerExceptions.All(IsExpected),
+        OperationCanceledException => true,
         ArgumentException or InvalidOperationException or InvalidCastException or NotSupportedException
-        or IOException or UnauthorizedAccessException or RegexMatchTimeoutException or FormatException
-        or ObjectDisposedException;
+            or IOException or UnauthorizedAccessException or RegexMatchTimeoutException or FormatException
+            or ObjectDisposedException => true,
+        _ => false,
+    };
+
+    private static string Render(Exception exception)
+    {
+        var first = First(exception);
+
+        return first is OperationCanceledException ? Errors.Cancelled().Render() : Describe(first);
+    }
+
+    private static Exception First(Exception exception) =>
+        exception is AggregateException aggregate && aggregate.Flatten().InnerExceptions is [var inner, ..]
+            ? inner
+            : exception;
 
     private static string Describe(Exception exception) =>
         Errors.Invalid(

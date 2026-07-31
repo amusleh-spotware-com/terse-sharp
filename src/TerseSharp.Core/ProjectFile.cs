@@ -32,9 +32,19 @@ public static class ProjectFile
     public static Result<string> RemoveReference(string projectPath, string targetProject, bool dryRun) =>
         RemoveItem(projectPath, "ProjectReference", Relative(projectPath, targetProject), dryRun, "project_remove_reference");
 
-    public static Result<string> AddPackage(string projectPath, string package, string? version, bool dryRun)
+    public static Result<string> AddPackage(string root, string projectPath, string package, string? version, bool dryRun)
     {
-        var central = CentralVersionsFile(projectPath);
+        if (string.IsNullOrWhiteSpace(package))
+            return Result.Fail<string>(Errors.Blank("package"));
+
+        var central = CentralVersionsFile(root, projectPath);
+
+        if (central is null && CentralVersionsFile(null, projectPath) is not null)
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "this project's Directory.Packages.props sits above the workspace root",
+                "load the workspace at the repository root, or edit Directory.Packages.props directly"));
+        }
 
         return central is null
             ? AddItem(projectPath, "PackageReference", package, dryRun, "package_add", version)
@@ -42,13 +52,19 @@ public static class ProjectFile
     }
 
     public static Result<string> RemovePackage(string projectPath, string package, bool dryRun) =>
-        RemoveItem(projectPath, "PackageReference", package, dryRun, "package_remove");
+        string.IsNullOrWhiteSpace(package)
+            ? Result.Fail<string>(Errors.Blank("package"))
+            : RemoveItem(projectPath, "PackageReference", package, dryRun, "package_remove");
 
     public static Result<string> ListPackages(string projectPath)
     {
         var document = Load(projectPath);
-        var packages = document is null ? [] : Items(document, "PackageReference");
-        var references = document is null ? [] : Items(document, "ProjectReference");
+
+        if (document is null)
+            return Result.Fail<string>(Errors.DocumentNotFound(projectPath));
+
+        var packages = Items(document, "PackageReference");
+        var references = Items(document, "ProjectReference");
         var response = new ResponseBuilder("package_list", projectPath);
 
         response.Summary(packages.Length + references.Length, packages.Length + references.Length, "references");
@@ -234,11 +250,11 @@ public static class ProjectFile
         _ => "Microsoft.NET.Sdk",
     };
 
-    private static string? CentralVersionsFile(string projectPath)
+    private static string? CentralVersionsFile(string? root, string projectPath)
     {
         var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(projectPath))!);
 
-        while (directory is not null)
+        while (directory is not null && (root is null || PathBoundary.Contains(root, directory.FullName)))
         {
             var candidate = Path.Combine(directory.FullName, "Directory.Packages.props");
 

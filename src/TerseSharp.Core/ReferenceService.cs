@@ -22,7 +22,7 @@ public static class ReferenceService
             .ThenBy(location => location.Location.SourceSpan.Start)
             .ToArray();
 
-        return Render(symbol, locations, maxResults);
+        return Render(workspace.Root, symbol, locations, maxResults);
     }
 
     public static async Task<string> FindImplementationsAsync(
@@ -40,16 +40,16 @@ public static class ReferenceService
         response.Summary(found.Length, found.Length, "implementations");
 
         foreach (var implementation in found)
-            response.Line(Describe(implementation));
+            response.Line(Describe(workspace.Root, implementation));
 
         return response.ToString();
     }
 
-    private static string Describe(ISymbol symbol) => string.Create(
+    private static string Describe(string root, ISymbol symbol) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{SymbolFormat.Location(symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Describe(symbol)}");
+        $"{SymbolFormat.Location(root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Describe(symbol)}");
 
-    private static string Render(ISymbol symbol, ReferenceLocation[] locations, int maxResults)
+    private static string Render(string root, ISymbol symbol, ReferenceLocation[] locations, int maxResults)
     {
         var shown = Math.Min(maxResults, locations.Length);
         var files = locations.Select(location => location.Document.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
@@ -57,7 +57,7 @@ public static class ReferenceService
 
         response.Summary(shown, locations.Length, string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"));
 
-        foreach (var group in locations.Take(shown).GroupBy(UsageGroup.Of))
+        foreach (var group in locations.Take(shown).GroupBy(location => UsageGroup.Of(root, location)))
             response.Line(Describe(group.Key, group));
 
         return response.ToString();
@@ -87,8 +87,8 @@ public static class ReferenceService
 
     private readonly record struct UsageGroup(string Path, string Confidence, string Kind)
     {
-        public static UsageGroup Of(ReferenceLocation location) => new(
-            location.Location.GetLineSpan().Path,
+        public static UsageGroup Of(string root, ReferenceLocation location) => new(
+            PositionFormat.Relative(root, location.Location.GetLineSpan().Path),
             ConfidenceTag.Of(ConfidenceOf(location)),
             ClassifyKind(location));
     }

@@ -66,4 +66,9 @@ public static class Errors
         TerseErrorCode.Cancelled,
         "the call was cancelled before it produced a result",
         "retry, or narrow the request with a path or maxResults");
+
+    public static TerseError Blank(string name) => new(
+        TerseErrorCode.InvalidArgument,
+        string.Create(CultureInfo.InvariantCulture, $"'{name}' is required and cannot be empty"),
+        string.Create(CultureInfo.InvariantCulture, $"pass a non-empty {name}"));
 }

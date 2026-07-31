@@ -77,6 +77,9 @@ Prefer to configure it by hand:
 
 ## The 53 tools
 
+Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT` or
+`HEURISTIC` tag. Paths are workspace-relative.
+
 - **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace`, `list_projects`
 - **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`
 - **Analyze & clean** — `analyze`, `format`, `cleanup`, `get_diagnostics`

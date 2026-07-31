@@ -8,6 +8,74 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-31
+
+### Fixed
+
+- **`package_add` could write outside the workspace it was given.** With a blank `project` the path
+  resolved to the workspace root itself, passed the containment check, and the Central Package
+  Management lookup then walked *parent directories without any boundary* until it found a
+  `Directory.Packages.props` — in a nested checkout that is the outer repository's file, which it
+  edited. Found by the new robustness sweep, which corrupted this repository's own
+  `Directory.Packages.props` on its first run. The lookup now stops at the workspace root, a blank
+  package id or path is refused, and a sentinel test asserts no tool writes outside the workspace.
+- **`solution_add_project` accepted anything.** A blank path added `<Project Path="." />` to the
+  solution. A blank path is refused and the target must end in `.csproj`, `.fsproj` or `.vbproj`.
+- **`package_list` reported success for a project that does not exist**, answering `0 references`
+  instead of `ERROR DocumentNotFound` — an agent would conclude the project had no dependencies.
+- **`package_list` and `project_properties` read project files outside the workspace.** Unlike every
+  write tool they never went through the containment guard, so
+  `package_list(project:"../../../elsewhere/App.csproj")` returned that file's references — and, once
+  `package_list` learned to fail on a missing file, became a filesystem-existence probe. Both are
+  contained now.
+- **A parallel failure could escape as an untyped error.** `Parallel.ForEachAsync` surfaces
+  `AggregateException`, which `ToolBoundary` did not recognise, so an expected inner failure would
+  have been rethrown instead of rendered. Aggregates are unwrapped and rendered like any other.
+
+### Changed
+
+- **Every reported path is workspace-relative.** `find_usages`, `find_implementations`,
+  `search_symbols`, `get_symbol`, `get_symbol_source`, `analyze`, `get_diagnostics` and the dead-code
+  findings printed absolute paths, repeating the workspace root on every record. Paths outside the
+  workspace are still printed in full. This is a response-format change.
+- **`get_file_outline` and `get_type_outline` take `signatures` (default `true`).** With
+  `signatures=false` the outline is ids, accessibility and line ranges only — measured on
+  `EditGate.cs` at 50% of the raw file against 71% with signatures. The default is unchanged.
+- **`build` recovers from its own file locks.** It now runs without holding the workspace lease, and
+  when MSB3021/MSB3027 or "being used by another process" appears it unloads the workspace, retries
+  the build, reloads, and says so. Symbol ids are unaffected; `undo_last_change` history is
+  discarded, which the response states. When the retry is still blocked the response says that too,
+  and names the real cause: a running process that owns the file — a server started from the output
+  directory being rebuilt — which unloading a workspace cannot release.
+  The retry only runs when exactly one workspace is loaded: unloading one of several would let an
+  unhinted call silently resolve to the wrong checkout during the rebuild, which is the one failure
+  `AmbiguousWorkspace` exists to prevent. A reload that fails is reported rather than swallowed.
+- **The advertised tool schema is smaller.** Repeated parameter descriptions were trimmed:
+  `tools/list` went from 7,488 to 7,121 tokens — a fixed cost paid on every session.
+
+### Performance
+
+- **The per-project loops run in parallel** in `analyze`, `get_diagnostics`, dead-code analysis,
+  `search_symbols` and symbol-id resolution, bounded by processor count. Dead-code analysis also
+  parallelises across candidate members, and its outer project loop is sequential so the two levels
+  cannot multiply into `ProcessorCount²` concurrent solution-wide searches. Output is unchanged and
+  deterministic: results are collected per project and flattened in project order — never in
+  completion order — then grouped and sorted before rendering. Four stress tests assert byte-for-byte
+  identical answers across repeated runs, verified on this repository's own solution as well as the
+  fixture.
+
+### Added
+
+- **A robustness sweep over the whole advertised surface.** `ToolRobustnessE2ETests` reads
+  `tools/list` from the running server and calls every tool with garbage arguments, with no
+  arguments and with empty strings, asserting each answers a structured response with a `remedy:`
+  line, never a stack trace, and that the server is still healthy afterwards. New tools are covered
+  automatically. Alongside it, `ToolEdgeCaseE2ETests` (inverted ranges, ranges past EOF, negative
+  line numbers, invalid and catastrophic regexes, malformed symbol ids, non-C# files, blank
+  arguments, out-of-workspace paths) and `ToolStressE2ETests` (determinism under repetition,
+  40 concurrent calls, oversized `maxResults`, a 20,000-character pattern).
+- Test count: 144 unit and 159 E2E.
+
 ## [0.4.0] - 2026-07-31
 
 ### Fixed
@@ -269,7 +337,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.4.0
 [0.3.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.3.1
 [0.3.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.3.0
@@ -278,3 +347,8 @@ benchmark harnesses are specified but not implemented.
 [0.2.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.2.0
 [0.1.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.1.0
+- **`package_add` refuses when Central Package Management sits above the workspace root.** Bounding
+  the lookup fixed the escape, but left a worse failure available: with the file out of reach the
+  tool would have written `<PackageReference Include="X" Version="Y" />` into a CPM-managed project,
+  which is an NU1008 build break reported as a successful diff. It now says where the file is and
+  what to do instead. Loading the workspace at the repository root restores the normal behaviour.

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
@@ -11,20 +12,31 @@ public static class DiagnosticsService
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var found = new List<Diagnostic>();
         var scope = DiagnosticScope.For(workspace, path);
+        var found = new ConcurrentBag<Diagnostic>();
 
-        foreach (var project in workspace.Solution.Projects)
-        {
-            var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+        await Parallel.ForEachAsync(
+            workspace.Solution.Projects,
+            ParallelWork.Options(cancellationToken),
+            (project, token) => CollectAsync(project, scope, minimum, found, token)).ConfigureAwait(false);
 
-            if (compilation is null)
-                continue;
+        return Render(workspace.Root, path, found, maxResults);
+    }
 
-            found.AddRange(compilation.GetDiagnostics(cancellationToken).Where(diagnostic => Keep(diagnostic, scope, minimum)));
-        }
+    private static async ValueTask CollectAsync(
+        Project project,
+        DiagnosticScope scope,
+        DiagnosticSeverity minimum,
+        ConcurrentBag<Diagnostic> found,
+        CancellationToken cancellationToken)
+    {
+        var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
 
-        return Render(path, found, maxResults);
+        if (compilation is null)
+            return;
+
+        foreach (var diagnostic in compilation.GetDiagnostics(cancellationToken).Where(candidate => Keep(candidate, scope, minimum)))
+            found.Add(diagnostic);
     }
 
     private static bool Keep(Diagnostic diagnostic, DiagnosticScope scope, DiagnosticSeverity minimum) =>
@@ -32,10 +44,10 @@ public static class DiagnosticsService
         && !diagnostic.IsSuppressed
         && scope.Includes(diagnostic);
 
-    private static string Render(string? path, List<Diagnostic> found, int maxResults)
+    private static string Render(string root, string? path, ConcurrentBag<Diagnostic> found, int maxResults)
     {
         var deduplicated = found
-            .GroupBy(Key, StringComparer.Ordinal)
+            .GroupBy(diagnostic => Key(root, diagnostic), StringComparer.Ordinal)
             .Select(group => new { Text = group.Key, Count = group.Count() })
             .OrderBy(entry => entry.Text, StringComparer.Ordinal)
             .ToArray();
@@ -50,9 +62,9 @@ public static class DiagnosticsService
         return response.ToString();
     }
 
-    private static string Key(Diagnostic diagnostic) => string.Create(
+    private static string Key(string root, Diagnostic diagnostic) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{diagnostic.Id} {Severity(diagnostic)} {PositionFormat.Describe(diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+        $"{diagnostic.Id} {Severity(diagnostic)} {PositionFormat.Describe(root, diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
 
     private static string Severity(Diagnostic diagnostic) => diagnostic.Severity.ToString().ToLowerInvariant();
 }

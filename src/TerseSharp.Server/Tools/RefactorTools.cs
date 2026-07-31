@@ -9,10 +9,10 @@ public sealed class RefactorTools(ToolContext context)
     [McpServerTool(Name = "extract_interface")]
     [Description("Create an interface beside a type containing its public instance methods and properties. The new file is added to the same project.")]
     public Task<string> ExtractInterface(
-        [Description("Symbol id of the type, e.g. T:Trading.OrderService.")] string typeSymbolId,
+        [Description("Type id, e.g. T:Trading.OrderService.")] string typeSymbolId,
         [Description("Name of the interface to create, e.g. IOrderService.")] string interfaceName,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => RefactorService.ExtractInterfaceAsync(
             loaded, symbol, interfaceName, Options("extract_interface", dryRun), cancellationToken), cancellationToken);
@@ -21,8 +21,8 @@ public sealed class RefactorTools(ToolContext context)
     [Description("Move a type out of a shared file into its own file named after it, keeping the usings and namespace.")]
     public Task<string> MoveTypeToFile(
         [Description("Symbol id of the type to move.")] string typeSymbolId,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => RefactorService.MoveTypeToFileAsync(
             loaded, symbol, Options("move_type_to_file", dryRun), cancellationToken), cancellationToken);
@@ -32,8 +32,8 @@ public sealed class RefactorTools(ToolContext context)
     public Task<string> MoveTypeToNamespace(
         [Description("Symbol id of the type to move.")] string typeSymbolId,
         [Description("Target namespace, e.g. Trading.Orders.")] string targetNamespace,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => RefactorService.MoveTypeToNamespaceAsync(
             loaded, symbol, targetNamespace, Options("move_type_to_namespace", dryRun), cancellationToken), cancellationToken);
@@ -43,16 +43,16 @@ public sealed class RefactorTools(ToolContext context)
     public Task<string> ChangeSignature(
         [Description("Symbol id of the method.")] string symbolId,
         [Description("New parameter list without the parentheses, e.g. 'int count, string name'.")] string parameters,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even when call sites stop compiling. Default false.")] bool allowErrors = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => RefactorService.ChangeSignatureAsync(
             loaded, symbol, parameters, new EditOptions("change_signature", dryRun, allowErrors), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "undo_last_change")]
     [Description("Revert the most recent mutation applied by this server. Keeps the last 10 snapshots.")]
-    public Task<string> UndoLastChange([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
+    public Task<string> UndoLastChange([Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } rejection
             ? Task.FromResult(rejection)
             : context.WithWorkspace(workspace, null, loaded => loaded.Undo());

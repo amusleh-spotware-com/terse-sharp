@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 
@@ -13,28 +14,30 @@ public static class SymbolSearch
         CancellationToken cancellationToken)
     {
         var ceiling = Math.Max(Math.Min(maxResults, 1024) * 8, 256);
-        var found = new List<ISymbol>(Math.Min(ceiling, 1024));
+        var projects = workspace.Solution.Projects.ToArray();
+        var perProject = new ISymbol[projects.Length][];
 
-        foreach (var project in workspace.Solution.Projects)
-        {
-            if (found.Count >= ceiling)
-                break;
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, projects.Length),
+            ParallelWork.Options(cancellationToken),
+            async (index, token) =>
+            {
+                var matches = await SymbolFinder
+                    .FindSourceDeclarationsWithPatternAsync(projects[index], query, token)
+                    .ConfigureAwait(false);
 
-            var matches = await SymbolFinder
-                .FindSourceDeclarationsWithPatternAsync(project, query, cancellationToken)
-                .ConfigureAwait(false);
+                perProject[index] = [.. matches.Where(candidate => KindMatches(candidate, kind))];
+            }).ConfigureAwait(false);
 
-            found.AddRange(matches.Where(symbol => KindMatches(symbol, kind)));
-        }
-
-        return Rank(found, maxResults);
+        return Rank(perProject.SelectMany(found => found).Take(ceiling), maxResults);
     }
 
-    private static ISymbol[] Rank(List<ISymbol> found, int maxResults) =>
+    private static ISymbol[] Rank(IEnumerable<ISymbol> found, int maxResults) =>
         [.. found
             .DistinctBy(symbol => SymbolId.From(symbol).Value, StringComparer.Ordinal)
             .OrderByDescending(symbol => symbol.DeclaredAccessibility is Accessibility.Public)
             .ThenBy(symbol => symbol.Name.Length)
+            .ThenBy(symbol => SymbolId.From(symbol).Value, StringComparer.Ordinal)
             .Take(maxResults)];
 
     private static bool KindMatches(ISymbol symbol, string? kind) =>

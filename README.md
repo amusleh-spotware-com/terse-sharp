@@ -101,7 +101,7 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 ## 🧰 The tools
 
 53 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
-`EXACT` (Roslyn-resolved) or `HEURISTIC` (text/index) tag.
+`EXACT` (Roslyn-resolved) or `HEURISTIC` (text/index) tag. Paths are workspace-relative.
 
 | Group | Tools |
 |---|---|

@@ -100,7 +100,7 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task PackageAdd_WithDryRun_AddsAPackageReference()
+    public async Task PackageAdd_WhenCentralPackageManagementSitsAboveTheWorkspace_IsRefused()
     {
         var text = await server.CallAsync("package_add", new()
         {
@@ -110,8 +110,9 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
             ["dryRun"] = true,
         });
 
-        Assert.Contains("Serilog", text, StringComparison.Ordinal);
-        Assert.Contains("dryRun", text, StringComparison.Ordinal);
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("above the workspace root", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -12,8 +12,20 @@ public static class PositionFormat
         return Describe(span.Path, span.StartLinePosition);
     }
 
+    public static string Describe(string root, Location location)
+    {
+        var span = location.GetLineSpan();
+
+        return Describe(Relative(root, span.Path), span.StartLinePosition);
+    }
+
     public static string Describe(string path, LinePosition position) =>
         string.Create(CultureInfo.InvariantCulture, $"{path}:{position.Line + 1}:{position.Character + 1}");
+
+    public static string Relative(string root, string? path) =>
+        path is { Length: > 0 } file && PathBoundary.Contains(root, file)
+            ? Path.GetRelativePath(root, file)
+            : path ?? "-";
 
     public static string Range(Location location)
     {

@@ -15,8 +15,8 @@ public static partial class DotnetRunner
 
     private const int MaxTimings = 50;
 
-    public static async Task<string> BuildAsync(
-        LoadedWorkspace workspace,
+    public static async Task<BuildRun> BuildAsync(
+        WorkspaceTarget workspace,
         string? project,
         CancellationToken cancellationToken)
     {
@@ -24,11 +24,16 @@ public static partial class DotnetRunner
         var run = await RunAsync(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"], workspace.Root, DefaultTimeout, cancellationToken)
             .ConfigureAwait(false);
 
-        return RenderBuild(target, run);
+        return new BuildRun(RenderBuild(target, run), Locked(run));
     }
 
+    private static bool Locked(ProcessRun run) => IsLockedOutput(run.ExitCode, run.Output);
+
+    internal static bool IsLockedOutput(int exitCode, string output) =>
+        exitCode is not 0 && LockedOutput().IsMatch(output);
+
     internal static async Task<TestRunResult> TestAsync(
-        LoadedWorkspace workspace,
+        WorkspaceTarget workspace,
         TestRunRequest request,
         CancellationToken cancellationToken)
     {
@@ -63,7 +68,7 @@ public static partial class DotnetRunner
     }
 
     internal static async Task<string> ListTestsAsync(
-        LoadedWorkspace workspace,
+        WorkspaceTarget workspace,
         string target,
         string? contains,
         TimeSpan timeout,
@@ -119,11 +124,11 @@ public static partial class DotnetRunner
 
     private static void AppendLockWarning(ResponseBuilder response, ProcessRun run)
     {
-        if (run.ExitCode is 0 || !LockedOutput().IsMatch(run.Output))
+        if (!Locked(run))
             return;
 
         response.Note("WARNING a locked output file blocked the build; the loaded workspace holds MSBuild file locks");
-        response.Note("remedy: unload_workspace, retry build, then load_workspace");
+        response.Note("remedy: see the NOTE below; the build is retried automatically when one workspace is loaded");
     }
 
     private static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request)
@@ -320,3 +325,5 @@ public static partial class DotnetRunner
 internal sealed record ProcessRun(int ExitCode, string Output, long ElapsedMilliseconds, bool TimedOut = false);
 
 internal readonly record struct TestRunResult(string Response, TestRunReport Report);
+
+public readonly record struct BuildRun(string Response, bool Locked);

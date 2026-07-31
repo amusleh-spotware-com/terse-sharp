@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -15,22 +16,39 @@ public static class AnalysisService
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var found = new List<Diagnostic>();
-        var engines = new List<string> { "compiler" };
         var scope = DiagnosticScope.For(workspace, path);
         var document = path is null ? null : DocumentLookup.Find(workspace, path);
+        var found = new ConcurrentBag<Diagnostic>();
+        var analyzed = new ConcurrentBag<string>();
 
-        foreach (var project in Targets(workspace, document))
-            await CollectAsync(project, found, engines, cancellationToken).ConfigureAwait(false);
+        await Parallel.ForEachAsync(
+            Targets(workspace, document),
+            ParallelWork.Options(cancellationToken),
+            (project, token) => CollectAsync(project, found, analyzed, token)).ConfigureAwait(false);
 
         var extra = includeDeadCode
             ? await DeadCodeService.FindAsync(workspace, path, cancellationToken).ConfigureAwait(false)
             : [];
 
+        return Render(
+            workspace.Root,
+            path,
+            Engines(analyzed, includeDeadCode),
+            Filter(found, scope, minimum, ids),
+            Keep(extra, ids),
+            maxResults);
+    }
+
+    private static List<string> Engines(ConcurrentBag<string> analyzed, bool includeDeadCode)
+    {
+        var engines = new List<string>(analyzed.Count + 2) { "compiler" };
+
+        engines.AddRange(analyzed.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal));
+
         if (includeDeadCode)
             engines.Add("dead-code");
 
-        return Render(path, engines, Filter(found, scope, minimum, ids), Keep(extra, ids), maxResults);
+        return engines;
     }
 
     private static string[] Keep(IReadOnlyList<string> findings, IReadOnlyList<string> ids) =>
@@ -41,10 +59,10 @@ public static class AnalysisService
     private static IEnumerable<Project> Targets(LoadedWorkspace workspace, Document? document) =>
         document is null ? workspace.Solution.Projects : [document.Project];
 
-    private static async Task CollectAsync(
+    private static async ValueTask CollectAsync(
         Project project,
-        List<Diagnostic> found,
-        List<string> engines,
+        ConcurrentBag<Diagnostic> found,
+        ConcurrentBag<string> analyzed,
         CancellationToken cancellationToken)
     {
         var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
@@ -52,23 +70,18 @@ public static class AnalysisService
         if (compilation is null)
             return;
 
-        found.AddRange(compilation.GetDiagnostics(cancellationToken));
+        foreach (var diagnostic in compilation.GetDiagnostics(cancellationToken))
+            found.Add(diagnostic);
 
         var analyzers = Analyzers(project);
 
         if (analyzers.IsEmpty)
             return;
 
-        AddEngine(engines, project);
-        found.AddRange(await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false));
-    }
+        analyzed.Add("analyzers(" + project.Name + ")");
 
-    private static void AddEngine(List<string> engines, Project project)
-    {
-        var name = "analyzers(" + project.Name + ")";
-
-        if (!engines.Contains(name, StringComparer.Ordinal))
-            engines.Add(name);
+        foreach (var diagnostic in await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false))
+            found.Add(diagnostic);
     }
 
     private static async Task<ImmutableArray<Diagnostic>> RunAsync(
@@ -92,7 +105,7 @@ public static class AnalysisService
         [.. project.AnalyzerReferences.SelectMany(reference => reference.GetAnalyzers(project.Language))];
 
     private static Diagnostic[] Filter(
-        List<Diagnostic> found,
+        ConcurrentBag<Diagnostic> found,
         DiagnosticScope scope,
         DiagnosticSeverity minimum,
         IReadOnlyList<string> ids) =>
@@ -104,10 +117,16 @@ public static class AnalysisService
         && (ids.Count is 0 || ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
         && scope.Includes(diagnostic);
 
-    private static string Render(string? path, List<string> engines, Diagnostic[] found, string[] extra, int maxResults)
+    private static string Render(
+        string root,
+        string? path,
+        List<string> engines,
+        Diagnostic[] found,
+        string[] extra,
+        int maxResults)
     {
         var grouped = found
-            .Select(DiagnosticFormat.Key)
+            .Select(diagnostic => DiagnosticFormat.Key(root, diagnostic))
             .Concat(extra)
             .GroupBy(text => text, StringComparer.Ordinal)
             .Select(group => new { Text = group.Key, Count = group.Count() })
@@ -128,9 +147,9 @@ public static class AnalysisService
 
 public static class DiagnosticFormat
 {
-    public static string Key(Diagnostic diagnostic) => string.Create(
+    public static string Key(string root, Diagnostic diagnostic) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{diagnostic.Id} {Severity(diagnostic)} {Category(diagnostic)} {PositionFormat.Describe(diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+        $"{diagnostic.Id} {Severity(diagnostic)} {Category(diagnostic)} {PositionFormat.Describe(root, diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
 
     private static string Severity(Diagnostic diagnostic) => diagnostic.Severity.ToString().ToLowerInvariant();
 

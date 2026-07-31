@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
@@ -15,22 +16,24 @@ public static class DeadCodeService
     {
         var document = path is null ? null : DocumentLookup.Find(workspace, path);
         var scope = DiagnosticScope.For(workspace, path);
-        var findings = new List<string>();
+        var findings = new ConcurrentBag<string>();
 
-        foreach (var project in Targets(workspace, document))
-            await ScanAsync(workspace, project, scope, findings, cancellationToken).ConfigureAwait(false);
+        await Parallel.ForEachAsync(
+            Targets(workspace, document),
+            ParallelWork.Sequential(cancellationToken),
+            (project, token) => ScanAsync(workspace, project, scope, findings, token)).ConfigureAwait(false);
 
-        return [.. findings.Distinct(StringComparer.Ordinal)];
+        return [.. findings.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
     }
 
     private static IEnumerable<Project> Targets(LoadedWorkspace workspace, Document? document) =>
         document is null ? workspace.Solution.Projects : [document.Project];
 
-    private static async Task ScanAsync(
+    private static async ValueTask ScanAsync(
         LoadedWorkspace workspace,
         Project project,
         DiagnosticScope scope,
-        List<string> findings,
+        ConcurrentBag<string> findings,
         CancellationToken cancellationToken)
     {
         var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
@@ -43,7 +46,7 @@ public static class DeadCodeService
             .Where(diagnostic => Hinted(diagnostic) && scope.Includes(diagnostic.Location));
 
         foreach (var diagnostic in hinted)
-            findings.Add(Describe(diagnostic));
+            findings.Add(Describe(scope.Root, diagnostic));
 
         await ScanMembersAsync(workspace, compilation, scope, findings, cancellationToken).ConfigureAwait(false);
     }
@@ -51,37 +54,35 @@ public static class DeadCodeService
     private static bool Hinted(Diagnostic diagnostic) =>
         CompilerHints.Contains(diagnostic.Id, StringComparer.Ordinal) && !diagnostic.IsSuppressed;
 
-    private static string Describe(Diagnostic diagnostic) => string.Create(
+    private static string Describe(string root, Diagnostic diagnostic) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{diagnostic.Id} info DeadCode {PositionFormat.Describe(diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+        $"{diagnostic.Id} info DeadCode {PositionFormat.Describe(root, diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
 
-    private static async Task ScanMembersAsync(
+    private static Task ScanMembersAsync(
         LoadedWorkspace workspace,
         Compilation compilation,
         DiagnosticScope scope,
-        List<string> findings,
-        CancellationToken cancellationToken)
-    {
-        foreach (var symbol in Candidates(compilation, scope))
-        {
-            var declaring = DeclaringDocuments(workspace.Solution, symbol.ContainingType);
+        ConcurrentBag<string> findings,
+        CancellationToken cancellationToken) =>
+        Parallel.ForEachAsync(
+            Candidates(compilation, scope),
+            ParallelWork.Options(cancellationToken),
+            (symbol, token) => InspectAsync(workspace, symbol, scope, findings, token));
 
-            if (await IsUnreferencedAsync(workspace, symbol, declaring, cancellationToken).ConfigureAwait(false))
-                findings.Add(Describe(symbol));
-        }
-    }
-
-    private static async Task<bool> IsUnreferencedAsync(
+    private static async ValueTask InspectAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
-        ImmutableHashSet<Document>? declaring,
+        DiagnosticScope scope,
+        ConcurrentBag<string> findings,
         CancellationToken cancellationToken)
     {
+        var declaring = DeclaringDocuments(workspace.Solution, symbol.ContainingType);
         var references = await SymbolFinder
             .FindReferencesAsync(symbol, workspace.Solution, declaring, cancellationToken)
             .ConfigureAwait(false);
 
-        return references.Sum(reference => reference.Locations.Count(location => !location.IsImplicit)) is 0;
+        if (references.Sum(reference => reference.Locations.Count(location => !location.IsImplicit)) is 0)
+            findings.Add(Describe(scope.Root, symbol));
     }
 
     private static ImmutableHashSet<Document>? DeclaringDocuments(Solution solution, INamedTypeSymbol? type)
@@ -98,9 +99,9 @@ public static class DeadCodeService
             : [.. documents.OfType<Document>()];
     }
 
-    private static string Describe(ISymbol symbol) => string.Create(
+    private static string Describe(string root, ISymbol symbol) => string.Create(
         CultureInfo.InvariantCulture,
-        $"TERSE001 info DeadCode {SymbolFormat.Location(symbol)}: '{symbol.Name}' is never referenced ({SymbolId.From(symbol)})");
+        $"TERSE001 info DeadCode {SymbolFormat.Location(root, symbol)}: '{symbol.Name}' is never referenced ({SymbolId.From(symbol)})");
 
     private static IEnumerable<ISymbol> Candidates(Compilation compilation, DiagnosticScope scope) =>
         Types(compilation.Assembly.GlobalNamespace)

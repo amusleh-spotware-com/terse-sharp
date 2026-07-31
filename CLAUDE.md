@@ -62,6 +62,9 @@ Every tool method is a one-liner delegating to `ToolContext`:
 - `ToolContext.WithWorkspace(Async)(workspace, pathHint, action)` resolves the workspace, or returns
   a rendered `ERROR` string.
 - `ToolContext.WithSymbolAsync(workspace, symbolId, action)` additionally resolves the symbol id.
+- `ToolContext.WithTargetAsync(workspace, pathHint, action)` hands over only the solution path and
+  root and **releases the lease first** — for `build`/`run_tests`, which shell out and must be able
+  to unload the workspace to release its MSBuild file locks.
 - `ToolContext.RejectWrite()` is the `--read-only` gate; every mutating tool must call it first.
 - `ToolBoundary.Run(Async)` catches expected exceptions and renders them; unexpected ones rethrow.
 
@@ -79,7 +82,8 @@ Never throw a bare message and never return prose. Failures go through `Errors.*
 `TerseError(Code, Message, Remedy)` → `ERROR <Code>\n<message>\nremedy: <remedy>`; add new codes to
 `TerseErrorCode`. Success goes through `ResponseBuilder`: header line, then
 `N unit (truncated=…, total=…)`, then one record per line, each tagged `EXACT` (Roslyn-resolved) or
-`HEURISTIC` (`ConfidenceTag.Of`).
+`HEURISTIC` (`ConfidenceTag.Of`). **Every path in a response is workspace-relative**
+(`PositionFormat.Relative`); only a file outside the workspace root is printed in full.
 
 ### Edits
 
@@ -104,6 +108,9 @@ not contain `C:\repoEvil`).
 5. One E2E test that asserts response **values** (never "did not throw") against
    `fixtures/FixtureSolution`; `fixtures/BrokenSolution` exists for load-failure and diagnostics
    paths. Fixtures are intentionally outside `TerseSharp.slnx`.
+   `ToolRobustnessE2ETests` then covers the new tool automatically: it reads `tools/list` and calls
+   every tool with garbage, empty and missing arguments, asserting a structured answer with a
+   `remedy:` line and that nothing is written outside the workspace.
 6. Unit tests for formatting and error paths.
 7. Update `CHANGELOG.md` under `## [Unreleased]`, the tool tables in `README.md`, and `NUGET_README.md`
    (a separate pure-Markdown copy — nuget.org does not render the GitHub README's HTML).

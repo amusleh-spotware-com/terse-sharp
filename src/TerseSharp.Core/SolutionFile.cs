@@ -15,6 +15,16 @@ public static class SolutionFile
         if (!IsXml(solutionPath))
             return Result.Fail<string>(Unsupported(solutionPath, "add"));
 
+        if (string.IsNullOrWhiteSpace(projectPath))
+            return Result.Fail<string>(Errors.Blank("project"));
+
+        if (!IsProjectFile(projectPath))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{projectPath}' is not a project file"),
+                "pass a path ending in .csproj, .fsproj or .vbproj"));
+        }
+
         var relative = Relative(solutionPath, projectPath);
 
         if (Projects(solutionPath).Contains(relative, StringComparer.OrdinalIgnoreCase))
@@ -47,6 +57,9 @@ public static class SolutionFile
     private static bool Matches(XElement element, string relative) =>
         Normalize(element.Attribute("Path")?.Value ?? string.Empty)
             .Equals(Normalize(relative), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsProjectFile(string path) =>
+        Path.GetExtension(path) is ".csproj" or ".fsproj" or ".vbproj";
 
     private static Result<string> Write(string solutionPath, XDocument document, bool dryRun, string tool, string relative)
     {

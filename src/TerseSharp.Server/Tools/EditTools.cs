@@ -10,9 +10,9 @@ public sealed class EditTools(ToolContext context)
     public Task<string> ReplaceSymbolBody(
         [Description("Symbol id of the member.")] string symbolId,
         [Description("New body, with or without the surrounding braces.")] string body,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Apply even when the edit introduces new compile errors. Default false.")] bool allowErrors = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => SymbolEditService.ReplaceBodyAsync(
             loaded, symbol, body, Options("replace_symbol_body", dryRun, allowErrors), cancellationToken), cancellationToken);
@@ -22,9 +22,9 @@ public sealed class EditTools(ToolContext context)
     public Task<string> ReplaceSymbol(
         [Description("Symbol id of the member.")] string symbolId,
         [Description("Complete new member declaration.")] string declaration,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Apply even when the edit introduces new compile errors. Default false.")] bool allowErrors = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => SymbolEditService.ReplaceDeclarationAsync(
             loaded, symbol, declaration, Options("replace_symbol", dryRun, allowErrors), cancellationToken), cancellationToken);
@@ -34,9 +34,9 @@ public sealed class EditTools(ToolContext context)
     public Task<string> AddMember(
         [Description("Symbol id of the containing type.")] string typeSymbolId,
         [Description("Complete member declaration to add.")] string declaration,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Apply even when the edit introduces new compile errors. Default false.")] bool allowErrors = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => SymbolEditService.AddMemberAsync(
             loaded, symbol, declaration, Options("add_member", dryRun, allowErrors), cancellationToken), cancellationToken);
@@ -46,8 +46,8 @@ public sealed class EditTools(ToolContext context)
     public Task<string> DeleteSymbol(
         [Description("Symbol id to delete.")] string symbolId,
         [Description("Delete even when references exist. Default false.")] bool force = false,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => SymbolEditService.DeleteAsync(
             loaded, symbol, force, Options("delete_symbol", dryRun, allowErrors: false), cancellationToken), cancellationToken);
@@ -57,8 +57,8 @@ public sealed class EditTools(ToolContext context)
     public Task<string> RenameSymbol(
         [Description("Symbol id to rename.")] string symbolId,
         [Description("New identifier.")] string newName,
-        [Description("Return the diff without writing. Default false.")] bool dryRun = false,
-        [Description("Optional workspace path or worktree name.")] string? workspace = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => RenameService.RenameAsync(
             loaded, symbol, newName, Options("rename_symbol", dryRun, allowErrors: false), cancellationToken), cancellationToken);
