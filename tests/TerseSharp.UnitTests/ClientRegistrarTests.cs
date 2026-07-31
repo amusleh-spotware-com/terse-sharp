@@ -160,10 +160,8 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public void Register_WhenNoClientMatches_SaysSoInsteadOfReturningNothing()
-    {
+    public void Register_WhenNoClientMatches_SaysSoInsteadOfReturningNothing() =>
         Assert.Equal("no MCP clients matched", ClientRegistrar.Register("emacs", null));
-    }
 
     [Fact]
     public void Register_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
