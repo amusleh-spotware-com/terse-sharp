@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-31
+
 > **This is a MAJOR change — several tools changed their response format.**
 > `get_file_outline` and `get_type_outline` print short member references instead of documentation
 > comment ids (`ids=full` restores them); `find_usages` gained a `src`/`test` column and an optional
@@ -128,7 +130,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   bigger `maxResults` and pay for the whole list. Every listing tool now appends
   `- narrow with <parameter>` when, and only when, it truncated: `glob=` for text search, `severity=`,
   `ids=` or `path=` for diagnostics, `depth=` or `filter=` for a XAML outline, `kind=` for XAML search.
-- Test count: 232 unit and 274 E2E.
+- **`rename_symbol` rewrites the XAML that names the symbol, and `find_usages` shows it.** Renaming a
+  code-behind handler left `Click="OnSubmit"` pointing at a method that no longer exists, and renaming
+  a bound property left `{Binding Symbol}` bound to nothing — neither is a compile error in WPF, so the
+  compile gate certified a broken UI as clean. Both now travel with the rename, and both appear in
+  `find_usages` so the blast radius is visible first. The rewrite happens **only** where an `x:Class`
+  or an `x:DataType`/`d:DataContext` proves the reference is to that member; a binding with no declared
+  context is listed as `NOT rewritten` rather than rewritten on a guess.
+- **`xaml_codebehind`** reports the `x:Class` a file binds to and every event handler it names, with
+  the element and event each sits on, instead of reading the `.xaml.cs` to find out what the markup
+  wires up.
+- **`xaml_set_property`** sets or adds one attribute on one element, addressed by the element path
+  `xaml_outline` prints, `#Name` or `key=Key`. It edits the tag in place so the file's formatting
+  survives, returns a diff like every other mutation, honours `dryRun` and `--read-only`, and refuses
+  an edit whose result would not parse rather than writing broken markup. This replaces line-based
+  `Edit` on the file shape agents are measured worst at.
+- Test count: 232 unit and 285 E2E.
 
 ## [0.6.0] - 2026-07-31
 
@@ -513,7 +530,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.7.0
 [0.6.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.6.0
 [0.5.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.5.0
 [0.4.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.4.0

@@ -78,6 +78,27 @@ public static partial class XamlService
         return Result.Ok(response.ToString());
     }
 
+    public static Result<string> CodeBehind(LoadedWorkspace workspace, string path)
+    {
+        return Read(workspace, path, (document, relative) =>
+        {
+            var handlers = XamlCodeBehind.Handlers(document).ToArray();
+            var response = new ResponseBuilder("xaml_codebehind", relative);
+
+            response.Summary(handlers.Length, handlers.Length, "handlers");
+            response.Note("class=" + (XamlCodeBehind.ClassOf(document) ?? "-"));
+
+            foreach (var handler in handlers)
+            {
+                response.Line(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{relative}:{handler.Line}  EXACT  {handler.Element}.{handler.Event}  {handler.Method}"));
+            }
+
+            return response.ToString();
+        });
+    }
+
     public static Result<string> Bindings(LoadedWorkspace workspace, string path)
     {
         return Read(workspace, path, (document, relative) =>

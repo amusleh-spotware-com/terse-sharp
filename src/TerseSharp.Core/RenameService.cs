@@ -21,10 +21,42 @@ public static class RenameService
 
         var changed = ChangedDocuments(workspace.Solution, updated);
 
-        return changed.Length is 0
-            ? Result.Ok(Unchanged(symbol, newName))
-            : await EditGate.ApplyAsync(workspace, updated, changed, options, cancellationToken).ConfigureAwait(false);
+        if (changed.Length is 0)
+            return Result.Ok(Unchanged(symbol, newName));
+
+        var applied = await EditGate.ApplyAsync(workspace, updated, changed, options, cancellationToken).ConfigureAwait(false);
+
+        return applied.IsOk ? Result.Ok(WithXaml(workspace, symbol, newName, options, applied.Value!)) : applied;
     }
+
+    private static string WithXaml(
+        LoadedWorkspace workspace,
+        ISymbol symbol,
+        string newName,
+        EditOptions options,
+        string applied)
+    {
+        var xaml = XamlRename.Apply(workspace.Root, symbol, newName, options.DryRun);
+
+        if (xaml.Sites is 0 && xaml.Skipped.Count is 0)
+            return applied;
+
+        var response = new ResponseBuilder(string.Empty, string.Empty);
+
+        response.Note(applied);
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"xaml: {xaml.Sites} site(s) in {xaml.Files} file(s) {(options.DryRun ? "would be" : "were")} rewritten"));
+
+        foreach (var skipped in xaml.Skipped)
+            response.Note(Describe(skipped));
+
+        return response.ToString().TrimStart('\n');
+    }
+
+    private static string Describe(XamlUsage usage) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{usage.File}:{usage.Line}  {usage.Confidence}  {usage.Kind}  {usage.Text}  NOT rewritten, no declared data context proves it binds this member");
 
     private static string Unchanged(ISymbol symbol, string newName)
     {

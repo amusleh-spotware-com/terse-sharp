@@ -76,6 +76,9 @@ public static class ReferenceService
         foreach (var group in grouped.GroupBy(entry => entry.Group))
             response.Line(Describe(group.Key, group.Select(entry => entry.Location)));
 
+        foreach (var usage in XamlUsageService.Find(root, symbol, symbol.Name))
+            response.Line(DescribeXaml(usage));
+
         return response.ToString();
     }
 
@@ -119,6 +122,10 @@ public static class ReferenceService
             CultureInfo.InvariantCulture,
             $"{group.Path}  {group.Confidence}  {group.Kind}  {group.Scope}  {container}{Positions(locations)}");
     }
+
+    private static string DescribeXaml(XamlUsage usage) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{usage.File}:{usage.Line}  {usage.Confidence}  xaml {usage.Kind}  {usage.Text}");
 
     private static string Positions(IEnumerable<ReferenceLocation> locations) =>
         string.Join(", ", locations.Select(Position));

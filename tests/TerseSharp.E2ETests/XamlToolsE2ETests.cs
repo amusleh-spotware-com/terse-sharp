@@ -8,6 +8,7 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
     private const string AvaloniaView = "src/Fixture.Trading/Views/Avalonia/MainWindow.axaml";
     private const string MauiView = "src/Fixture.Trading/Views/Maui/MainPage.xaml";
     private const string WinUiView = "src/Fixture.Trading/Views/WinUi/MainPage.xaml";
+    private const string ShellView = "src/Fixture.Trading/Views/ShellView.xaml";
 
     [Fact]
     public async Task XamlOutline_ShowsTheElementTreeWithoutAttributes()
@@ -66,7 +67,8 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("xaml_find", new() { ["query"] = "Button" });
 
         Assert.Contains("OrderView.xaml", text, StringComparison.Ordinal);
-        Assert.Contains("2 matches", text, StringComparison.Ordinal);
+        Assert.Contains("ShellView.xaml", text, StringComparison.Ordinal);
+        Assert.Contains("3 matches", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -219,6 +221,126 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("xaml_names", new() { ["path"] = BoundView });
 
         Assert.Contains("uid=BoundView_Symbol", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlSetProperty_AddsAnAttributeWithoutTouchingTheRestOfTheFile()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = View,
+            ["target"] = "#SymbolText",
+            ["property"] = "FontSize",
+            ["value"] = "14",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("dryRun", text, StringComparison.Ordinal);
+        Assert.Contains("FontSize=\"14\"", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlSetProperty_ReplacesAnAttributeThatIsAlreadyThere()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = View,
+            ["target"] = "#SymbolText",
+            ["property"] = "Text",
+            ["value"] = "{Binding Instrument}",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("{Binding Instrument}", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"{Binding Symbol}\" Text=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlSetProperty_OnATargetThatMatchesNothing_SaysSo()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = View,
+            ["target"] = "#NoSuchElement",
+            ["property"] = "FontSize",
+            ["value"] = "14",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("matched no element", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlSetProperty_RefusesAValueThatWouldBreakTheMarkup()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = View,
+            ["target"] = "#SymbolText",
+            ["property"] = "Text",
+            ["value"] = "a\" /><Broken",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("malformed XAML", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlCodeBehind_ReportsTheClassAndEveryHandler()
+    {
+        var text = await server.CallAsync("xaml_codebehind", new() { ["path"] = ShellView });
+
+        Assert.Contains("class=Fixture.Trading.Views.ShellView", text, StringComparison.Ordinal);
+        Assert.Contains("Button.Click  OnSubmitClicked", text, StringComparison.Ordinal);
+        Assert.Contains("1 handlers", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindUsages_OnACodeBehindHandler_ReportsTheXamlThatWiresIt()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "ShellView.OnSubmitClicked" });
+
+        Assert.Contains("xaml Click handler", text, StringComparison.Ordinal);
+        Assert.Contains("ShellView.xaml", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindUsages_OnABoundProperty_ReportsTheBindingSite()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderViewModel.Symbol" });
+
+        Assert.Contains("xaml binding", text, StringComparison.Ordinal);
+        Assert.Contains("{Binding Symbol}", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenameSymbol_WithDryRun_ReportsTheXamlItWouldRewrite()
+    {
+        var text = await server.CallAsync("rename_symbol", new()
+        {
+            ["symbolId"] = "ShellView.OnSubmitClicked",
+            ["newName"] = "OnSubmitPressed",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("xaml: 1 site(s) in 1 file(s) would be rewritten", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenameSymbol_DoesNotRewriteABindingWithNoDeclaredDataContext()
+    {
+        var text = await server.CallAsync("rename_symbol", new()
+        {
+            ["symbolId"] = "OrderViewModel.Volume",
+            ["newName"] = "Quantity",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("NOT rewritten", text, StringComparison.Ordinal);
+        Assert.Contains("HEURISTIC", text, StringComparison.Ordinal);
     }
 
     [Fact]

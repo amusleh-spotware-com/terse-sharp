@@ -1,29 +1,64 @@
 # TerseSharp
 
-**Your agent stops reading whole C# files.**
+### Your agent stops reading whole C# files.
 
 A Roslyn-powered [MCP](https://modelcontextprotocol.io) server that lets a coding agent navigate,
 read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep`, no line-number
-`Edit`, no shelling out.
+`Edit`, no shelling out. **56 tools. One install. No IDE, no licence, no network.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/amusleh-spotware-com/terse-sharp/ci.yml?branch=main&label=CI)](https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 
-## Why
+---
 
-An agent working a C# solution spends most of its context on the wrong shape of data:
+## The same four questions, before and after
 
-| Question | With built-in tools |
-| --- | --- |
-| What's on `OrderService`? | `Read OrderService.cs` → ~6,000 tokens |
-| Who calls `Submit`? | `Grep "Submit"` + 3 more reads → ~4,000 tokens |
-| Rename `Submit` → `SubmitAsync` | grep + 9 context-echoing edits, misses the interface |
-| Why is the build red? | full MSBuild output → ~8,000 tokens |
+| Question | Built-in tools | TerseSharp |
+| --- | --- | --- |
+| What's on this 2,000-line type? | `Read` → **~6,000 tokens** | `get_type_outline` → **~450** |
+| Who calls this method? | `Grep` + follow-up reads → **~4,000** | `find_usages` → **~200** |
+| Rename it across the solution | ~5,000 tokens, **misses the interface** | `rename_symbol` → **~150**, correct |
+| Why is the build red? | **~8,000 tokens** of MSBuild spew | `build` → **~600** |
 
-Roslyn already knows all four answers semantically. TerseSharp hands them over in the shape the agent
-needs: a signature list instead of a file, real call sites instead of string matches, a solution-wide
-rename instead of a regex sweep, deduplicated diagnostics instead of build logs.
+Roslyn already knows all four answers. TerseSharp hands them over in the shape the agent needs: a
+signature list instead of a file, real call sites instead of string matches, a solution-wide rename
+instead of a regex sweep, deduplicated diagnostics instead of build logs.
+
+---
+
+## 🎨 XAML that knows about your C#
+
+TerseSharp holds the XAML tree **and** the Roslyn compilation in one process — so it answers the two
+questions no text tool can. **WPF · Avalonia (`.axaml`) · WinUI · MAUI**, dialect detected from the
+markup namespace.
+
+**Does this binding actually bind?** WPF has *no* compile-time binding check at all — a typo fails
+silently to debug output. `xaml_bindings validate=true` resolves the data context from `x:DataType`
+or `d:DataContext`, maps the XAML prefix through its `clr-namespace:`, and walks every path segment
+against the real symbol:
+
+```
+BoundView.xaml:7   EXACT  TextBlock.Text  {Binding Symbol}    OK Symbol on OrderViewModel
+BoundView.xaml:9   EXACT  TextBlock.Text  {Binding Symbl}     ERROR no member 'Symbl'; nearest 'Symbol'
+BoundView.xaml:10  EXACT  TextBlock.Text  {Binding Sel.Symbol} OK Sel.Symbol on OrderViewModel
+```
+
+**Where does this resource come from?** One call instead of reading `App.xaml` and every merged
+dictionary in order:
+
+```
+xaml_resolve AccentBrush
+Views/OrderView.xaml:5      SolidColorBrush  scope=local
+Views/Themes/Dark.xaml:4    SolidColorBrush  scope=theme
+```
+
+Plus: **`rename_symbol` rewrites XAML too** — rename a code-behind handler and the `Click="…"` follows;
+rename a bound property and `{Binding …}` follows, but only where an `x:Class` or `x:DataType` proves
+it. `xaml_set_property` edits an attribute in place without reformatting the file.
+`xaml_codebehind`, `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_validate`, `xaml_find`.
+
+---
 
 ## Install
 
@@ -75,7 +110,7 @@ Prefer to configure it by hand:
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
 
-## The 54 tools
+## The 56 tools
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT` or
 `HEURISTIC` tag. Paths are workspace-relative.
@@ -86,7 +121,7 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
 - **Edit** — `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`
 - **Refactor** — `extract_interface`, `move_type_to_file`, `move_type_to_namespace`, `change_signature`, `undo_last_change`
 - **Projects & solutions** — `solution_projects`, `solution_add_project`, `solution_remove_project`, `project_create`, `project_properties`, `project_set_property`, `project_add_reference`, `project_remove_reference`, `package_list`, `package_add`, `package_remove`
-- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_bindings`, `xaml_validate`, `xaml_find`
+- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_bindings`, `xaml_validate`, `xaml_find`, `xaml_codebehind`, `xaml_set_property`
   — `xaml_resolve` reports every declaration of a resource key across the workspace with its scope, and
   `xaml_bindings validate=true` checks each binding path against the `x:DataType` or `d:DataContext`
   type resolved through Roslyn

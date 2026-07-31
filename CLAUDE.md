@@ -43,7 +43,7 @@ child process over stdio and throws `build TerseSharp.Server first` if it is mis
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **54 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **56 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
 `DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,
@@ -183,6 +183,27 @@ by default, pattern matching and switch expressions over `if`/`else` ladders, ex
 `IFormatProvider` on every culture-sensitive format (`string.Create(CultureInfo.InvariantCulture, $"…")`,
 never bare interpolation as a converter — `System.Globalization` is a global using), and **no
 comments**: make the code say it.
+
+## 🚫 HARD GATE — a release is not cut until the changelog links it
+
+Every `## [x.y.z] - yyyy-mm-dd` heading in `CHANGELOG.md` has a matching link definition at the bottom
+of the file, and `[Unreleased]` compares against the newest tag. Those link definitions are what make
+the version headings clickable; a release whose heading exists but whose link does not is a dead
+reference on nuget.org and on the GitHub release page.
+
+When tagging `vX.Y.Z`, in the same commit as the tag's content:
+
+1. Rename `## [Unreleased]` to `## [X.Y.Z] - <today, ISO>` and open a fresh empty `## [Unreleased]`.
+2. Add the link definition for the new version at the bottom:
+   `[X.Y.Z]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/vX.Y.Z`
+3. Repoint the unreleased comparison at the new tag:
+   `[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/vX.Y.Z...HEAD`
+4. Verify: every `## [` heading except `[Unreleased]` has a `[` link definition, and every link
+   definition names a tag that exists (`git tag --list`).
+
+Do not create the GitHub release before the changelog says the version exists — the release notes are
+read from it, and a tag pushed against a changelog that still says `[Unreleased]` publishes a release
+describing nothing.
 
 ## Versioning
 

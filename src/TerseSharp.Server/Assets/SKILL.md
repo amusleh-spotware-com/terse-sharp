@@ -23,6 +23,8 @@ or grepping for a type name, costs 10-30x more tokens and returns matches that a
 | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
 | hunting a resource through `App.xaml` and every merged dictionary | `xaml_resolve(key)` | every declaration of the key with its scope, in one call |
 | eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path checked against the `x:DataType`/`d:DataContext` type through Roslyn |
+| reading a `.xaml.cs` to see what the markup wires up | `xaml_codebehind(path)` | the `x:Class` and every event handler with its element and event |
+| `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element path, `#Name` or `key=Key`; formatting preserved, malformed results refused |
 | `Edit` a `.cs` file | `replace_symbol_body` / `replace_symbol` / `add_member` | addressed by symbol id, so line drift cannot break it |
 | find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, includes interfaces, overrides and doc crefs |
 | `Edit` a non-`.cs` file | `edit_text(path, oldText, newText)` | refuses an ambiguous match |
@@ -109,6 +111,12 @@ the root markup namespace and reported on every outline and validation.
 anywhere under the workspace root — a key defined in `App.xaml` or a merged dictionary is not an
 error. If any XAML file fails to parse it says so and switches resource checking off rather than
 reporting every key in that file as missing.
+
+`rename_symbol` rewrites XAML too. Renaming a code-behind handler updates the `Click="…"` that names
+it, and renaming a bound property updates `{Binding …}` — but **only** where an `x:Class` or an
+`x:DataType`/`d:DataContext` proves the binding refers to that member. A binding with no declared
+context is reported `NOT rewritten` rather than rewritten on a guess, so check that list after a
+rename. `find_usages` shows the same XAML sites, so the blast radius is visible before you rename.
 
 `xaml_bindings(validate: true)` resolves the data context from `x:DataType` or
 `d:DataContext="{d:DesignInstance …}"`, including inheritance from an ancestor, and walks each path

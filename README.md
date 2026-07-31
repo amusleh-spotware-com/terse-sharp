@@ -146,7 +146,7 @@ depend on the model remembering.
 
 ## 🧰 The tools
 
-54 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+56 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` (Roslyn-resolved) or `HEURISTIC` (text/index) tag. Paths are workspace-relative.
 
 | Group | Tools |
@@ -157,7 +157,7 @@ depend on the model remembering.
 | **Edit** | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
-| **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_bindings` · `xaml_validate` · `xaml_find` |
+| **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_set_property` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
 | **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
@@ -342,7 +342,8 @@ built as compact text rather than JSON.
 | `analyze` (diagnostics + analyzers + dead code) / `format` / `cleanup`, Roslyn-only | ✅ |
 | XAML outline, names, resources, bindings, validation, search | ✅ |
 | XAML resource graph (`xaml_resolve`), typed binding validation, dialect fixtures | ✅ |
-| XAML structured edits, code-behind bridge, XAML-aware rename and `find_usages` | 🔜 |
+| `xaml_codebehind`, `xaml_set_property`, XAML-aware `rename_symbol` and `find_usages` | ✅ |
+| XAML element insert/remove, style and template resolution, dead-resource detection | 🔜 |
 | Token budget harness | ✅ |
 | Content-addressed index, trigram search, file watcher | 🔜 |
 

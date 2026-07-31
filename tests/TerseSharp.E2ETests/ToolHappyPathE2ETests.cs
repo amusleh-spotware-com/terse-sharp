@@ -137,5 +137,14 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("xaml_validate", new() { ["path"] = View }, "xaml_validate"),
         ("xaml_find", new() { ["query"] = "Button" }, "OrderView.xaml"),
         ("xaml_resolve", new() { ["key"] = "AccentBrush" }, "scope="),
+        ("xaml_codebehind", new() { ["path"] = "src/Fixture.Trading/Views/ShellView.xaml" }, "class="),
+        ("xaml_set_property", new()
+        {
+            ["path"] = "src/Fixture.Trading/Views/OrderView.xaml",
+            ["target"] = "#SymbolText",
+            ["property"] = "FontSize",
+            ["value"] = "14",
+            ["dryRun"] = true,
+        }, "changedLines="),
     ];
 }

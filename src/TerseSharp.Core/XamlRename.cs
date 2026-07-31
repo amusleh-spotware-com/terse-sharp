@@ -1,0 +1,36 @@
+using Microsoft.CodeAnalysis;
+
+namespace TerseSharp.Core;
+
+public sealed record XamlRenameResult(int Files, int Sites, IReadOnlyList<XamlUsage> Skipped);
+
+public static class XamlRename
+{
+    public static XamlRenameResult Apply(string root, ISymbol symbol, string newName, bool dryRun)
+    {
+        var usages = XamlUsageService.Find(root, symbol, newName);
+        var exact = usages.Where(usage => usage.Confidence is "EXACT").ToArray();
+        var skipped = usages.Where(usage => usage.Confidence is not "EXACT").ToArray();
+        var files = exact.Select(usage => usage.File).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+        if (!dryRun)
+        {
+            foreach (var file in files)
+                Rewrite(Path.Combine(root, file), exact.Where(usage => Same(usage.File, file)));
+        }
+
+        return new XamlRenameResult(files.Length, exact.Length, skipped);
+    }
+
+    private static void Rewrite(string full, IEnumerable<XamlUsage> usages)
+    {
+        var text = File.ReadAllText(full);
+
+        foreach (var usage in usages.Where(usage => !Same(usage.Text, usage.Replacement)))
+            text = text.Replace('"' + usage.Text + '"', '"' + usage.Replacement + '"', StringComparison.Ordinal);
+
+        AtomicWrite.Text(full, text);
+    }
+
+    private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
+}

@@ -61,6 +61,27 @@ public sealed class XamlTools(ToolContext context)
             : context.WithWorkspace(workspace, path, loaded =>
                 NavigationTools.Unwrap(XamlService.Validate(loaded, path ?? string.Empty)));
 
+    [McpServerTool(Name = "xaml_codebehind")]
+    [Description("The x:Class a XAML file binds to, and every event handler it names, with the element and event each sits on. Use instead of reading the .xaml.cs to find out what the markup wires up.")]
+    public Task<string> XamlCodeBehind(
+        [Description("Path to the XAML file.")] string path,
+        [Description("Workspace or worktree name.")] string? workspace = null) =>
+        context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(XamlService.CodeBehind(loaded, path)));
+
+    [McpServerTool(Name = "xaml_set_property")]
+    [Description("Set or add one attribute on one XAML element, addressed by its element path from xaml_outline, #Name or key=Key. Preserves the file's formatting and refuses an edit that would produce malformed XAML. Use instead of Edit on a .xaml file.")]
+    public Task<string> XamlSetProperty(
+        [Description("Path to the XAML file.")] string path,
+        [Description("Element path from xaml_outline, #Name or key=Key.")] string target,
+        [Description("Attribute name, e.g. Background.")] string property,
+        [Description("Attribute value.")] string value,
+        [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null) =>
+        context.RejectWrite() is { } refusal
+            ? Task.FromResult(refusal)
+            : context.WithWorkspace(workspace, path, loaded =>
+                NavigationTools.Unwrap(XamlEditService.SetProperty(loaded, path, target, property, value, dryRun)));
+
     [McpServerTool(Name = "xaml_find")]
     [Description("Find XAML elements across the workspace by element type, x:Name, resource key, x:Uid or binding text. Use instead of Grep over .xaml files.")]
     public Task<string> XamlFind(

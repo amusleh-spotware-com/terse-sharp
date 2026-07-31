@@ -1,0 +1,10 @@
+<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Fixture.Trading.Views"
+             x:Class="Fixture.Trading.Views.ShellView"
+             x:DataType="vm:OrderViewModel">
+  <StackPanel>
+    <Button Content="Submit" Click="OnSubmitClicked" />
+    <TextBlock Text="{Binding Symbol}" />
+  </StackPanel>
+</UserControl>

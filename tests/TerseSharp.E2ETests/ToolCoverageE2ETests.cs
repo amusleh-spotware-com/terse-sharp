@@ -18,7 +18,7 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
         "project_add_reference", "project_remove_reference",
         "package_list", "package_add", "package_remove",
         "xaml_outline", "xaml_names", "xaml_resources", "xaml_bindings", "xaml_validate", "xaml_find",
-        "xaml_resolve",
+        "xaml_resolve", "xaml_codebehind", "xaml_set_property",
     };
 
     [Fact]
