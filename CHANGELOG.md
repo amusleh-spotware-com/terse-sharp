@@ -8,8 +8,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`run_tests` reports statistics.** Every run now carries
+  `passed= failed= skipped= total= durationMs= exitCode= elapsedMs=`, on green runs too.
+- **`run_tests` selects what to run.** `test=` takes a fully-qualified test name or a class or
+  namespace prefix, `filter=` still takes a raw VSTest expression, and passing both is refused with
+  `ERROR InvalidArgument`. `noBuild=true` reuses the existing binaries, `includePassed=true` lists
+  passing tests, `slowest=N` ranks the slowest, and `timeoutSeconds=` replaces the fixed 10-minute cap.
+- **`rerun_failed`** re-runs only the tests that failed in the previous `run_tests` call.
+- **`list_tests`** names the tests a project or solution contains without running them, with an
+  optional `contains=` substring.
+
 ### Fixed
 
+- **`run_tests` counted output lines, not tests.** A run with 2 failures reported `5 failures`,
+  because the header, the message and the final summary line each matched the failure regex. Counts
+  now come from the run's TRX report.
+- **`run_tests` dropped everything an agent needs to fix a test.** The exception type and message,
+  xunit's `Expected:`/`Actual:` values and the whole stack trace were discarded, leaving
+  `Error Message:` with nothing after it. Each failure now reports its message (capped at 12 lines)
+  and one workspace-relative `file:line` frame, with framework frames skipped.
+- **`run_tests` merged two tests that failed with the same message** into one line, and printed the
+  run summary twice.
+- **A filter that matched nothing looked like a green run** — `0 failures`, `exitCode=0`. It now says
+  `WARNING no test matched filter '<expr>'; this is not a green run`.
+- **A run that produced no results still printed a `0 failures` headline.** A missing project or a
+  crashed runner now reports `FAILED …, no test results were produced` followed by the output tail.
 - **`terse install` honours `CLAUDE_CONFIG_DIR`.** Claude Code reads `$CLAUDE_CONFIG_DIR/.claude.json`
   when that variable is set, so registering into `~/.claude.json` left the server invisible to the
   agent. The skill from `install --skill` follows the same directory (`$CLAUDE_CONFIG_DIR/skills`).

@@ -100,7 +100,7 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 
 ## 🧰 The tools
 
-51 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+53 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` (Roslyn-resolved) or `HEURISTIC` (text/index) tag.
 
 | Group | Tools |
@@ -113,7 +113,7 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
 | **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_bindings` · `xaml_validate` · `xaml_find` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
-| **Build** | `build` · `run_tests` |
+| **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 ### Analysis without a licence
 
@@ -124,6 +124,40 @@ unreferenced private members as `TERSE001`, plus the compiler's own unused-field
 hints — so one call covers everything. `cleanup` removes unused `using` directives, sorts what
 remains System-first and reformats to your `.editorconfig`. All of it is Roslyn: **no IDE, no
 external tool, no licence, no network.**
+
+### Tests an agent can act on
+
+`run_tests` parses the run's TRX report, so a red run comes back with the counters and, per failure,
+the exception or assertion message, the expected and actual values, and **one** stack frame —
+workspace-relative — instead of a stack trace:
+
+```
+2 failures (truncated=false, total=2)
+
+passed=3 failed=2 skipped=1 total=6 durationMs=229 exitCode=1 elapsedMs=9533
+
+FAIL Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion (2 ms)
+  Assert.Equal() Failure: Values differ
+  Expected: 4
+  Actual:   5
+  at tests/Fixture.Trading.Tests/DeliberateOutcomesTests.cs:26
+```
+
+Failures are capped at 20 and each message at 12 lines, so a red suite cannot flood the context. A
+filter that matches nothing says so instead of looking green, and a run that produced no results at
+all never reports `0 failures`.
+
+| Goal | Call |
+|---|---|
+| Whole solution | `run_tests` |
+| One project | `run_tests project="tests/Unit/Unit.csproj"` |
+| One test | `run_tests test="Ns.OrderTests.Submits"` — substring match, so check `total=`; a parameterized case runs its whole theory |
+| One class or namespace | `run_tests test="Ns.OrderTests"` |
+| Raw VSTest expression | `run_tests filter="Category=Fast"` |
+| Skip the rebuild | `run_tests noBuild=true` |
+| Only what just failed | `rerun_failed` |
+| Names without running | `list_tests contains="Order"` |
+| Slowest tests | `run_tests slowest=10` |
 
 **What each one replaces**
 
@@ -136,7 +170,7 @@ external tool, no licence, no network.**
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
-| `Bash: dotnet test` | `run_tests` | failures only; a green run is one line |
+| `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
 
 ### Safety
 

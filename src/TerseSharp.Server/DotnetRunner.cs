@@ -5,7 +5,15 @@ namespace TerseSharp.Server;
 
 public static partial class DotnetRunner
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);
+
+    private const int MaxFailures = 20;
+
+    private const int MaxMessageLines = 12;
+
+    private const int MaxTestNames = 200;
+
+    private const int MaxTimings = 50;
 
     public static async Task<string> BuildAsync(
         LoadedWorkspace workspace,
@@ -13,26 +21,77 @@ public static partial class DotnetRunner
         CancellationToken cancellationToken)
     {
         var target = project ?? workspace.SolutionPath;
-        var run = await RunAsync(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"], workspace.Root, cancellationToken)
+        var run = await RunAsync(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"], workspace.Root, DefaultTimeout, cancellationToken)
             .ConfigureAwait(false);
 
         return RenderBuild(target, run);
     }
 
-    public static async Task<string> TestAsync(
+    internal static async Task<TestRunResult> TestAsync(
         LoadedWorkspace workspace,
-        string? project,
-        string? filter,
+        TestRunRequest request,
         CancellationToken cancellationToken)
     {
-        var target = project ?? workspace.SolutionPath;
-        string[] arguments = string.IsNullOrWhiteSpace(filter)
-            ? ["test", target, "-nodeReuse:false", "--nologo"]
-            : ["test", target, "-nodeReuse:false", "--nologo", "--filter", filter];
+        var results = Directory.CreateTempSubdirectory("terse-tests-");
 
-        var run = await RunAsync(arguments, workspace.Root, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var run = await RunAsync(Arguments(request, results.FullName), workspace.Root, request.Timeout, cancellationToken)
+                .ConfigureAwait(false);
+            var report = Report(results, workspace.Root);
 
-        return RenderTest(target, run);
+            return new TestRunResult(RenderTest(run, report, request), report);
+        }
+        finally
+        {
+            Discard(results);
+        }
+    }
+
+    private static void Discard(DirectoryInfo results)
+    {
+        try
+        {
+            results.Delete(recursive: true);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    internal static async Task<string> ListTestsAsync(
+        LoadedWorkspace workspace,
+        string target,
+        string? contains,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var run = await RunAsync(["test", target, "-nodeReuse:false", "--nologo", "--list-tests"], workspace.Root, timeout, cancellationToken)
+            .ConfigureAwait(false);
+
+        return RenderTestNames(target, run, contains);
+    }
+
+    private static TestRunReport Report(DirectoryInfo results, string workspaceRoot) =>
+        TestResultParser.Parse(Directory.EnumerateFiles(results.FullName, "*.trx", SearchOption.AllDirectories), workspaceRoot);
+
+    private static string[] Arguments(TestRunRequest request, string resultsDirectory)
+    {
+        var arguments = new List<string>(12)
+        {
+            "test", request.Target, "-nodeReuse:false", "--nologo", "--logger", "trx", "--results-directory", resultsDirectory,
+        };
+
+        if (request.Filter is { Length: > 0 } filter)
+            arguments.AddRange(["--filter", filter]);
+
+        if (request.NoBuild)
+            arguments.Add("--no-build");
+
+        return [.. arguments];
     }
 
     private static string RenderBuild(string target, ProcessRun run)
@@ -56,27 +115,116 @@ public static partial class DotnetRunner
         return response.ToString();
     }
 
-    private static string RenderTest(string target, ProcessRun run)
+    private static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request)
     {
-        var failures = FailureLine()
-            .Matches(run.Output)
-            .Select(match => match.Value.Trim())
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        if (report.Total is 0 && run.ExitCode is not 0)
+            return RenderNoResults(request.Target, run);
 
-        var response = new ResponseBuilder("run_tests", target);
+        var shown = Math.Min(report.Failures.Length, MaxFailures);
+        var response = new ResponseBuilder("run_tests", request.Target);
 
-        response.Summary(failures.Length, failures.Length, "failures");
-        response.Note(string.Create(CultureInfo.InvariantCulture, $"exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}"));
-        response.Note(Summary(run.Output));
+        response.Summary(shown, report.Failures.Length, "failures");
+        response.Note(Counters(report, run));
 
-        foreach (var failure in failures)
-            response.Line(failure);
-
-        AppendTail(response, run, failures.Length);
+        AppendWarnings(response, run, report, request.Filter);
+        AppendFailures(response, report, shown);
+        AppendTimings(response, report, request);
 
         return response.ToString();
     }
+
+    private static string RenderNoResults(string target, ProcessRun run)
+    {
+        var response = new ResponseBuilder("run_tests", target);
+
+        response.Note(run.TimedOut
+            ? string.Create(CultureInfo.InvariantCulture, $"FAILED timed out after {run.ElapsedMilliseconds} ms, no test results were produced; last output lines:")
+            : string.Create(CultureInfo.InvariantCulture, $"FAILED exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}, no test results were produced; last output lines:"));
+
+        foreach (var line in Tail(run.Output))
+            response.Line(line);
+
+        return response.ToString();
+    }
+
+    private static string RenderTestNames(string target, ProcessRun run, string? contains)
+    {
+        var names = TestNameList.Parse(run.Output, contains);
+        var shown = Math.Min(names.Length, MaxTestNames);
+        var response = new ResponseBuilder("list_tests", target);
+
+        response.Summary(shown, names.Length, "tests");
+
+        for (var index = 0; index < shown; index++)
+            response.Line(names[index]);
+
+        AppendTail(response, run, names.Length);
+
+        return response.ToString();
+    }
+
+    private static string Counters(TestRunReport report, ProcessRun run) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}");
+
+    private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter)
+    {
+        if (run.TimedOut)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING timed out after {run.ElapsedMilliseconds} ms; the results below are partial"));
+
+        if (report.Total is 0)
+            response.Note(NoMatch(filter));
+    }
+
+    private static string NoMatch(string? filter) => filter is { Length: > 0 }
+        ? string.Create(CultureInfo.InvariantCulture, $"WARNING no test matched filter '{filter}'; this is not a green run")
+        : "WARNING no test was discovered; this is not a green run";
+
+    private static void AppendFailures(ResponseBuilder response, TestRunReport report, int shown)
+    {
+        for (var index = 0; index < shown; index++)
+            AppendFailure(response, report.Failures[index]);
+    }
+
+    private static void AppendFailure(ResponseBuilder response, TestFailure failure)
+    {
+        response.Note(string.Empty);
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"FAIL {failure.Name} ({failure.DurationMs} ms)"));
+
+        foreach (var line in MessageLines(failure.Message))
+            response.Line("  " + line);
+
+        if (failure.Frame is { Length: > 0 } frame)
+            response.Line("  at " + frame);
+    }
+
+    private static void AppendTimings(ResponseBuilder response, TestRunReport report, TestRunRequest request)
+    {
+        if (request.IncludePassed)
+            AppendLines(response, report.PassedTests, "PASS");
+
+        if (request.Slowest > 0)
+            AppendLines(response, [.. report.Slowest(request.Slowest)], "SLOW");
+    }
+
+    private static void AppendLines(ResponseBuilder response, IReadOnlyList<TestTiming> tests, string prefix)
+    {
+        if (tests.Count is 0)
+            return;
+
+        var shown = Math.Min(tests.Count, MaxTimings);
+
+        response.Note(string.Empty);
+
+        for (var index = 0; index < shown; index++)
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"{prefix} {tests[index].Name} ({tests[index].DurationMs} ms)"));
+
+        if (shown < tests.Count)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{prefix} truncated=true, total={tests.Count}"));
+    }
+
+    private static IEnumerable<string> MessageLines(string message) =>
+        message.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(MaxMessageLines);
 
     private static void AppendTail(ResponseBuilder response, ProcessRun run, int parsed)
     {
@@ -92,14 +240,7 @@ public static partial class DotnetRunner
     private static IEnumerable<string> Tail(string output) =>
         output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(15);
 
-    private static string Summary(string output)
-    {
-        var match = TestSummary().Match(output);
-
-        return match.Success ? match.Value.Trim() : "no test summary found";
-    }
-
-    private static async Task<ProcessRun> RunAsync(string[] arguments, string workingDirectory, CancellationToken cancellationToken)
+    private static async Task<ProcessRun> RunAsync(string[] arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -116,7 +257,7 @@ public static partial class DotnetRunner
         using var process = Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        deadline.CancelAfter(Timeout);
+        deadline.CancelAfter(timeout);
 
         var run = await DrainAsync(process, stopwatch, deadline.Token).ConfigureAwait(false);
 
@@ -154,17 +295,14 @@ public static partial class DotnetRunner
         return new ProcessRun(
             -1,
             string.Create(CultureInfo.InvariantCulture, $"TIMED_OUT after {stopwatch.ElapsedMilliseconds} ms; the process tree was killed"),
-            stopwatch.ElapsedMilliseconds);
+            stopwatch.ElapsedMilliseconds,
+            TimedOut: true);
     }
 
     [GeneratedRegex(@"^.*?: (error|warning) [A-Z]+\d+:.*$", RegexOptions.Multiline)]
     private static partial Regex DiagnosticLine();
-
-    [GeneratedRegex(@"^\s*(Failed|Error Message:|Assert\.).*$", RegexOptions.Multiline)]
-    private static partial Regex FailureLine();
-
-    [GeneratedRegex(@"(Passed!|Failed!).*$", RegexOptions.Multiline)]
-    private static partial Regex TestSummary();
 }
 
-internal sealed record ProcessRun(int ExitCode, string Output, long ElapsedMilliseconds);
+internal sealed record ProcessRun(int ExitCode, string Output, long ElapsedMilliseconds, bool TimedOut = false);
+
+internal readonly record struct TestRunResult(string Response, TestRunReport Report);

@@ -24,7 +24,9 @@ or grepping for a type name, costs 10-30x more tokens and returns matches that a
 | find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, includes interfaces, overrides and doc crefs |
 | `Edit` a non-`.cs` file | `edit_text(path, oldText, newText)` | refuses an ambiguous match |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
-| `Bash: dotnet test` | `run_tests` | failures only; a green run is one line |
+| `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
+| re-running the ones that broke | `rerun_failed` | replays the previous run's failures, nothing else |
+| `dotnet test --list-tests` | `list_tests(contains)` | names only, without running them |
 
 ## Working rules
 
@@ -43,6 +45,31 @@ or grepping for a type name, costs 10-30x more tokens and returns matches that a
    assume it picked the right one.
 7. **Truncation is explicit.** `truncated=true, total=N` means there are more; raise `maxResults`
    rather than assuming you saw everything.
+
+## Running tests
+
+`run_tests` reports `passed= failed= skipped= total= durationMs=` on every run, then one block per
+failure: the message, the expected and actual values, and one workspace-relative `file:line` frame.
+Fix the test from that block — do not shell out to `dotnet test` for the stack trace.
+
+| Goal | Call |
+|---|---|
+| whole solution | `run_tests` |
+| one project | `run_tests(project)` |
+| one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
+| one case of a parameterized test | `run_tests(test)` with the case name — runs the whole theory, since the runner's `FullyQualifiedName` carries no arguments |
+
+`test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs `…SubmitsTwice`)
+runs both — check `total=` to see what actually ran, and use `filter="FullyQualifiedName=<name>"` when
+you need exactly one.
+| a raw VSTest expression | `run_tests(filter)` |
+| skip the rebuild | `run_tests(noBuild: true)` |
+| only what just failed | `rerun_failed` |
+| the slowest N | `run_tests(slowest: 10)` |
+| names without running | `list_tests(contains)` |
+
+`total=0` with a `WARNING` line means **nothing ran** — a filter typo, not a green suite. A run that
+produced no results at all reports `FAILED …, no test results were produced` and never `0 failures`.
 
 ## When a tool refuses
 

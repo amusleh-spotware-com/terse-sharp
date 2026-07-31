@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="6f5b3f6c-0000-4000-8000-000000000002" name="crashed" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult testName="Fixture.Trading.Tests.DeliberateOutcomesTests.Passes" outcome="Passed" duration="00:00:00.0010000">
+      <Output>
+        <ErrorInfo>
+          <Message>the runner died before this element was clo

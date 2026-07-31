@@ -73,9 +73,9 @@ Prefer to configure it by hand:
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs |
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
-| `dotnet test` | `run_tests` | failures only; a green run is one line |
+| `dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
 
-## The 51 tools
+## The 53 tools
 
 - **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace`, `list_projects`
 - **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`
@@ -85,7 +85,7 @@ Prefer to configure it by hand:
 - **Projects & solutions** — `solution_projects`, `solution_add_project`, `solution_remove_project`, `project_create`, `project_properties`, `project_set_property`, `project_add_reference`, `project_remove_reference`, `package_list`, `package_add`, `package_remove`
 - **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_bindings`, `xaml_validate`, `xaml_find`
 - **Files** — `read_text`, `write_text`, `edit_text`, `find_files`, `search_text`, `search_regex`
-- **Build** — `build`, `run_tests`
+- **Build & test** — `build`, `run_tests`, `rerun_failed`, `list_tests`
 
 ### Analysis without a licence
 

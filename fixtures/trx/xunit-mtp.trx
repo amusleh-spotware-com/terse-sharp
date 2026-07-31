@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="6f5b3f6c-0000-4000-8000-000000000004" name="mtp" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-07-31T10:00:00.0000000+00:00" start="2026-07-31T10:00:00.0000000+00:00" finish="2026-07-31T10:00:02.0000000+00:00" />
+  <Results>
+    <UnitTestResult executionId="1a0d0e00-0000-4000-8000-000000000001" testId="1a0d0e00-0000-4000-8000-000000000011" testName="Fixture.Trading.Tests.DeliberateOutcomesTests.Passes" outcome="Passed" duration="00:00:00.0030000" />
+    <UnitTestResult executionId="1a0d0e00-0000-4000-8000-000000000002" testId="1a0d0e00-0000-4000-8000-000000000012" testName="Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion" outcome="Failed" duration="00:00:00.0020000">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Equal() Failure: Values differ&#xD;
+Expected: 4&#xD;
+Actual:   5</Message>
+          <StackTrace>   at Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion() in C:\repo\fixtures\FixtureSolution\tests\Fixture.Trading.Tests\DeliberateOutcomesTests.cs:line 18</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="1a0d0e00-0000-4000-8000-000000000003" testId="1a0d0e00-0000-4000-8000-000000000013" testName="Fixture.Trading.Tests.DeliberateOutcomesTests.Throws" outcome="Failed" duration="00:00:00.0060000">
+      <Output>
+        <ErrorInfo>
+          <Message>System.InvalidOperationException : probe boom</Message>
+          <StackTrace>   at Fixture.Trading.Tests.DeliberateOutcomesTests.Throws() in C:\repo\fixtures\FixtureSolution\tests\Fixture.Trading.Tests\DeliberateOutcomesTests.cs:line 24&#xD;
+   at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="1a0d0e00-0000-4000-8000-000000000004" testId="1a0d0e00-0000-4000-8000-000000000014" testName="Fixture.Trading.Tests.DeliberateOutcomesTests.SkippedByDesign" outcome="NotExecuted" duration="00:00:00.0000000" />
+  </Results>
+  <ResultSummary outcome="Failed">
+    <Counters total="4" executed="3" passed="1" failed="2" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="1" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+  </ResultSummary>
+</TestRun>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="6f5b3f6c-0000-4000-8000-000000000005" name="sibling" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult testName="Sibling.Tests.OutsideTests.Fails" outcome="Failed" duration="00:00:00.0010000">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.True() Failure</Message>
+          <StackTrace>   at Sibling.Tests.OutsideTests.Fails() in C:\repository\src\Outside.cs:line 7</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <ResultSummary outcome="Failed">
+    <Counters total="1" executed="1" passed="0" failed="1" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+  </ResultSummary>
+</TestRun>
