@@ -23,8 +23,10 @@ public sealed class WorkspaceTools(ToolContext context)
 
     [McpServerTool(Name = "list_workspaces")]
     [Description("List loaded workspaces with their git branch and worktree, so you can disambiguate several checkouts of one repo.")]
-    public string ListWorkspaces()
+    public async Task<string> ListWorkspaces()
     {
+        await context.ReadyAsync().ConfigureAwait(false);
+
         var all = context.Registry.All();
         var response = new ResponseBuilder("list_workspaces", string.Empty);
 
@@ -33,22 +35,29 @@ public sealed class WorkspaceTools(ToolContext context)
         foreach (var workspace in all)
             response.Line(Describe(workspace));
 
+        if (all.Count is 0 && context.PreloadFailure is { } failure)
+            response.Note("the startup preload failed: " + failure);
+
         return response.ToString();
     }
 
     [McpServerTool(Name = "unload_workspace")]
     [Description("Unload a workspace and release its MSBuild file locks so an external build can run.")]
-    public string UnloadWorkspace([Description("Solution or project path to unload.")] string path) =>
-        context.Registry.Unload(path) ? "unloaded " + path : "not loaded " + path;
+    public async Task<string> UnloadWorkspace([Description("Solution or project path to unload.")] string path)
+    {
+        await context.ReadyAsync().ConfigureAwait(false);
+
+        return context.Registry.Unload(path) ? "unloaded " + path : "not loaded " + path;
+    }
 
     [McpServerTool(Name = "workspace_status")]
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, and any project that failed to load.")]
-    public string WorkspaceStatus([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
+    public Task<string> WorkspaceStatus([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, null, RenderStatus);
 
     [McpServerTool(Name = "list_projects")]
     [Description("List the projects of a loaded workspace: name, target framework, document count.")]
-    public string ListProjects([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
+    public Task<string> ListProjects([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, null, RenderProjects);
 
     private static string? Discover() =>

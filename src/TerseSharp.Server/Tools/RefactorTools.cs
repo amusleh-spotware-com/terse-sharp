@@ -52,12 +52,10 @@ public sealed class RefactorTools(ToolContext context)
 
     [McpServerTool(Name = "undo_last_change")]
     [Description("Revert the most recent mutation applied by this server. Keeps the last 10 snapshots.")]
-    public string UndoLastChange([Description("Optional workspace path or worktree name.")] string? workspace = null)
-    {
-        var rejection = context.RejectWrite();
-
-        return rejection ?? context.WithWorkspace(workspace, null, loaded => loaded.Undo());
-    }
+    public Task<string> UndoLastChange([Description("Optional workspace path or worktree name.")] string? workspace = null) =>
+        context.RejectWrite() is { } rejection
+            ? Task.FromResult(rejection)
+            : context.WithWorkspace(workspace, null, loaded => loaded.Undo());
 
     private static EditOptions Options(string tool, bool dryRun) => new(tool, dryRun, AllowErrors: false);
 

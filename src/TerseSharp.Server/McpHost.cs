@@ -22,20 +22,19 @@ public static class McpHost
 
         var host = builder.Build();
 
-        await PreloadAsync(host.Services, workspace, cancellationToken).ConfigureAwait(false);
+        Preload(host.Services, workspace, cancellationToken);
+
         await host.RunAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task PreloadAsync(IServiceProvider services, string? workspace, CancellationToken cancellationToken)
+    private static void Preload(IServiceProvider services, string? workspace, CancellationToken cancellationToken)
     {
         var target = workspace ?? Discovered();
 
         if (target is null)
             return;
 
-        var context = services.GetRequiredService<ToolContext>();
-
-        await context.Registry.LoadAsync(target, cancellationToken).ConfigureAwait(false);
+        services.GetRequiredService<ToolContext>().BeginPreload(target, cancellationToken);
     }
 
     private static string? Discovered() =>

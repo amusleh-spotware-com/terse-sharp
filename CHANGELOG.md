@@ -22,6 +22,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ### Fixed
 
+- **The server was unreachable on a large solution.** `serve` loaded the whole workspace before it
+  started the stdio transport, so `initialize` went unanswered until the load finished. The MCP
+  client cancels `initialize` after a fixed 60 s - which `MCP_TIMEOUT` does not raise - so a
+  158-project solution failed to connect with `-32001 Request timed out` while small ones were fine.
+  The transport now starts first and the workspace loads in the background: `initialize` answers in
+  ~1 s regardless of solution size, and the first tool call that needs the workspace waits for the
+  load to finish rather than reporting `WorkspaceNotLoaded`. A preload that fails is reported by
+  `list_workspaces` instead of being lost.
 - **`run_tests` counted output lines, not tests.** A run with 2 failures reported `5 failures`,
   because the header, the message and the final summary line each matched the failure regex. Counts
   now come from the run's TRX report.

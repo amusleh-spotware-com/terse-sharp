@@ -4,9 +4,20 @@ namespace TerseSharp.Server;
 
 public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDisposable
 {
+    private Task ready = Task.CompletedTask;
+
     public WorkspaceRegistry Registry { get; } = registry;
 
     public bool ReadOnly { get; } = readOnly;
+
+    public string? PreloadFailure { get; private set; }
+
+    public void BeginPreload(string target, CancellationToken cancellationToken) =>
+        Preload(Registry.LoadAsync(target, cancellationToken));
+
+    public Task ReadyAsync() => ready;
+
+    internal void Preload(Task load) => ready = ObserveAsync(load);
 
     public async Task<string> WithSymbolAsync(
         string? workspace,
@@ -14,6 +25,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         Func<LoadedWorkspace, ISymbol, Task<string>> action,
         CancellationToken cancellationToken)
     {
+        await ready.ConfigureAwait(false);
+
         return await ToolBoundary.RunAsync(async () =>
         {
             var resolved = Registry.Resolve(workspace, null);
@@ -29,8 +42,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         }).ConfigureAwait(false);
     }
 
-    public string WithWorkspace(string? workspace, string? pathHint, Func<LoadedWorkspace, string> action)
+    public async Task<string> WithWorkspace(string? workspace, string? pathHint, Func<LoadedWorkspace, string> action)
     {
+        await ready.ConfigureAwait(false);
+
         return ToolBoundary.Run(() =>
         {
             var resolved = Registry.Resolve(workspace, pathHint);
@@ -44,6 +59,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         string? pathHint,
         Func<LoadedWorkspace, Task<string>> action)
     {
+        await ready.ConfigureAwait(false);
+
         return await ToolBoundary.RunAsync(async () =>
         {
             var resolved = Registry.Resolve(workspace, pathHint);
@@ -57,4 +74,20 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         : null;
 
     public void Dispose() => Registry.Dispose();
+
+    private async Task ObserveAsync(Task load)
+    {
+        try
+        {
+            await load.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            PreloadFailure = "the workspace preload was cancelled";
+        }
+        catch (Exception exception)
+        {
+            PreloadFailure = string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}");
+        }
+    }
 }
