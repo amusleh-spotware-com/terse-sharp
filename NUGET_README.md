@@ -1,10 +1,13 @@
 # TerseSharp
 
-### Your agent stops reading whole C# files.
+### The bridge between your coding agent and your C# codebase.
 
-A Roslyn-powered [MCP](https://modelcontextprotocol.io) server that lets a coding agent navigate,
-read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep`, no line-number
-`Edit`, no shelling out. **82 tools. One install. No IDE, no licence, no network.**
+A Roslyn-powered [MCP](https://modelcontextprotocol.io) server that lets an agent navigate, read,
+edit, refactor, build and test a .NET solution **semantically** — no `Read`, no `Grep`, no
+line-number `Edit`, no shelling out. **83 tools. One install. No IDE, no licence, no network.**
+
+**Fewer tokens → lower bill. Fewer round trips → less waiting. Exact answers → fewer wrong edits.**
+Your agent spends the context window **doing the work** instead of **finding the code**.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/amusleh-spotware-com/terse-sharp/ci.yml?branch=main&label=CI)](https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
@@ -12,51 +15,60 @@ read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep
 
 ---
 
-## The same four questions, before and after
+## 💸 What it saves you
 
-| Question | Built-in tools | TerseSharp |
-| --- | --- | --- |
-| What's on this 2,000-line type? | `Read` → **~6,000 tokens** | `get_type_outline` → **~450** |
-| Who calls this method? | `Grep` + follow-up reads → **~4,000** | `find_usages` → **~200** |
-| Rename it across the solution | ~5,000 tokens, **misses the interface** | `rename_symbol` → **~150**, correct |
-| Why is the build red? | **~8,000 tokens** of MSBuild spew | `build` → **~600** |
+| Question | Built-in tools | TerseSharp | |
+| --- | --- | --- | --- |
+| What's on this 2,000-line type? | `Read` → **~6,000 tokens** | `get_type_outline` → **~450** | **13×** |
+| Who calls this method? | `Grep` + follow-up reads → **~4,000** | `find_usages` → **~200** | **20×** |
+| Rename it across the solution | ~5,000 tokens, **misses the interface** | `rename_symbol` → **~150**, correct | **30×** |
+| Why is the build red? | **~8,000 tokens** of MSBuild spew | `build` → **~600** | **13×** |
+| Does this `{Binding}` bind? | **no static answer exists in WPF** | `xaml_bindings validate=true` | ∞ |
 
-Roslyn already knows all four answers. TerseSharp hands them over in the shape the agent needs: a
-signature list instead of a file, real call sites instead of string matches, a solution-wide rename
-instead of a regex sweep, deduplicated diagnostics instead of build logs.
+Asserted by a token-budget suite in CI on every commit, not estimated.
+
+- 💰 **Money.** Ten type reads cost ~60,000 input tokens with `Read`; ~4,500 here — billed every
+  session, on every repo, for every agent you run.
+- ⏱️ **Time.** No IDE to launch, no language server handshake. The workspace loads **once**; every
+  later question is answered from the same in-memory compilation, and repeat XAML / `.resx` / DI
+  questions are served from a per-generation index that **reads no file at all**.
+- 🎯 **Fewer wrong edits.** A grep-driven rename misses the interface and hits the comment. An edit
+  that introduces a compile error is **rolled back** before the agent reports it done.
+
+**Round trips, not just bytes.** `explore_symbol` folds signature + docs + usage counts +
+implementations + XAML sites into one call; `impact_of` answers *"what breaks if I change this"* —
+every referencing file and every project that recompiles — **before** the rename, not after the build
+goes red.
 
 ---
 
-## 🎨 XAML that knows about your C#
+## 🎨 XAML and 🧩 Razor, checked against your C#
 
-TerseSharp holds the XAML tree **and** the Roslyn compilation in one process — so it answers the two
-questions no text tool can. **WPF · Avalonia (`.axaml`) · WinUI · MAUI**, dialect detected from the
-markup namespace.
+TerseSharp holds the markup tree **and** the Roslyn compilation in one process, so it answers what no
+text tool can. **WPF · Avalonia (`.axaml`) · WinUI · MAUI**, dialect detected from the namespace.
 
-**Does this binding actually bind?** WPF has *no* compile-time binding check at all — a typo fails
-silently to debug output. `xaml_bindings validate=true` resolves the data context from `x:DataType`
-or `d:DataContext`, maps the XAML prefix through its `clr-namespace:`, and walks every path segment
-against the real symbol:
-
-```
-BoundView.xaml:7   EXACT  TextBlock.Text  {Binding Symbol}    OK Symbol on OrderViewModel
-BoundView.xaml:9   EXACT  TextBlock.Text  {Binding Symbl}     ERROR no member 'Symbl'; nearest 'Symbol'
-BoundView.xaml:10  EXACT  TextBlock.Text  {Binding Sel.Symbol} OK Sel.Symbol on OrderViewModel
-```
-
-**Where does this resource come from?** One call instead of reading `App.xaml` and every merged
-dictionary in order:
+**Does this binding actually bind?** WPF has *no* compile-time binding check — a typo fails silently to
+debug output. `xaml_bindings validate=true` resolves the data context from `x:DataType` or
+`d:DataContext`, maps the prefix through its `clr-namespace:`, and walks every path segment against the
+real symbol:
 
 ```
-xaml_resolve AccentBrush
-Views/OrderView.xaml:5      SolidColorBrush  scope=local
-Views/Themes/Dark.xaml:4    SolidColorBrush  scope=theme
+BoundView.xaml:7   EXACT  TextBlock.Text  {Binding Symbol}  OK Symbol on OrderViewModel
+BoundView.xaml:9   EXACT  TextBlock.Text  {Binding Symbl}   ERROR no member 'Symbl'; nearest 'Symbol'
 ```
 
-Plus: **`rename_symbol` rewrites XAML too** — rename a code-behind handler and the `Click="…"` follows;
-rename a bound property and `{Binding …}` follows, but only where an `x:Class` or `x:DataType` proves
-it. `xaml_set_property` edits an attribute in place without reformatting the file.
-`xaml_codebehind`, `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_validate`, `xaml_find`.
+**Where does this resource come from?** `xaml_resolve AccentBrush` reports every declaration of the key
+with its `scope=local|theme`, instead of reading `App.xaml` and each merged dictionary in order.
+
+**The Blazor bug nothing else catches.** An attribute matching no `[Parameter]` compiles clean and
+throws `InvalidOperationException` at render. `razor_validate` reports it — with unknown components,
+duplicate `@page` routes, a `@bind` with no setter and an unregistered `@inject` — at the `.razor` line,
+never at the generated file under `obj/`. `razor_component` prints a component's full `[Parameter]` list,
+including one from a referenced package.
+
+**Renames carry into markup.** `rename_symbol` rewrites `Click="…"` and `{Binding …}`, but only where an
+`x:Class` or `x:DataType` proves it — anything else is listed `NOT rewritten` rather than guessed — and
+renaming a Blazor component renames its file plus the `.razor.cs`/`.razor.css`/`.razor.js` siblings.
 
 ---
 
@@ -78,61 +90,10 @@ terse install --guard               # also install the hook that BLOCKS Read/Gre
 terse doctor                        # verify SDK, MSBuild, workspace load, client registration
 ```
 
-**🔒 Make it stick.** The most expensive failure mode is an agent that has TerseSharp installed and
-reaches for `Read`/`Grep` anyway — every token the server saves on a call the agent never makes is
-zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolUse` hook that
-**denies** the built-in and names the tool to use instead:
-
-| | |
-| --- | --- |
-| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · a shell text read or listing on them (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`, plus the PowerShell forms `Get-ChildItem`, `gci`, `Get-Content`, `gc`, `Select-String`, `sls`) · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup, and for a XAML glob or shell walk it names `xaml_find`, `xaml_resolve` and `xaml_styles` **before** `find_files` |
-| **Names a tool that can do it** | `Write`/`Edit` on a `.cs` path that does not exist yet names `write_text(path, content, force=true)` — no symbol tool creates a file, and a denial with no legal move is what produces a silent fallback. A relative path the hook cannot resolve is offered creation only as the "if it does not exist yet" case, never as an unconditional overwrite |
-| **Says freshness is handled** | every `.cs` **write** denial adds that a file created or edited through `write_text` is picked up automatically, with no reload |
-| **Allowed** | plain `.css`, `.js`, `.csv`, `.csx` — matching is by file **extension** plus the `.razor.css`/`.razor.js` pair, not substring, so an ordinary stylesheet stays editable |
-| **Denied** | `dotnet format`, `dotnet clean` — `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them |
-| **Allowed** | `dotnet restore`, `pack`, `publish`, `run`, `tool` — no TerseSharp tool replaces these, and a denial that names no alternative is a wall |
-| **Never blocks on failure** | malformed hook input allows the call, so a guard fault cannot wedge a session |
-
-Pair it with `--skill`: the skill teaches the swaps, the guard enforces them.
-
-**🎮 Unity:** works on Unity game code too — Unity generates a real `.sln` with
-`Assembly-CSharp.csproj`, so outlines, `find_usages`, symbol-addressed edits and compile-gated rename
-across your `MonoBehaviour`s all work. Open the project in the editor once so the project files exist.
-Scene graph, inspector values and play-mode state are out of scope: TerseSharp answers questions about
-your **C# code**, not the editor.
-
 With no arguments the server walks up from the current directory, finds your `.sln` / `.slnx` /
-`.slnf` / `.csproj`, and loads it.
-
-Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set —
-`terse install` and `terse doctor` follow it, `--skill` lands in `$CLAUDE_CONFIG_DIR/skills` (else
-`~/.claude/skills`), and `doctor` prints the config path it read.
-
-**✂️ Success costs nothing.** All 30 mutating tools — `replace_symbol*`, `add_member`, `delete_symbol`,
-`rename_symbol`, the refactors, `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`,
-`package_*`, `solution_*` — answer a successful edit in **one line per changed file**
-(workspace-relative `path  changedLines=N`, plus the compile gate's `errors=/warnings=` counters), not
-a unified diff you already know the content of. `verbose=true` restores the diff; `dryRun=true` is
-never condensed, because there the diff *is* the answer; and **every caveat prints in full
-regardless** — a rollback, a new compile error, `0 files changed`, `compileGate=unavailable`,
-`workspace=stale`, `UNFIXED`, `designerStale`, or the `NOT rewritten` list a XAML-aware rename leaves.
-
-**🔔 Staying current.** A new release is announced to your agent for the cost of **one `HEAD` request to
-GitHub's `releases/latest` — empty body, no token, no rate limit — at most once every 24 hours**, on a
-background task that never blocks the handshake or a tool call. The result is cached in
-`~/.terse/update`, so a restart inside that window makes no request at all, and a failed check is cached
-too. When a newer release exists the **next tool response carries one extra last line**, the one channel
-every MCP client shows its agent:
-
-```
-UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp
-```
-
-It appears once per server process and never repeats; the response above it is untouched. `terse doctor`
-answers on demand. After you update, the next `terse serve` rewrites the installed `SKILL.md` and
-re-applies the `terse guard` hook so both match the new binary — only for what you installed: an absent
-skill is never created, an absent hook never added, other hooks never touched. `TERSE_UPDATE=0` turns
-the check and the refresh off; `TERSE_UPDATE_URL` points them at another endpoint.
+`.slnf` / `.csproj`, and loads it. Claude Code reads `~/.claude.json`, or
+`$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set — `terse install` and `terse doctor`
+follow it, and `doctor` prints the config path it read.
 
 Prefer to configure it by hand:
 
@@ -147,6 +108,50 @@ Prefer to configure it by hand:
 }
 ```
 
+**🔒 Make it stick.** The most expensive failure mode is an agent that has TerseSharp installed and
+reaches for `Read`/`Grep` anyway — every token the server saves on a call the agent never makes is
+zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolUse` hook that
+**denies** the built-in and names the tool to use instead.
+
+| | |
+| --- | --- |
+| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · a shell text read or listing on them (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`, plus the PowerShell forms `Get-ChildItem`, `gci`, `Get-Content`, `gc`, `Select-String`, `sls`) · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup, `xaml_find`/`xaml_resolve`/`xaml_styles` before `find_files` for XAML |
+| **Names a tool that can do it** | `Write`/`Edit` on a `.cs` path that does not exist yet names `write_text(path, content, force=true)` — no symbol tool creates a file, and a denial with no legal move is what produces a silent fallback |
+| **Says freshness is handled** | every `.cs` write denial adds that a file created or edited through `write_text` is picked up automatically, with no reload |
+| **Allowed** | plain `.css`, `.js`, `.csv`, `.csx` — matching is by file **extension** plus the `.razor.css`/`.razor.js` pair, not substring · `dotnet restore`, `pack`, `publish`, `run`, `tool` — no TerseSharp tool replaces these, and a denial that names no alternative is a wall |
+| **Never blocks on failure** | malformed hook input allows the call, so a guard fault cannot wedge a session |
+
+Pair it with `--skill`: the skill teaches the swaps, the guard enforces them.
+
+**🎮 Unity:** works on Unity game code too — Unity generates a real `.sln` with
+`Assembly-CSharp.csproj`, so outlines, `find_usages`, symbol-addressed edits and compile-gated rename
+across your `MonoBehaviour`s all work. Open the project in the editor once so the project files exist.
+Scene graph, inspector values and play-mode state are out of scope: TerseSharp answers questions about
+your **C# code**, not the editor.
+
+**✂️ Success costs nothing.** All 30 mutating tools — `replace_symbol*`, `add_member`,
+`delete_symbol`, `rename_symbol`, the refactors, `write_text`, `edit_text`, `xaml_*`, `razor_*`,
+`resx_*`, `project_*`, `package_*`, `solution_*` — answer a successful edit in **one line per changed
+file** (workspace-relative `path  changedLines=N`, plus the compile gate's `errors=`/`warnings=`
+counters), not a diff of text the agent just wrote. `verbose=true` restores it; `dryRun=true` is never
+condensed, because there the diff *is* the answer; and **every caveat prints in full regardless** — a
+rollback, a new compile error, `0 files changed`, `compileGate=unavailable`, `workspace=stale`,
+`UNFIXED`, `designerStale`, or the `NOT rewritten` list a XAML-aware rename leaves.
+
+**🔔 Staying current.** A new release is announced to your agent for the cost of **one `HEAD` request
+to GitHub's `releases/latest` — empty body, no token, no rate limit — at most once every 24 hours**,
+on a background task that never blocks the handshake or a tool call, cached in `~/.terse/update`. When
+a newer release exists the **next tool response carries one extra last line**:
+
+```
+UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp
+```
+
+It appears once per server process and never repeats. After you update, the next `terse serve`
+rewrites the installed `SKILL.md` and re-applies the `terse guard` hook so both match the new binary —
+only for what you installed. `TERSE_UPDATE=0` turns the check and the refresh off; `TERSE_UPDATE_URL`
+points them elsewhere.
+
 ## What each tool replaces
 
 | Instead of | Use | Why |
@@ -154,14 +159,19 @@ Prefer to configure it by hand:
 | `Read` a `.cs` file | `get_file_outline` | types + members + line ranges, no bodies |
 | `Read` to see one method | `get_symbol_source` | that member only |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
-| `Grep` to find callers | `find_usages` | real references, one line per file with a `src`/`test` marker; `containers=true` also names the member each usage sits in |
-| `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
+| `Grep` to find callers | `find_usages` | real references, each marked `src` or `test` |
+| three calls to learn a symbol | `explore_symbol` | signature, docs, usage counts, implementations, XAML sites — one call |
+| guessing a rename's blast radius | `impact_of` | every referencing file and every project that recompiles |
+| grepping `Program.cs` for DI | `find_registrations` · `list_endpoints` | open generics, factory delegates and `Add*` extensions grep cannot see |
+| `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol, immune to line drift |
+| creating a new `.cs` file | `write_text(path, content, force: true)` | the new type resolves on the very next call |
+| `Edit` a `.xaml` file | `xaml_set_property` | addressed by element, formatting preserved |
 | `Read` a `.razor` / `.cshtml` file | `razor_outline` | directives, component tree and `@code` members, each component resolved to its type |
 | `Edit` a `.razor` file | `razor_set_attribute` | element-addressed, and the Razor generator re-runs so a broken edit is rolled back |
-| find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs |
 | `Read` a `.resx` file | `resx_get` | keys and values per culture; a missing translation prints `MISSING` |
 | `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
 | `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
+| find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew; a clean build is one line |
 | `dotnet test` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
 | `dotnet format` | `format`, `cleanup fix=all`, `cleanup verify=true` | compile-gated code fixes and a one-line verdict, never raw CLI output |
@@ -169,8 +179,9 @@ Prefer to configure it by hand:
 
 ## The 83 tools
 
-Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT` or
-`HEURISTIC` tag. Paths are workspace-relative.
+Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT`
+(Roslyn-resolved) or `HEURISTIC` (text/index) tag. Paths are workspace-relative, and truncation names
+the parameter that narrows it.
 
 - **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace`, `list_projects`
 - **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`, `explore_symbol`, `impact_of`
@@ -179,35 +190,60 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
 - **Edit** — `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`
 - **Refactor** — `extract_interface`, `move_type_to_file`, `move_type_to_namespace`, `change_signature`, `undo_last_change`
 - **Projects & solutions** — `solution_projects`, `solution_add_project`, `solution_remove_project`, `project_create`, `project_properties`, `project_set_property`, `project_add_reference`, `project_remove_reference`, `package_list`, `package_add`, `package_remove`
-- **XAML** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_styles`, `xaml_bindings`, `xaml_validate`, `xaml_find`, `xaml_codebehind`, `xaml_localization`, `xaml_set_property`, `xaml_add_element`, `xaml_remove_element`
-  — `xaml_resolve` reports every declaration of a resource key across the workspace with its scope, and
-  `xaml_bindings validate=true` checks each binding path against the `x:DataType` or `d:DataContext`
-  type resolved through Roslyn
+- **XAML (WPF · Avalonia · WinUI · MAUI)** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_styles`, `xaml_bindings`, `xaml_validate`, `xaml_find`, `xaml_codebehind`, `xaml_localization`, `xaml_set_property`, `xaml_add_element`, `xaml_remove_element`
 - **Localization (`.resx`/`.resw`)** — `resx_files`, `resx_get`, `resx_find`, `resx_usages`, `resx_set`, `resx_remove`, `resx_rename`, `resx_validate`
-  — `resx_get` prints every key with its value per culture and `MISSING` where a translation is absent,
-  `resx_validate` reports missing translations, placeholder mismatches, duplicate names, orphans, empty
-  values and a stale designer, and the writers rewrite only the `<data>` element they address, keeping the
-  schema header, ordering, indentation, line endings and byte order mark intact
 - **Razor / Blazor** — `razor_outline`, `razor_component`, `razor_find`, `razor_bindings`, `razor_codebehind`, `razor_validate`, `razor_set_attribute`, `razor_add_element`, `razor_remove_element`, `razor_set_directive`
-  — components resolve through the Razor source generator, so `razor_outline` names the real type of
-  every `<Card />`, `razor_component` reports the parameters of a component from source **or** a
-  referenced package, and `razor_validate` reports the faults the compiler does not: an unknown
-  `[Parameter]`, a duplicate `@page` route, a `@bind` with no setter, an unregistered `@inject`
 - **Files** — `read_text`, `write_text`, `edit_text`, `find_files`, `search_text`, `search_regex`
 - **Build & test** — `build`, `run_tests`, `rerun_failed`, `list_tests`
 
-### Analysis without a licence
+## ⚔️ Vs the alternatives
 
-`analyze` runs the compiler plus every analyzer your projects already reference - CA rules,
-StyleCop, SonarAnalyzer, Roslynator, anything in your `PackageReference` list - down to `info` and
-`hidden` severity, which a normal build hides. It also reports dead code in the same list -
-unreferenced private members as `TERSE001`, plus the compiler's unused-field and unreachable-code
-hints - so one call covers everything. `cleanup` removes unused `using` directives, sorts what
-remains System-first and reformats to your `.editorconfig`. `cleanup fix=style|analyzers|all` also applies the code fixes of every analyzer the project references - the in-process equivalent of `dotnet format style` and `dotnet format analyzers` - compile-gated, rolled back if it breaks the build, and reporting `UNFIXED <id>` for anything no fixer covers. `format verify=true` and `cleanup verify=true` replace `--verify-no-changes` with a one-line verdict, `path=` takes a file, a directory or a glob, and generated code is never rewritten. `clean` replaces `dotnet clean`: it deletes `bin` and `obj` and reports `projects=`, `files=` and `freedBytes=` instead of MSBuild output, releasing the workspace's own file locks first when they block the delete; it is not covered by `undo_last_change`. All Roslyn: no IDE, no external tool,
-no licence, no network.
+| | **TerseSharp** | Rider MCP | `RoslynMcpServer` | `csharp-lsp-mcp` |
+| --- | --- | --- | --- | --- |
+| Needs a running IDE | **No** | Yes (licensed, solution open) | No | No |
+| Setup | **one command** | IDE + licence | tool install | tool install + `csharp-ls` |
+| C# semantics | **Roslyn, exact** | Roslyn, exact | Roslyn, exact | via `csharp-ls` |
+| Can edit / refactor | **Yes** | Yes | Partial | Rename preview |
+| Compile-gated edits with rollback | **Yes** | No | No | No |
+| Undo the last symbol edit as a tool | **`undo_last_change`** | No | No | No |
+| Response size budgeted in CI | **The savings above** | No | No | No |
+| One-line success, `verbose=true` for the diff | **Yes** | No | No | No |
+| Symbol addressable by short name | **Yes, round-trips** | Ids only | Ids only | Positions |
+| Confidence tag on every semantic result | **`EXACT` / `HEURISTIC`** | No | No | No |
+| Truncation that names the narrowing parameter | **Yes** | No | No | No |
+| Type-checked XAML bindings | **Yes** | Inspections only | No | No |
+| XAML resource graph (merged dictionaries, themes) | **Yes** | No | No | No |
+| XAML-aware rename | **Yes** | Partial | No | No |
+| Razor / Blazor component API + validation | **Yes** | Inspections only | No | No |
+| Edits inside `@code` via the C# tools | **Yes** | Partial | No | No |
+| `.resx` / `.resw` read, edit and translation lint | **Yes** | No | No | No |
+| DI registrations & ASP.NET endpoints as tools | **Yes** | No | No | No |
+| Analyzers + dead code, no licence | **Down to `info`** | Yes (licensed) | No | No |
+| `build` / `run_tests` / `rerun_failed` as tools | **Yes** | Yes | No | No |
+| Project / package / solution editing | **Yes** | Partial | No | No |
+| Live disk sync (watcher + stamp check) | **Yes** | IDE-managed | No | No |
+| Parallel worktrees / multi-repo | **First-class** | One solution per IDE | No | No |
+| `--read-only` mode | **Yes** | No | No | No |
+| Ships an agent skill + a `PreToolUse` guard hook | **Yes** | No | No | No |
+| E2E test per advertised tool | **Required** | — | — | — |
 
-Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT`
-(Roslyn-resolved) or `HEURISTIC` (text/index) tag.
+Compared against public documentation and tool lists at time of writing; corrections welcome by PR.
+
+## Analysis without a licence
+
+`analyze` runs the compiler plus every analyzer your projects already reference — CA rules, StyleCop,
+SonarAnalyzer, Roslynator, anything in your `PackageReference` list — down to `info` and `hidden`
+severity, which a normal build hides, and reports dead code in the same list, so one call covers
+everything. `cleanup` removes unused `using` directives, sorts what remains System-first and reformats
+to your `.editorconfig`; `cleanup fix=style|analyzers|all` also applies the code fixes of every
+analyzer the project references — the in-process equivalent of `dotnet format style` and
+`dotnet format analyzers` — compile-gated, rolled back if it breaks the build, and reporting
+`UNFIXED <id>` for anything no fixer covers. `format verify=true` and `cleanup verify=true` replace
+`--verify-no-changes` with a one-line verdict, `path=` takes a file, a directory or a glob, and
+generated code is never rewritten. `clean` replaces `dotnet clean`: it deletes `bin` **and** `obj` and
+reports `projects=`, `files=` and `freedBytes=` instead of MSBuild output, releasing the workspace's
+own file locks first when they block the delete. All Roslyn: no IDE, no external tool, no licence, no
+network.
 
 ## Freshness — the workspace follows the disk
 
@@ -217,7 +253,7 @@ state **with an `EXACT` tag**. It now tracks the tree.
 
 - **A `FileSystemWatcher` per workspace** nominates changed paths. It is a hint, not a source of
   truth: state changes only after a **content comparison**, so a dropped, duplicated or out-of-order
-  OS event can delay a refresh but never corrupt one, and the server's own writes are no-ops.
+  OS event can delay a refresh but never corrupt one.
 - **Sync is lazy** — events accumulate and are drained by the next call that needs semantics, so a
   `git checkout` storm costs one reload, not one per file. `read_text`, `write_text`, `edit_text`,
   `find_files`, `search_text` and `search_regex` answer from disk and skip it.
@@ -225,50 +261,38 @@ state **with an `EXACT` tag**. It now tracks the tree.
   it, which is why correctness survives a dropped event and `--no-watch`.
 - **Doubt is a rebuild** — a changed `.csproj`/`.props`/`.targets`/`.sln`/`global.json`/`.editorconfig`,
   a `.cs` added or removed under a project's directory, a watcher buffer overflow or an over-cap
-  pending set reload the solution rather than guess. A `.cs` outside every project directory belongs
-  to no project and is ignored. A call already in flight keeps answering from the snapshot it started
-  with.
-- **Four generation counters** — `Code`, `Project`, `Xaml`, `Resx` — so a `.cs` edit does not
-  invalidate the XAML graph and a reload bumps `Code` and `Project` only. They carry across a reload;
-  compare them for inequality rather than ordering, because unloading and loading a workspace afresh
-  starts them again.
+  pending set reload the solution rather than guess. A call already in flight keeps answering from the
+  snapshot it started with.
+- **Four generation counters** — `Code`, `Project`, `Xaml`, `Resx` (plus `rz` for Razor) — so a `.cs`
+  edit does not invalidate the XAML graph. They carry across a reload; compare them for inequality
+  rather than ordering.
+- **Repeat questions read no file at all** — `xaml_resolve`, `xaml_validate`, `xaml_styles`,
+  `xaml_localization`, `xaml_find`, the `resx_*` tools, `find_registrations` and `list_endpoints`
+  share one index per workspace, built once per generation and reused until that counter moves. When
+  it does, only the files whose stamp changed are re-parsed — a one-file edit in a 200-file tree costs
+  one parse, not 200.
 - **Undo knows it was overtaken** — an external change to a file an undo snapshot covers drops that
   snapshot and every one above it, and `undo_last_change` says so instead of silently reverting
   someone else's work.
 
-- **Repeat questions are answered from an index, not a rescan** — `xaml_resolve`, `xaml_validate`,
-  `xaml_styles`, `xaml_localization`, `xaml_find`, the `resx_*` tools, `find_registrations` and
-  `list_endpoints` used to walk and re-parse the whole tree on every call. They now share one index
-  per workspace, built once per generation and reused until that counter moves, so **the second call
-  reads no file at all**. When a generation moves, only the files whose `(LastWriteTimeUtc, Length)`
-  changed are re-parsed — a one-file edit in a 200-file tree costs one parse, not 200. When the
-  watcher is off or degraded, the index verifies by stamp sweep before answering. Parsed documents sit
-  behind a bounded LRU (128 documents or 32 MB) because an `XDocument` costs 5-10× its file, so
-  `xaml_find` and the XAML sweep inside `find_usages` — the two that need every document rather than
-  its index record — still re-parse beyond that cap.
-
-`workspace_status` reports `watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0` and
-`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10) documents=9/128 parses=9`.
-`load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`) turns the watcher
-off for constrained containers, and `terse doctor` reports whether this platform supports file
-watching at all.
+`workspace_status` reports `watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0` and the
+index hit rates. `load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`)
+turns the watcher off for constrained containers, and `terse doctor` reports whether this platform
+supports file watching at all.
 
 ## Safety
 
 - **Symbol-addressed edits** — no `old_string` echo, no line numbers to drift.
 - **`dryRun` on every mutation** returns the unified diff and writes nothing.
-- **Compile-gated** — an edit that introduces a *new* compile error is rolled back and the error
-  returned. Pre-existing errors never block an edit. `allowErrors: true` opts out.
+- **Compile-gated** — a C#, Razor or refactoring edit that introduces a *new* compile error is rolled
+  back and the error returned. Pre-existing errors never block an edit; `allowErrors: true` opts out.
+  The `.resx`, `.xaml` and `project_*`/`package_*`/`solution_*` writers are file writes: surgical and
+  formatting-preserving, but outside the compile gate and outside `undo_last_change` — preview them
+  with `dryRun`.
 - **Short symbol references** — an outline prints `OrderService.Submit(Order)` rather than a
-  200-character documentation id, and every tool that takes a `symbolId` accepts that name back.
-  A member a short name cannot address unambiguously — a constructor, operator, indexer, generic or
-  explicit interface implementation — keeps its documentation id, so every reference an outline prints
-  resolves. `ids=full` prints ids for everything; an ambiguous name lists the candidates rather than
-  guessing.
-- **Truncation that steers** — a truncated listing says which parameter narrows it.
-- **Diff-only responses** — mutations return the diff, a changed-line count and
-  `errors=N (+D) warnings=N (+D)`, never the file. A `dryRun` that would be rolled back says so and
-  names the errors it would introduce.
+  200-character documentation id, and every tool that takes a `symbolId` accepts that name back. A
+  member a short name cannot address unambiguously keeps its documentation id, so every reference an
+  outline prints resolves. An ambiguous name lists the candidates rather than guessing.
 - **Workspace containment** — paths compare by whole segment, so root `C:\repo` does not contain
   `C:\repoEvil`.
 - **`--read-only`** makes every mutating tool refuse and touch nothing.
@@ -277,7 +301,7 @@ watching at all.
 
 Run several agents at once across several git worktrees of one repo, and across unrelated repos —
 one server holding many workspaces (LRU, default 4), or many processes, or both. Every answer names
-its worktree and branch, and an ambiguous request returns `AMBIGUOUS_WORKSPACE` listing the
+its worktree and branch, and an ambiguous request returns `ERROR AmbiguousWorkspace` listing the
 candidates **instead of guessing** — answering from the wrong checkout is the one failure an agent
 cannot detect.
 

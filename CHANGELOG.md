@@ -8,6 +8,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Documentation
+
+- **`README.md` and `NUGET_README.md` rewritten around what the server buys you** — that TerseSharp is
+  the bridge between an agent and a C# codebase, and that the payoff is tokens, money, wall-clock time
+  and round trips rather than a tool count. New up front: a TL;DR, a "what it saves you" section
+  (money/time/fewer-wrong-edits) and a round-trip comparison. The GitHub README gains three colourful
+  **Mermaid** diagrams — the bridge architecture (agent → guard → TerseSharp → Roslyn → disk), the
+  four-stage development loop with the tools of each stage, and a sequence diagram contrasting
+  `Grep`-and-read with one `find_usages` call. Mermaid is GitHub-only, so `NUGET_README.md` stays pure
+  Markdown.
+- **The comparison table is extended from 10 rows to 26**, adding the capabilities the alternatives do
+  not have: `undo_last_change`, CI-asserted response budgets, one-line success with `verbose=true`,
+  short symbol references that round-trip, the `EXACT`/`HEURISTIC` tag, steering truncation, the XAML
+  resource graph, Razor/Blazor component API and validation, `@code` edits through the C# tools, the
+  `.resx`/`.resw` translation lint, DI/endpoint tools, project-package-solution editing, live disk
+  sync, `--read-only`, and the shipped skill plus `PreToolUse` guard hook. It now also appears in
+  `NUGET_README.md`, which had none.
+- **Leaner prose.** The README drops *Status*, *Design principles* and *What it deliberately doesn't
+  do*, and moves the guard matrix, the freshness contract and the update check into `<details>` blocks:
+  **6.8% fewer words** (6,144 → 5,726) at the same line count, while gaining three diagrams and a FAQ.
+  A new FAQ answers the recurring questions (no IDE/licence, which agents, will it edit behind your
+  back, huge solutions, VB/F#, git-DB-debugging scope, how the savings are measured) for human, agent
+  and search-engine readers. `NUGET_README.md` keeps its XAML/Razor section, now also covering the
+  Blazor validation and markup-aware rename it did not describe.
+- **Corrected claims that had gone stale.** Tool count **82 → 83** (README badge, NuGet summary line);
+  the `run_tests` per-failure message cap **12 → 30 lines** (`DotnetRunner.MaxMessageLines`); the
+  worktree error spelled `AMBIGUOUS_WORKSPACE` is `ERROR AmbiguousWorkspace`; the Razor rule set is
+  `RZR000`–`RZR010`, not the six ids previously listed as complete; the compile gate and
+  `undo_last_change` are stated as covering the C#/Razor/refactoring edits only, since the `.resx`,
+  `.xaml` and project/package/solution writers are file writes; and the token-budget claim now names
+  what is actually asserted (the savings table, 21 assertions) instead of "every number".
+
 ## [0.16.0] - 2026-08-01
 
 Two changes, both about what a tool response costs and what it tells you: every mutating tool stops
