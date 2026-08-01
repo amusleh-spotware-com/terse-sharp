@@ -112,6 +112,60 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.All(responses, response => Assert.True(Tokens(response) <= 800, Report("read tool", response)));
     }
 
+    [Fact]
+    public async Task ResxGet_KeysOnly_CostsAFractionOfReadingTheWidestResourceFile()
+    {
+        var keys = await server.CallAsync("resx_get", new()
+        {
+            ["path"] = "src/Fixture.Trading/Resources/Wide.resx",
+            ["values"] = false,
+            ["maxResults"] = 200,
+        });
+
+        var whole = await File.ReadAllTextAsync(
+            Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "Resources", "Wide.resx"),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(Tokens(keys) * 3 < Tokens(whole), Report("resx_get", keys, whole));
+    }
+
+    [Fact]
+    public async Task ResxGet_WithAPrefix_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("resx_get", new()
+        {
+            ["path"] = "src/Fixture.Trading/Strings.resx",
+            ["cultures"] = "all",
+            ["prefix"] = "Caption_",
+        });
+
+        Assert.True(Tokens(text) <= 250, Report("resx_get", text));
+    }
+
+    [Fact]
+    public async Task ResxValidate_OnTheWholeWorkspace_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("resx_validate", []);
+
+        Assert.True(Tokens(text) <= 800, Report("resx_validate", text));
+    }
+
+    [Fact]
+    public async Task ResxFiles_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("resx_files", []);
+
+        Assert.True(Tokens(text) <= 400, Report("resx_files", text));
+    }
+
+    [Fact]
+    public async Task ResxUsages_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("resx_usages", new() { ["key"] = "Caption_Submit" });
+
+        Assert.True(Tokens(text) <= 250, Report("resx_usages", text));
+    }
+
     private static int Tokens(string text) => (text.Length + 3) / 4;
 
     private static string Report(string tool, string response) =>

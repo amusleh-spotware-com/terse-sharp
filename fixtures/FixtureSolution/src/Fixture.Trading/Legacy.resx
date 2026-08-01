@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="$this.Text" xml:space="preserve">
+    <value>Legacy form</value>
+  </data>
+  <data name="&gt;&gt;submitButton.Name" xml:space="preserve">
+    <value>submitButton</value>
+  </data>
+  <data name="&gt;&gt;submitButton.Type" xml:space="preserve">
+    <value>System.Windows.Forms.Button, System.Windows.Forms</value>
+  </data>
+</root>

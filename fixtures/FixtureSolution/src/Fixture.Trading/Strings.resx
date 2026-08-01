@@ -6,4 +6,27 @@
   <data name="Unused_Key" xml:space="preserve">
     <value>Nothing uses this</value>
   </data>
+  <data name="Caption_Submit" xml:space="preserve">
+    <value>Submit order</value>
+    <comment>Submit order</comment>
+  </data>
+  <data name="Caption_Count" xml:space="preserve">
+    <value>{0} of {1}</value>
+  </data>
+  <data name="Caption_Total" xml:space="preserve">
+    <value>Total</value>
+  </data>
+  <data name="Caption_Trim">
+    <value> padded </value>
+  </data>
+  <data name="Caption_Dup" xml:space="preserve">
+    <value>First</value>
+  </data>
+  <data name="Caption_Dup" xml:space="preserve">
+    <value>Second</value>
+  </data>
+  <data name="Caption_Icon" type="System.Drawing.Color, System.Drawing">Blue</data>
+  <data name="Caption_Logo" mimetype="application/x-microsoft.net.object.bytearray.base64">
+    <value>AAEC</value>
+  </data>
 </root>

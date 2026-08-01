@@ -64,6 +64,7 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         "solution_add_project", "solution_remove_project",
         "project_create", "project_set_property", "project_add_reference", "project_remove_reference",
         "package_add", "package_remove",
+        "resx_set", "resx_remove", "resx_rename",
     ];
 
     [Theory]
@@ -95,6 +96,9 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         "project_set_property" => new() { ["project"] = ProjectFile, ["name"] = "LangVersion", ["value"] = "preview" },
         "project_add_reference" or "project_remove_reference" => new() { ["project"] = ProjectFile, ["target"] = ProjectFile },
         "package_add" => new() { ["project"] = ProjectFile, ["package"] = "Serilog", ["version"] = "4.0.0" },
+        "resx_set" => new() { ["path"] = ResourceFile, ["key"] = "Scratch_Two", ["value"] = "Two" },
+        "resx_remove" => new() { ["path"] = ResourceFile, ["key"] = "Scratch_One", ["force"] = true },
+        "resx_rename" => new() { ["path"] = ResourceFile, ["key"] = "Scratch_One", ["newKey"] = "Scratch_Renamed" },
         _ => new() { ["project"] = ProjectFile, ["package"] = "Serilog" },
     };
 
@@ -103,4 +107,6 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
     private const string ServiceType = "T:Fixture.Trading.OrderService";
 
     private const string Unused = "M:Fixture.Trading.OrderService.Unused";
+
+    private const string ResourceFile = "src/Fixture.Trading/Scratch.resx";
 }

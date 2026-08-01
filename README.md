@@ -26,7 +26,7 @@
   <img src="https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 10"/>
   <img src="https://img.shields.io/badge/Roslyn-semantic-512BD4.svg" alt="Roslyn"/>
   <img src="https://img.shields.io/badge/XAML-WPF_·_Avalonia_·_WinUI_·_MAUI-0078D4.svg" alt="XAML"/>
-  <img src="https://img.shields.io/badge/tools-64-26C281.svg" alt="64 tools"/>
+  <img src="https://img.shields.io/badge/tools-72-26C281.svg" alt="72 tools"/>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"/></a>
 </p>
 
@@ -230,7 +230,7 @@ What it covers, and what it deliberately does not:
 
 | | |
 |---|---|
-| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command |
+| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command. A denial on a resource file names `resx_get`, `resx_find` and `resx_set` rather than the C# tools |
 | **Allows** | everything else, including `.css`, `.csv`, `.cshtml` and `.csx` — matching is by **file extension**, not substring, so a Blazor or MAUI repo keeps working |
 | **Denies** | `dotnet build`, `dotnet test`, `dotnet msbuild`, `dotnet vstest`, bare `msbuild` — anywhere in a compound command — because `build`, `run_tests`, `rerun_failed` and `list_tests` replace them |
 | **Allows** | `dotnet clean`, `restore`, `pack`, `publish`, `format`, `run`, `tool update` — **no TerseSharp tool replaces these**, and a denial that names no alternative is just a wall |
@@ -247,7 +247,7 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 
 ## 🧰 The tools
 
-64 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+72 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` / `HEURISTIC` tag. Paths are workspace-relative. Truncation names the parameter that narrows it.
 
 | Group | Tools |
@@ -260,6 +260,7 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
 | **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_styles` · `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` · `xaml_set_property` · `xaml_add_element` · `xaml_remove_element` |
+| **Localization (`.resx`/`.resw`)** | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
 | **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
@@ -275,6 +276,9 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | `Grep` to find callers | `find_usages` | real references, each marked `src` or `test` |
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol, immune to line drift |
 | `Edit` a `.xaml` file | `xaml_set_property` | addressed by element, formatting preserved |
+| `Read` a `.resx` file | `resx_get` | keys and values per culture; a missing translation prints `MISSING` |
+| `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
+| `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
@@ -358,6 +362,28 @@ than rewritten on a guess.
 
 ---
 
+## 🌍 Localization without reading a single `.resx`
+
+A 500-key `.resx` costs ~12 000 tokens to read, and a neutral + `fr` + `de` family ~36 000 — so the two
+questions that matter are the two an agent cannot afford to ask. `resx_validate` answers them in one call:
+
+```
+RESX001  src/App/Strings.de.resx  Order_Submit  MISSING      no de value; neutral="Submit order"
+RESX002  src/App/Strings.de.resx  Order_Count   PLACEHOLDER  neutral has {0},{1}, this culture has {0} - {1} is never filled in
+RESX002  src/App/Strings.fr.resx  Order_Total   PLACEHOLDER  this culture has {2} which the neutral value does not - string.Format throws FormatException
+RESX004  src/App/Strings.resx     Order_Submit  DUPLICATE    declared at lines 40, 88 - GenerateResource fails on a duplicate name
+```
+
+A placeholder mismatch is a runtime `FormatException` in one locale only — the bug class no compiler
+catches. Edits are surgical: `resx_set`, `resx_remove` and `resx_rename` rewrite only the `<data>` element
+they address, so the schema header, the ordering, the indentation, the line endings and the byte order mark
+survive, and a rename that would leave any file malformed writes nothing at all. Typed and binary entries
+are listed and passed through untouched, never rewritten. **WinForms designer resources are recognised and
+excluded from the translation lint** rather than flooding it with false positives, and `.resw` families are
+served by the same tools.
+
+---
+
 ## ⚔️ Vs the alternatives
 
 | | TerseSharp | Rider MCP | `RoslynMcpServer` | `csharp-lsp-mcp` |
@@ -420,6 +446,7 @@ built as compact text rather than JSON.
 | `explore_symbol`, `impact_of`, `find_registrations`, `list_endpoints` | ✅ |
 | XAML element insert/remove, dead-resource detection, `terse install --guard` | ✅ |
 | `xaml_styles` (implicit + keyed + `BasedOn` chain), `xaml_localization` (`x:Uid`→resx) | ✅ |
+| `.resx`/`.resw` listing, cross-culture read, search, key usages, surgical edit, rename, `RESX001`–`RESX009` lint | ✅ |
 | Shared warm workspace daemon across processes | 🔜 |
 | Content-addressed index, trigram search, file watcher | 🔜 |
 
@@ -436,6 +463,9 @@ described in [RELEASING.md](RELEASING.md).
 - **Unity / Unreal *editor* tools** — scene graph, inspector, play-mode state. Those read a live
   editor, which a headless process cannot, and six broken tools are worse than none. The **C# code**
   in a Unity project is fully supported — see the Unity note under [Install](#-install).
+- **Translation formats other than `.resx`/`.resw`** — no `.xlf`, no `.restext`, no CSV round trip and no
+  machine translation. The resx tools address keys and values; moving strings between systems is a
+  localization pipeline's job.
 - **Commit / push** — git access is read-only. Your agent already has git.
 - **Arbitrary shell execution** — only `dotnet build` / `dotnet test`, deadlined and killed on timeout.
 - **VB.NET / F# language tools** — C# first; they load without breaking navigation and language tools

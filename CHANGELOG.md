@@ -8,9 +8,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **Eight `.resx`/`.resw` localization tools** — the surface goes from 64 to 72. `resx_files` lists every
+  resource family with its cultures, entry counts, missing-translation total and designer file;
+  `resx_get` prints each key with its value per culture and `MISSING` where a translation is absent
+  (`values=false` lists keys only, at a fraction of the cost of reading the file); `resx_find` searches
+  key, value or comment across every family; `resx_usages` reports the generated designer property
+  resolved through Roslyn as `EXACT` plus `GetString`, localizer indexers, `x:Uid`, `[Display]` and Razor
+  literals as `HEURISTIC`, with `composedLookups=N` so "no usages" is never claimed as proof when the
+  solution builds keys at runtime; `resx_set` adds or updates one key or a batch of `Key=Value` lines and
+  creates a missing culture file from the neutral header; `resx_remove` deletes a key from one culture or
+  the whole family and refuses while it is still referenced unless `force=true`; `resx_rename` renames
+  across the family and rewrites the references it can prove, all or nothing; `resx_validate` reports
+  `RESX001` missing translation, `RESX002` placeholder mismatch (separating the missing-`{n}` case from
+  the extra-`{n}` case that makes `string.Format` throw), `RESX003` unused (opt-in, `HEURISTIC`),
+  `RESX004` duplicate name, `RESX005` orphan, `RESX006` empty value, `RESX007` whitespace trimmed for
+  want of `xml:space`, `RESX008` unsorted and `RESX009` stale designer.
+- Every write is **surgical**: only the addressed `<data>` element is rewritten, so the schema header,
+  `resheader` rows, entry order, indentation, line endings and byte order mark survive, and a result that
+  would not parse is refused before anything is written. Typed and binary entries are reported
+  `TYPED`/`BINARY` and passed through untouched. A multi-file edit that fails part way restores the files
+  it already wrote.
+
 ### Changed
 
-- **The guard intercepts `dotnet build` and `dotnet test`.** It only ever denied reads and edits, so
+- **`terse guard` covers `.resx` and `.resw`.** A denied read, glob, grep or edit on a resource file now
+  names `resx_get`, `resx_find` and `resx_set` instead of the C# tools.
+- **`AtomicWrite` preserves the byte order mark of the file it replaces.** Every write went out as UTF-8
+  without a BOM, so editing a Visual Studio-written `.resx` or `.xaml` showed a whole-file encoding change
+  in git. It now detects the existing preamble and writes the same one; a new file is still BOM-free.
+- **`xaml_localization` shares the resource index** instead of carrying its own `.resx` reader, so the two
+  cannot drift; its `resourceFiles=` count is unchanged in meaning.
+- `SKILL.md` teaches the eight tools, the `RESX00n` rules, and that `resx_*` and `xaml_*` writes are file
+  writes and therefore outside `undo_last_change`.
+- **The guard also intercepts `dotnet build` and `dotnet test`.** It only ever denied reads and edits, so
   the two shell-outs the server most obviously replaces — `build` and `run_tests` — went straight
   through, and the README even documented `dotnet build App.csproj` as an intentional allow. Now
   `dotnet build`, `dotnet test`, `dotnet msbuild`, `dotnet vstest` and bare `msbuild` are denied

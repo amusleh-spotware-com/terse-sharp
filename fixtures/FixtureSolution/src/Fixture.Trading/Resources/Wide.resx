@@ -1,0 +1,421 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Wide_Key_001" xml:space="preserve">
+    <value>Wide value 001</value>
+  </data>
+  <data name="Wide_Key_002" xml:space="preserve">
+    <value>Wide value 002</value>
+  </data>
+  <data name="Wide_Key_003" xml:space="preserve">
+    <value>Wide value 003</value>
+  </data>
+  <data name="Wide_Key_004" xml:space="preserve">
+    <value>Wide value 004</value>
+  </data>
+  <data name="Wide_Key_005" xml:space="preserve">
+    <value>Wide value 005</value>
+  </data>
+  <data name="Wide_Key_006" xml:space="preserve">
+    <value>Wide value 006</value>
+  </data>
+  <data name="Wide_Key_007" xml:space="preserve">
+    <value>Wide value 007</value>
+  </data>
+  <data name="Wide_Key_008" xml:space="preserve">
+    <value>Wide value 008</value>
+  </data>
+  <data name="Wide_Key_009" xml:space="preserve">
+    <value>Wide value 009</value>
+  </data>
+  <data name="Wide_Key_010" xml:space="preserve">
+    <value>Wide value 010</value>
+  </data>
+  <data name="Wide_Key_011" xml:space="preserve">
+    <value>Wide value 011</value>
+  </data>
+  <data name="Wide_Key_012" xml:space="preserve">
+    <value>Wide value 012</value>
+  </data>
+  <data name="Wide_Key_013" xml:space="preserve">
+    <value>Wide value 013</value>
+  </data>
+  <data name="Wide_Key_014" xml:space="preserve">
+    <value>Wide value 014</value>
+  </data>
+  <data name="Wide_Key_015" xml:space="preserve">
+    <value>Wide value 015</value>
+  </data>
+  <data name="Wide_Key_016" xml:space="preserve">
+    <value>Wide value 016</value>
+  </data>
+  <data name="Wide_Key_017" xml:space="preserve">
+    <value>Wide value 017</value>
+  </data>
+  <data name="Wide_Key_018" xml:space="preserve">
+    <value>Wide value 018</value>
+  </data>
+  <data name="Wide_Key_019" xml:space="preserve">
+    <value>Wide value 019</value>
+  </data>
+  <data name="Wide_Key_020" xml:space="preserve">
+    <value>Wide value 020</value>
+  </data>
+  <data name="Wide_Key_021" xml:space="preserve">
+    <value>Wide value 021</value>
+  </data>
+  <data name="Wide_Key_022" xml:space="preserve">
+    <value>Wide value 022</value>
+  </data>
+  <data name="Wide_Key_023" xml:space="preserve">
+    <value>Wide value 023</value>
+  </data>
+  <data name="Wide_Key_024" xml:space="preserve">
+    <value>Wide value 024</value>
+  </data>
+  <data name="Wide_Key_025" xml:space="preserve">
+    <value>Wide value 025</value>
+  </data>
+  <data name="Wide_Key_026" xml:space="preserve">
+    <value>Wide value 026</value>
+  </data>
+  <data name="Wide_Key_027" xml:space="preserve">
+    <value>Wide value 027</value>
+  </data>
+  <data name="Wide_Key_028" xml:space="preserve">
+    <value>Wide value 028</value>
+  </data>
+  <data name="Wide_Key_029" xml:space="preserve">
+    <value>Wide value 029</value>
+  </data>
+  <data name="Wide_Key_030" xml:space="preserve">
+    <value>Wide value 030</value>
+  </data>
+  <data name="Wide_Key_031" xml:space="preserve">
+    <value>Wide value 031</value>
+  </data>
+  <data name="Wide_Key_032" xml:space="preserve">
+    <value>Wide value 032</value>
+  </data>
+  <data name="Wide_Key_033" xml:space="preserve">
+    <value>Wide value 033</value>
+  </data>
+  <data name="Wide_Key_034" xml:space="preserve">
+    <value>Wide value 034</value>
+  </data>
+  <data name="Wide_Key_035" xml:space="preserve">
+    <value>Wide value 035</value>
+  </data>
+  <data name="Wide_Key_036" xml:space="preserve">
+    <value>Wide value 036</value>
+  </data>
+  <data name="Wide_Key_037" xml:space="preserve">
+    <value>Wide value 037</value>
+  </data>
+  <data name="Wide_Key_038" xml:space="preserve">
+    <value>Wide value 038</value>
+  </data>
+  <data name="Wide_Key_039" xml:space="preserve">
+    <value>Wide value 039</value>
+  </data>
+  <data name="Wide_Key_040" xml:space="preserve">
+    <value>Wide value 040</value>
+  </data>
+  <data name="Wide_Key_041" xml:space="preserve">
+    <value>Wide value 041</value>
+  </data>
+  <data name="Wide_Key_042" xml:space="preserve">
+    <value>Wide value 042</value>
+  </data>
+  <data name="Wide_Key_043" xml:space="preserve">
+    <value>Wide value 043</value>
+  </data>
+  <data name="Wide_Key_044" xml:space="preserve">
+    <value>Wide value 044</value>
+  </data>
+  <data name="Wide_Key_045" xml:space="preserve">
+    <value>Wide value 045</value>
+  </data>
+  <data name="Wide_Key_046" xml:space="preserve">
+    <value>Wide value 046</value>
+  </data>
+  <data name="Wide_Key_047" xml:space="preserve">
+    <value>Wide value 047</value>
+  </data>
+  <data name="Wide_Key_048" xml:space="preserve">
+    <value>Wide value 048</value>
+  </data>
+  <data name="Wide_Key_049" xml:space="preserve">
+    <value>Wide value 049</value>
+  </data>
+  <data name="Wide_Key_050" xml:space="preserve">
+    <value>Wide value 050</value>
+  </data>
+  <data name="Wide_Key_051" xml:space="preserve">
+    <value>Wide value 051</value>
+  </data>
+  <data name="Wide_Key_052" xml:space="preserve">
+    <value>Wide value 052</value>
+  </data>
+  <data name="Wide_Key_053" xml:space="preserve">
+    <value>Wide value 053</value>
+  </data>
+  <data name="Wide_Key_054" xml:space="preserve">
+    <value>Wide value 054</value>
+  </data>
+  <data name="Wide_Key_055" xml:space="preserve">
+    <value>Wide value 055</value>
+  </data>
+  <data name="Wide_Key_056" xml:space="preserve">
+    <value>Wide value 056</value>
+  </data>
+  <data name="Wide_Key_057" xml:space="preserve">
+    <value>Wide value 057</value>
+  </data>
+  <data name="Wide_Key_058" xml:space="preserve">
+    <value>Wide value 058</value>
+  </data>
+  <data name="Wide_Key_059" xml:space="preserve">
+    <value>Wide value 059</value>
+  </data>
+  <data name="Wide_Key_060" xml:space="preserve">
+    <value>Wide value 060</value>
+  </data>
+  <data name="Wide_Key_061" xml:space="preserve">
+    <value>Wide value 061</value>
+  </data>
+  <data name="Wide_Key_062" xml:space="preserve">
+    <value>Wide value 062</value>
+  </data>
+  <data name="Wide_Key_063" xml:space="preserve">
+    <value>Wide value 063</value>
+  </data>
+  <data name="Wide_Key_064" xml:space="preserve">
+    <value>Wide value 064</value>
+  </data>
+  <data name="Wide_Key_065" xml:space="preserve">
+    <value>Wide value 065</value>
+  </data>
+  <data name="Wide_Key_066" xml:space="preserve">
+    <value>Wide value 066</value>
+  </data>
+  <data name="Wide_Key_067" xml:space="preserve">
+    <value>Wide value 067</value>
+  </data>
+  <data name="Wide_Key_068" xml:space="preserve">
+    <value>Wide value 068</value>
+  </data>
+  <data name="Wide_Key_069" xml:space="preserve">
+    <value>Wide value 069</value>
+  </data>
+  <data name="Wide_Key_070" xml:space="preserve">
+    <value>Wide value 070</value>
+  </data>
+  <data name="Wide_Key_071" xml:space="preserve">
+    <value>Wide value 071</value>
+  </data>
+  <data name="Wide_Key_072" xml:space="preserve">
+    <value>Wide value 072</value>
+  </data>
+  <data name="Wide_Key_073" xml:space="preserve">
+    <value>Wide value 073</value>
+  </data>
+  <data name="Wide_Key_074" xml:space="preserve">
+    <value>Wide value 074</value>
+  </data>
+  <data name="Wide_Key_075" xml:space="preserve">
+    <value>Wide value 075</value>
+  </data>
+  <data name="Wide_Key_076" xml:space="preserve">
+    <value>Wide value 076</value>
+  </data>
+  <data name="Wide_Key_077" xml:space="preserve">
+    <value>Wide value 077</value>
+  </data>
+  <data name="Wide_Key_078" xml:space="preserve">
+    <value>Wide value 078</value>
+  </data>
+  <data name="Wide_Key_079" xml:space="preserve">
+    <value>Wide value 079</value>
+  </data>
+  <data name="Wide_Key_080" xml:space="preserve">
+    <value>Wide value 080</value>
+  </data>
+  <data name="Wide_Key_081" xml:space="preserve">
+    <value>Wide value 081</value>
+  </data>
+  <data name="Wide_Key_082" xml:space="preserve">
+    <value>Wide value 082</value>
+  </data>
+  <data name="Wide_Key_083" xml:space="preserve">
+    <value>Wide value 083</value>
+  </data>
+  <data name="Wide_Key_084" xml:space="preserve">
+    <value>Wide value 084</value>
+  </data>
+  <data name="Wide_Key_085" xml:space="preserve">
+    <value>Wide value 085</value>
+  </data>
+  <data name="Wide_Key_086" xml:space="preserve">
+    <value>Wide value 086</value>
+  </data>
+  <data name="Wide_Key_087" xml:space="preserve">
+    <value>Wide value 087</value>
+  </data>
+  <data name="Wide_Key_088" xml:space="preserve">
+    <value>Wide value 088</value>
+  </data>
+  <data name="Wide_Key_089" xml:space="preserve">
+    <value>Wide value 089</value>
+  </data>
+  <data name="Wide_Key_090" xml:space="preserve">
+    <value>Wide value 090</value>
+  </data>
+  <data name="Wide_Key_091" xml:space="preserve">
+    <value>Wide value 091</value>
+  </data>
+  <data name="Wide_Key_092" xml:space="preserve">
+    <value>Wide value 092</value>
+  </data>
+  <data name="Wide_Key_093" xml:space="preserve">
+    <value>Wide value 093</value>
+  </data>
+  <data name="Wide_Key_094" xml:space="preserve">
+    <value>Wide value 094</value>
+  </data>
+  <data name="Wide_Key_095" xml:space="preserve">
+    <value>Wide value 095</value>
+  </data>
+  <data name="Wide_Key_096" xml:space="preserve">
+    <value>Wide value 096</value>
+  </data>
+  <data name="Wide_Key_097" xml:space="preserve">
+    <value>Wide value 097</value>
+  </data>
+  <data name="Wide_Key_098" xml:space="preserve">
+    <value>Wide value 098</value>
+  </data>
+  <data name="Wide_Key_099" xml:space="preserve">
+    <value>Wide value 099</value>
+  </data>
+  <data name="Wide_Key_100" xml:space="preserve">
+    <value>Wide value 100</value>
+  </data>
+  <data name="Wide_Key_101" xml:space="preserve">
+    <value>Wide value 101</value>
+  </data>
+  <data name="Wide_Key_102" xml:space="preserve">
+    <value>Wide value 102</value>
+  </data>
+  <data name="Wide_Key_103" xml:space="preserve">
+    <value>Wide value 103</value>
+  </data>
+  <data name="Wide_Key_104" xml:space="preserve">
+    <value>Wide value 104</value>
+  </data>
+  <data name="Wide_Key_105" xml:space="preserve">
+    <value>Wide value 105</value>
+  </data>
+  <data name="Wide_Key_106" xml:space="preserve">
+    <value>Wide value 106</value>
+  </data>
+  <data name="Wide_Key_107" xml:space="preserve">
+    <value>Wide value 107</value>
+  </data>
+  <data name="Wide_Key_108" xml:space="preserve">
+    <value>Wide value 108</value>
+  </data>
+  <data name="Wide_Key_109" xml:space="preserve">
+    <value>Wide value 109</value>
+  </data>
+  <data name="Wide_Key_110" xml:space="preserve">
+    <value>Wide value 110</value>
+  </data>
+  <data name="Wide_Key_111" xml:space="preserve">
+    <value>Wide value 111</value>
+  </data>
+  <data name="Wide_Key_112" xml:space="preserve">
+    <value>Wide value 112</value>
+  </data>
+  <data name="Wide_Key_113" xml:space="preserve">
+    <value>Wide value 113</value>
+  </data>
+  <data name="Wide_Key_114" xml:space="preserve">
+    <value>Wide value 114</value>
+  </data>
+  <data name="Wide_Key_115" xml:space="preserve">
+    <value>Wide value 115</value>
+  </data>
+  <data name="Wide_Key_116" xml:space="preserve">
+    <value>Wide value 116</value>
+  </data>
+  <data name="Wide_Key_117" xml:space="preserve">
+    <value>Wide value 117</value>
+  </data>
+  <data name="Wide_Key_118" xml:space="preserve">
+    <value>Wide value 118</value>
+  </data>
+  <data name="Wide_Key_119" xml:space="preserve">
+    <value>Wide value 119</value>
+  </data>
+  <data name="Wide_Key_120" xml:space="preserve">
+    <value>Wide value 120</value>
+  </data>
+</root>

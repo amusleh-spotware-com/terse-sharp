@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="Caption_Count" xml:space="preserve">
+    <value>{0}</value>
+  </data>
+  <data name="Caption_Total" xml:space="preserve">
+    <value>Gesamt</value>
+  </data>
+</root>

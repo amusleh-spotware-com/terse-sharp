@@ -4,7 +4,7 @@
 
 A Roslyn-powered [MCP](https://modelcontextprotocol.io) server that lets a coding agent navigate,
 read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep`, no line-number
-`Edit`, no shelling out. **64 tools. One install. No IDE, no licence, no network.**
+`Edit`, no shelling out. **72 tools. One install. No IDE, no licence, no network.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/amusleh-spotware-com/terse-sharp/ci.yml?branch=main&label=CI)](https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
@@ -74,7 +74,7 @@ Register it with your agent — TerseSharp writes the config itself, you don't h
 terse install                       # detect installed clients and register with all of them
 terse install --client claude-code  # or pick one: claude-code | cursor | vscode | windsurf
 terse install --skill               # also install the agent skill
-terse install --guard               # also install the hook that BLOCKS Read/Grep/Edit on C# and XAML
+terse install --guard               # also install the hook that BLOCKS Read/Grep/Edit on C#, XAML and .resx
 terse doctor                        # verify SDK, MSBuild, workspace load, client registration
 ```
 
@@ -85,7 +85,7 @@ zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolU
 
 | | |
 | --- | --- |
-| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml` · `Glob`/`Grep` scoped to them · `grep`/`cat`/`sed`/`rg` on them · `dotnet build`, `dotnet test`, `msbuild`, `vstest` — anywhere in a compound command |
+| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · `grep`/`cat`/`sed`/`rg` on them · `dotnet build`, `dotnet test`, `msbuild`, `vstest` — anywhere in a compound command. A resource file is redirected to `resx_get`/`resx_find`/`resx_set` |
 | **Allowed** | `.css`, `.csv`, `.cshtml`, `.csx` — matching is by file **extension**, not substring, so Blazor and MAUI repos keep working |
 | **Allowed** | `dotnet clean`, `restore`, `pack`, `publish`, `format`, `run`, `tool` — no TerseSharp tool replaces these, and a denial that names no alternative is a wall |
 | **Never blocks on failure** | malformed hook input allows the call, so a guard fault cannot wedge a session |
@@ -128,10 +128,13 @@ Prefer to configure it by hand:
 | `Grep` to find callers | `find_usages` | real references, one line per file with a `src`/`test` marker; `containers=true` also names the member each usage sits in |
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs |
+| `Read` a `.resx` file | `resx_get` | keys and values per culture; a missing translation prints `MISSING` |
+| `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
+| `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
 
-## The 64 tools
+## The 72 tools
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT` or
 `HEURISTIC` tag. Paths are workspace-relative.
@@ -147,6 +150,11 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
   — `xaml_resolve` reports every declaration of a resource key across the workspace with its scope, and
   `xaml_bindings validate=true` checks each binding path against the `x:DataType` or `d:DataContext`
   type resolved through Roslyn
+- **Localization (`.resx`/`.resw`)** — `resx_files`, `resx_get`, `resx_find`, `resx_usages`, `resx_set`, `resx_remove`, `resx_rename`, `resx_validate`
+  — `resx_get` prints every key with its value per culture and `MISSING` where a translation is absent,
+  `resx_validate` reports missing translations, placeholder mismatches, duplicate names, orphans, empty
+  values and a stale designer, and the writers rewrite only the `<data>` element they address, keeping the
+  schema header, ordering, indentation, line endings and byte order mark intact
 - **Files** — `read_text`, `write_text`, `edit_text`, `find_files`, `search_text`, `search_regex`
 - **Build & test** — `build`, `run_tests`, `rerun_failed`, `list_tests`
 

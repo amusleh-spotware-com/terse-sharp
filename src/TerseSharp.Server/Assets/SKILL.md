@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET or XAML in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 64 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml file is never edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML or .resx localization in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 72 of them, so a .cs file is never read whole, a symbol is never found by text search, and neither a .xaml nor a .resx file is ever edited by line number.
 ---
 
 # TerseSharp
@@ -15,7 +15,8 @@ Before **every** `Read`, `Grep`, `Glob`, `Edit`, `Write` or code-touching `Bash`
 question:
 
 > **Is the target a `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`,
-> `.axaml` or `.paml` file, or a question about C# symbols, references, diagnostics, builds or tests?**
+> `.axaml`, `.paml`, `.resx` or `.resw` file, or a question about C# symbols, references, diagnostics,
+> builds or tests?**
 
 **If yes, the built-in is forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for
 it in the table below.
@@ -41,11 +42,11 @@ the file is outside any loaded workspace, or the server is genuinely unreachable
 A silent drop is the breach, even when the reason would have been valid.
 
 **Tripwires — stop and re-read this gate if any fires:**
-- You are about to `Read` a `.cs` or `.xaml` file.
+- You are about to `Read` a `.cs`, `.xaml` or `.resx` file.
 - Your built-in calls on C# outnumber your TerseSharp calls for this task.
 - You have used only `search_text` and no `search_symbols`, `find_usages` or `get_file_outline` — you
   are text-grepping through a semantic server.
-- You are about to `Edit` a `.xaml` by line number.
+- You are about to `Edit` a `.xaml` or `.resx` by line number.
 
 ## Replace the built-in on the left
 
@@ -74,6 +75,11 @@ A silent drop is the breach, even when the reason would have been valid.
 | judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
 | "why does this control look like that" | `xaml_styles(typeName)` | implicit and keyed styles with the `BasedOn` chain |
 | "is this element translated" | `xaml_localization()` | every `x:Uid` joined to its `.resx`/`.resw` entry |
+| `Read` a `.resx`/`.resw` | `resx_get(path, cultures)` | every key with its value per culture; absent ones print `MISSING` |
+| `Grep` a resource key | `resx_find(query)` | key, value or comment, across every family |
+| "is this key still used" | `resx_usages(key)` | designer property through Roslyn, plus `GetString`, localizer, `x:Uid`, Razor |
+| "which strings are untranslated" | `resx_validate()` | missing, placeholder mismatch, duplicate, orphan, empty, stale designer |
+| `Edit` a `.resx`/`.resw` | `resx_set` · `resx_remove` · `resx_rename` | one `<data>` element rewritten; header, order, indentation, line endings and BOM kept |
 | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `Bash: dotnet test` / `vstest` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
@@ -109,6 +115,15 @@ only what appeared since the previous run of the same scope, plus what was fixed
 `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` ·
 `xaml_set_property` · `xaml_add_element` · `xaml_remove_element`.
 
+**Localization** — `resx_files` (every `.resx`/`.resw` family with its cultures, counts, missing total and
+designer) · `resx_get` (keys and values per culture; `MISSING` where a translation is absent; `values=false`
+lists keys only) · `resx_find` (key, value or comment) · `resx_usages` (Roslyn-resolved designer property
+plus the textual forms, with `composedLookups=` so an empty answer is never claimed as proof) · `resx_set`
+(one key or `entries` as `Key=Value` lines; creates a missing culture file from the neutral header) ·
+`resx_remove` · `resx_rename` · `resx_validate` (`RESX001` missing · `RESX002` placeholder mismatch ·
+`RESX003` unused, `includeUnused` only · `RESX004` duplicate · `RESX005` orphan · `RESX006` empty ·
+`RESX007` trimmed whitespace · `RESX008` unsorted · `RESX009` stale designer).
+
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
 
 **Build and test** — `build` · `run_tests` · `rerun_failed` · `list_tests`.
@@ -140,6 +155,32 @@ only what appeared since the previous run of the same scope, plus what was fixed
 8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT`, `HEURISTIC`,
    `AmbiguousSymbol`, `SaturatedName` all mean *the server declined to guess*, not that the thing does
    not exist. Narrow the question; do not treat it as a negative result.
+
+9. **`resx_*` edits are outside `undo_last_change`.** Its history holds Roslyn solution snapshots, and a
+   `.resx`, `.resw` or `.xaml` write is a file write. Use `dryRun: true` first; the diff is your undo.
+
+## Localization (`.resx` / `.resw`)
+
+Never `read_text` a `.resx`: `resx_get` gives the same keys for a fraction of the tokens, and
+`cultures: "all"` puts every translation of a key on one line with `MISSING` where one is absent.
+
+`resx_validate` is the tool with no built-in equivalent. `RESX002` compares the placeholder set of each
+translation against the neutral value and separates the two failures — a **missing** `{n}` leaves text
+unfilled, an **extra** `{n}` makes `string.Format` throw in that locale only. `RESX003` (unused) is
+`includeUnused: true`, always `HEURISTIC`, and turns advisory when `composedLookups > 0`, because a key
+built at runtime (`GetString("Error_" + code)`) cannot be seen. Never delete a key on `RESX003` alone.
+
+The writers are surgical: only the addressed `<data>` element is rewritten, so the schema header,
+`resheader` rows, entry order, indentation, line endings and byte order mark survive; a result that would
+not parse is refused. Typed and binary entries (`type=`, `mimetype=`) are reported `TYPED`/`BINARY` and
+passed through — `resx_set` on one is refused rather than corrupting it. `resx_remove` covers every file of
+the family unless you pass `culture:`, and refuses while the key is still referenced unless `force: true`.
+`resx_rename` is all-or-nothing across the family plus the references it can prove.
+
+A culture file is recognised by a lowercase BCP-47 segment (`Strings.fr.resx`, `Strings.pt-BR.resx`);
+`Order.Web.resx` is a neutral file, not a `Web` culture. WinForms designer resources are detected and left
+out of the translation lint. Adding a key to a family with a `*.Designer.cs` reports `designerStale=true`:
+regenerate it before referencing the key from C#, or the build will not see it.
 
 ## XAML
 

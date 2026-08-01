@@ -55,7 +55,7 @@ public sealed class XamlStyleAndLocalizationE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("xaml_localization", []);
 
-        Assert.Contains("resourceFiles=1", text, StringComparison.Ordinal);
+        Assert.Contains("resourceFiles=9", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 }

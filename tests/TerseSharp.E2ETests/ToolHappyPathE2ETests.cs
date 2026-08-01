@@ -157,6 +157,32 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
             ["dryRun"] = true,
         }, "changedLines="),
         ("xaml_codebehind", new() { ["path"] = "src/Fixture.Trading/Views/ShellView.xaml" }, "class="),
+        ("resx_files", [], "families"),
+        ("resx_get", new() { ["path"] = "src/Fixture.Trading/Strings.resx" }, "Caption_Submit"),
+        ("resx_find", new() { ["query"] = "Caption_Count" }, "Caption_Count"),
+        ("resx_usages", new() { ["key"] = "Caption_Submit" }, "composedLookups="),
+        ("resx_set", new()
+        {
+            ["path"] = "src/Fixture.Trading/Scratch.resx",
+            ["key"] = "Scratch_Two",
+            ["value"] = "Two",
+            ["dryRun"] = true,
+        }, "changedLines="),
+        ("resx_remove", new()
+        {
+            ["path"] = "src/Fixture.Trading/Scratch.resx",
+            ["key"] = "Scratch_One",
+            ["force"] = true,
+            ["dryRun"] = true,
+        }, "changedLines="),
+        ("resx_rename", new()
+        {
+            ["path"] = "src/Fixture.Trading/Scratch.resx",
+            ["key"] = "Scratch_One",
+            ["newKey"] = "Scratch_Renamed",
+            ["dryRun"] = true,
+        }, "changedLines="),
+        ("resx_validate", new() { ["rules"] = "RESX001" }, "RESX001"),
         ("xaml_set_property", new()
         {
             ["path"] = "src/Fixture.Trading/Views/OrderView.xaml",
