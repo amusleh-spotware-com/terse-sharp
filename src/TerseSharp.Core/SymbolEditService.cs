@@ -26,7 +26,7 @@ public static class SymbolEditService
 
         return replacement is null
             ? Result.Fail<string>(Errors.Invalid("the body did not parse", "pass a block starting with '{' or an expression body"))
-            : await SwapAsync(workspace, target, replacement, options, cancellationToken).ConfigureAwait(false);
+            : await SwapAsync(workspace, target, [replacement], options, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<Result<string>> ReplaceDeclarationAsync(
@@ -48,10 +48,10 @@ public static class SymbolEditService
             return Result.Fail<string>(refusal);
 
         var target = Promoted(found);
-        var parsed = MemberDeclaration.Parse(declaration);
+        var parsed = MemberDeclaration.ParseAll(declaration);
 
         return parsed.IsOk
-            ? await SwapAsync(workspace, target, parsed.Value!.WithTriviaFrom(target.Node), options, cancellationToken).ConfigureAwait(false)
+            ? await SwapAsync(workspace, target, Rewritten(parsed.Value!, target.Node), options, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(parsed.Error!);
     }
 
@@ -74,11 +74,11 @@ public static class SymbolEditService
         if (target is null || target.Node is not TypeDeclarationSyntax type)
             return Result.Fail<string>(Errors.Invalid("the target is not a type declaration", "pass a type symbol id"));
 
-        var member = MemberDeclaration.Parse(declaration);
+        var members = MemberDeclaration.ParseAll(declaration);
 
-        return member.IsOk
-            ? await SwapAsync(workspace, target, Appended(type, member.Value!), options, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(member.Error!);
+        return members.IsOk
+            ? await SwapAsync(workspace, target, [Appended(type, members.Value!)], options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(members.Error!);
     }
 
     public static async Task<Result<string>> DeleteAsync(
@@ -153,7 +153,7 @@ public static class SymbolEditService
     private static async Task<Result<string>> SwapAsync(
         LoadedWorkspace workspace,
         EditTarget target,
-        SyntaxNode replacement,
+        IReadOnlyList<SyntaxNode> replacements,
         EditOptions options,
         CancellationToken cancellationToken)
     {
@@ -162,10 +162,11 @@ public static class SymbolEditService
         if (root is null)
             return Result.Fail<string>(Errors.DocumentNotFound(target.Document.FilePath ?? target.Document.Name));
 
-        if (replacement.ToFullString().Equals(target.Node.ToFullString(), StringComparison.Ordinal))
+        if (replacements is [var only] && only.ToFullString().Equals(target.Node.ToFullString(), StringComparison.Ordinal))
             return Result.Ok(Unchanged(options.Tool));
 
-        var swapped = root.ReplaceNode(target.Node, replacement.WithAdditionalAnnotations(Formatter.Annotation));
+        var annotated = replacements.Select(node => node.WithAdditionalAnnotations(Formatter.Annotation));
+        var swapped = root.ReplaceNode(target.Node, annotated);
         var formatted = await IndentedAsync(target.Document.WithSyntaxRoot(swapped), cancellationToken).ConfigureAwait(false);
         var updated = workspace.Solution.WithDocumentSyntaxRoot(target.Document.Id, formatted);
 
@@ -196,9 +197,12 @@ public static class SymbolEditService
         if (trimmed.StartsWith("=>", StringComparison.Ordinal))
             return WithExpression(node, trimmed);
 
-        var block = SyntaxFactory.ParseStatement(trimmed.StartsWith('{') ? trimmed : "{" + body + "}");
+        if (trimmed.StartsWith('{'))
+            return AsBlock(node, trimmed);
 
-        return block is BlockSyntax parsed && !parsed.ContainsDiagnostics ? WithBody(node, parsed) : null;
+        return IsExpressionBodied(node) && WithExpression(node, "=>" + trimmed) is { } expression
+            ? expression
+            : AsBlock(node, "{" + body + "}");
     }
 
     private static SyntaxNode? WithBody(SyntaxNode node, BlockSyntax block) => node switch
@@ -222,8 +226,15 @@ public static class SymbolEditService
             .WithTrailingTrivia(member.GetTrailingTrivia().Add(SyntaxFactory.ElasticCarriageReturnLineFeed));
     }
 
-    private static TypeDeclarationSyntax Appended(TypeDeclarationSyntax type, MemberDeclarationSyntax member) =>
-        type.AddMembers(Separated(member, type.Members.Count > 0)).WithCloseBraceToken(OnItsOwnLine(type.CloseBraceToken));
+    private static TypeDeclarationSyntax Appended(TypeDeclarationSyntax type, IReadOnlyList<MemberDeclarationSyntax> members)
+    {
+        var updated = type;
+
+        foreach (var member in members)
+            updated = updated.AddMembers(Separated(member, updated.Members.Count > 0 && NeedsBlankLine(member)));
+
+        return updated.WithCloseBraceToken(OnItsOwnLine(updated.CloseBraceToken));
+    }
 
     private static SyntaxToken OnItsOwnLine(SyntaxToken closeBrace) =>
         closeBrace.LeadingTrivia.Any(SyntaxKind.EndOfLineTrivia)
@@ -277,6 +288,29 @@ public static class SymbolEditService
             _ => null,
         };
     }
+
+    private static bool IsExpressionBodied(SyntaxNode node) => node switch
+    {
+        MethodDeclarationSyntax method => method.ExpressionBody is not null,
+        ConstructorDeclarationSyntax constructor => constructor.ExpressionBody is not null,
+        AccessorDeclarationSyntax accessor => accessor.ExpressionBody is not null,
+        LocalFunctionStatementSyntax local => local.ExpressionBody is not null,
+        _ => false,
+    };
+
+    private static SyntaxNode[] Rewritten(MemberDeclarationSyntax[] members, SyntaxNode original) =>
+    [
+        members[0].WithTriviaFrom(original),
+        .. members.Skip(1).Select(member => (SyntaxNode)Separated(member, NeedsBlankLine(member))),
+    ];
+
+    private static SyntaxNode? AsBlock(SyntaxNode node, string text) =>
+            SyntaxFactory.ParseStatement(text) is BlockSyntax parsed && !parsed.ContainsDiagnostics
+                ? WithBody(node, parsed)
+                : null;
+
+    private static bool NeedsBlankLine(MemberDeclarationSyntax member) =>
+            !member.GetLeadingTrivia().Any(SyntaxKind.EndOfLineTrivia);
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

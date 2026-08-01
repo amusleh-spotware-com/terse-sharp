@@ -32,14 +32,18 @@ public static class ResxValidation
         var unused = includeUnused || selected.Contains("RESX003", StringComparer.OrdinalIgnoreCase);
         var checks = new Checks(selected, unused ? ResxUsageService.Tokens(workspace.Root) : [], unused);
 
-        var findings = families
-            .Value!
-            .Where(family => family.Kind is not ResxKind.WinForms)
+        var checkedFamilies = families.Value!.Where(family => family.Kind is not ResxKind.WinForms).ToArray();
+
+        var findings = checkedFamilies
             .SelectMany(family => Findings(index, family, checks))
             .Where(finding => selected.Contains(finding.Code, StringComparer.OrdinalIgnoreCase))
             .ToArray();
 
-        return Result.Ok(Render(findings, path is { Length: > 0 } ? path : "solution", maxResults));
+        return Result.Ok(Render(
+            findings,
+            path is { Length: > 0 } ? path : "solution",
+            maxResults,
+            new ResxScope(checkedFamilies.Length, selected)));
     }
 
     private static Result<IReadOnlyList<ResxFamily>> Scope(ResxIndex index, LoadedWorkspace workspace, string? path)
@@ -228,11 +232,14 @@ public static class ResxValidation
             "UNUSED",
             "no C#, XAML or Razor reference found - HEURISTIC, a key composed at runtime cannot be seen"));
 
-    private static string Render(ResxFinding[] findings, string scope, int maxResults)
+    private static string Render(ResxFinding[] findings, string scope, int maxResults, ResxScope checkedScope)
     {
         var response = new ResponseBuilder("resx_validate", scope);
 
         response.Summary(Math.Min(maxResults, findings.Length), findings.Length, "findings", "rules=");
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"checked={checkedScope.Families} family(ies) rules={string.Join(',', checkedScope.Rules)}"));
 
         foreach (var finding in findings.Take(maxResults))
         {
@@ -254,4 +261,6 @@ public static class ResxValidation
     }
 
     private sealed record Checks(IReadOnlyList<string> Selected, HashSet<string> Tokens, bool IncludeUnused);
+
+    private readonly record struct ResxScope(int Families, IReadOnlyList<string> Rules);
 }

@@ -156,14 +156,14 @@ points them elsewhere.
 
 | Instead of | Use | Why |
 | --- | --- | --- |
-| `Read` a `.cs` file | `get_file_outline` | types + members + line ranges, no bodies |
+| `Read` a `.cs` file | `get_file_outline` | types + members + line ranges, no bodies; `usings=true` adds the using directives |
 | `Read` to see one method | `get_symbol_source` | that member only |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
 | `Grep` to find callers | `find_usages` | real references, each marked `src` or `test` |
 | three calls to learn a symbol | `explore_symbol` | signature, docs, usage counts, implementations, XAML sites — one call |
 | guessing a rename's blast radius | `impact_of` | every referencing file and every project that recompiles |
 | grepping `Program.cs` for DI | `find_registrations` · `list_endpoints` | open generics, factory delegates and `Add*` extensions grep cannot see |
-| `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol, immune to line drift |
+| `Edit` a `.cs` file | `replace_symbol_body` · `add_member` | addressed by symbol, immune to line drift; several declarations land as one compile-gated edit |
 | creating a new `.cs` file | `write_text(path, content, force: true)` | the new type resolves on the very next call |
 | `Edit` a `.xaml` file | `xaml_set_property` | addressed by element, formatting preserved |
 | `Read` a `.razor` / `.cshtml` file | `razor_outline` | directives, component tree and `@code` members, each component resolved to its type |
@@ -194,6 +194,9 @@ the parameter that narrows it.
 - **Localization (`.resx`/`.resw`)** — `resx_files`, `resx_get`, `resx_find`, `resx_usages`, `resx_set`, `resx_remove`, `resx_rename`, `resx_validate`
 - **Razor / Blazor** — `razor_outline`, `razor_component`, `razor_find`, `razor_bindings`, `razor_codebehind`, `razor_validate`, `razor_set_attribute`, `razor_add_element`, `razor_remove_element`, `razor_set_directive`
 - **Files** — `read_text`, `write_text`, `edit_text`, `find_files`, `search_text`, `search_regex`
+  (the search tools take `query` and anchor `^`/`$` per line; `bin`, `obj`, `.git`, `.claude`,
+  `artifacts`, `TestResults`, `node_modules` and directory symlinks are skipped; `read_text` also
+  reads an absolute path outside the workspace, tagged `outside-workspace`)
 - **Build & test** — `build`, `run_tests`, `rerun_failed`, `list_tests`
 
 ## ⚔️ Vs the alternatives

@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace TerseSharp.Core;
 
 public static class LineEndings
@@ -54,5 +56,40 @@ public static class LineEndings
         }
 
         return (windows, unix);
+    }
+
+    public static string? Uniform(ReadOnlySpan<char> text)
+    {
+        var (windows, unix) = Count(text);
+
+        return (windows, unix) switch
+        {
+            ( > 0, 0) => Windows,
+            (0, > 0) => Unix,
+            _ => null,
+        };
+    }
+
+    public static string Apply(string content, string ending)
+    {
+        var span = content.AsSpan();
+        var builder = new StringBuilder(content.Length + 16);
+        var index = 0;
+
+        while (index < span.Length)
+        {
+            var next = span[index..].IndexOf('\n');
+
+            if (next < 0)
+                break;
+
+            var at = index + next;
+            var start = at > 0 && span[at - 1] is '\r' ? at - 1 : at;
+
+            builder.Append(span[index..start]).Append(ending);
+            index = at + 1;
+        }
+
+        return builder.Append(span[index..]).ToString();
     }
 }

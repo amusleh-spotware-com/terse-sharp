@@ -167,4 +167,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
 
         return Registry.Resolve(workspace, pathHint);
     }
+
+    public bool OutsideEveryWorkspace(string path) =>
+            Path.IsPathRooted(path)
+            && Registry.All().All(loaded => !PathBoundary.Contains(loaded.Root, Path.GetFullPath(path)));
 }

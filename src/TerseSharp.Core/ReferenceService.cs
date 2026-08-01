@@ -167,7 +167,7 @@ public static class ReferenceService
             PositionFormat.Relative(root, PositionFormat.Source(location.Location).Path),
             ConfidenceTag.Of(ConfidenceOf(location)),
             ClassifyKind(location),
-            TestScope.Of(location.Document.Project),
+            TestScope.Of(root, location.Document),
             UsageContainer.Of(syntax, location.Location.SourceSpan));
     }
 }

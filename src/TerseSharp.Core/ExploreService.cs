@@ -73,7 +73,7 @@ public static class ExploreService
 
         return new Reach(
             locations.Length,
-            locations.Count(location => TestScope.Of(location.Document.Project) is "test"),
+            locations.Count(location => TestScope.Of(workspace.Root, location.Document) is "test"),
             implementations.Count(),
             [.. Grouped(workspace.Root, locations)],
             [.. XamlUsageService.Find(workspace, symbol, symbol.Name).Select(Describe)]);
@@ -84,7 +84,7 @@ public static class ExploreService
         .OrderByDescending(group => group.Count())
         .Select(group => string.Create(
             CultureInfo.InvariantCulture,
-            $"{group.Key}  EXACT  {TestScope.Of(group.First().Document.Project)}  {group.Count()} usage(s)"));
+            $"{group.Key}  EXACT  {TestScope.Of(root, group.First().Document)}  {group.Count()} usage(s)"));
 
     private static string Describe(XamlUsage usage) => string.Create(
         CultureInfo.InvariantCulture,

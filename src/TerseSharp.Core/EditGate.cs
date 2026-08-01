@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.Core;
 
@@ -11,11 +12,12 @@ public static class EditGate
         EditOptions options,
         CancellationToken cancellationToken)
     {
-        var diff = await DiffAsync(workspace.Solution, updated, changed, cancellationToken).ConfigureAwait(false);
+        var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
+        var diff = await DiffAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
 
         var report = options.AllowErrors
             ? null
-            : await AnalyseAsync(workspace.Solution, updated, changed, cancellationToken).ConfigureAwait(false);
+            : await AnalyseAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
 
         if (options.DryRun)
             return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root));
@@ -23,7 +25,7 @@ public static class EditGate
         if (report is { NewErrors.Length: > 0 })
             return Result.Fail<string>(Errors.CompileRegression(report.NewErrors));
 
-        return await workspace.TryApplyAsync(updated, changed, cancellationToken).ConfigureAwait(false)
+        return await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false)
             ? Result.Ok(Render(options, diff, "applied", report, workspace.Root))
             : Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
     }
@@ -191,4 +193,61 @@ public static class EditGate
         && !options.DryRun
         && diffs.Length is not 0
         && report is not { NewErrors.Length: > 0 };
+
+    private static async Task<string?> EndingAsync(
+        LoadedWorkspace workspace,
+        Solution before,
+        DocumentId id,
+        CancellationToken cancellationToken)
+    {
+        if ((before.GetDocument(id) ?? Sibling(workspace, before, id)) is not { } source)
+            return null;
+
+        var text = await source.GetTextAsync(cancellationToken).ConfigureAwait(false);
+
+        return LineEndings.Uniform(text.ToString());
+    }
+
+    private static async Task<Solution> AdoptAsync(
+        LoadedWorkspace workspace,
+        Solution before,
+        Solution solution,
+        DocumentId id,
+        CancellationToken cancellationToken)
+    {
+        if (solution.GetDocument(id) is not { } document)
+            return solution;
+
+        if (await EndingAsync(workspace, before, id, cancellationToken).ConfigureAwait(false) is not { } ending)
+            return solution;
+
+        var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var current = text.ToString();
+        var adopted = LineEndings.Apply(current, ending);
+
+        return string.Equals(current, adopted, StringComparison.Ordinal)
+            ? solution
+            : solution.WithDocumentText(id, SourceText.From(adopted, text.Encoding));
+    }
+
+    private static async Task<Solution> AdoptEndingsAsync(
+        LoadedWorkspace workspace,
+        Solution after,
+        IReadOnlyList<DocumentId> changed,
+        CancellationToken cancellationToken)
+    {
+        var solution = after;
+
+        foreach (var id in changed)
+            solution = await AdoptAsync(workspace, workspace.Solution, solution, id, cancellationToken).ConfigureAwait(false);
+
+        return solution;
+    }
+
+    private static Document? Sibling(LoadedWorkspace workspace, Solution before, DocumentId id) => before
+            .GetProject(id.ProjectId)?
+            .Documents
+            .FirstOrDefault(document => document.FilePath is { Length: > 0 } file
+                && SourceFile.IsCSharp(file)
+                && !GeneratedCode.IsGenerated(workspace.Root, file));
 }

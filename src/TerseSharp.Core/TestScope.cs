@@ -14,4 +14,7 @@ public static class TestScope
         .Select(Path.GetFileNameWithoutExtension)
         .Any(assembly => Frameworks.Any(framework =>
             assembly?.Contains(framework, StringComparison.OrdinalIgnoreCase) is true));
+
+    public static string Of(string root, Document document) =>
+            GeneratedCode.IsGenerated(root, document.FilePath) ? "gen" : Of(document.Project);
 }

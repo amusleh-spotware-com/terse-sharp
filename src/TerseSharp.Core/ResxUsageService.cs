@@ -154,7 +154,7 @@ public static class ResxUsageService
             span.StartLinePosition.Line + 1,
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{TestScope.Of(location.Document.Project)}  {symbol.ContainingType?.Name}.{symbol.Name}{Container(location)}"),
+                $"{TestScope.Of(root, location.Document)}  {symbol.ContainingType?.Name}.{symbol.Name}{Container(location)}"),
             Confidence.Exact);
     }
 

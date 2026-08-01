@@ -11,7 +11,7 @@ public sealed class EditTools(ToolContext context)
     [Description("Replace a method, constructor or accessor body, addressed by symbol id. No line numbers and no surrounding context needed. Rolled back if it introduces a compile error. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbolBody(
         [Description("Symbol id of the member.")] string symbolId,
-        [Description("New body, with or without the surrounding braces.")] string body,
+        [Description("New body: statements with or without the surrounding braces, or an expression body as '=> expr'. On a member that is already expression-bodied, a bare expression is accepted and stays expression-bodied.")] string body,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
         [Description(VerboseHelp)] bool verbose = false,
@@ -21,10 +21,10 @@ public sealed class EditTools(ToolContext context)
             loaded, symbol, body, Options("replace_symbol_body", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
         [Description("Symbol id of the member.")] string symbolId,
-        [Description("Complete new member declaration.")] string declaration,
+        [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
         [Description(VerboseHelp)] bool verbose = false,
@@ -34,10 +34,10 @@ public sealed class EditTools(ToolContext context)
             loaded, symbol, declaration, Options("replace_symbol", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "add_member")]
-    [Description("Add a member to a type, addressed by the type's symbol id. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Add one or more members to a type, addressed by the type's symbol id. Several declarations in one call land as a single compile-gated edit, so a set of members that reference each other needs no dependency ordering. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> AddMember(
         [Description("Symbol id of the containing type.")] string typeSymbolId,
-        [Description("Complete member declaration to add.")] string declaration,
+        [Description("One complete member declaration, or several in sequence; they are added together as one edit.")] string declaration,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
         [Description(VerboseHelp)] bool verbose = false,

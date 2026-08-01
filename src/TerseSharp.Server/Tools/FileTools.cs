@@ -6,7 +6,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text")]
-    [Description("Read any file, line-ranged. Use for non-C# files; for a .cs file prefer get_file_outline or get_symbol_source. On markdown, headings=true returns the heading map with line ranges and section=\"## Commands\" returns just that section.")]
+    [Description("Read any file, line-ranged. Use for non-C# files; for a .cs file prefer get_file_outline or get_symbol_source. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
@@ -16,16 +16,27 @@ public sealed class FileTools(ToolContext context)
         [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(
-            workspace,
+        Read(
             path,
-            async loaded => NavigationTools.Unwrap(await FileService.ReadTextAsync(
-                loaded,
-                path,
-                new FileService.ReadRequest(new FileService.LineRange(startLine, endLine, Lines(maxLines)), headings, section),
-                cancellationToken).ConfigureAwait(false)),
-            semantic: false,
+            new FileService.ReadRequest(new FileService.LineRange(startLine, endLine, Lines(maxLines)), headings, section),
+            workspace,
             cancellationToken);
+
+    private Task<string> Read(
+        string path,
+        FileService.ReadRequest request,
+        string? workspace,
+        CancellationToken cancellationToken) =>
+        context.OutsideEveryWorkspace(path)
+            ? ToolBoundary.RunAsync(async () => NavigationTools.Unwrap(
+                await FileService.ReadOutsideAsync(path, request, cancellationToken).ConfigureAwait(false)))
+            : context.WithWorkspaceAsync(
+                workspace,
+                path,
+                async loaded => NavigationTools.Unwrap(
+                    await FileService.ReadTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false)),
+                semantic: false,
+                cancellationToken);
 
     [McpServerTool(Name = "write_text")]
     [Description("Create or overwrite a file atomically. A successful write answers in one line - path and changedLines; pass verbose=true for the diff. A .cs file needs force=true, and when it is already a document in the workspace the write is compile-gated exactly like replace_symbol - rolled back if it introduces an error, unless allowErrors=true. Missing directories are created, the file's existing line endings are kept, and the new or changed file is visible to every semantic tool on the next call, with no reload.")]
@@ -66,7 +77,7 @@ public sealed class FileTools(ToolContext context)
                 cancellationToken).ConfigureAwait(false)));
 
     [McpServerTool(Name = "find_files")]
-    [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git and node_modules are excluded.")]
+    [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded.")]
     public Task<string> FindFiles(
         [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string glob,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -78,34 +89,44 @@ public sealed class FileTools(ToolContext context)
             semantic: false);
 
     [McpServerTool(Name = "search_text")]
-    [Description("Literal text search across the workspace. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
+    [Description("Literal text search across the workspace. Also the counting tool: total= is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
     public Task<string> SearchText(
-        [Description("Literal text to find.")] string pattern,
+        [Description("Literal text to find.")] string? query = null,
         [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
+        [Description("Alias for query.")] string? pattern = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(
-            workspace,
-            null,
-            loaded => TextSearchService.SearchAsync(loaded, pattern, glob ?? "*", regex: false, NavigationTools.Cap(maxResults, 100), cancellationToken),
-            semantic: false,
-            cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false), cancellationToken);
 
     [McpServerTool(Name = "search_regex")]
-    [Description("Regular-expression search across the workspace. Results are tagged HEURISTIC.")]
+    [Description("Regular-expression search across the workspace. total= is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
-        [Description(".NET regular expression.")] string pattern,
+        [Description(".NET regular expression.")] string? query = null,
         [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
+        [Description("Alias for query.")] string? pattern = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(
-            workspace,
-            null,
-            loaded => TextSearchService.SearchAsync(loaded, pattern, glob ?? "*", regex: true, NavigationTools.Cap(maxResults, 100), cancellationToken),
-            semantic: false,
-            cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true), cancellationToken);
+
+    private Task<string> Search(TextQuery request, CancellationToken cancellationToken) =>
+        request.Text is not { Length: > 0 }
+            ? Task.FromResult(Errors.Blank("query").Render())
+            : context.WithWorkspaceAsync(
+                request.Workspace,
+                null,
+                loaded => TextSearchService.SearchAsync(
+                    loaded,
+                    request.Text,
+                    request.Glob ?? "*",
+                    request.Regex,
+                    NavigationTools.Cap(request.MaxResults, 100),
+                    cancellationToken),
+                semantic: false,
+                cancellationToken);
+
+    private readonly record struct TextQuery(string? Text, string? Glob, string? Workspace, int MaxResults, bool Regex);
 
     private Task<string> Guarded(string? workspace, string path, Func<LoadedWorkspace, Task<string>> action) =>
         context.RejectWrite() is { } rejection

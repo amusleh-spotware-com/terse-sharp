@@ -60,12 +60,20 @@ public sealed class XamlTools(ToolContext context)
         [Description("file (default) or solution.")] string? scope = null,
         [Description("Max issues when scope is solution (200).")] int maxResults = 0,
         [Description("With scope=solution, also report x:Key and x:Name declarations that nothing references (heuristic).")] bool includeUnused = false,
-        [Description("Workspace or worktree name.")] string? workspace = null) =>
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default) =>
         string.Equals(scope, "solution", StringComparison.OrdinalIgnoreCase)
-            ? context.WithWorkspace(workspace, null, loaded =>
-                NavigationTools.Unwrap(XamlService.ValidateAll(loaded, NavigationTools.Cap(maxResults, 200), includeUnused)))
-            : context.WithWorkspace(workspace, path, loaded =>
-                NavigationTools.Unwrap(XamlService.Validate(loaded, path ?? string.Empty)));
+            ? context.WithWorkspaceAsync(
+                workspace,
+                null,
+                async loaded => NavigationTools.Unwrap(
+                    await XamlService.ValidateAllAsync(loaded, NavigationTools.Cap(maxResults, 200), includeUnused, cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken)
+            : context.WithWorkspace(
+                workspace,
+                path,
+                loaded => NavigationTools.Unwrap(XamlService.Validate(loaded, path ?? string.Empty)),
+                cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "xaml_codebehind")]
     [Description("The x:Class a XAML file binds to, and every event handler it names, with the element and event each sits on. Use instead of reading the .xaml.cs to find out what the markup wires up.")]
@@ -121,9 +129,10 @@ public sealed class XamlTools(ToolContext context)
     [Description("Every Style, ControlTemplate and DataTemplate that targets an element type, keyed and implicit, with its BasedOn chain resolved. Answers \"why does this control look like that\" without reading Generic.xaml and every theme dictionary.")]
     public Task<string> XamlStyles(
         [Description("Element type, e.g. Button.")] string typeName,
-        [Description("Workspace or worktree name.")] string? workspace = null) =>
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Max styles (100).")] int maxResults = 0) =>
         context.WithWorkspace(workspace, null, loaded =>
-            NavigationTools.Unwrap(XamlStyleGraph.Render(loaded.Indexes.Xaml(), typeName)));
+            NavigationTools.Unwrap(XamlStyleGraph.Render(loaded.Indexes.Xaml(), typeName, NavigationTools.Cap(maxResults, 100))));
 
     [McpServerTool(Name = "xaml_localization")]
     [Description("Every x:Uid in the workspace joined to the .resx/.resw entries that name it. A uid with no entry is reported UNRESOLVED rather than omitted, so an untranslated element is visible.")]

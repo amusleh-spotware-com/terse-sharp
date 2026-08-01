@@ -31,7 +31,7 @@ public sealed class LoadedWorkspace : IDisposable
         Sync = new WorkspaceSync(Root, seed.Generations);
         Indexes = new WorkspaceIndexes(Root, Sync);
         watcher = WorkspaceWatcher.Create(Root, Sync, seed.Watch);
-        lineEnding = new Lazy<string>(() => DetectLineEnding(load.SolutionPath));
+        lineEnding = new Lazy<string>(() => DetectLineEnding(SourceSample() ?? load.SolutionPath));
     }
 
     public WorkspaceLoadResult Load { get; }
@@ -247,4 +247,10 @@ public sealed class LoadedWorkspace : IDisposable
         public bool Covers(IReadOnlyList<string> paths) =>
             Paths.Any(path => paths.Contains(path, StringComparer.OrdinalIgnoreCase));
     }
+
+    private string? SourceSample() => Solution
+            .Projects
+            .SelectMany(project => project.Documents)
+            .Select(document => document.FilePath)
+            .FirstOrDefault(file => file is { Length: > 0 } && SourceFile.IsCSharp(file) && !GeneratedCode.IsGenerated(Root, file));
 }

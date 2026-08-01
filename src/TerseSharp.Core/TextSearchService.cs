@@ -11,7 +11,6 @@ public static class TextSearchService
 
     private const long MaxSearchableBytes = 16L * 1024 * 1024;
 
-    private static readonly string[] ExcludedDirectories = [".git", "bin", "obj", "node_modules", ".vs", ".idea"];
 
     private static readonly FrozenSet<string> BinaryExtensions = new[]
     {
@@ -200,7 +199,7 @@ public static class TextSearchService
     }
 
     private static IEnumerable<string> Subdirectories(string directory) =>
-        Directories(directory).Where(child => !ExcludedDirectories.Contains(Path.GetFileName(child), StringComparer.OrdinalIgnoreCase));
+        Directories(directory).Where(WorkspaceFiles.Traversable);
 
     private static FileInfo[] Entries(string directory)
     {
@@ -285,11 +284,11 @@ public static class TextSearchService
         {
             try
             {
-                return new Regex(pattern, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant);
+                return new Regex(pattern, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant | RegexOptions.Multiline);
             }
             catch (NotSupportedException)
             {
-                return new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
+                return new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.Multiline, TimeSpan.FromSeconds(2));
             }
         }
     }

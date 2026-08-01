@@ -15,19 +15,19 @@ public static class XamlStyleGraph
                 Scope(element))
             : null;
 
-    public static Result<string> Render(XamlResourceGraph graph, string typeName)
+    public static Result<string> Render(XamlResourceGraph graph, string typeName, int maxResults)
     {
         var styles = graph.Styles;
         var applicable = styles.Where(style => Applies(style, typeName)).ToArray();
         var response = new ResponseBuilder("xaml_styles", typeName);
 
-        response.Summary(applicable.Length, applicable.Length, "styles");
+        response.Summary(Math.Min(applicable.Length, maxResults), applicable.Length, "styles", "maxResults=");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"scanned={graph.FileCount} files"));
 
         if (applicable.Length is 0)
             response.Line(string.Create(CultureInfo.InvariantCulture, $"no Style targets '{typeName}' in any XAML file under the workspace root"));
 
-        foreach (var style in applicable.OrderBy(style => style.Key is null ? 0 : 1).ThenBy(style => style.File, StringComparer.Ordinal))
+        foreach (var style in applicable.OrderBy(style => style.Key is null ? 0 : 1).ThenBy(style => style.File, StringComparer.Ordinal).Take(maxResults))
             response.Line(Describe(style, styles));
 
         return Result.Ok(response.ToString());

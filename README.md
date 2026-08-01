@@ -386,14 +386,14 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 
 | Instead of | Use | Why |
 |---|---|---|
-| `Read` a `.cs` file | `get_file_outline` · `get_symbol_source` | types, members and line ranges — or one member, never the file |
+| `Read` a `.cs` file | `get_file_outline` · `get_symbol_source` | types, members and line ranges — or one member, never the file; `usings=true` adds the file's using directives |
 | quoting a 200-character symbol id | `OrderService.Submit(Order)` | every reference an outline prints resolves back; `ids=full` for the ids |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
 | `Grep` to find callers | `find_usages` | real references, each marked `src` or `test`; `containers=true` names the member each sits in |
 | three calls to learn a symbol | `explore_symbol` | signature, docs, usage counts, implementations, XAML sites — one call |
 | guessing a rename's blast radius | `impact_of` | every referencing file and every project that recompiles, before you touch it |
 | grepping `Program.cs` for DI | `find_registrations` · `list_endpoints` | open generics, factory delegates and `Add*` extensions grep cannot see |
-| `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol, immune to line drift |
+| `Edit` a `.cs` file | `replace_symbol_body` · `add_member` | addressed by symbol, immune to line drift; several declarations land as one compile-gated edit |
 | creating a new `.cs` file | `write_text(path, content, force: true)` | the new type resolves on the very next call |
 | `Edit` a `.xaml` file | `xaml_set_property` | addressed by element, formatting preserved |
 | `Read` / `Edit` a `.resx` file | `resx_get` · `resx_set` · `resx_remove` · `resx_rename` | values per culture with `MISSING` marked; schema header, ordering, indentation and BOM preserved |
@@ -402,6 +402,9 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Bash: dotnet build` / `test` | `build` · `run_tests` · `rerun_failed` | deduplicated diagnostics, no MSBuild spew; green is one line, red carries the assertion |
 | `Bash: dotnet format` / `clean` | `format` · `cleanup fix=all` · `clean` | compile-gated code fixes, a one-line verdict, freed-byte counters — never raw CLI output |
+| a per-file analyzer sweep | `analyze path=src/**/*.cs` · `analyze changed=true` | a file, a directory, a glob, or just what you touched — one call instead of one per file |
+| `Glob` for `*.sln` in an unfamiliar repo | `load_workspace discover=true` | every solution and project under a directory, shallowest first, loading none of them |
+| `Grep` in non-code files | `search_text(query)` · `search_regex(query)` | `total=` counts matching lines; `bin`, `obj`, `.git`, `.claude`, `artifacts`, `TestResults` and symlinks are skipped |
 
 </details>
 

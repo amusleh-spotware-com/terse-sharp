@@ -111,7 +111,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ReplaceSymbol_WithSeveralMembers_IsRefusedInsteadOfSilentlyKeepingTheFirst()
+    public async Task ReplaceSymbol_WithSeveralMembers_ReplacesTheTargetWithAllOfThem()
     {
         var text = await server.CallAsync("replace_symbol", new()
         {
@@ -120,12 +120,12 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             ["dryRun"] = true,
         });
 
-        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("not exactly one member", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("Extra", text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task AddMember_WithSeveralMembers_IsRefused()
+    public async Task AddMember_WithSeveralMembers_AddsThemInOneEdit()
     {
         var text = await server.CallAsync("add_member", new()
         {
@@ -134,8 +134,23 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             ["dryRun"] = true,
         });
 
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("One", text, StringComparison.Ordinal);
+        Assert.Contains("Two", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithAMalformedDeclaration_IsStillRefused()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int Broken( => 1;",
+            ["dryRun"] = true,
+        });
+
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("not exactly one member", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
 
     [Fact]

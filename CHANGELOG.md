@@ -8,6 +8,116 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-01
+
+**Response formats changed.** `search_symbols` now reports the real `total=` and sets `truncated=true`
+when it caps; `load_workspace` and `workspace_status` gained `failures=`/`warnings=` counters and stopped
+listing MSBuild warnings as `FAILED`; `find_usages`, `explore_symbol`, `impact_of` and `resx_usages` tag a
+usage in generated code `gen` instead of `src`; `read_text headings=true` prints an anchor slug column;
+`xaml_styles` caps at 100; and `search_regex` anchors `^`/`$` per line. Every change makes an answer that
+was wrong or unprovable correct — an agent that parsed the old shape should re-read the entries below.
+
+### Fixed
+
+- **`search_symbols` no longer claims a truncated answer is complete.** It capped the list at
+  `maxResults` and then reported that number as the total, so every capped search printed
+  `truncated=false, total=<cap>`. Measured on a 148-project solution: `search_symbols("OrderService")`
+  answered `50 symbols (truncated=false, total=50)` where the real count is 178 — an agent reading that
+  line stops, and silently misses 128 declarations. The summary now carries the real total, sets
+  `truncated=true` and steers with `- narrow with kind= or maxResults=`. When the raw match set exceeds
+  the internal dedupe ceiling the total is a count of declarations rather than of distinct symbols, and
+  the response says so instead of implying an exact figure.
+- **`find_files`, `search_text` and `search_regex` walked directories the rest of the server excludes.**
+  They carried their own exclusion list (`.git`, `bin`, `obj`, `node_modules`, `.vs`, `.idea`) while
+  `WorkspaceFiles` — used by every XAML, resx and Razor index — also excludes `.claude`, `artifacts`
+  and `TestResults` and refuses to follow directory symlinks. On a repo with agent worktrees under
+  `.claude/worktrees`, `find_files **/*.xaml` reported `total=1376` where the workspace holds 689, and
+  `search_regex` returned two-thirds of its matches from stale copies of the same files. Both walkers
+  now share one list and one symlink guard.
+- **A usage inside generated code is tagged `gen`, not `src`.** `find_usages`, `explore_symbol`,
+  `impact_of` and `resx_usages` labelled a hit in `obj/**/*.g.cs` as `src`, inviting an edit to a file
+  the build regenerates.
+- **MSBuild warnings are no longer reported as load failures.** `load_workspace` and `workspace_status`
+  rendered every `WorkspaceFailed` diagnostic as `FAILED` and counted it in `failures=`, so a solution
+  whose projects all loaded reported `failures=20` — NuGet advisories (NU1903) and target-framework
+  notes (NU1701). They are now split: `failures=` counts diagnostics that actually stopped a project
+  loading, `warnings=` counts the rest, and the warnings are listed only with `verbose=true`. That
+  removes 20 lines from every `workspace_status` on a large solution. Load diagnostics are also
+  collected through a concurrent queue, since MSBuild raises them from parallel project loads.
+- **`razor_validate` no longer claims framework services are unregistered.** `RZR009` compared each
+  `@inject` against `Add*` calls found in source, so `NavigationManager`, `HttpClient`, `IJSRuntime`,
+  `IStringLocalizer` and friends — registered by the Blazor host, not by user code — were reported
+  `NOT_REGISTERED  … InvalidOperationException at first render`. Measured on a real Blazor app: 466
+  findings, of which the first ten were all false. Host-provided services are now excluded, and when
+  the index meets `Add*` calls whose registered types it cannot read (`AddMudServices()` and other
+  package extension methods) the finding says the service may be registered inside one of them instead
+  of asserting a runtime failure. The suppression list is deliberately narrow — only services the host
+  always registers. `IMemoryCache`, `IDistributedCache`, `IStringLocalizer`, `IHttpClientFactory`,
+  `HttpClient` and `AuthenticationStateProvider` need an explicit `Add*` call, so they are still
+  reported; suppressing them would have hidden the exact bug the rule exists to catch. The `Add*` calls
+  counted as unreadable are only those that pass no type and no `typeof` — a collection `.Add(item)`
+  or `.AddRange(items)` is not one, so the number in the message is a count of real registration
+  helpers.
+- **`razor_validate scope=solution` no longer rebuilds its DI index once per file.** The registration
+  scan walked every document in the solution for each Razor file examined; it is now computed once per
+  run, still lazily, so a 126-component app does one scan instead of 126.
+- **`xaml_validate includeUnused=true` reads asynchronously and honours the workspace exclusions.** Its
+  C# literal scan used a synchronous `Directory.EnumerateFiles(root, "*.cs", AllDirectories)` plus
+  `File.ReadAllText`, walking `bin`, `obj`, `.claude` and `node_modules` and following symlinks.
+- **`xaml_styles` caps its answer.** It had no `maxResults` and no truncation: `xaml_styles("TextBlock")`
+  on a real WPF app returned 218 records in one response. It now takes `maxResults` (default 100) and
+  reports `truncated=`.
+- **The symbol writers keep the edited file's line endings.** `replace_symbol`, `replace_symbol_body`,
+  `add_member`, `delete_symbol` and the refactors emitted CRLF into an LF file, leaving mixed endings;
+  every edit now adopts the ending of the document it changes, and a new file takes it from a sibling
+  **non-generated** source document rather than from the solution file. Adoption converts only `\r\n`
+  and `\n` — never the other characters `String.ReplaceLineEndings` treats as breaks (`\f`, `\v`,
+  U+0085, U+2028, U+2029), which occur inside verbatim string literals — and it runs only on a file
+  whose existing endings are already uniform, so a mixed-ending file is left alone instead of being
+  rewritten end to end.
+- **`resx_validate` proves a zero result.** It answered `0 findings` with nothing to say how much it
+  looked at; it now notes the number of families checked and the rules applied.
+
+### Added
+
+- **`search_text` and `search_regex` accept `query`.** Every other search tool on the surface takes
+  `query` (`search_symbols`, `xaml_find`, `razor_find`, `resx_find`, `find_registrations`); these two
+  took `pattern`, and a call with the wrong name failed with the MCP SDK's opaque
+  `An error occurred invoking 'search_text'.` and no `remedy:` line. `query` is now the documented
+  parameter, `pattern` stays as an alias, and a call with neither returns a structured error naming
+  `query`. Both descriptions now also state what `total=` actually counts — matching **lines**, at most
+  one per line — and that a zero result proves absence only in the files the walker searched.
+- **`analyze` takes a directory, a glob and `changed=true`**, matching `format` and `cleanup`. The
+  mandatory per-file gate over a task's touched files was one call per file; it is now one. The
+  dead-code scan is scoped by the same resolved document set as the compiler and analyzer diagnostics,
+  so a glob reports the dead code inside it and `changed=true` does not report dead code from files the
+  task never opened. `changed` is part of the `sinceLast` history key, so a scoped run is not diffed
+  against — and does not overwrite — the whole-solution baseline.
+- **`get_file_outline usings=true`** lists the file's own using directives, so a new member's header can
+  be written without reading the source.
+- **`read_text headings=true` prints each heading's GitHub anchor slug**, so an in-page link is copied
+  rather than derived by hand. Repeated headings are numbered the way GitHub numbers them — the second
+  `## Added` is `#added-1` — which is most of them in a changelog.
+- **`read_text` accepts an absolute path outside every workspace root**, tagged `outside-workspace`, so
+  comparing a file against another repo no longer needs a full `load_workspace`. Every writer still
+  refuses to leave the workspace.
+- **`add_member` and `replace_symbol` accept several declarations in one call**, applied as one
+  compile-gated edit. A set of members that reference each other no longer has to be added in
+  dependency order, and `replace_symbol` can split a member into overloads.
+- **`replace_symbol_body` accepts a bare expression on an expression-bodied member**, instead of
+  wrapping it in braces and failing the compile gate with `CS0161`.
+- **`load_workspace` and `workspace_status` take `verbose`**, which lists the MSBuild load warnings.
+- **`load_workspace discover=true`** lists every `.slnx`/`.sln`/`.slnf`/`.csproj` under a directory,
+  shallowest first, and loads nothing. Pointing the server at an unfamiliar repository previously had
+  no answer at all — auto-discovery only walks *up* from the working directory — so it took a `Glob`.
+
+### Changed
+
+- **`search_regex` anchors `^` and `$` to each line.** It compiled without `RegexOptions.Multiline`, so
+  the anchors matched the whole file: `^### Added` answered `0 matches` on a file with fifteen such
+  headings while `### Added` answered thirty-seven. A silently-empty search is read as proof of
+  absence, which is what the tool now says it is.
+
 ### Documentation
 
 - **`README.md` and `NUGET_README.md` rewritten around what the server buys you** — that TerseSharp is
@@ -1164,7 +1274,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.0
 [0.16.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.16.0
 [0.15.2]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.2
 [0.15.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.0

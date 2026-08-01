@@ -24,16 +24,15 @@ public static class RazorValidation
         if (targets.Count is 0)
             return Result.Fail<string>(Errors.Invalid("no Razor file matched the request", "pass a .razor path, or scope=solution"));
 
-        var findings = new List<RazorFinding>();
-        var contexts = new List<RazorContext>(targets.Count);
+        var run = new RazorRun(workspace, new RazorRegistrationCache(workspace), [], new List<RazorContext>(targets.Count));
 
         foreach (var target in targets)
-            await CollectAsync(workspace, target, contexts, findings, cancellationToken).ConfigureAwait(false);
+            await CollectAsync(run, target, cancellationToken).ConfigureAwait(false);
 
-        findings.AddRange(Routes(contexts));
-        findings.AddRange(OrphanStyles(workspace, scope));
+        run.Findings.AddRange(Routes(run.Contexts));
+        run.Findings.AddRange(OrphanStyles(workspace, scope));
 
-        return Result.Ok(Render(workspace, path, scope, Selected(findings, rules), maxResults));
+        return Result.Ok(Render(workspace, path, scope, Selected(run.Findings, rules), maxResults));
     }
 
     private static IReadOnlyList<string> Targets(LoadedWorkspace workspace, string? path, string scope) =>
@@ -48,26 +47,21 @@ public static class RazorValidation
         return resolved.IsOk && RazorDocument.IsRazor(resolved.Value!) ? [resolved.Value!] : [];
     }
 
-    private static async Task CollectAsync(
-        LoadedWorkspace workspace,
-        string file,
-        List<RazorContext> contexts,
-        List<RazorFinding> findings,
-        CancellationToken cancellationToken)
+    private static async Task CollectAsync(RazorRun run, string file, CancellationToken cancellationToken)
     {
-        var opened = await RazorOpen.AtAsync(workspace, file, cancellationToken).ConfigureAwait(false);
+        var opened = await RazorOpen.AtAsync(run.Workspace, file, cancellationToken).ConfigureAwait(false);
 
         if (!opened.IsOk)
             return;
 
         var context = opened.Value!;
 
-        contexts.Add(context);
-        findings.AddRange(Parse(context));
-        findings.AddRange(Components(context));
-        findings.AddRange(Bindings(context));
-        findings.AddRange(RouteParameters(context));
-        findings.AddRange(await InjectionsAsync(context, cancellationToken).ConfigureAwait(false));
+        run.Contexts.Add(context);
+        run.Findings.AddRange(Parse(context));
+        run.Findings.AddRange(Components(context));
+        run.Findings.AddRange(Bindings(context));
+        run.Findings.AddRange(RouteParameters(context));
+        run.Findings.AddRange(await InjectionsAsync(context, run.Registrations, cancellationToken).ConfigureAwait(false));
     }
 
     private static IEnumerable<RazorFinding> Parse(RazorContext context) => context.Document.Issues
@@ -253,24 +247,27 @@ public static class RazorValidation
         .Select(segment => segment.Split(':', '?', '*')[0].Trim())
         .Where(name => name.Length > 0);
 
-    private static async Task<IEnumerable<RazorFinding>> InjectionsAsync(RazorContext context, CancellationToken cancellationToken)
+    private static async Task<IEnumerable<RazorFinding>> InjectionsAsync(
+        RazorContext context,
+        RazorRegistrationCache registrations,
+        CancellationToken cancellationToken)
     {
         var injected = context.Document.Values("inject").Select(Injected).Where(name => name.Length > 0).ToArray();
 
         if (injected.Length is 0)
             return [];
 
-        var registered = await RazorRegistrations.NamesAsync(context.Workspace, cancellationToken).ConfigureAwait(false);
+        var index = await registrations.GetAsync(cancellationToken).ConfigureAwait(false);
 
         return injected
-            .Where(name => !registered.Contains(name))
+            .Where(name => !index.Names.Contains(name) && !RazorRegistrations.IsHostProvided(name))
             .Select(name => new RazorFinding(
                 "RZR009",
                 context.Relative,
                 LineOfInject(context, name),
                 name,
                 "NOT_REGISTERED",
-                "HEURISTIC no DI registration found - InvalidOperationException at first render"));
+                Unregistered(index.Unreadable)));
     }
 
     private static int LineOfInject(RazorContext context, string name) => context.Document.Directives
@@ -348,4 +345,16 @@ public static class RazorValidation
 
         return response.ToString();
     }
+
+    private static string Unregistered(int unreadable) => unreadable is 0
+            ? "HEURISTIC no DI registration found - InvalidOperationException at first render"
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"HEURISTIC no DI registration found, but {unreadable} Add* call(s) name no type this index can read - the service may be registered inside one of them");
+
+    private readonly record struct RazorRun(
+            LoadedWorkspace Workspace,
+            RazorRegistrationCache Registrations,
+            List<RazorFinding> Findings,
+            List<RazorContext> Contexts);
 }

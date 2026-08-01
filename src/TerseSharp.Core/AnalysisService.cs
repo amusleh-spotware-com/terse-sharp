@@ -14,20 +14,27 @@ public static class AnalysisService
         bool includeDeadCode,
         int maxResults,
         bool sinceLast,
+        bool changed,
         CancellationToken cancellationToken)
     {
-        var scope = DiagnosticScope.For(workspace, path);
-        var document = path is null ? null : DocumentLookup.Find(workspace, path);
+        var unscoped = path is null && !changed;
+        var documents = unscoped ? [] : DocumentScope.Select(workspace, path, changed);
+
+        if (!unscoped && documents.Length is 0)
+            return Empty(path, changed).Render();
+
+        var targets = Targets(workspace, documents, unscoped).ToArray();
+        var scope = Scope(workspace, documents, unscoped);
         var found = new ConcurrentBag<Diagnostic>();
         var analyzed = new ConcurrentBag<string>();
 
         await Parallel.ForEachAsync(
-            Targets(workspace, document),
+            targets,
             ParallelWork.Options(cancellationToken),
             (project, token) => CollectAsync(project, found, analyzed, token)).ConfigureAwait(false);
 
         var extra = includeDeadCode
-            ? await DeadCodeService.FindAsync(workspace, path, cancellationToken).ConfigureAwait(false)
+            ? await DeadCodeService.FindAsync(workspace, targets, scope, cancellationToken).ConfigureAwait(false)
             : [];
 
         return Render(
@@ -40,7 +47,8 @@ public static class AnalysisService
             sinceLast,
             minimum,
             ids,
-            includeDeadCode);
+            includeDeadCode,
+            changed);
     }
 
     private static List<string> Engines(ConcurrentBag<string> analyzed, bool includeDeadCode)
@@ -60,8 +68,13 @@ public static class AnalysisService
             ? [.. findings]
             : [.. findings.Where(finding => ids.Any(id => finding.StartsWith(id, StringComparison.OrdinalIgnoreCase)))];
 
-    private static IEnumerable<Project> Targets(LoadedWorkspace workspace, Document? document) =>
-        document is null ? workspace.Solution.Projects : [document.Project];
+    private static IEnumerable<Project> Targets(LoadedWorkspace workspace, DocumentId[] documents, bool unscoped) =>
+        unscoped
+            ? workspace.Solution.Projects
+            : documents
+                .Select(id => workspace.Solution.GetDocument(id)?.Project)
+                .OfType<Project>()
+                .DistinctBy(project => project.Id);
 
     private static async ValueTask CollectAsync(
         Project project,
@@ -111,7 +124,8 @@ public static class AnalysisService
         bool sinceLast,
         DiagnosticSeverity minimum,
         IReadOnlyList<string> ids,
-        bool includeDeadCode)
+        bool includeDeadCode,
+        bool changed)
     {
         var grouped = found
             .Select(diagnostic => DiagnosticFormat.Key(root, diagnostic))
@@ -125,7 +139,7 @@ public static class AnalysisService
             .Select(entry => entry.Count is 1 ? entry.Text : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}"))
             .ToArray();
 
-        var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}");
+        var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{changed}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}");
         var delta = DiagnosticHistory.Record(scope, lines);
         var shown = sinceLast ? delta.Appeared : lines;
 
@@ -157,6 +171,19 @@ public static class AnalysisService
 
         return response.ToString();
     }
+
+    private static DiagnosticScope Scope(LoadedWorkspace workspace, DocumentId[] documents, bool unscoped) =>
+            unscoped
+                ? DiagnosticScope.For(workspace, null)
+                : DiagnosticScope.Of(
+                    workspace.Root,
+                    documents.Select(id => workspace.Solution.GetDocument(id)?.FilePath).OfType<string>());
+
+    private static TerseError Empty(string? path, bool changed) => changed
+            ? Errors.Invalid(
+                "no document under that scope was modified since the workspace loaded",
+                "drop changed=true to analyze the whole scope")
+            : Errors.DocumentNotFound(path ?? "solution");
 }
 
 public static class DiagnosticFormat

@@ -27,9 +27,10 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Include member signatures. false gives ids and line ranges only, ~40% cheaper.")] bool signatures = true,
         [Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Also list the file's own using directives, so a new member's header can be written without reading source.")] bool usings = false,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, async loaded =>
-            Unwrap(await OutlineService.FileAsync(loaded, path, signatures, ids ?? "short", cancellationToken).ConfigureAwait(false)),
+            Unwrap(await OutlineService.FileAsync(loaded, path, signatures, ids ?? "short", usings, cancellationToken).ConfigureAwait(false)),
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "get_type_outline")]
@@ -142,21 +143,21 @@ public sealed class NavigationTools(ToolContext context)
         CancellationToken cancellationToken)
     {
         var found = await SymbolSearch.FindAsync(workspace, query, kind, maxResults, cancellationToken).ConfigureAwait(false);
+        var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
+        var shownComponents = Math.Min(components.Count, maxResults);
+        var shownSymbols = Math.Min(found.Ranked.Count, maxResults - shownComponents);
         var response = new ResponseBuilder("search_symbols", query);
 
-        var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
+        response.Summary(shownComponents + shownSymbols, components.Count + found.Total, "symbols", "kind= or maxResults=");
 
-        response.Summary(found.Count + components.Count, found.Count + components.Count, "symbols");
+        if (!found.TotalIsExact)
+            response.Note("WARNING total counts duplicate declarations across projects; narrow query= for an exact count");
 
-        foreach (var component in components.Take(maxResults))
+        foreach (var component in components.Take(shownComponents))
             response.Line(RazorUsageService.Describe(component));
 
-        foreach (var symbol in found)
-        {
-            response.Line(string.Create(
-                CultureInfo.InvariantCulture,
-                $"{SymbolFormat.Location(workspace.Root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Describe(symbol)}"));
-        }
+        foreach (var symbol in found.Ranked.Take(shownSymbols))
+            response.Line(Describe(workspace, symbol));
 
         return response.ToString();
     }
@@ -172,4 +173,9 @@ public sealed class NavigationTools(ToolContext context)
     internal static int Cap(int requested, int fallback) => requested <= 0 ? fallback : Math.Min(requested, 1000);
 
     internal static string Unwrap(Result<string> result) => result.IsOk ? result.Value! : result.Error!.Render();
+
+    private static string Describe(LoadedWorkspace workspace, ISymbol symbol) =>
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{SymbolFormat.Location(workspace.Root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Describe(symbol)}");
 }

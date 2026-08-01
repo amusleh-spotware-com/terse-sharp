@@ -60,18 +60,18 @@ A silent drop is the breach, even when the reason would have been valid.
 
 | Instead of | Use | Why |
 |---|---|---|
-| `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies |
+| `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives |
 | `Read` to see one method | `get_symbol_source(symbolId)` | that member only |
 | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies |
 | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
 | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
-| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `node_modules` excluded |
-| `Grep` in non-code files | `search_text` / `search_regex` | tagged `HEURISTIC` |
+| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
+| `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC`; `total=` counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
 | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response |
-| `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges, then only that section |
+| `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
-| `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated |
+| `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
 | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
 | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call |
 | rewrite an **existing** `.cs` file whole | `write_text(path, content, force: true)` | compile-gated: rolled back if it introduces an error, `allowErrors: true` to opt out |
@@ -85,7 +85,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | "what endpoints exist?" | `list_endpoints()` | every `Map*` with the member it sits in |
 | orienting on a symbol | `explore_symbol(symbolId)` | signature, doc, reach, implementations, XAML sites in one call |
 | judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
-| "why does this control look like that" | `xaml_styles(typeName)` | implicit and keyed styles with the `BasedOn` chain |
+| "why does this control look like that" | `xaml_styles(typeName)` | implicit and keyed styles with the `BasedOn` chain, capped by `maxResults` (100) |
 | "is this element translated" | `xaml_localization()` | every `x:Uid` joined to its `.resx`/`.resw` entry |
 | `Read` a `.resx`/`.resw` | `resx_get(path, cultures)` | every key with its value per culture; absent ones print `MISSING` |
 | `Grep` a resource key | `resx_find(query)` | key, value or comment, across every family |
@@ -113,7 +113,10 @@ A silent drop is the breach, even when the reason would have been valid.
 ## The whole surface, by job
 
 **Workspace** — `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` ·
-`list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution. Its
+`list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution.
+Facing an unfamiliar repository, `load_workspace(path, discover: true)` lists every solution and
+project under a directory without loading one — auto-discovery only walks *up* from the working
+directory, so this is the call that replaces globbing for `*.sln`. Its
 last line reports freshness — `watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0`: the
 watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor), how many paths are
 waiting to be examined, and how many watcher events were lost. `load_workspace(reload: true)` forces a
@@ -121,8 +124,16 @@ re-read from disk; you should almost never need it. The line after it reports th
 `index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10)
 documents=9/128 parses=9`.
 
+**`failures=` and `warnings=` are different things.** `failures=` counts projects that did not load;
+`warnings=` counts MSBuild diagnostics that did not stop a load — NuGet advisories (NU1903), target
+framework notes (NU1701) and the like. A big solution routinely reports `failures=0 warnings=20` and
+is fully usable. The warnings are listed only with `verbose=true`, so do not read a warning count as a
+broken workspace, and do not fall back to the built-ins over one.
+
 **Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·
 `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of`.
+A usage inside generated code is tagged `gen` rather than `src` — it is a real reference, but the file
+is regenerated, so never edit it.
 
 **.NET semantics grep cannot reach** — `find_registrations` (DI) · `list_endpoints` (ASP.NET Core).
 
@@ -132,12 +143,24 @@ full report on any of them. The short form is **only** emitted when there is not
 a failure, a diagnostic, a rolled-back edit, a timeout, a zero-result run and a locked file all keep
 the full output — so do not pass `verbose=true` defensively.
 
-**Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `sinceLast=true` reports
+**Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `path=` takes a file, a
+directory or a glob and `changed=true` limits it to files modified since the workspace loaded, so the
+end-of-task gate over a task's touched files is **one** call, not one per file; `sinceLast=true` reports
 only what appeared since the previous run of the same scope, plus what was fixed) ·
 `get_diagnostics` · `format` (whitespace; `verify=true` for a one-line verdict, `path=` takes a file, a directory or a glob) · `cleanup` (`fix=usings` by default; `fix=style|analyzers|all` applies the referenced analyzers' code fixes with `ids=` and `severity=` filters, reports `UNFIXED <id>` for what no fixer covers, and never rewrites generated code) · `clean` (deletes `bin`/`obj`, `dryRun=true` to preview, not covered by `undo_last_change`).
 
+**`format verify` and `cleanup verify` are not the same gate.** `format` compares against the Roslyn
+whitespace formatter, which `dotnet format style` and `dotnet format analyzers` do not run — a
+`VERIFY_FAILED` there can still be a green CI leg. `cleanup verify=true fix=style` and
+`fix=analyzers` are exactly those two CI commands; `fix=all` and the default `fix=usings` are
+supersets and may name files CI accepts.
+
 **Edit** — `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol`
-· `undo_last_change`.
+· `undo_last_change`. `add_member` and `replace_symbol` accept **several declarations in one call**,
+applied as a single compile-gated edit — so a set of members that reference each other needs no
+dependency ordering, and `replace_symbol` can split a member into overloads. On a member that is
+already expression-bodied, `replace_symbol_body` accepts a bare expression as well as `=> expr` and a
+statement block.
 
 **Refactor** — `extract_interface` · `move_type_to_file` · `move_type_to_namespace` ·
 `change_signature`.
@@ -163,6 +186,13 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
 `razor_remove_element` · `razor_set_directive`.
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
+The search tools take `query` (`pattern` still works). `find_files`, `search_text` and `search_regex`
+skip `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and
+directory symlinks — the same set every index uses, so a nested agent worktree never doubles a result.
+`read_text` also accepts an **absolute path outside every workspace root**, tagged
+`outside-workspace`, so comparing a file against another repo needs no second `load_workspace` and no
+`workspace=` even with several loaded; every writer still refuses to leave the workspace.
+`search_regex` anchors `^` and `$` to each line.
 
 **Build and test** — `build` · `clean` · `run_tests` · `rerun_failed` · `list_tests`.
 
@@ -313,7 +343,10 @@ an unresolved capitalised tag is a real defect (it renders as raw HTML), not a t
 attribute that matches no `[Parameter]` (compiles clean, throws at render) · `RZR003` a missing
 `[EditorRequired]` · `RZR004` a `@bind` with no setter · `RZR005` a route parameter with no property ·
 `RZR006` two components on one route · `RZR007` a mistyped `@ref` · `RZR008` an orphan `.razor.css` ·
-`RZR009` an `@inject` nothing registers (`HEURISTIC`) · `RZR010` markup that will not parse. Razor's
+`RZR009` an `@inject` nothing registers (`HEURISTIC`; services the Blazor host provides —
+`NavigationManager`, `HttpClient`, `IJSRuntime`, `IStringLocalizer` and friends — are never reported,
+and when the scan meets `Add*` extension calls whose registered types it cannot read the finding says
+the service may live inside one of them rather than asserting a runtime failure) · `RZR010` markup that will not parse. Razor's
 own `RZ####` diagnostics come from `build`, not from `get_diagnostics`.
 
 Razor edits are **compile-gated**: the tool writes the new text into the workspace, the generator

@@ -1,11 +1,13 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace TerseSharp.Core;
 
+public readonly record struct SymbolMatches(IReadOnlyList<ISymbol> Ranked, int Total, bool TotalIsExact);
+
 public static class SymbolSearch
 {
-    public static async Task<IReadOnlyList<ISymbol>> FindAsync(
+    public static async Task<SymbolMatches> FindAsync(
         LoadedWorkspace workspace,
         string query,
         string? kind,
@@ -28,19 +30,45 @@ public static class SymbolSearch
                 perProject[index] = [.. matches.Where(candidate => KindMatches(candidate, kind))];
             }).ConfigureAwait(false);
 
-        return Rank(perProject.SelectMany(found => found).Take(ceiling), maxResults);
+        return Summarize(perProject, ceiling, maxResults);
     }
 
-    private static ISymbol[] Rank(IEnumerable<ISymbol> found, int maxResults) =>
+    private static SymbolMatches Summarize(ISymbol[][] perProject, int ceiling, int maxResults)
+    {
+        var declarations = MatchCount(perProject);
+        var window = Distinct(perProject.SelectMany(found => found).Take(ceiling));
+        var exact = declarations <= ceiling;
+
+        return new SymbolMatches(Rank(window, maxResults), exact ? window.Length : declarations, exact);
+    }
+
+    private static int MatchCount(ISymbol[][] perProject)
+    {
+        var declarations = 0;
+
+        foreach (var project in perProject)
+            declarations += project.Length;
+
+        return declarations;
+    }
+
+    private static Identified[] Distinct(IEnumerable<ISymbol> found) =>
         [.. found
-            .DistinctBy(symbol => SymbolId.From(symbol).Value, StringComparer.Ordinal)
-            .OrderByDescending(symbol => symbol.DeclaredAccessibility is Accessibility.Public)
-            .ThenBy(symbol => symbol.Name.Length)
-            .ThenBy(symbol => SymbolId.From(symbol).Value, StringComparer.Ordinal)
-            .Take(maxResults)];
+            .Select(symbol => new Identified(symbol, SymbolId.From(symbol).Value))
+            .DistinctBy(entry => entry.Id, StringComparer.Ordinal)];
+
+    private static ISymbol[] Rank(Identified[] distinct, int maxResults) =>
+        [.. distinct
+            .OrderByDescending(entry => entry.Symbol.DeclaredAccessibility is Accessibility.Public)
+            .ThenBy(entry => entry.Symbol.Name.Length)
+            .ThenBy(entry => entry.Id, StringComparer.Ordinal)
+            .Take(maxResults)
+            .Select(entry => entry.Symbol)];
 
     private static bool KindMatches(ISymbol symbol, string? kind) =>
         string.IsNullOrWhiteSpace(kind)
         || SymbolFormat.Kind(symbol).Equals(kind, StringComparison.OrdinalIgnoreCase)
         || symbol.Kind.ToString().Equals(kind, StringComparison.OrdinalIgnoreCase);
+
+    private readonly record struct Identified(ISymbol Symbol, string Id);
 }

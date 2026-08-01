@@ -1,19 +1,24 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
 
 public static partial class XamlDeadCode
 {
-    public static IEnumerable<string> Unused(string root, XamlResourceGraph graph)
+    public static async Task<IReadOnlyList<string>> UnusedAsync(
+        string root,
+        XamlResourceGraph graph,
+        CancellationToken cancellationToken)
     {
         var referenced = References(graph);
-        var literals = Literals(root);
+        var literals = await LiteralsAsync(root, cancellationToken).ConfigureAwait(false);
 
-        foreach (var declaration in graph.Files.SelectMany(file => Declarations(file)))
-        {
-            if (!referenced.Contains(declaration.Value) && !literals.Contains(declaration.Value))
-                yield return Issue(declaration);
-        }
+        return
+        [
+            .. graph.Files
+                .SelectMany(Declarations)
+                .Where(declaration => !referenced.Contains(declaration.Value) && !literals.Contains(declaration.Value))
+                .Select(Issue),
+        ];
     }
 
     private static IEnumerable<Declaration> Declarations(XamlFileRecord file)
@@ -50,42 +55,30 @@ public static partial class XamlDeadCode
             found.Add(match.Groups[1].Value);
     }
 
-    private static HashSet<string> Literals(string root)
+    private static async Task<HashSet<string>> LiteralsAsync(string root, CancellationToken cancellationToken)
     {
         var found = new HashSet<string>(StringComparer.Ordinal);
+        var lookup = found.GetAlternateLookup<ReadOnlySpan<char>>();
 
         foreach (var file in SourceFiles(root))
         {
-            foreach (Match match in QuotedLiteral().Matches(Read(file)))
-                found.Add(match.Value);
+            var text = await ReadAsync(file, cancellationToken).ConfigureAwait(false);
+
+            foreach (var match in QuotedLiteral().EnumerateMatches(text))
+                lookup.Add(text.AsSpan(match.Index, match.Length));
         }
 
         return found;
     }
 
-    private static IEnumerable<string> SourceFiles(string root)
-    {
-        try
-        {
-            return Directory
-                .EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
-                .Where(file => !GeneratedCode.IsGenerated(root, file));
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
+    private static IEnumerable<string> SourceFiles(string root) => WorkspaceFiles
+        .Enumerate(root, file => SourceFile.IsCSharp(file) && !GeneratedCode.IsGenerated(root, file));
 
-    private static string Read(string file)
+    private static async Task<string> ReadAsync(string file, CancellationToken cancellationToken)
     {
         try
         {
-            return File.ReadAllText(file);
+            return await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
         }
         catch (IOException)
         {

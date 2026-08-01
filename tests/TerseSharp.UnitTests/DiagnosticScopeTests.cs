@@ -30,11 +30,11 @@ public sealed class DiagnosticScopeTests
 
     [Fact]
     public void Includes_AGeneratedFileNamedExplicitly_IsKept() =>
-        Assert.True(new DiagnosticScope(Root, Generated).Includes(At(Generated, DiagnosticSeverity.Info)));
+        Assert.True(DiagnosticScope.Of(Root, [Generated]).Includes(At(Generated, DiagnosticSeverity.Info)));
 
     [Fact]
     public void Includes_AnotherFileWhenOneIsNamed_IsDropped() =>
-        Assert.False(new DiagnosticScope(Root, Handwritten).Includes(At(Path.Combine(Root, "src", "Other.cs"), DiagnosticSeverity.Warning)));
+        Assert.False(DiagnosticScope.Of(Root, [Handwritten]).Includes(At(Path.Combine(Root, "src", "Other.cs"), DiagnosticSeverity.Warning)));
 
     private static Diagnostic At(string file, DiagnosticSeverity severity) => Diagnostic.Create(
         new DiagnosticDescriptor("TEST001", "title", "message", "category", severity, isEnabledByDefault: true),

@@ -33,4 +33,35 @@ public static class MemberDeclaration
 
     private static string Excerpt(string trailing) =>
         trailing.Length <= 60 ? trailing : trailing[..60] + "...";
+
+    public static Result<MemberDeclarationSyntax[]> ParseAll(string declarations)
+    {
+        var members = new List<MemberDeclarationSyntax>();
+        var remaining = declarations;
+
+        while (remaining.Trim().Length > 0)
+        {
+            var parsed = SyntaxFactory.ParseMemberDeclaration(remaining, consumeFullText: false);
+
+            if (parsed is null || parsed.FullSpan.End is 0)
+                return Result.Fail<MemberDeclarationSyntax[]>(Unparsed());
+
+            if (Fatal(parsed) is { Length: > 0 } errors)
+                return Result.Fail<MemberDeclarationSyntax[]>(Malformed(errors));
+
+            members.Add(parsed);
+            remaining = remaining[parsed.FullSpan.End..];
+        }
+
+        return members.Count is 0
+            ? Result.Fail<MemberDeclarationSyntax[]>(Unparsed())
+            : Result.Ok(members.ToArray());
+    }
+
+    private static Diagnostic[] Fatal(MemberDeclarationSyntax parsed) =>
+            [.. parsed.GetDiagnostics().Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error)];
+
+    private static TerseError Unparsed() => Errors.Invalid(
+            "the declaration did not parse",
+            "pass one or more complete member declarations");
 }

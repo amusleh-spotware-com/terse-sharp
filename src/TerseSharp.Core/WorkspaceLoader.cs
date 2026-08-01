@@ -1,3 +1,4 @@
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
@@ -11,18 +12,18 @@ internal static class WorkspaceLoader
         MsBuildBootstrap.Ensure();
 
         var full = Path.GetFullPath(path);
-        var failures = new List<string>();
+        var reported = new ConcurrentQueue<WorkspaceDiagnostic>();
         var workspace = MSBuildWorkspace.Create();
 
         workspace.SkipUnrecognizedProjects = true;
-        workspace.RegisterWorkspaceFailedHandler(args => failures.Add(args.Diagnostic.Message));
+        workspace.RegisterWorkspaceFailedHandler(args => reported.Enqueue(args.Diagnostic));
 
         var stopwatch = Stopwatch.StartNew();
         var solution = await OpenAsync(workspace, full, cancellationToken).ConfigureAwait(false);
 
         stopwatch.Stop();
 
-        var result = Describe(full, solution, stopwatch.ElapsedMilliseconds, failures);
+        var result = Describe(full, solution, stopwatch.ElapsedMilliseconds, reported);
 
         return new LoadedWorkspace(workspace, result, GitContext.Detect(full), seed);
     }
@@ -44,14 +45,19 @@ internal static class WorkspaceLoader
         string path,
         Solution solution,
         long elapsedMilliseconds,
-        IReadOnlyList<string> failures) =>
+        IReadOnlyCollection<WorkspaceDiagnostic> reported) =>
         new(
             path,
             solution.Projects.Count(),
             solution.Projects.Sum(project => project.Documents.Count()),
             elapsedMilliseconds,
-            Deduplicate(failures));
+            Messages(reported, WorkspaceDiagnosticKind.Failure),
+            Messages(reported, WorkspaceDiagnosticKind.Warning));
 
-    private static string[] Deduplicate(IReadOnlyList<string> failures) =>
-        [.. failures.Distinct(StringComparer.Ordinal).Take(20)];
+    private static string[] Messages(IReadOnlyCollection<WorkspaceDiagnostic> reported, WorkspaceDiagnosticKind kind) =>
+        [.. reported
+            .Where(diagnostic => diagnostic.Kind == kind)
+            .Select(diagnostic => diagnostic.Message)
+            .Distinct(StringComparer.Ordinal)
+            .Take(20)];
 }

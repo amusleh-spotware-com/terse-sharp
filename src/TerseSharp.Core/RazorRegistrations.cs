@@ -1,23 +1,54 @@
+﻿using System.Collections.Frozen;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace TerseSharp.Core;
 
+public readonly record struct RazorRegistrationIndex(IReadOnlySet<string> Names, int Unreadable);
+
 public static class RazorRegistrations
 {
-    public static async Task<IReadOnlySet<string>> NamesAsync(LoadedWorkspace workspace, CancellationToken cancellationToken)
+    private static readonly FrozenSet<string> HostProvided = new[]
+    {
+        "AntiforgeryStateProvider",
+        "ComponentStatePersistenceManager",
+        "HttpContext",
+        "IConfiguration",
+        "IErrorBoundaryLogger",
+        "IHostApplicationLifetime",
+        "IHostEnvironment",
+        "IJSInProcessRuntime",
+        "IJSRuntime",
+        "IJSUnmarshalledRuntime",
+        "ILogger",
+        "ILoggerFactory",
+        "IOptions",
+        "IOptionsMonitor",
+        "IOptionsSnapshot",
+        "IServiceProvider",
+        "IServiceScopeFactory",
+        "IWebAssemblyHostEnvironment",
+        "IWebHostEnvironment",
+        "NavigationManager",
+        "PersistentComponentState",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    public static bool IsHostProvided(string name) => HostProvided.Contains(name);
+
+    public static async Task<RazorRegistrationIndex> IndexAsync(LoadedWorkspace workspace, CancellationToken cancellationToken)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var unreadable = 0;
 
         foreach (var document in Documents(workspace))
         {
             var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
 
             if (root is not null)
-                names.UnionWith(In(root));
+                unreadable += Collect(names, root);
         }
 
-        return names;
+        return new RazorRegistrationIndex(names, unreadable);
     }
 
     private static IEnumerable<Document> Documents(LoadedWorkspace workspace) => workspace
@@ -26,14 +57,29 @@ public static class RazorRegistrations
         .SelectMany(project => project.Documents)
         .Where(document => document.FilePath is { Length: > 0 } && !GeneratedCode.IsGenerated(workspace.Root, document.FilePath));
 
-    private static IEnumerable<string> In(SyntaxNode root) => root
-        .DescendantNodes()
-        .OfType<InvocationExpressionSyntax>()
-        .Where(Registers)
-        .SelectMany(Named);
+    private static int Collect(HashSet<string> names, SyntaxNode root)
+    {
+        var unreadable = 0;
+
+        foreach (var invocation in root.DescendantNodes().OfType<InvocationExpressionSyntax>().Where(Registers))
+        {
+            var named = false;
+
+            foreach (var name in Named(invocation))
+            {
+                names.Add(name);
+                named = true;
+            }
+
+            if (!named && Opaque(invocation) && invocation.Expression is MemberAccessExpressionSyntax)
+                unreadable++;
+        }
+
+        return unreadable;
+    }
 
     private static bool Registers(InvocationExpressionSyntax invocation) =>
-        Method(invocation) is { } name
+        Method(invocation) is { Length: > 3 } name
         && (name.StartsWith("Add", StringComparison.Ordinal) || name.StartsWith("TryAdd", StringComparison.Ordinal));
 
     private static string? Method(InvocationExpressionSyntax invocation) => invocation.Expression switch
@@ -64,4 +110,7 @@ public static class RazorRegistrations
         QualifiedNameSyntax qualified => Simple(qualified.Right),
         _ => type.ToString(),
     };
+
+    private static bool Opaque(InvocationExpressionSyntax invocation) => invocation.ArgumentList.Arguments
+            .All(argument => argument.Expression is LambdaExpressionSyntax or AnonymousMethodExpressionSyntax);
 }

@@ -36,4 +36,8 @@ public static class PathBoundary
             return Path.GetFullPath(path);
         }
     }
+
+    public static StringComparer Comparer { get; } = OperatingSystem.IsLinux()
+            ? StringComparer.Ordinal
+            : StringComparer.OrdinalIgnoreCase;
 }

@@ -155,10 +155,17 @@ public static class XamlService
             : Reread(workspace, located.Value!, graph);
     }
 
-    public static Result<string> ValidateAll(LoadedWorkspace workspace, int maxResults, bool includeUnused)
+    public static async Task<Result<string>> ValidateAllAsync(
+        LoadedWorkspace workspace,
+        int maxResults,
+        bool includeUnused,
+        CancellationToken cancellationToken)
     {
         var graph = workspace.Indexes.Xaml();
-        var unused = includeUnused ? XamlDeadCode.Unused(workspace.Root, graph) : [];
+        var unused = includeUnused
+            ? await XamlDeadCode.UnusedAsync(workspace.Root, graph, cancellationToken).ConfigureAwait(false)
+            : [];
+
         var issues = graph.Files.SelectMany(file => Collect(file, graph)).Concat(unused).ToArray();
         var response = new ResponseBuilder("xaml_validate", "solution");
 

@@ -11,23 +11,19 @@ public static class DeadCodeService
 
     public static async Task<IReadOnlyList<string>> FindAsync(
         LoadedWorkspace workspace,
-        string? path,
+        IEnumerable<Project> targets,
+        DiagnosticScope scope,
         CancellationToken cancellationToken)
     {
-        var document = path is null ? null : DocumentLookup.Find(workspace, path);
-        var scope = DiagnosticScope.For(workspace, path);
         var findings = new ConcurrentBag<string>();
 
         await Parallel.ForEachAsync(
-            Targets(workspace, document),
+            targets,
             ParallelWork.Sequential(cancellationToken),
             (project, token) => ScanAsync(workspace, project, scope, findings, token)).ConfigureAwait(false);
 
         return [.. findings.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
     }
-
-    private static IEnumerable<Project> Targets(LoadedWorkspace workspace, Document? document) =>
-        document is null ? workspace.Solution.Projects : [document.Project];
 
     private static async ValueTask ScanAsync(
         LoadedWorkspace workspace,

@@ -50,7 +50,7 @@ public static class WorkspaceFiles
         }
     }
 
-    private static bool Traversable(string directory) =>
+    public static bool Traversable(string directory) =>
         !IsExcludedDirectory(Path.GetFileName(directory)) && !IsLink(directory);
 
     private static bool IsLink(string directory)

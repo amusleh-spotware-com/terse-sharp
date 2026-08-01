@@ -9,16 +9,17 @@ public sealed class AnalysisTools(ToolContext context)
     [McpServerTool(Name = "analyze")]
     [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode.")]
     public Task<string> Analyze(
-        [Description("File to scope to.")] string? path = null,
+        [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
         [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
         [Description("Optional comma-separated diagnostic ids to keep, e.g. CA1822,TERSE001.")] string? ids = null,
         [Description("Include unreferenced members and unreachable code. Default true; set false on a huge solution to skip the reference scan.")] bool includeDeadCode = true,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (200).")] int maxResults = 0,
         [Description("Report only diagnostics that appeared since the previous analyze of the same scope, and which ones were fixed.")] bool sinceLast = false,
+        [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, loaded => AnalysisService.AnalyzeAsync(
-            loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, cancellationToken),
+            loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "format")]
@@ -27,7 +28,7 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("File, directory or glob such as src/**/*.cs; empty formats every document.")] string? path = null,
         [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing.")] bool verify = false,
+        [Description("Report clean or VERIFY_FAILED with the files the Roslyn whitespace formatter would change, and write nothing. This is not the CI gate: dotnet format style and analyzers do not run the whitespace formatter, so a VERIFY_FAILED here can still be a green CI leg. Use cleanup verify=true fix=style and fix=analyzers to pre-empt CI.")] bool verify = false,
         [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
@@ -47,7 +48,7 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("Minimum severity to fix: error, warning, info, hidden. Default info.")] string? severity = null,
         [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing.")] bool verify = false,
+        [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing. fix=style verifies exactly what dotnet format style checks and fix=analyzers exactly what dotnet format analyzers checks, so those two are the CI pre-empt; fix=all and the default fix=usings are supersets and can name files CI accepts.")] bool verify = false,
         [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default)

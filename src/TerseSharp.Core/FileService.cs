@@ -9,28 +9,21 @@ public static class FileService
 
     private const int MaxNearMisses = 3;
 
-    public static async Task<Result<string>> ReadTextAsync(
+    public static Task<Result<string>> ReadTextAsync(
         LoadedWorkspace workspace,
         string path,
         ReadRequest request,
         CancellationToken cancellationToken)
     {
-        var resolved = PathGuard.Resolve(workspace, path);
+        var resolved = Readable(workspace, path);
 
         if (!resolved.IsOk)
-            return Result.Fail<string>(resolved.Error!);
+            return Task.FromResult(Result.Fail<string>(resolved.Error!));
 
         var full = resolved.Value!;
+        var label = PathBoundary.Contains(workspace.Root, full) ? path : Outside(full);
 
-        if (!File.Exists(full))
-            return Result.Fail<string>(Errors.DocumentNotFound(path));
-
-        if (BinaryContent.Reject(full, path) is { } binary)
-            return binary;
-
-        var text = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
-
-        return Present(path, text, request);
+        return PresentFileAsync(full, label, request, cancellationToken);
     }
 
     public static async Task<Result<string>> WriteTextAsync(
@@ -182,32 +175,37 @@ public static class FileService
         return response.ToString();
     }
 
-    private static Result<string> Present(string path, string text, ReadRequest request)
+    private static Result<string> Present(string path, string label, string text, ReadRequest request)
     {
         if (request.Headings)
-            return Outline(path, text);
+            return Outline(path, label, text);
 
         return request.Section is { Length: > 0 } heading
-            ? Slice(path, text, heading, request)
-            : Result.Ok(Render(path, text, request.Range));
+            ? Slice(label, text, heading, request)
+            : Result.Ok(Render(label, text, request.Range));
     }
 
-    private static Result<string> Outline(string path, string text)
+    private static Result<string> Outline(string path, string label, string text)
     {
         if (!DocumentOutline.IsMarkdown(path))
         {
             return Result.Fail<string>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"'{path}' is not markdown, so it has no headings"),
+                string.Create(CultureInfo.InvariantCulture, $"'{label}' is not markdown, so it has no headings"),
                 "drop headings=true, or use get_file_outline for a .cs file"));
         }
 
         var sections = DocumentOutline.Headings(text);
-        var response = new ResponseBuilder("read_text", path + " headings");
+        var response = new ResponseBuilder("read_text", label + " headings");
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
 
         response.Summary(sections.Count, sections.Count, "sections");
 
         foreach (var section in sections)
-            response.Line(string.Create(CultureInfo.InvariantCulture, $"{section.StartLine}-{section.EndLine}  {section.Heading}"));
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{section.StartLine}-{section.EndLine}  {section.Heading}  #{Unique(seen, MarkdownAnchor.Of(section.Heading))}"));
+        }
 
         return Result.Ok(response.ToString());
     }
@@ -308,5 +306,50 @@ public static class FileService
         var options = new EditOptions("write_text", dryRun, allowErrors, verbose);
 
         return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Result<string> Readable(LoadedWorkspace workspace, string path) =>
+            Path.IsPathRooted(path) && !PathBoundary.Contains(workspace.Root, Path.GetFullPath(path))
+                ? Result.Ok(Path.GetFullPath(path))
+                : PathGuard.Resolve(workspace, path);
+
+    private static string Unique(Dictionary<string, int> seen, string slug)
+    {
+        if (!seen.TryGetValue(slug, out var used))
+        {
+            seen[slug] = 0;
+
+            return slug;
+        }
+
+        seen[slug] = used + 1;
+
+        return string.Create(CultureInfo.InvariantCulture, $"{slug}-{used + 1}");
+    }
+
+    public static Task<Result<string>> ReadOutsideAsync(string path, ReadRequest request, CancellationToken cancellationToken)
+    {
+        var full = Path.GetFullPath(path);
+
+        return PresentFileAsync(full, Outside(full), request, cancellationToken);
+    }
+
+    private static string Outside(string full) => full + "  outside-workspace";
+
+    private static async Task<Result<string>> PresentFileAsync(
+            string full,
+            string label,
+            ReadRequest request,
+            CancellationToken cancellationToken)
+    {
+        if (!File.Exists(full))
+            return Result.Fail<string>(Errors.DocumentNotFound(label));
+
+        if (BinaryContent.Reject(full, label) is { } binary)
+            return binary;
+
+        var text = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
+
+        return Present(full, label, text, request);
     }
 }

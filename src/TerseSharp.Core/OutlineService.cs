@@ -11,6 +11,7 @@ public static class OutlineService
         string path,
         bool signatures,
         string ids,
+        bool usings,
         CancellationToken cancellationToken)
     {
         var document = DocumentLookup.Find(workspace, path);
@@ -28,10 +29,11 @@ public static class OutlineService
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
         var declarations = Declarations(root);
+        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null);
 
         return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
             ? note
-            : Render("get_file_outline", path, declarations, model, signatures, ids));
+            : Render("get_file_outline", path, declarations, model, format));
     }
 
     public static async Task<Result<string>> TypeAsync(
@@ -57,7 +59,7 @@ public static class OutlineService
 
         return model is null || node is not MemberDeclarationSyntax declaration || !IsTypeDeclaration(declaration)
             ? Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []))
-            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, signatures, ids));
+            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, new OutlineFormat(signatures, ids, null)));
     }
 
     private static Result<string>? Rejected(string ids) =>
@@ -78,15 +80,17 @@ public static class OutlineService
         string argument,
         MemberDeclarationSyntax[] declarations,
         SemanticModel model,
-        bool signatures,
-        string ids)
+        OutlineFormat format)
     {
         var response = new ResponseBuilder(tool, argument);
 
         response.Summary(declarations.Length, declarations.Length, "types");
 
+        if (format.Usings is { Length: > 0 } usings)
+            response.Note("usings: " + usings);
+
         foreach (var declaration in declarations)
-            AppendType(response, declaration, model, signatures, ids);
+            AppendType(response, declaration, model, format);
 
         return response.ToString();
     }
@@ -95,8 +99,7 @@ public static class OutlineService
         ResponseBuilder response,
         MemberDeclarationSyntax declaration,
         SemanticModel model,
-        bool signatures,
-        string ids)
+        OutlineFormat format)
     {
         var symbol = model.GetDeclaredSymbol(declaration);
 
@@ -105,10 +108,10 @@ public static class OutlineService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"{Reference(symbol, ids)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
+            $"{Reference(symbol, format.Ids)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
 
         foreach (var member in Members(declaration))
-            AppendMember(response, member, model, signatures, ids);
+            AppendMember(response, member, model, format);
     }
 
     private static IEnumerable<MemberDeclarationSyntax> Members(MemberDeclarationSyntax declaration) => declaration switch
@@ -122,8 +125,7 @@ public static class OutlineService
         ResponseBuilder response,
         MemberDeclarationSyntax member,
         SemanticModel model,
-        bool signatures,
-        string ids)
+        OutlineFormat format)
     {
         var symbol = model.GetDeclaredSymbol(member);
 
@@ -132,7 +134,7 @@ public static class OutlineService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"  {Reference(symbol, ids)}  {Signature(symbol, signatures)} :{PositionFormat.LineRange(member)}"));
+            $"  {Reference(symbol, format.Ids)}  {Signature(symbol, format.Signatures)} :{PositionFormat.LineRange(member)}"));
     }
 
     private static string Reference(ISymbol symbol, string ids) =>
@@ -173,4 +175,16 @@ public static class OutlineService
 
         return response.ToString();
     }
+
+    private static string Usings(SyntaxNode root) => string.Join(
+            ", ",
+            root.DescendantNodes().OfType<UsingDirectiveSyntax>().Select(Describe));
+
+    private static string Describe(UsingDirectiveSyntax directive) => string.Concat(
+            directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword) ? "global " : string.Empty,
+            directive.StaticKeyword.IsKind(SyntaxKind.StaticKeyword) ? "static " : string.Empty,
+            directive.Alias is { } alias ? alias.Name.Identifier.ValueText + " = " : string.Empty,
+            directive.NamespaceOrType?.ToString() ?? string.Empty);
+
+    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings);
 }

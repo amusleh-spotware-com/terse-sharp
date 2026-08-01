@@ -15,6 +15,29 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task SearchSymbols_WhenCapped_CostsLessThanTheUncappedAnswerButKeepsTheTotal()
+    {
+        var capped = await server.CallAsync("search_symbols", new() { ["query"] = "Order", ["maxResults"] = 2 });
+        var full = await server.CallAsync("search_symbols", new() { ["query"] = "Order", ["maxResults"] = 200 });
+
+        Assert.True(Tokens(capped) < Tokens(full), Report("search_symbols", capped, full));
+        Assert.Contains("truncated=true", capped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithUsings_CostsOneExtraLine()
+    {
+        var bare = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/Localization.cs" });
+        var withUsings = await server.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "src/Fixture.Trading/Localization.cs",
+            ["usings"] = true,
+        });
+
+        Assert.Equal(Lines(bare) + 1, Lines(withUsings));
+    }
+
+    [Fact]
     public async Task ExploreSymbol_OnTheWidestSymbol_StaysUnderItsBudget()
     {
         var text = await server.CallAsync("explore_symbol", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
@@ -203,6 +226,8 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     }
 
     private static int Tokens(string text) => (text.Length + 3) / 4;
+
+    private static int Lines(string text) => text.Split('\n').Length;
 
     private static string Report(string tool, string response) =>
         string.Create(CultureInfo.InvariantCulture, $"{tool}: {Tokens(response)} tokens\n{response}");
