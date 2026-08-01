@@ -16,7 +16,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
         try
         {
-            if (TryGet(full) is { } existing)
+            if (Existing(full) is { } existing)
             {
                 existing.Touch();
 
@@ -89,12 +89,6 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
             return all;
         }
-    }
-
-    private LoadedWorkspace? TryGet(string full)
-    {
-        lock (map)
-            return workspaces.TryGetValue(full, out var existing) ? existing : null;
     }
 
     private async Task<LoadedWorkspace> AddAsync(string full, WorkspaceSeed seed, CancellationToken cancellationToken)

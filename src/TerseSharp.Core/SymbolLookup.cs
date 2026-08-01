@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 
@@ -56,7 +55,7 @@ public static class SymbolLookup
     private static Result<ISymbol> Chosen(string text, ISymbol[] matches, IReadOnlyList<ISymbol> found) => matches switch
     {
         [var only] => Result.Ok(only),
-        [] => Result.Fail<ISymbol>(Errors.SymbolNotFound(text, [.. found.Take(3).Select(SymbolReference.Brief)])),
+        [] => Result.Fail<ISymbol>(Errors.SymbolNotFound(text, [.. found.Take(3).Select(Addressable)])),
         _ => Result.Fail<ISymbol>(Errors.AmbiguousName(
             text,
             [.. matches.Take(10).Select(symbol => SymbolId.From(symbol).Value)],
@@ -137,4 +136,6 @@ public static class SymbolLookup
 
         return arity < 0 ? name : name[..arity];
     }
+    private static string Addressable(ISymbol symbol) =>
+        SymbolReference.RoundTrips(symbol) ? SymbolReference.Brief(symbol) : SymbolId.From(symbol).Value;
 }

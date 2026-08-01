@@ -21,8 +21,11 @@ public static class XamlEditService
         string path,
         string target,
         string markup,
+        string position,
         bool dryRun) =>
-        Apply(workspace, path, "xaml_add_element", target, (text, span) => Nest(text, span, markup), dryRun);
+        RejectPosition(position) is { } refusal
+            ? Task.FromResult(refusal)
+            : Apply(workspace, path, "xaml_add_element", target, (text, span) => Nest(text, span, markup, position), dryRun);
 
     private static Result<string> Cut(string text, TagSpan span)
     {
@@ -35,21 +38,39 @@ public static class XamlEditService
             : Result.Ok(text.Remove(full.Value.Start, full.Value.Length));
     }
 
-    private static Result<string> Nest(string text, TagSpan span, string markup)
+    private static Result<string> Nest(string text, TagSpan span, string markup, string position)
     {
-        var tag = text[span.Start..span.End];
-
-        if (tag.EndsWith("/>", StringComparison.Ordinal))
+        if (text[span.Start..span.End].EndsWith("/>", StringComparison.Ordinal))
         {
             return Result.Fail<string>(Errors.Invalid(
                 "the target element is self-closing and has no content to add to",
                 "give it a child by editing the markup, or target its parent"));
         }
 
-        var indent = Indent(text, span.Start);
+        var at = InsertionPoint(text, span, position);
 
-        return Result.Ok(text.Insert(span.End, "\n" + indent + "  " + markup.Trim()));
+        return at < 0
+            ? Result.Fail<string>(Errors.Invalid(
+                "the target element has no matching closing tag, so position=last cannot be resolved",
+                "pass position=first, or repair the markup"))
+            : Result.Ok(text.Insert(at, "\n" + Indent(text, span.Start) + "  " + markup.Trim()));
     }
+
+    private static int InsertionPoint(string text, TagSpan span, string position)
+    {
+        if (position is "first")
+            return span.End;
+
+        var whole = Whole(text, span);
+
+        return whole is null ? -1 : whole.Value.End - (Name(text, span).Length + 3);
+    }
+
+    public static Result<string>? RejectPosition(string position) => position is "first" or "last"
+        ? null
+        : Result.Fail<string>(Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"position='{position}' is not known"),
+            "pass position=first or position=last"));
 
     private static TagSpan? Whole(string text, TagSpan opening)
     {
@@ -111,9 +132,6 @@ public static class XamlEditService
 
     private static bool Boundary(char character) => char.IsWhiteSpace(character) || character is '>' or '/';
 
-    private static int ClosingLength(string text, TagSpan opening) =>
-        Name(text, opening).Length + 3;
-
     private static string Name(string text, TagSpan opening) => text[(opening.Start + 1)..opening.End]
         .TrimEnd('>', '/')
         .Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
@@ -153,7 +171,10 @@ public static class XamlEditService
         var written = await Write(tool, full, PositionFormat.Relative(workspace.Root, full), located.Value, change, dryRun).ConfigureAwait(false);
 
         if (written.IsOk && !dryRun)
+        {
+            workspace.Sync.Notice(full);
             workspace.Sync.Bumped(ChangeKind.Xaml);
+        }
 
         return written;
     }

@@ -182,6 +182,7 @@ public sealed class CleanServiceTests
             project,
             includeIntermediate,
             dryRun,
+            verbose: true,
             TestContext.Current.CancellationToken);
 
     private static string Sandbox()

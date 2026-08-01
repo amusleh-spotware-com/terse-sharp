@@ -18,24 +18,27 @@ public static class EditGate
             : await AnalyseAsync(workspace.Solution, updated, changed, cancellationToken).ConfigureAwait(false);
 
         if (options.DryRun)
-            return Result.Ok(Render(options.Tool, diff, "dryRun", report));
+            return Result.Ok(Render(options, diff, "dryRun", report));
 
         if (report is { NewErrors.Length: > 0 })
             return Result.Fail<string>(Errors.CompileRegression(report.NewErrors));
 
         return await workspace.TryApplyAsync(updated, changed, cancellationToken).ConfigureAwait(false)
-            ? Result.Ok(Render(options.Tool, diff, "applied", report))
+            ? Result.Ok(Render(options, diff, "applied", report))
             : Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
     }
 
-    private static string Render(string tool, DocumentDiff[] diffs, string state, GateReport? report)
+    private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report)
     {
-        var response = new ResponseBuilder(tool, state);
+        var response = new ResponseBuilder(options.Tool, state);
 
         response.Summary(diffs.Length, diffs.Length, "files changed");
 
         if (report is not null)
             Announce(response, report);
+
+        if (options.Quiet && !options.DryRun && report is not { NewErrors.Length: > 0 })
+            return Compact(response, diffs);
 
         foreach (var diff in diffs)
             response.Line(diff.Text).Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={diff.ChangedLines}"));
@@ -171,5 +174,11 @@ public static class EditGate
     private sealed record GateReport(string[] NewErrors, int Errors, int ErrorDelta, int Warnings, int WarningDelta);
 
     private readonly record struct Tally(Dictionary<string, int> Errors, int ErrorCount, int WarningCount);
+    private static string Compact(ResponseBuilder response, DocumentDiff[] diffs)
+    {
+        foreach (var diff in diffs)
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"{diff.Path}  changedLines={diff.ChangedLines}"));
 
+        return response.Note("(verbose=true for the diff)").ToString();
+    }
 }

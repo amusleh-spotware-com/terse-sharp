@@ -8,6 +8,8 @@ namespace TerseSharp.Core;
 
 public sealed class FixerCatalog
 {
+    private const int MaxCatalogs = 32;
+
     private static readonly ConcurrentDictionary<string, FixerCatalog> Catalogs = new(StringComparer.Ordinal);
 
     private static readonly string[] BundledFixerAssemblies =
@@ -24,12 +26,18 @@ public sealed class FixerCatalog
     public CodeFixProvider? For(string diagnosticId) =>
         providers.TryGetValue(diagnosticId, out var provider) ? provider : null;
 
-    public static FixerCatalog For(Project project) => Catalogs.GetOrAdd(Key(project), _ => Build(project));
+    public static FixerCatalog For(Project project)
+    {
+        if (Catalogs.Count >= MaxCatalogs)
+            Catalogs.Clear();
+
+        return Catalogs.GetOrAdd(Key(project), _ => Build(project));
+    }
 
     private static string Key(Project project) => string.Join(
         '|',
         project.Language,
-        string.Join(';', project.AnalyzerReferences.Select(reference => reference.FullPath ?? reference.Display).Order(StringComparer.Ordinal)));
+        string.Join(';', project.AnalyzerReferences.Select(Stamped).Order(StringComparer.Ordinal)));
 
     private static FixerCatalog Build(Project project)
     {
@@ -144,6 +152,23 @@ public sealed class FixerCatalog
         catch (Exception exception) when (exception is MissingMethodException or TargetInvocationException or TypeLoadException or MemberAccessException)
         {
             return null;
+        }
+    }
+    private static string Stamped(AnalyzerReference reference)
+    {
+        var path = reference.FullPath ?? reference.Display ?? string.Empty;
+
+        try
+        {
+            var file = new FileInfo(path);
+
+            return file.Exists
+                ? string.Create(CultureInfo.InvariantCulture, $"{path}@{file.LastWriteTimeUtc.Ticks}:{file.Length}")
+                : path;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return path;
         }
     }
 }

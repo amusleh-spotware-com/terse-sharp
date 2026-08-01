@@ -26,6 +26,7 @@ public sealed class LoadedWorkspace : IDisposable
         Git = git;
         Root = Path.GetDirectoryName(Path.GetFullPath(load.SolutionPath)) ?? load.SolutionPath;
         LastUsedUtc = DateTimeOffset.UtcNow;
+        LoadedUtc = DateTimeOffset.UtcNow;
         dropped = seed.UndoNote;
         Sync = new WorkspaceSync(Root, seed.Generations);
         Indexes = new WorkspaceIndexes(Root, Sync);
@@ -48,6 +49,8 @@ public sealed class LoadedWorkspace : IDisposable
     public string LineEnding => lineEnding.Value;
 
     public DateTimeOffset LastUsedUtc { get; private set; }
+
+    public DateTimeOffset LoadedUtc { get; }
 
     public Solution Solution => workspace.CurrentSolution;
 

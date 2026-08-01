@@ -20,11 +20,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             Contained(target, project, resolved => BuildWithRecoveryAsync(target, resolved, verbose, cancellationToken)));
 
     [McpServerTool(Name = "clean")]
-    [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. Not covered by undo_last_change.")]
+    [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
     public Task<string> Clean(
         [Description("Project path; empty cleans every project under the workspace root.")] string? project = null,
         [Description("Also delete obj, the intermediate output. Default true; false leaves obj as dotnet clean does.")] bool includeIntermediate = true,
         [Description("List what would be deleted and delete nothing.")] bool dryRun = false,
+        [Description("List every directory, not just the counters.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default)
     {
@@ -33,7 +34,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         return rejection is not null
             ? Task.FromResult(rejection)
             : context.WithTargetAsync(workspace, project, target => CleanWithRecoveryAsync(
-                target, project, includeIntermediate, dryRun, cancellationToken));
+                target, project, includeIntermediate, dryRun, verbose, cancellationToken));
     }
 
     [McpServerTool(Name = "run_tests")]
@@ -109,10 +110,11 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         string? project,
         bool includeIntermediate,
         bool dryRun,
+        bool verbose,
         CancellationToken cancellationToken) =>
         RecoveredAsync(target, "clean", () =>
         {
-            var run = CleanService.Clean(target, project, includeIntermediate, dryRun, cancellationToken);
+            var run = CleanService.Clean(target, project, includeIntermediate, dryRun, verbose, cancellationToken);
 
             return Task.FromResult(run.IsOk
                 ? new LockedRun(run.Value!.Response, run.Value!.Locked)

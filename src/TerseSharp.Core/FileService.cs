@@ -1,3 +1,6 @@
+using System.Text;
+using Microsoft.CodeAnalysis.Text;
+
 namespace TerseSharp.Core;
 
 public static class FileService
@@ -36,6 +39,7 @@ public static class FileService
         string content,
         bool dryRun,
         bool force,
+        bool allowErrors,
         CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace, path);
@@ -51,6 +55,9 @@ public static class FileService
         var exists = File.Exists(full);
         var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
         var after = LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
+
+        if (await GatedAsync(workspace, path, after, dryRun, allowErrors, cancellationToken).ConfigureAwait(false) is { } gated)
+            return gated;
 
         if (!dryRun)
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
@@ -278,5 +285,21 @@ public static class FileService
         }
 
         return count;
+    }
+    private static async Task<Result<string>?> GatedAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string content,
+        bool dryRun,
+        bool allowErrors,
+        CancellationToken cancellationToken)
+    {
+        if (!SourceFile.IsCSharp(path) || DocumentLookup.Find(workspace, path) is not { } document)
+            return null;
+
+        var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, Encoding.UTF8));
+        var options = new EditOptions("write_text", dryRun, allowErrors, Quiet: true);
+
+        return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
     }
 }

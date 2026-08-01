@@ -28,19 +28,20 @@ public sealed class FileTools(ToolContext context)
             cancellationToken);
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically. Returns the diff, not the file. A .cs file needs force=true; missing directories are created, the file's existing line endings are kept, and the new or changed file is visible to every semantic tool on the next call, with no reload.")]
+    [Description("Create or overwrite a file atomically. Returns the diff, not the file. A .cs file needs force=true, and when it is already a document in the workspace the write is compile-gated exactly like replace_symbol - rolled back if it introduces an error, unless allowErrors=true. Missing directories are created, the file's existing line endings are kept, and the new or changed file is visible to every semantic tool on the next call, with no reload.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("Full new content.")] string content,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Allow writing a .cs file, bypassing the compile-gated symbol tools. Default false.")] bool force = false,
+        [Description("Allow writing a .cs file. The write is still compile-gated when the file is already in the workspace.")] bool force = false,
+        [Description("Apply a .cs write even if it introduces compile errors.")] bool allowErrors = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(
             workspace,
             path,
             async loaded => NavigationTools.Unwrap(
-                await FileService.WriteTextAsync(loaded, path, content, dryRun, force, cancellationToken).ConfigureAwait(false)));
+                await FileService.WriteTextAsync(loaded, path, content, dryRun, force, allowErrors, cancellationToken).ConfigureAwait(false)));
 
     [McpServerTool(Name = "edit_text")]
     [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\". Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines. Returns the diff.")]

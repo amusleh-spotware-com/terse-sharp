@@ -155,4 +155,12 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
         Assert.StartsWith("ERROR DocumentNotFound", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+    [Fact]
+    public async Task Format_WhenApplied_ReportsOneLinePerFileAndKeepsTheDiffBehindVerbose()
+    {
+        var quiet = await server.CallAsync("format", new() { ["path"] = "src/**/*.cs" });
+
+        Assert.Contains("files changed", quiet, StringComparison.Ordinal);
+        Assert.DoesNotContain("@@", quiet, StringComparison.Ordinal);
+    }
 }

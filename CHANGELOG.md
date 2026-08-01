@@ -8,6 +8,65 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-01
+
+### Changed
+
+- **`format`, `cleanup` and `clean` report one line per changed file instead of a diff.** `format` and
+  `cleanup` print `path  changedLines=N` per file plus the `errors=/warnings=` counters; `clean` prints
+  its counters and stops. `verbose=true` restores the diff and the per-directory list. A rolled-back
+  edit, a locked directory and every `dryRun` keep the full output, because those are results that have
+  something to say. Response-format change to three tools. Closes **I26**.
+- **`write_text force=true` on a `.cs` file that is already a workspace document is now compile-gated.**
+  It runs through `EditGate` exactly like `replace_symbol`: the diff, the `errors=N (+D)` counters, and
+  a rollback if the write introduces a compile error. `allowErrors=true` opts out for a deliberate
+  mid-refactor write. This closes the last hole in the compile gate the server advertises — the index
+  task did 9 unchecked whole-file rewrites and the previous release did 6. A file that is not yet a
+  document is still written directly; there is nothing to compare it against. Closes **I24**.
+
+### Added
+
+- **`format(changed: true)` and `cleanup(changed: true)`** limit the pass to files modified since the
+  workspace loaded, so a post-edit sweep stops reformatting files the task never touched. Closes the
+  half of **I23** that was still open; generated code under `obj/` was already excluded.
+- **`xaml_add_element(position: "first" | "last")`.** `last` is the default and inserts before the
+  closing tag; `first` inserts right after the opening tag. An element with no matching closing tag is
+  refused rather than guessed at.
+
+### Fixed
+
+- **`replace_symbol` and `replace_symbol_body` no longer emit the replacement's opening brace at column
+  0.** The new node is annotated and run through the Roslyn formatter, so a body passed with its own
+  braces lands at the member's own indentation. Observed 20+ times in the previous task, each costing a
+  `format` sweep afterwards. Closes **I27**.
+- **`replace_symbol` no longer reports `applied` for a no-op.** A declaration whose full text matches
+  what is already there answers
+  `0 files changed - the declaration is identical to what is already there, so nothing was written`
+  instead of a success that wrote nothing. Closes **I9**.
+- **`replace_symbol` and `delete_symbol` work on fields.** A field symbol's declaring syntax is the
+  variable declarator, so replacing it threw `InvalidCastException: FieldDeclarationSyntax →
+  VariableDeclaratorSyntax` and deleting it left a dangling `private int ;`. The target is now promoted
+  to its field declaration, and a field that shares one declaration with others (`int a, b;`) is refused
+  with a remedy naming what to do. Closes **I8**.
+- **`get_file_outline` on a file of top-level statements no longer answers `0 types`** — a claim it
+  cannot support, which reads as "the file is empty". It now reports the statement count, the file's
+  length and `use read_text`, with a line range per statement. Closes **I18**.
+- **`SymbolNotFound`'s `nearest:` line no longer suggests a candidate the resolver would also reject.**
+  A name that cannot round-trip — a constructor, an operator, a generic method, a member of a generic
+  type — is offered as its documentation id instead of the short form. Closes **I16**.
+- **A rebuilt analyzer at an unchanged path no longer serves stale `CodeFixProvider` instances.**
+  `FixerCatalog`'s key now includes each analyzer reference's last-write time and length, and the
+  process-wide cache is bounded at 32 entries. Closes the correctness half of **I15**; the collectible
+  load context it also asks for is still open.
+- `xaml_set_property`, `xaml_add_element` and `xaml_remove_element` tell the workspace which file they
+  wrote instead of relying on the watcher, so they are correct under `--no-watch` too. Partly closes
+  **I19**; `project_*`, `package_*` and `solution_*` still rely on the watcher.
+- `load_workspace` matches an already-loaded solution by file identity rather than by normalised path
+  string, so two spellings of the same solution no longer produce two entries that make every later
+  call ambiguous. Closes the practical half of **I20**.
+- CI: `dotnet format style --verify-no-changes` failed on `IDE0022` after 0.13.0. The rule is now part
+  of the pre-push check (`cleanup verify=true fix=style` and `fix=analyzers`, plus `format verify=true`).
+
 ## [0.13.0] - 2026-08-01
 
 ### Changed
@@ -904,7 +963,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.14.0
 [0.13.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.13.0
 [0.12.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.12.0
 [0.11.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.11.0

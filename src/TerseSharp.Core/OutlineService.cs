@@ -27,7 +27,11 @@ public static class OutlineService
         if (root is null || model is null)
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
-        return Result.Ok(Render("get_file_outline", path, Declarations(root), model, signatures, ids));
+        var declarations = Declarations(root);
+
+        return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
+            ? note
+            : Render("get_file_outline", path, declarations, model, signatures, ids));
     }
 
     public static async Task<Result<string>> TypeAsync(
@@ -139,4 +143,34 @@ public static class OutlineService
     private static string Signature(ISymbol symbol, bool signatures) => signatures
         ? string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)} ")
         : string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} ");
+    private static string Located(GlobalStatementSyntax statement)
+    {
+        var span = statement.SyntaxTree.GetLineSpan(statement.Span);
+        var text = statement.Statement.ToString().ReplaceLineEndings(" ").Trim();
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $":{span.StartLinePosition.Line + 1}-{span.EndLinePosition.Line + 1}  {(text.Length <= 100 ? text : text[..100] + "...")}");
+    }
+
+    private static string? TopLevel(SyntaxNode root)
+    {
+        var statements = root.ChildNodes().OfType<GlobalStatementSyntax>().ToArray();
+
+        if (statements.Length is 0)
+            return null;
+
+        var lines = root.SyntaxTree.GetText().Lines.Count;
+        var response = new ResponseBuilder("get_file_outline", "top-level statements");
+
+        response.Summary(statements.Length, statements.Length, "statements");
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"this file declares no type: it is {lines} lines of top-level statements - read it with read_text"));
+
+        foreach (var statement in statements)
+            response.Line(Located(statement));
+
+        return response.ToString();
+    }
 }

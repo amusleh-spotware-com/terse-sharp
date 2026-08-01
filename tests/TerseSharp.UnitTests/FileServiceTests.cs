@@ -231,4 +231,37 @@ public sealed class FileServiceTests
 
         return name;
     }
+    [Fact]
+    public async Task WriteText_OnACSharpDocumentThatWouldNotCompile_IsRolledBackLikeASymbolEdit()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+        var document = lease.Workspace.Solution.Projects
+            .SelectMany(project => project.Documents)
+            .First(candidate => candidate.FilePath is { Length: > 0 });
+        var before = await File.ReadAllTextAsync(document.FilePath!, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var result = await FileService.WriteTextAsync(
+                lease.Workspace,
+                document.FilePath!,
+                before + "\nthis is not C#\n",
+                dryRun: false,
+                force: true,
+                allowErrors: false,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsOk);
+            Assert.Equal(TerseErrorCode.CompileRegression, result.Error!.Code);
+            Assert.Equal(before, await File.ReadAllTextAsync(document.FilePath!, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(document.FilePath!, before, TestContext.Current.CancellationToken);
+        }
+    }
 }

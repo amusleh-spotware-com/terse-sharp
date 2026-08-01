@@ -25,7 +25,7 @@ public sealed class FormatServiceTests
 
         var result = await FormatService.RunAsync(
             lease.Workspace,
-            string.Empty,
+            new FixScope(string.Empty, ChangedOnly: false),
             new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, Verify: false),
             new EditOptions("format", DryRun: false, AllowErrors: false),
             TestContext.Current.CancellationToken);
@@ -62,7 +62,7 @@ public sealed class FormatServiceTests
 
         var result = await FormatService.RunAsync(
             lease.Workspace,
-            path,
+            new FixScope(path, ChangedOnly: false),
             new FixRequest(mode, [], DiagnosticSeverity.Info, Verify: mode is FixMode.None),
             new EditOptions(mode is FixMode.None ? "format" : "cleanup", DryRun: true, AllowErrors: false),
             TestContext.Current.CancellationToken);
@@ -70,5 +70,24 @@ public sealed class FormatServiceTests
         Assert.True(result.IsOk, result.Error?.Message);
 
         return result.Value!;
+    }
+    [Fact]
+    public async Task Format_WithChangedOnly_AndNothingTouchedSinceLoad_RefusesInsteadOfSweepingEverything()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+
+        var result = await FormatService.RunAsync(
+            lease.Workspace,
+            new FixScope(null, ChangedOnly: true),
+            new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, Verify: false),
+            new EditOptions("format", DryRun: true, AllowErrors: false),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(result.IsOk);
+        Assert.Contains("modified since the workspace loaded", result.Error!.Message, StringComparison.Ordinal);
     }
 }

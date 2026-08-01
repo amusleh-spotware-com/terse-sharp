@@ -11,6 +11,8 @@ public enum FixMode
     All,
 }
 
+public readonly record struct FixScope(string? Path, bool ChangedOnly);
+
 public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, DiagnosticSeverity Severity, bool Verify)
 {
     public bool AppliesCodeFixes => Mode is FixMode.Style or FixMode.Analyzers or FixMode.All;

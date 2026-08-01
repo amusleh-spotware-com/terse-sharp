@@ -89,17 +89,18 @@ public sealed class XamlTools(ToolContext context)
                 await XamlEditService.SetProperty(loaded, path, target, property, value, dryRun).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_add_element")]
-    [Description("Insert markup as the last child of one XAML element, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]
+    [Description("Insert markup as a child of one XAML element, addressed by its element path from xaml_outline, #Name or key=Key. position=last (default) puts it before the closing tag, position=first right after the opening tag. Refuses an edit that would produce malformed XAML.")]
     public Task<string> XamlAddElement(
         [Description("Path to the XAML file.")] string path,
         [Description("Parent element: path from xaml_outline, #Name or key=Key.")] string target,
         [Description("Markup to insert, e.g. <TextBlock Text=\"Hi\" />.")] string markup,
+        [Description("last (default) or first.")] string? position = null,
         [Description("Return the diff without writing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await XamlEditService.AddElement(loaded, path, target, markup, dryRun).ConfigureAwait(false)));
+                await XamlEditService.AddElement(loaded, path, target, markup, position ?? "last", dryRun).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_remove_element")]
     [Description("Remove one XAML element and its children, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]

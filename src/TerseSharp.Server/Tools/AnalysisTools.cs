@@ -22,29 +22,33 @@ public sealed class AnalysisTools(ToolContext context)
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "format")]
-    [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob; verify=true returns a one-line verdict instead of a diff, replacing dotnet format --verify-no-changes. Returns the diff, never the file.")]
+    [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob, and changed=true limits the pass to files modified since the workspace loaded; verify=true returns a one-line verdict, replacing dotnet format --verify-no-changes. Reports one line per changed file; pass verbose=true for the diff.")]
     public Task<string> Format(
         [Description("File, directory or glob such as src/**/*.cs; empty formats every document.")] string? path = null,
+        [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing.")] bool verify = false,
+        [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, path, loaded => FormatService.RunAsync(
             loaded,
-            path,
+            new FixScope(path, changed),
             new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
-            new EditOptions("format", dryRun, AllowErrors: false),
+            new EditOptions("format", dryRun, AllowErrors: false, Quiet: !verbose),
             cancellationToken));
 
     [McpServerTool(Name = "cleanup")]
-    [Description("Replaces Bash dotnet format style and dotnet format analyzers. Removes unused using directives, sorts the remaining ones System-first, then reformats; fix=style, analyzers or all also applies the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob. Returns the diff and is rolled back if it breaks the build.")]
+    [Description("Replaces Bash dotnet format style and dotnet format analyzers. Removes unused using directives, sorts the remaining ones System-first, then reformats; fix=style, analyzers or all also applies the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
     public Task<string> Cleanup(
         [Description("File, directory or glob such as src/**/*.cs; empty cleans every document.")] string? path = null,
         [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, or all.")] string? fix = null,
         [Description("Optional comma-separated diagnostic ids to fix, e.g. IDE0005,CA1822.")] string? ids = null,
         [Description("Minimum severity to fix: error, warning, info, hidden. Default info.")] string? severity = null,
+        [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing.")] bool verify = false,
+        [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default)
     {
@@ -53,9 +57,9 @@ public sealed class AnalysisTools(ToolContext context)
         return mode.IsOk
             ? Guarded(workspace, path, loaded => FormatService.RunAsync(
                 loaded,
-                path,
+                new FixScope(path, changed),
                 new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
-                new EditOptions("cleanup", dryRun, AllowErrors: false),
+                new EditOptions("cleanup", dryRun, AllowErrors: false, Quiet: !verbose),
                 cancellationToken))
             : Task.FromResult(mode.Error!.Render());
     }

@@ -9,15 +9,15 @@ public static class FormatService
 {
     public static async Task<Result<string>> RunAsync(
         LoadedWorkspace workspace,
-        string? path,
+        FixScope scope,
         FixRequest request,
         EditOptions options,
         CancellationToken cancellationToken)
     {
-        var documents = Targets(workspace, path);
+        var documents = Scoped(workspace, scope);
 
         if (documents.Length is 0)
-            return Result.Fail<string>(Errors.DocumentNotFound(path ?? "solution"));
+            return Result.Fail<string>(Empty(scope));
 
         var outcome = request.AppliesCodeFixes
             ? await CodeFixService.ApplyAsync(workspace.Solution, documents, request, cancellationToken).ConfigureAwait(false)
@@ -187,6 +187,34 @@ public static class FormatService
         Name(directive).StartsWith("System", StringComparison.Ordinal) ? 0 : 1;
 
     private static string Name(UsingDirectiveSyntax directive) => directive.Name?.ToString() ?? string.Empty;
+
+    private static DocumentId[] Scoped(LoadedWorkspace workspace, FixScope scope)
+    {
+        var targets = Targets(workspace, scope.Path);
+
+        return scope.ChangedOnly ? [.. targets.Where(id => Touched(workspace, id))] : targets;
+    }
+
+    private static bool Touched(LoadedWorkspace workspace, DocumentId id)
+    {
+        if (workspace.Solution.GetDocument(id)?.FilePath is not { Length: > 0 } file)
+            return false;
+
+        try
+        {
+            return File.GetLastWriteTimeUtc(file) > workspace.LoadedUtc.UtcDateTime;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+    }
+
+    private static TerseError Empty(FixScope scope) => scope.ChangedOnly
+        ? Errors.Invalid(
+            "no document under that scope was modified since the workspace loaded",
+            "drop changed=true to sweep the whole scope")
+        : Errors.DocumentNotFound(scope.Path ?? "solution");
 
     private static DocumentId[] Targets(LoadedWorkspace workspace, string? path)
     {

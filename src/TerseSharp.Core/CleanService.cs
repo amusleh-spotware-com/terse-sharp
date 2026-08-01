@@ -16,6 +16,7 @@ public static class CleanService
         string? project,
         bool includeIntermediate,
         bool dryRun,
+        bool verbose,
         CancellationToken cancellationToken)
     {
         var roots = Roots(target, project, cancellationToken);
@@ -28,7 +29,7 @@ public static class CleanService
             .ToArray();
 
         return Result.Ok(new CleanRun(
-            Render(target.Root, project, roots.Value!.Length, removals, dryRun),
+            Render(target.Root, project, roots.Value!.Length, removals, dryRun, verbose),
             removals.Any(removal => removal.Locked)));
     }
 
@@ -126,13 +127,16 @@ public static class CleanService
         }
     }
 
-    private static string Render(string root, string? project, int projects, Removal[] removals, bool dryRun)
+    private static string Render(string root, string? project, int projects, Removal[] removals, bool dryRun, bool verbose)
     {
         var locked = removals.Count(removal => removal.Locked);
         var response = new ResponseBuilder("clean", project ?? PositionFormat.Relative(root, root));
 
         response.Summary(Math.Min(removals.Length, MaxListedDirectories), removals.Length, "directories", "project=");
         response.Note(Counters(projects, removals, locked, dryRun));
+
+        if (locked is 0 && !verbose && !dryRun)
+            return response.Note("(verbose=true for the per-directory list)").ToString();
 
         if (locked > 0)
         {

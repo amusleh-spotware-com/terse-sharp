@@ -77,7 +77,7 @@ public sealed class CodeFixServiceTests
 
         var result = await FormatService.RunAsync(
             lease.Workspace,
-            StyleSample,
+            new FixScope(StyleSample, ChangedOnly: false),
             new FixRequest(mode, ids, DiagnosticSeverity.Info, Verify: false),
             new EditOptions("cleanup", DryRun: true, AllowErrors: false),
             TestContext.Current.CancellationToken);

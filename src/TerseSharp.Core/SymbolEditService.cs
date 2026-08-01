@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Formatting;
 
 namespace TerseSharp.Core;
 
@@ -38,11 +39,15 @@ public static class SymbolEditService
         if (await RazorAsync(workspace, symbol, RazorMemberEdit.Declaration, declaration, options, cancellationToken).ConfigureAwait(false) is { } razor)
             return razor;
 
-        var target = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
+        var found = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
-        if (target is null)
+        if (found is null)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
+        if (Shared(found) is { } refusal)
+            return Result.Fail<string>(refusal);
+
+        var target = Promoted(found);
         var parsed = MemberDeclaration.Parse(declaration);
 
         return parsed.IsOk
@@ -91,12 +96,14 @@ public static class SymbolEditService
         if (await RazorAsync(workspace, symbol, RazorMemberEdit.Delete, string.Empty, options, cancellationToken).ConfigureAwait(false) is { } razor)
             return razor;
 
-        var target = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
+        var found = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
-        if (target is null)
+        if (found is null)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
-        return await RemoveAsync(workspace, target, options, cancellationToken).ConfigureAwait(false);
+        return Shared(found) is { } refusal
+            ? Result.Fail<string>(refusal)
+            : await RemoveAsync(workspace, Promoted(found), options, cancellationToken).ConfigureAwait(false);
     }
 
     private static Task<Result<string>?> RazorAsync(
@@ -155,7 +162,12 @@ public static class SymbolEditService
         if (root is null)
             return Result.Fail<string>(Errors.DocumentNotFound(target.Document.FilePath ?? target.Document.Name));
 
-        var updated = workspace.Solution.WithDocumentSyntaxRoot(target.Document.Id, root.ReplaceNode(target.Node, replacement));
+        if (replacement.ToFullString().Equals(target.Node.ToFullString(), StringComparison.Ordinal))
+            return Result.Ok(Unchanged(options.Tool));
+
+        var swapped = root.ReplaceNode(target.Node, replacement.WithAdditionalAnnotations(Formatter.Annotation));
+        var formatted = await IndentedAsync(target.Document.WithSyntaxRoot(swapped), cancellationToken).ConfigureAwait(false);
+        var updated = workspace.Solution.WithDocumentSyntaxRoot(target.Document.Id, formatted);
 
         return await EditGate.ApplyAsync(workspace, updated, [target.Document.Id], options, cancellationToken).ConfigureAwait(false);
     }
@@ -212,6 +224,34 @@ public static class SymbolEditService
         closeBrace.LeadingTrivia.Any(SyntaxKind.EndOfLineTrivia)
             ? closeBrace
             : closeBrace.WithLeadingTrivia(closeBrace.LeadingTrivia.Insert(0, SyntaxFactory.ElasticCarriageReturnLineFeed));
+    private static string Unchanged(string tool) => new ResponseBuilder(tool, "applied")
+        .Summary(0, 0, "files changed")
+        .Note("the declaration is identical to what is already there, so nothing was written")
+        .ToString();
+    private static async Task<SyntaxNode> IndentedAsync(Document document, CancellationToken cancellationToken)
+    {
+        var formatted = await Formatter.FormatAsync(document, Formatter.Annotation, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return await formatted.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false)
+            ?? await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("the formatted document has no syntax root");
+    }
+
+    private static EditTarget Promoted(EditTarget target) => target.Node switch
+    {
+        VariableDeclaratorSyntax { Parent.Parent: BaseFieldDeclarationSyntax field }
+            when field.Declaration.Variables.Count is 1 => target with { Node = field },
+        _ => target,
+    };
+
+    private static TerseError? Shared(EditTarget target) =>
+        target.Node is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: > 1 } declaration }
+            ? Errors.Invalid(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"this field shares one declaration with {declaration.Variables.Count - 1} other variable(s), so it cannot be replaced or deleted as a whole member"),
+                "split the declaration into one field per line first, or edit it with edit_text force=true")
+            : null;
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

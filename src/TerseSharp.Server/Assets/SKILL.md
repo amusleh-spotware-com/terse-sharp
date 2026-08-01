@@ -74,6 +74,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated |
 | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
 | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call |
+| rewrite an **existing** `.cs` file whole | `write_text(path, content, force: true)` | compile-gated: rolled back if it introduces an error, `allowErrors: true` to opt out |
 | find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
 | `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element, formatting preserved |
@@ -104,6 +105,8 @@ A silent drop is the breach, even when the reason would have been valid.
 | `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
 | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
+| formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened |
+| rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
 | `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
 | editing a `.csproj` by hand | `project_*` · `package_*` · `solution_*` | CPM-aware, containment-checked |
 
@@ -122,6 +125,12 @@ documents=9/128 parses=9`.
 `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of`.
 
 **.NET semantics grep cannot reach** — `find_registrations` (DI) · `list_endpoints` (ASP.NET Core).
+
+**Success is quiet.** `build`, `run_tests`, `rerun_failed`, `format`, `cleanup` and `clean` answer a
+result that has nothing to say in one line, or one line per changed file. `verbose=true` restores the
+full report on any of them. The short form is **only** emitted when there is nothing else to report —
+a failure, a diagnostic, a rolled-back edit, a timeout, a zero-result run and a locked file all keep
+the full output — so do not pass `verbose=true` defensively.
 
 **Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `sinceLast=true` reports
 only what appeared since the previous run of the same scope, plus what was fixed) ·

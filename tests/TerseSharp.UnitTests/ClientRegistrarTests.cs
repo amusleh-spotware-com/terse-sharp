@@ -160,10 +160,8 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public async Task Register_WhenNoClientMatches_SaysSoInsteadOfReturningNothing()
-    {
+    public async Task Register_WhenNoClientMatches_SaysSoInsteadOfReturningNothing() =>
         Assert.Equal("no MCP clients matched", await ClientRegistrar.Register("emacs", null));
-    }
     [Fact]
     public async Task Register_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
     {
