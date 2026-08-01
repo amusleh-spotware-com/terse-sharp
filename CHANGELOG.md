@@ -8,9 +8,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
-## [0.15.1] - 2026-08-01
+## [0.15.2] - 2026-08-01
 
 Seven defects found after 0.15.0 shipped — six by the review, one by CI on macOS.
+
+> **0.15.1 is 0.15.0.** A `v0.15.1` tag was created on the 0.15.0 commit by mistake and the release
+> pipeline published it before it could be stopped; deleting a pushed tag was not authorised. The
+> package is byte-identical to 0.15.0 and contains **none** of the fixes below. Use 0.15.2.
 
 ### Fixed
 
@@ -1063,8 +1067,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.15.1...HEAD
-[0.15.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.1
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.15.2...HEAD
+[0.15.2]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.2
 [0.15.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.0
 [0.14.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.14.0
 [0.13.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.13.0
