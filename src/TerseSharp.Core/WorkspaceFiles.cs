@@ -2,14 +2,41 @@ namespace TerseSharp.Core;
 
 public static class WorkspaceFiles
 {
-    private static readonly string[] Excluded = ["bin", "obj", ".git", ".claude", "node_modules"];
+    private static readonly string[] ExcludedDirectories =
+        ["bin", "obj", ".git", ".claude", "node_modules", ".vs", ".idea", "artifacts", "TestResults"];
+
+    private static readonly string[] TemporaryExtensions = [".tmp", ".swp", ".swx", ".orig", ".rej"];
 
     public static IEnumerable<string> Enumerate(string root, Func<string, bool> include) => Walk(root, include);
+
+    public static bool IsExcludedDirectory(string name) =>
+        ExcludedDirectories.Contains(name, StringComparer.OrdinalIgnoreCase);
 
     public static bool IsExcluded(string file, string root) => Path
         .GetRelativePath(root, file)
         .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-        .Any(segment => Excluded.Contains(segment, StringComparer.OrdinalIgnoreCase));
+        .Any(IsExcludedDirectory);
+
+    public static bool IsTemporary(string path)
+    {
+        var name = Path.GetFileName(path.AsSpan());
+
+        return name.EndsWith('~')
+            || name.StartsWith("~$", StringComparison.Ordinal)
+            || name.StartsWith(".#", StringComparison.Ordinal)
+            || Matches(Path.GetExtension(path.AsSpan()), TemporaryExtensions);
+    }
+
+    internal static bool Matches(ReadOnlySpan<char> extension, string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (extension.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
 
     private static IEnumerable<string> Walk(string directory, Func<string, bool> include)
     {
@@ -24,7 +51,7 @@ public static class WorkspaceFiles
     }
 
     private static bool Traversable(string directory) =>
-        !Excluded.Contains(Path.GetFileName(directory), StringComparer.OrdinalIgnoreCase) && !IsLink(directory);
+        !IsExcludedDirectory(Path.GetFileName(directory)) && !IsLink(directory);
 
     private static bool IsLink(string directory)
     {

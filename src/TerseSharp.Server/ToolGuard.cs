@@ -13,7 +13,10 @@ public static class ToolGuard
     private static readonly string[] RazorSuffixes = [".razor", ".cshtml", ".razor.css", ".razor.js"];
 
     private static readonly string[] TextCommands =
-        ["grep", "rg", "cat", "head", "tail", "sed", "awk", "findstr", "type"];
+    [
+        "grep", "rg", "cat", "head", "tail", "sed", "awk", "findstr", "type",
+        "find", "fd", "ls", "dir", "tree", "wc", "nl",
+    ];
 
     public static GuardVerdict Inspect(string tool, JsonObject input) => tool switch
     {
@@ -167,7 +170,7 @@ public static class ToolGuard
 
     private static string Reason(string tool, string target) => string.Create(
         CultureInfo.InvariantCulture,
-        $"TerseSharp guard: {tool} on '{Trim(target)}' is C#/.NET source. Use the terse-sharp MCP instead - {Replacement(tool, target)}. Read the tool's remedy: line rather than falling back to a built-in.");
+        $"TerseSharp guard: {tool} on '{Trim(target)}' is C#/.NET source. Use the terse-sharp MCP instead - {Replacement(tool, target)}. Read the tool's remedy: line rather than falling back to a built-in.{Freshness(tool, target)}");
 
     private static bool IsRazorFile(string token) =>
         RazorSuffixes.Any(suffix => token.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
@@ -190,7 +193,7 @@ public static class ToolGuard
         ? Razor(tool)
         : IsResource(target)
         ? Resource(tool)
-        : Code(tool);
+        : Code(tool, target);
 
     private static string Resource(string tool) => tool switch
     {
@@ -201,13 +204,12 @@ public static class ToolGuard
         _ => "the matching resx_ tool",
     };
 
-    private static string Code(string tool) => tool switch
+    private static string Code(string tool, string target) => tool switch
     {
         "Read" => "get_file_outline, get_symbol_source, xaml_outline or read_text",
         "Grep" => "search_symbols, find_usages, find_implementations, search_text or xaml_find",
         "Glob" => "find_files",
-        "Write" or "Edit" or "MultiEdit" or "NotebookEdit" =>
-            "replace_symbol_body, replace_symbol, add_member, rename_symbol, xaml_set_property or edit_text",
+        "Write" or "Edit" or "MultiEdit" or "NotebookEdit" => Writer(target),
         _ => "the matching terse-sharp tool",
     };
 
@@ -215,4 +217,29 @@ public static class ToolGuard
 
     private static string? Text(JsonObject input, string name) =>
         input[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    private static string Writer(string target)
+    {
+        if (!IsCSharp(target) || File.Exists(target))
+            return Editors;
+
+        return Path.IsPathRooted(target)
+            ? Creator
+            : Editors + ", or " + Creator + " when the file does not exist yet";
+    }
+
+    private const string Editors =
+        "replace_symbol_body, replace_symbol, add_member, rename_symbol, xaml_set_property or edit_text";
+
+    private static bool IsCSharp(string text) => Tokens(text)
+        .Select(token => Path.GetExtension(token.TrimEnd('.', ':', ';')))
+        .Any(extension => extension.Equals(".cs", StringComparison.OrdinalIgnoreCase));
+
+    private static string Freshness(string tool, string target) => IsWrite(tool) && IsCSharp(target)
+        ? " A file you create or edit through write_text is picked up automatically - every semantic tool sees it on the next call, with no reload."
+        : string.Empty;
+    private const string Creator =
+        "write_text(path, content, force=true) to create it, then add_member or replace_symbol";
+
+    private static bool IsWrite(string tool) => tool is "Write" or "Edit" or "MultiEdit" or "NotebookEdit";
 }

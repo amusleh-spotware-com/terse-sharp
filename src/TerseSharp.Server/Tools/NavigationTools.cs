@@ -14,7 +14,11 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (50).")] int maxResults = 0,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, null, loaded => SearchAsync(loaded, query, kind, Cap(maxResults, 50), cancellationToken));
+        context.WithWorkspaceAsync(
+            workspace,
+            null,
+            loaded => SearchAsync(loaded, query, kind, Cap(maxResults, 50), cancellationToken),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "get_file_outline")]
     [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file.")]
@@ -25,7 +29,8 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, async loaded =>
-            Unwrap(await OutlineService.FileAsync(loaded, path, signatures, ids ?? "short", cancellationToken).ConfigureAwait(false)));
+            Unwrap(await OutlineService.FileAsync(loaded, path, signatures, ids ?? "short", cancellationToken).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "get_type_outline")]
     [Description("List a type's members with signatures and line ranges, without the bodies. The cheapest way to learn what a class offers.")]
@@ -75,7 +80,8 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Max results (100).")] int maxResults = 0,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, null, loaded =>
-            RegistrationService.RegistrationsAsync(loaded, query, Cap(maxResults, 100), cancellationToken));
+            RegistrationService.RegistrationsAsync(loaded, query, Cap(maxResults, 100), cancellationToken),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_endpoints")]
     [Description("Every ASP.NET Core endpoint registration in the solution - MapGet, MapPost, MapControllers, MapHub and friends - with the member each sits in. Use instead of grepping Program.cs and every extension method it calls.")]
@@ -84,7 +90,8 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Max results (200).")] int maxResults = 0,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, null, loaded =>
-            RegistrationService.EndpointsAsync(loaded, Cap(maxResults, 200), cancellationToken));
+            RegistrationService.EndpointsAsync(loaded, Cap(maxResults, 200), cancellationToken),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "explore_symbol")]
     [Description("One call to orient on a symbol: signature, XML doc, location, how many usages it has in src and in tests, how many implementations, how many XAML sites, and the files it is used in. Replaces get_symbol + find_usages + find_implementations when you are learning what something is.")]
@@ -124,7 +131,8 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Max results (100).")] int maxResults = 0,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, loaded =>
-            DiagnosticsService.CollectAsync(loaded, path, Severity(minSeverity), Cap(maxResults, 100), cancellationToken));
+            DiagnosticsService.CollectAsync(loaded, path, Severity(minSeverity), Cap(maxResults, 100), cancellationToken),
+            cancellationToken: cancellationToken);
 
     private static async Task<string> SearchAsync(
         LoadedWorkspace workspace,

@@ -23,7 +23,7 @@ public static class EditGate
         if (report is { NewErrors.Length: > 0 })
             return Result.Fail<string>(Errors.CompileRegression(report.NewErrors));
 
-        return workspace.TryApply(updated)
+        return await workspace.TryApplyAsync(updated, changed, cancellationToken).ConfigureAwait(false)
             ? Result.Ok(Render(options.Tool, diff, "applied", report))
             : Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
     }
@@ -171,4 +171,5 @@ public static class EditGate
     private sealed record GateReport(string[] NewErrors, int Errors, int ErrorDelta, int Warnings, int WarningDelta);
 
     private readonly record struct Tally(Dictionary<string, int> Errors, int ErrorCount, int WarningCount);
+
 }

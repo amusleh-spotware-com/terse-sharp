@@ -72,6 +72,7 @@ tool that does not beat the built-in it replaces does not ship.
 | ✂️ **Slices, never files** | No tool returns a whole file by default. Outlines give types, members, signatures and line ranges — never bodies. |
 | 🔗 **Addressable by name** | An outline prints `OrderService.Submit(Order)`; feed it straight back to any tool. Ambiguous? It lists the candidates instead of guessing. |
 | 🛡️ **Compile-gated edits** | An edit that introduces a new compile error is rolled back. Every mutation reports `errors=N (+D) warnings=N (+D)` — no separate `analyze` needed. |
+| 🔄 **Always fresh** | A `FileSystemWatcher` plus a content comparison keeps the workspace level with the disk, so a file you just created or an edit from your IDE is already in the answer. |
 | 🎨 **XAML that knows your C#** | WPF · Avalonia · WinUI · MAUI. Type-checked bindings, a workspace-wide resource graph, and renames that carry into the markup. |
 | 🧩 **Razor and Blazor, resolved** | Components, parameters, bindings and routes read through the Razor source generator — plus the unknown-parameter bug that compiles clean and throws at render. |
 | 🔍 **Analysis without a licence** | Compiler + every analyzer your projects already reference + dead code, down to `info` severity. No IDE, no ReSharper, no network. |
@@ -153,8 +154,8 @@ Two things to know:
   the editor. It answers questions about your **C# code**. For scene and asset work, use a
   Unity-specific MCP alongside it.
 
-Regenerate the project files after adding assemblies or packages, then call `load_workspace` again (or
-restart the server) so the new projects are picked up.
+Regenerate the project files after adding assemblies or packages. A `.csproj` change is picked up by
+the watcher on the next semantic call; `load_workspace(reload: true)` forces it.
 
 </details>
 
@@ -195,6 +196,7 @@ If yes → you are FORBIDDEN from the built-in. No "just this once", no "Grep is
 | `Grep` a type or member       | `search_symbols` · `find_usages` · `find_implementations` |
 | `Glob` / `ls`                 | `find_files` |
 | `Edit` a `.cs`                | `replace_symbol_body` · `replace_symbol` · `add_member` · `rename_symbol` |
+| create a new `.cs`            | `write_text(path, content, force: true)` — then `add_member` |
 | `Edit` a `.xaml`              | `xaml_set_property` |
 | `Bash: dotnet build` / `test` | `build` · `run_tests` |
 
@@ -231,12 +233,14 @@ What it covers, and what it deliberately does not:
 
 | | |
 |---|---|
-| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read or listing (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`) **naming a .NET file**, anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Names a tool that can actually do it** | `Write`/`Edit` on a `.cs` path that **does not exist yet** names `write_text(path, content, force=true)`, because no symbol tool creates a file. Pointing a stuck agent at `replace_symbol_body` for a file that is not there is the dead end that produced a silent `edit_text force=true` fallback in 0.8.0. A relative path the hook process cannot resolve is offered creation only as the "if it does not exist yet" case, so the remedy never recommends overwriting a file that does exist |
+| **Says freshness is handled** | every `.cs` **write** denial adds: a file you create or edit through `write_text` is picked up automatically — no reload, no re-`Read` to check |
 | **Allows** | everything else, including plain `.css`, `.js`, `.csv` and `.csx` — matching is by **file extension** plus the `.razor.css`/`.razor.js` pair, not substring, so an ordinary stylesheet stays editable |
 | **Denies** | `dotnet build`, `dotnet test`, `dotnet msbuild`, `dotnet vstest`, bare `msbuild` — anywhere in a compound command — because `build`, `run_tests`, `rerun_failed` and `list_tests` replace them |
 | **Denies** | `dotnet format`, `dotnet clean` — because `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them, compile-gated and without the raw CLI output |
 | **Allows** | `dotnet restore`, `pack`, `publish`, `run`, `tool update` — **no TerseSharp tool replaces these**, and a denial that names no alternative is just a wall |
-| **Allows** | `git add OrderService.cs` — the path is mentioned, but the command is not a text read |
+| **Allows** | `git add OrderService.cs` — the path is mentioned, but the command is not a text read; and `ls src/App`, `find . -name "*.md"` — a listing that names no .NET file |
 | **Never blocks on failure** | malformed or unexpected hook input allows the call, so a guard fault cannot wedge a session |
 
 Re-running `install --guard` replaces only TerseSharp's own hook and leaves any other hooks in the
@@ -267,6 +271,52 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
 | **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
+### 🔄 Freshness — the workspace follows the disk
+
+A loaded workspace used to be a snapshot. A file you created with `write_text`, an edit from your IDE,
+a `git checkout` — none of it reached the Roslyn solution, so the next `replace_symbol` answered from
+stale state **with an `EXACT` tag**. That is the response contract's worst failure: a confident wrong
+answer the agent cannot detect.
+
+It now tracks the tree:
+
+- **A `FileSystemWatcher` per workspace** nominates changed paths. It is only a hint — state changes
+  after a **content comparison**, so a dropped, duplicated or out-of-order OS event can delay a
+  refresh but never corrupt one, and your own writes are naturally no-ops.
+- **Sync is lazy.** Events accumulate and are drained by the next call that needs semantics. A
+  `git checkout` storm costs one reload, not one per file. `read_text`, `write_text`, `edit_text`,
+  `find_files`, `search_text` and `search_regex` answer from disk and skip the sync entirely.
+- **A targeted check catches what the watcher drops.** Before answering about a specific file, its
+  `(LastWriteTimeUtc, Length)` is compared against the last known stamp — one `FileInfo` call on
+  exactly the file whose answer would otherwise be wrong. This is why `--no-watch` is still correct.
+- **Doubt is a rebuild.** A changed `.csproj`/`.props`/`.targets`/`.sln`/`global.json`/`.editorconfig`,
+  a `.cs` added or removed **under a project's directory**, a watcher buffer overflow or an over-cap
+  pending set all reload the solution rather than guess. (A `.cs` that appears outside every project
+  directory belongs to no project, so it is ignored rather than paid for.) Callers already holding a
+  lease keep answering from the snapshot they started with — that answer is correct for its request,
+  not stale.
+- **Four generation counters, not one** — `Code`, `Project`, `Xaml`, `Resx`. A `.cs` edit must not
+  invalidate the XAML graph, and a `.resx` edit must not invalidate anything Roslyn holds. A reload
+  bumps `Code` and `Project` only — it rebuilds the Roslyn solution, and it tells you nothing about
+  markup or resources — so a `.csproj` save does not throw away a XAML cache. They carry across a
+  reload rather than restarting at zero. **Compare them for inequality, never for ordering:** they
+  start again when a workspace is unloaded and loaded afresh, so "changed since I last looked" is the
+  only question they answer.
+- **Undo knows it was overtaken.** An external change to a file an undo snapshot covers drops that
+  snapshot and every one above it, and `undo_last_change` *says so* rather than silently reverting
+  someone else's work: `nothing to undo - 2 snapshot(s) were dropped after an external change to
+  src/Foo.cs`.
+
+`workspace_status` reports it in one line:
+
+```
+watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0
+```
+
+`load_workspace(reload: true)` forces a reload. `--no-watch` (or `TERSE_WATCH=0`) turns the watcher
+off for constrained containers where inotify limits would make it unreliable; `terse doctor` reports
+whether this platform supports file watching at all.
+
 <details>
 <summary><b>What each one replaces</b></summary>
 
@@ -278,6 +328,7 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
 | `Grep` to find callers | `find_usages` | real references, each marked `src` or `test` |
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol, immune to line drift |
+| creating a new `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type resolves on the very next call |
 | `Edit` a `.xaml` file | `xaml_set_property` | addressed by element, formatting preserved |
 | `Read` a `.resx` file | `resx_get` | keys and values per culture; a missing translation prints `MISSING` |
 | `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
@@ -520,8 +571,12 @@ siblings and every `<Card …>` in markup.
 | Razor/Blazor outline, component API, bindings, validation, element and directive edits | ✅ |
 | Razor-aware `find_usages`, `search_symbols`, `list_endpoints`, diagnostics mapped back to the `.razor` line | ✅ |
 | `@code` members edited through `replace_symbol_body` / `add_member`, component rename incl. its files | ✅ |
+| File watcher, lazy external-change sync, targeted stamp check | ✅ |
+| Per-kind generation counters (Code / Project / Xaml / Resx), carried across a reload | ✅ |
+| Undo provenance: a snapshot overtaken by an external change is dropped and reported | ✅ |
+| `load_workspace(reload)`, `--no-watch` / `TERSE_WATCH=0`, `doctor` watcher line | ✅ |
 | Shared warm workspace daemon across processes | 🔜 |
-| Content-addressed index, trigram search, file watcher | 🔜 |
+| Content-addressed index, trigram search | 🔜 |
 
 Changes are recorded in [CHANGELOG.md](CHANGELOG.md). Versioning and the release pipeline are
 described in [RELEASING.md](RELEASING.md).

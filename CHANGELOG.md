@@ -8,6 +8,79 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **A file created or edited outside the symbol tools is now part of the workspace.** A loaded
+  solution was a snapshot taken at load time and nothing ever re-read it, so `write_text` on a new
+  `.cs` followed by `replace_symbol` returned `SymbolNotFound`, and an external edit — your IDE,
+  `git checkout`, `dotnet format` — was answered from the load-time snapshot **with an `EXACT` tag**,
+  which is the response contract's worst failure: a confident wrong answer the agent cannot detect.
+  Each workspace now runs a `FileSystemWatcher`, but the watcher is only a hint: state changes after a
+  **content comparison**, so a dropped, duplicated or out-of-order OS event can delay a refresh and
+  never corrupt one, and the server's own writes are naturally no-ops. Sync is **lazy** — events
+  accumulate and are drained by the next call that needs semantics, so a `git checkout` storm costs
+  one reload rather than one per file. Before answering about a specific file, its
+  `(LastWriteTimeUtc, Length)` is compared against the last known stamp, which catches an event the OS
+  dropped and is why `--no-watch` is still correct. A changed `.csproj`, `.props`, `.targets`, `.sln`,
+  `global.json` or `.editorconfig`, a `.cs` added or removed under a project's directory, a watcher
+  buffer overflow and an over-cap pending set all reload the solution rather than guess; a call
+  already holding a lease keeps answering from the snapshot it was addressed against.
+
+- **`undo_last_change` actually reverts now.** It stored whole `Solution` snapshots and replayed them
+  through `TryApplyChanges`, which refuses a solution whose workspace version has moved on — so every
+  undo after a real edit answered `the workspace refused the revert`. No test had ever exercised a
+  successful undo, only the empty-history path. Undo now replays the previous **document texts** onto
+  the current solution.
+
+- **A workspace lease is released when a tool call fails.** The sync point held a lease across an
+  `await` with no `try`/`finally`, so a cancelled call or an `IOException` from a file being written
+  leaked it: the lease count never returned to zero, the `MSBuildWorkspace` was never disposed, and
+  `unload_workspace` reported success while MSBuild kept its file locks — defeating the documented
+  unload → build → load recipe.
+
+### Added
+
+- **`load_workspace(reload: true)`** discards the in-memory solution and reads it from disk again.
+  Generation counters carry over across the reload and the undo history is cleared, because those
+  snapshots belong to a workspace that no longer exists. Concurrent callers that all notice the same
+  staleness cost **one** reload, not one each.
+
+- **Per-kind generation counters on `workspace_status`** — `Code`, `Project`, `Xaml` and `Resx`, not
+  one shared number, so a `.cs` edit does not invalidate a XAML graph and a `.resx` edit invalidates
+  nothing Roslyn holds. `workspace_status` grows exactly one line:
+  `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0`. A reload bumps `Code` and `Project`
+  only, because it rebuilds the Roslyn solution and says nothing about markup or resources — so a
+  `.csproj` save does not invalidate a XAML cache. The counters carry across a reload instead of
+  restarting at zero; they answer "changed since I last looked", so a consumer compares them for
+  inequality rather than ordering.
+
+- **`--no-watch` and `TERSE_WATCH=0`** turn the watcher off for constrained containers where inotify
+  limits make it unreliable; freshness then rests on the per-file stamp check. `terse doctor` reports
+  whether this platform supports file watching at all.
+
+- **Undo provenance.** An external change to a file an undo snapshot covers drops that snapshot and
+  every snapshot above it, and `undo_last_change` says so — `nothing to undo - 2 snapshot(s) were
+  dropped after an external change to src/Foo.cs` — rather than silently reverting someone else's
+  work. A reload reports the whole stack as dropped for the same reason.
+
+### Changed
+
+- **The guard names a tool that can actually create a file.** `Write`/`Edit` on a `.cs` path that does
+  not exist was denied with a remedy listing `replace_symbol_body`, `replace_symbol`, `add_member` and
+  `rename_symbol` — **none of which creates a file**. An agent that needed a new type was left with a
+  denial and no legal move, which is exactly how a 0.8.0 session ended up on `edit_text force=true`.
+  The denial now names `write_text(path, content, force=true)` for a missing **rooted** path; for a
+  relative path, which the hook process cannot resolve against the agent's working directory, it
+  offers creation only as the "if it does not exist yet" case, so it never recommends overwriting a
+  file that does exist. Every `.cs` **write** denial carries the clause that a file written that way
+  is picked up automatically. `find`, `fd`, `ls`, `dir`, `tree`, `wc` and `nl` joined the shell
+  text-read list, because `find . -name "*.cs"` walked straight past the guard that `find_files`
+  replaces.
+
+- **`write_text` and `edit_text` tell the workspace what they wrote**, and the six file and text tools
+  opt out of the sync point: they answer from disk, so forcing a reload before a `read_text` would be
+  pure cost.
+
 ## [0.11.0] - 2026-08-01
 
 ### Added

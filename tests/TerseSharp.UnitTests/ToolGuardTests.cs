@@ -33,14 +33,25 @@ public sealed class ToolGuardTests
     [InlineData("grep -rn Submit src/App/OrderService.cs")]
     [InlineData("cat src/App/App.csproj")]
     [InlineData("rg Submit --glob *.cs")]
+    [InlineData("dotnet build src/App/App.csproj")]
+    [InlineData("find . -name \"*.cs\"")]
+    [InlineData("fd --extension cs src/App/OrderService.cs")]
+    [InlineData("ls src/App/*.cs")]
+    [InlineData("dir src\\App\\App.csproj")]
+    [InlineData("tree src/App/Views/Shell.xaml")]
+    [InlineData("wc -l src/App/OrderService.cs")]
+    [InlineData("nl src/App/OrderService.cs")]
     public void Inspect_ForAShellTextToolOnDotNetSource_Denies(string command) =>
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
     [Theory]
     [InlineData("dotnet pack src/App/App.csproj")]
     [InlineData("dotnet restore src/App/App.csproj")]
+    [InlineData("git status --short")]
     [InlineData("git add src/App/OrderService.cs")]
     [InlineData("grep -rn TODO docs/")]
+    [InlineData("ls src/App")]
+    [InlineData("find . -name \"*.md\"")]
     public void Inspect_ForAShellCommandThatIsNotATextRead_Allows(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
@@ -183,4 +194,57 @@ public sealed class ToolGuardTests
 
         Assert.Contains("resx_set", verdict.Reason, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("Write")]
+    [InlineData("Edit")]
+    public void Render_ForASourceFileThatDoesNotExist_NamesTheToolThatCanCreateIt(string tool)
+    {
+        var verdict = ToolGuard.Inspect(tool, new JsonObject { ["file_path"] = MissingSourcePath() });
+
+        Assert.Contains("write_text(path, content, force=true)", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("replace_symbol_body", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForASourceFileThatExists_NamesTheCompileGatedEditors()
+    {
+        var verdict = ToolGuard.Inspect("Edit", new JsonObject { ["file_path"] = Fixtures.OrderServicePath });
+
+        Assert.Contains("replace_symbol_body", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("write_text(path, content, force=true)", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Write")]
+    [InlineData("Edit")]
+    public void Render_ForASourceWriteDenial_SaysExternalChangesArePickedUpAutomatically(string tool)
+    {
+        var verdict = ToolGuard.Inspect(tool, new JsonObject { ["file_path"] = "src/App/OrderService.cs" });
+
+        Assert.Contains("picked up automatically", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Read", "file_path", "src/App/OrderService.cs")]
+    [InlineData("Grep", "glob", "*.cs")]
+    [InlineData("Read", "file_path", "src/App/Views/Shell.xaml")]
+    public void Render_ForADenialThatWritesNothing_OmitsTheFreshnessClause(string tool, string key, string value)
+    {
+        var verdict = ToolGuard.Inspect(tool, new JsonObject { [key] = value });
+
+        Assert.DoesNotContain("picked up automatically", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForARelativeSourcePath_NeverRecommendsAnUnconditionalOverwrite()
+    {
+        var verdict = ToolGuard.Inspect("Edit", new JsonObject { ["file_path"] = "src/App/OrderService.cs" });
+
+        Assert.Contains("replace_symbol_body", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("when the file does not exist yet", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    private static string MissingSourcePath() =>
+        Path.Combine(Path.GetTempPath(), "terse-guard-" + Guid.NewGuid().ToString("N") + ".cs");
 }

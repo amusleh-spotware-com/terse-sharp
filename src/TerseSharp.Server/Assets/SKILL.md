@@ -21,7 +21,8 @@ question:
 **If yes, the built-in is forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for
 it in the table below.
 
-**The shell does not launder it.** `grep`, `rg`, `find`, `cat`, `head`, `tail`, `sed`, `awk`, `ls`,
+**The shell does not launder it.** `grep`, `rg`, `find`, `fd`, `cat`, `head`, `tail`, `sed`, `awk`,
+`ls`, `dir`, `tree`, `wc`, `nl`, `findstr`,
 `type`, `dotnet build`, `dotnet test`, `dotnet msbuild` and `msbuild` run through `Bash` are built-ins
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
@@ -30,8 +31,14 @@ too and are covered by the same gate — including later in a compound command
 TerseSharp tool replaces them, so shelling out is the right call.
 
 **Banned reasoning.** Every one of these has produced a breach: "just this once" · "Grep is faster" ·
-"I only need one line" · "the workspace looked stale" · "the tool errored so I'll use Grep" · "I
+"I only need one line" · "the tool errored so I'll use Grep" · "I
 already started with Read, I'll stay consistent" · "it's a tiny file" · "I'll just check quickly".
+
+**"The workspace looked stale" is not on that list because it is no longer true.** The server watches
+the tree and compares content before it changes anything, so an external edit, a `git checkout`, or a
+file you just created is already in the answer. Never `Read` a `.cs` file to check whether the tool
+saw it, and never reload out of superstition — `workspace_status` shows the counters if you genuinely
+doubt it.
 
 **An `ERROR` is not permission to switch toolchains.** Every failure carries a `remedy:` line — read it
 and fix the *call*. A rejected glob means fix the glob. `AmbiguousSymbol` means pick a candidate.
@@ -64,6 +71,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response |
 | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated |
 | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | refuses an ambiguous match |
+| `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call |
 | find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
 | `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element, formatting preserved |
@@ -100,7 +108,11 @@ A silent drop is the breach, even when the reason would have been valid.
 ## The whole surface, by job
 
 **Workspace** — `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` ·
-`list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution.
+`list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution. Its
+last line reports freshness — `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0`: the
+watcher state, the per-kind generation counters (Code / Project / Xaml / Resx), how many paths are
+waiting to be examined, and how many watcher events were lost. `load_workspace(reload: true)` forces a
+re-read from disk; you should almost never need it.
 
 **Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·
 `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of`.
@@ -168,6 +180,13 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
 8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT`, `HEURISTIC`,
    `AmbiguousSymbol`, `SaturatedName` all mean *the server declined to guess*, not that the thing does
    not exist. Narrow the question; do not treat it as a negative result.
+9. **External edits are picked up automatically.** A file you or the user just created or changed —
+   through `write_text`, an IDE, `git checkout`, a formatter — is visible to every semantic tool on
+   the next call. Never re-`Read` a file to check, never reload "just in case". Creating a `.cs` file
+   is `write_text(path, content, force: true)`; `add_member` and `replace_symbol` work on it
+   immediately. When `undo_last_change` answers `nothing to undo - N snapshot(s) were dropped after an
+   external change to …`, that is the server refusing to overwrite someone else's edit — re-apply the
+   change deliberately instead of retrying the undo.
 
 9. **`resx_*` edits are outside `undo_last_change`.** Its history holds Roslyn solution snapshots, and a
    `.resx`, `.resw` or `.xaml` write is a file write. Use `dryRun: true` first; the diff is your undo.

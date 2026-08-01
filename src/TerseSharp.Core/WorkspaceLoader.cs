@@ -6,7 +6,7 @@ namespace TerseSharp.Core;
 
 internal static class WorkspaceLoader
 {
-    public static async Task<LoadedWorkspace> LoadAsync(string path, CancellationToken cancellationToken)
+    public static async Task<LoadedWorkspace> LoadAsync(string path, WorkspaceSeed seed, CancellationToken cancellationToken)
     {
         MsBuildBootstrap.Ensure();
 
@@ -24,7 +24,7 @@ internal static class WorkspaceLoader
 
         var result = Describe(full, solution, stopwatch.ElapsedMilliseconds, failures);
 
-        return new LoadedWorkspace(workspace, result, GitContext.Detect(full));
+        return new LoadedWorkspace(workspace, result, GitContext.Detect(full), seed);
     }
 
     private static async Task<Solution> OpenAsync(

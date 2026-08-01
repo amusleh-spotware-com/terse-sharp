@@ -9,6 +9,7 @@ public static class Doctor
             SdkLine(),
             Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
             ClientLine(),
+            WatcherLine(),
             await WorkspaceLineAsync(workspace, cancellationToken).ConfigureAwait(false)
         };
 
@@ -68,4 +69,18 @@ public static class Doctor
         ok
             ? string.Create(CultureInfo.InvariantCulture, $"OK   {name}: {detail}")
             : string.Create(CultureInfo.InvariantCulture, $"FAIL {name}: {detail} -> {remedy}");
+
+    private static string WatcherLine()
+    {
+        try
+        {
+            using var probe = new FileSystemWatcher(Path.GetTempPath()) { EnableRaisingEvents = true };
+
+            return Check("watcher", "this platform supports file watching", true, string.Empty);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return Check("watcher", exception.Message, false, "run with --no-watch; freshness then rests on the per-file stamp check");
+        }
+    }
 }

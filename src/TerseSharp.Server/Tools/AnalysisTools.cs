@@ -18,7 +18,8 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("Report only diagnostics that appeared since the previous analyze of the same scope, and which ones were fixed.")] bool sinceLast = false,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, loaded => AnalysisService.AnalyzeAsync(
-            loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, cancellationToken));
+            loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, cancellationToken),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "format")]
     [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob; verify=true returns a one-line verdict instead of a diff, replacing dotnet format --verify-no-changes. Returns the diff, never the file.")]

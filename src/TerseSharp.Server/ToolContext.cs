@@ -29,7 +29,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
 
         return await ToolBoundary.RunAsync(async () =>
         {
-            var resolved = Registry.Resolve(workspace, null);
+            var resolved = await ResolveAsync(workspace, null, semantic: true, cancellationToken).ConfigureAwait(false);
 
             if (!resolved.IsOk)
                 return resolved.Error!.Render();
@@ -44,33 +44,26 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         }).ConfigureAwait(false);
     }
 
-    public async Task<string> WithWorkspace(string? workspace, string? pathHint, Func<LoadedWorkspace, string> action)
-    {
-        await ready.ConfigureAwait(false);
-
-        return ToolBoundary.Run(() =>
-        {
-            var resolved = Registry.Resolve(workspace, pathHint);
-
-            if (!resolved.IsOk)
-                return resolved.Error!.Render();
-
-            using var lease = resolved.Value!;
-
-            return action(lease.Workspace);
-        });
-    }
+    public Task<string> WithWorkspace(
+        string? workspace,
+        string? pathHint,
+        Func<LoadedWorkspace, string> action,
+        bool semantic = true,
+        CancellationToken cancellationToken = default) =>
+        WithWorkspaceAsync(workspace, pathHint, loaded => Task.FromResult(action(loaded)), semantic, cancellationToken);
 
     public async Task<string> WithWorkspaceAsync(
         string? workspace,
         string? pathHint,
-        Func<LoadedWorkspace, Task<string>> action)
+        Func<LoadedWorkspace, Task<string>> action,
+        bool semantic = true,
+        CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
 
         return await ToolBoundary.RunAsync(async () =>
         {
-            var resolved = Registry.Resolve(workspace, pathHint);
+            var resolved = await ResolveAsync(workspace, pathHint, semantic, cancellationToken).ConfigureAwait(false);
 
             if (!resolved.IsOk)
                 return resolved.Error!.Render();
@@ -128,5 +121,50 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         {
             PreloadFailure = string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}");
         }
+    }
+
+    private async Task<Result<WorkspaceLease>> ResolveAsync(
+        string? workspace,
+        string? pathHint,
+        bool semantic,
+        CancellationToken cancellationToken)
+    {
+        var resolved = Registry.Resolve(workspace, pathHint);
+
+        if (!semantic || !resolved.IsOk)
+            return resolved;
+
+        return await SyncedAsync(resolved.Value!, workspace, pathHint, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<Result<WorkspaceLease>> SyncedAsync(
+        WorkspaceLease lease,
+        string? workspace,
+        string? pathHint,
+        CancellationToken cancellationToken)
+    {
+        bool reload;
+
+        try
+        {
+            reload = await lease.Workspace.Sync.SyncAsync(lease.Workspace, pathHint, cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            lease.Dispose();
+
+            throw;
+        }
+
+        if (!reload)
+            return Result.Ok(lease);
+
+        var stale = lease.Workspace;
+
+        lease.Dispose();
+
+        await Registry.RefreshAsync(stale, cancellationToken).ConfigureAwait(false);
+
+        return Registry.Resolve(workspace, pathHint);
     }
 }

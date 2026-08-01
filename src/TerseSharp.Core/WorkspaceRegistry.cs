@@ -1,11 +1,12 @@
 namespace TerseSharp.Core;
 
-public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
+public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) : IDisposable
 {
     private readonly Dictionary<string, LoadedWorkspace> workspaces = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Lock map = new();
     private readonly int maxWorkspaces = maxWorkspaces;
+    private readonly bool watch = watch;
 
     public async Task<WorkspaceLoadResult> LoadAsync(string path, CancellationToken cancellationToken)
     {
@@ -22,7 +23,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
                 return existing.Load;
             }
 
-            return (await AddAsync(full, cancellationToken).ConfigureAwait(false)).Load;
+            return (await AddAsync(full, WorkspaceSeed.Fresh(watch), cancellationToken).ConfigureAwait(false)).Load;
         }
         finally
         {
@@ -96,9 +97,9 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
             return workspaces.TryGetValue(full, out var existing) ? existing : null;
     }
 
-    private async Task<LoadedWorkspace> AddAsync(string full, CancellationToken cancellationToken)
+    private async Task<LoadedWorkspace> AddAsync(string full, WorkspaceSeed seed, CancellationToken cancellationToken)
     {
-        var loaded = await WorkspaceLoader.LoadAsync(full, cancellationToken).ConfigureAwait(false);
+        var loaded = await WorkspaceLoader.LoadAsync(full, seed, cancellationToken).ConfigureAwait(false);
 
         foreach (var evicted in Store(full, loaded))
             evicted.Dispose();
@@ -165,4 +166,47 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4) : IDisposable
     }
 
     private static string[] Paths(LoadedWorkspace[] loaded) => [.. loaded.Select(workspace => workspace.SolutionPath)];
+
+    public async Task<WorkspaceLoadResult> ReloadAsync(string path, CancellationToken cancellationToken) =>
+        (await SwapAsync(Path.GetFullPath(path), null, cancellationToken).ConfigureAwait(false)).Load;
+
+    private WorkspaceSeed Seed(LoadedWorkspace? previous) => previous is null
+        ? WorkspaceSeed.Fresh(watch)
+        : new WorkspaceSeed(previous.Sync.Generations.Reloaded(), watch, previous.UndoNote());
+    public async Task<WorkspaceLoadResult> RefreshAsync(LoadedWorkspace stale, CancellationToken cancellationToken) =>
+        (await SwapAsync(Path.GetFullPath(stale.SolutionPath), stale, cancellationToken).ConfigureAwait(false)).Load; private async Task<LoadedWorkspace> SwapAsync(string full, LoadedWorkspace? stale, CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var previous = Existing(full);
+
+            if (stale is not null && !ReferenceEquals(previous, stale))
+                return previous ?? stale;
+
+            var loaded = await AddAsync(Key(previous, full), Seed(previous), cancellationToken).ConfigureAwait(false);
+
+            previous?.Dispose();
+
+            return loaded;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private LoadedWorkspace? Existing(string full)
+    {
+        lock (map)
+        {
+            return workspaces.TryGetValue(full, out var direct)
+                ? direct
+                : workspaces.Values.FirstOrDefault(workspace => PathBoundary.SameFile(workspace.SolutionPath, full));
+        }
+    }
+
+    private static string Key(LoadedWorkspace? previous, string full) =>
+        previous is null ? full : Path.GetFullPath(previous.SolutionPath);
 }

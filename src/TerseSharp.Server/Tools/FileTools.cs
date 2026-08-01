@@ -14,11 +14,15 @@ public sealed class FileTools(ToolContext context)
         [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspace(workspace, path, loaded =>
-            NavigationTools.Unwrap(FileService.ReadText(loaded, path, startLine, endLine, Lines(maxLines), cancellationToken)));
+        context.WithWorkspace(
+            workspace,
+            path,
+            loaded => NavigationTools.Unwrap(FileService.ReadText(loaded, path, startLine, endLine, Lines(maxLines), cancellationToken)),
+            semantic: false,
+            cancellationToken);
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a non-C# file atomically. Returns the diff, not the file.")]
+    [Description("Create or overwrite a file atomically. Returns the diff, not the file. A .cs file needs force=true; the new or changed file is visible to every semantic tool on the next call, with no reload.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("Full new content.")] string content,
@@ -44,8 +48,11 @@ public sealed class FileTools(ToolContext context)
         [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string glob,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0) =>
-        context.WithWorkspace(workspace, null, loaded =>
-            TextSearchService.FindFiles(loaded, glob, NavigationTools.Cap(maxResults, 100)));
+        context.WithWorkspace(
+            workspace,
+            null,
+            loaded => TextSearchService.FindFiles(loaded, glob, NavigationTools.Cap(maxResults, 100)),
+            semantic: false);
 
     [McpServerTool(Name = "search_text")]
     [Description("Literal text search across the workspace. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
@@ -54,8 +61,11 @@ public sealed class FileTools(ToolContext context)
         [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0) =>
-        context.WithWorkspace(workspace, null, loaded =>
-            TextSearchService.Search(loaded, pattern, glob ?? "*", regex: false, NavigationTools.Cap(maxResults, 100)));
+        context.WithWorkspace(
+            workspace,
+            null,
+            loaded => TextSearchService.Search(loaded, pattern, glob ?? "*", regex: false, NavigationTools.Cap(maxResults, 100)),
+            semantic: false);
 
     [McpServerTool(Name = "search_regex")]
     [Description("Regular-expression search across the workspace. Results are tagged HEURISTIC.")]
@@ -64,13 +74,16 @@ public sealed class FileTools(ToolContext context)
         [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0) =>
-        context.WithWorkspace(workspace, null, loaded =>
-            TextSearchService.Search(loaded, pattern, glob ?? "*", regex: true, NavigationTools.Cap(maxResults, 100)));
+        context.WithWorkspace(
+            workspace,
+            null,
+            loaded => TextSearchService.Search(loaded, pattern, glob ?? "*", regex: true, NavigationTools.Cap(maxResults, 100)),
+            semantic: false);
 
     private Task<string> Guarded(string? workspace, string path, Func<LoadedWorkspace, string> action) =>
         context.RejectWrite() is { } rejection
             ? Task.FromResult(rejection)
-            : context.WithWorkspace(workspace, path, action);
+            : context.WithWorkspace(workspace, path, action, semantic: false);
 
     private static int Lines(int requested) => requested <= 0 ? 2000 : Math.Min(requested, 20000);
 }

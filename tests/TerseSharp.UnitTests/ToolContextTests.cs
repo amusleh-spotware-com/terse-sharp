@@ -23,7 +23,11 @@ public sealed class ToolContextTests
 
         context.Preload(preload.Task);
 
-        var call = context.WithWorkspace(null, null, loaded => loaded.SolutionPath);
+        var call = context.WithWorkspace(
+            null,
+            null,
+            loaded => loaded.SolutionPath,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(call.IsCompleted);
 
@@ -42,7 +46,11 @@ public sealed class ToolContextTests
 
         context.Preload(preload.Task);
 
-        var call = context.WithWorkspaceAsync(null, null, loaded => Task.FromResult(loaded.SolutionPath));
+        var call = context.WithWorkspaceAsync(
+            null,
+            null,
+            loaded => Task.FromResult(loaded.SolutionPath),
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.False(call.IsCompleted);
 
@@ -60,7 +68,11 @@ public sealed class ToolContextTests
 
         context.Preload(Task.FromException(new InvalidOperationException("the solution exploded")));
 
-        var text = await context.WithWorkspace(null, null, loaded => loaded.SolutionPath);
+        var text = await context.WithWorkspace(
+            null,
+            null,
+            loaded => loaded.SolutionPath,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("WorkspaceNotLoaded", text, StringComparison.Ordinal);
         Assert.Contains("the solution exploded", context.PreloadFailure!, StringComparison.Ordinal);
@@ -77,5 +89,29 @@ public sealed class ToolContextTests
         await context.ReadyAsync();
 
         Assert.Equal("the workspace preload was cancelled", context.PreloadFailure);
+    }
+
+    [Fact]
+    public async Task WithWorkspaceAsync_WhenTheSyncThrows_StillReleasesTheLease()
+    {
+        using var files = TemporarySolution.Create();
+        using var registry = new WorkspaceRegistry(watch: false);
+        using var context = new ToolContext(registry, readOnly: false);
+
+        await registry.LoadAsync(files.SolutionPath, TestContext.Current.CancellationToken);
+
+        var workspace = registry.All()[0];
+
+        workspace.Sync.Notice(files.OrderServicePath);
+
+        var text = await context.WithWorkspaceAsync(
+            null,
+            null,
+            loaded => Task.FromResult(loaded.SolutionPath),
+            cancellationToken: new CancellationToken(canceled: true));
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.True(registry.Unload(files.SolutionPath));
+        Assert.Empty(workspace.Solution.Projects);
     }
 }

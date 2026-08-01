@@ -85,7 +85,9 @@ zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolU
 
 | | |
 | --- | --- |
-| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · `grep`/`cat`/`sed`/`rg` on them · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · a shell text read or listing on them (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`) · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Names a tool that can do it** | `Write`/`Edit` on a `.cs` path that does not exist yet names `write_text(path, content, force=true)` — no symbol tool creates a file, and a denial with no legal move is what produces a silent fallback. A relative path the hook cannot resolve is offered creation only as the "if it does not exist yet" case, never as an unconditional overwrite |
+| **Says freshness is handled** | every `.cs` **write** denial adds that a file created or edited through `write_text` is picked up automatically, with no reload |
 | **Allowed** | plain `.css`, `.js`, `.csv`, `.csx` — matching is by file **extension** plus the `.razor.css`/`.razor.js` pair, not substring, so an ordinary stylesheet stays editable |
 | **Denied** | `dotnet format`, `dotnet clean` — `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them |
 | **Allowed** | `dotnet restore`, `pack`, `publish`, `run`, `tool` — no TerseSharp tool replaces these, and a denial that names no alternative is a wall |
@@ -180,6 +182,38 @@ no licence, no network.
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT`
 (Roslyn-resolved) or `HEURISTIC` (text/index) tag.
+
+## Freshness — the workspace follows the disk
+
+A loaded workspace used to be a snapshot: a file created with `write_text`, an edit from your IDE or a
+`git checkout` never reached the Roslyn solution, so the next `replace_symbol` answered from stale
+state **with an `EXACT` tag**. It now tracks the tree.
+
+- **A `FileSystemWatcher` per workspace** nominates changed paths. It is a hint, not a source of
+  truth: state changes only after a **content comparison**, so a dropped, duplicated or out-of-order
+  OS event can delay a refresh but never corrupt one, and the server's own writes are no-ops.
+- **Sync is lazy** — events accumulate and are drained by the next call that needs semantics, so a
+  `git checkout` storm costs one reload, not one per file. `read_text`, `write_text`, `edit_text`,
+  `find_files`, `search_text` and `search_regex` answer from disk and skip it.
+- **A targeted stamp check** compares one file's `(LastWriteTimeUtc, Length)` before answering about
+  it, which is why correctness survives a dropped event and `--no-watch`.
+- **Doubt is a rebuild** — a changed `.csproj`/`.props`/`.targets`/`.sln`/`global.json`/`.editorconfig`,
+  a `.cs` added or removed under a project's directory, a watcher buffer overflow or an over-cap
+  pending set reload the solution rather than guess. A `.cs` outside every project directory belongs
+  to no project and is ignored. A call already in flight keeps answering from the snapshot it started
+  with.
+- **Four generation counters** — `Code`, `Project`, `Xaml`, `Resx` — so a `.cs` edit does not
+  invalidate the XAML graph and a reload bumps `Code` and `Project` only. They carry across a reload;
+  compare them for inequality rather than ordering, because unloading and loading a workspace afresh
+  starts them again.
+- **Undo knows it was overtaken** — an external change to a file an undo snapshot covers drops that
+  snapshot and every one above it, and `undo_last_change` says so instead of silently reverting
+  someone else's work.
+
+`workspace_status` reports `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0`.
+`load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`) turns the watcher
+off for constrained containers, and `terse doctor` reports whether this platform supports file
+watching at all.
 
 ## Safety
 

@@ -45,8 +45,13 @@ public sealed class XamlTools(ToolContext context)
         CancellationToken cancellationToken = default) =>
         validate
             ? context.WithWorkspaceAsync(workspace, path, async loaded =>
-                NavigationTools.Unwrap(await XamlService.ValidateBindingsAsync(loaded, path, cancellationToken).ConfigureAwait(false)))
-            : context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(XamlService.Bindings(loaded, path)));
+                NavigationTools.Unwrap(await XamlService.ValidateBindingsAsync(loaded, path, cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken)
+            : context.WithWorkspace(
+                workspace,
+                path,
+                loaded => NavigationTools.Unwrap(XamlService.Bindings(loaded, path)),
+                cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "xaml_validate")]
     [Description("Check XAML for well-formedness, duplicate x:Key and x:Name, and resource references that resolve to no declaration anywhere in the workspace. Pass scope=solution to check every XAML file.")]

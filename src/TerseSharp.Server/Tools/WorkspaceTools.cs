@@ -6,9 +6,10 @@ namespace TerseSharp.Server.Tools;
 public sealed class WorkspaceTools(ToolContext context)
 {
     [McpServerTool(Name = "load_workspace")]
-    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory.")]
+    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory. External edits are picked up automatically, so reload=true is only for a change the server cannot see.")]
     public async Task<string> LoadWorkspace(
         [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
+        [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared.")] bool reload = false,
         CancellationToken cancellationToken = default)
     {
         var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
@@ -16,7 +17,9 @@ public sealed class WorkspaceTools(ToolContext context)
         if (target is null)
             return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
 
-        var result = await context.Registry.LoadAsync(target, cancellationToken).ConfigureAwait(false);
+        var result = reload
+            ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
+            : await context.Registry.LoadAsync(target, cancellationToken).ConfigureAwait(false);
 
         return Render(result);
     }
@@ -77,6 +80,7 @@ public sealed class WorkspaceTools(ToolContext context)
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} lastUsedUtc={workspace.LastUsedUtc:O}"));
+        response.Note(DescribeSync(workspace.Sync));
 
         if (RazorIndex.Build(workspace.Root).Count is var razor and > 0)
             response.Note(await RazorHealthAsync(workspace, razor, cancellationToken).ConfigureAwait(false));
@@ -131,4 +135,15 @@ public sealed class WorkspaceTools(ToolContext context)
 
         return response.ToString();
     }
+
+    private static string DescribeSync(WorkspaceSync sync) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"watch={DescribeWatch(sync)} gen={sync.Generations} pending={sync.PendingCount} lastSyncMs={sync.LastSyncMilliseconds} gaps={sync.Gaps}");
+
+    private static string DescribeWatch(WorkspaceSync sync) => sync.State switch
+    {
+        WatchState.Active => "active",
+        WatchState.Off => "off",
+        _ => "degraded(" + (sync.StateDetail ?? "unknown") + ")",
+    };
 }
