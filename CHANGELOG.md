@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-01
+
 ### Added
 
 - **Eight `.resx`/`.resw` localization tools** — the surface goes from 64 to 72. `resx_files` lists every
@@ -620,7 +622,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.9.0
 [0.8.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.8.0
 [0.7.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.7.0
 [0.6.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.6.0
