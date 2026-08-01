@@ -133,7 +133,7 @@ public static class XamlEditService
         string target,
         Func<string, TagSpan, Result<string>> change,
         bool dryRun)
-    {
+{
         var resolved = PathGuard.Resolve(workspace, path);
 
         if (!resolved.IsOk)
@@ -147,11 +147,16 @@ public static class XamlEditService
 
         var located = Locate(loaded.Value!, target);
 
-        return located.IsOk
-            ? Write(tool, full, PositionFormat.Relative(workspace.Root, full), located.Value, change, dryRun)
-            : Result.Fail<string>(located.Error!);
-    }
+        if (!located.IsOk)
+            return Result.Fail<string>(located.Error!);
 
+        var written = Write(tool, full, PositionFormat.Relative(workspace.Root, full), located.Value, change, dryRun);
+
+        if (written.IsOk && !dryRun)
+            workspace.Sync.Bumped(ChangeKind.Xaml);
+
+        return written;
+    }
     private static Result<string> Write(
         string tool,
         string full,

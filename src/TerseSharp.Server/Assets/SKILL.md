@@ -112,7 +112,9 @@ A silent drop is the breach, even when the reason would have been valid.
 last line reports freshness — `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0`: the
 watcher state, the per-kind generation counters (Code / Project / Xaml / Resx), how many paths are
 waiting to be examined, and how many watcher events were lost. `load_workspace(reload: true)` forces a
-re-read from disk; you should almost never need it.
+re-read from disk; you should almost never need it. The line after it reports the workspace index —
+`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-)
+documents=9/128 parses=9`.
 
 **Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·
 `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of`.
@@ -188,8 +190,22 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
    external change to …`, that is the server refusing to overwrite someone else's edit — re-apply the
    change deliberately instead of retrying the undo.
 
-9. **`resx_*` edits are outside `undo_last_change`.** Its history holds Roslyn solution snapshots, and a
-   `.resx`, `.resw` or `.xaml` write is a file write. Use `dryRun: true` first; the diff is your undo.
+10. **`resx_*` edits are outside `undo_last_change`.** Its history holds Roslyn solution snapshots, and a
+    `.resx`, `.resw` or `.xaml` write is a file write. Use `dryRun: true` first; the diff is your undo.
+
+11. **Ask a repeat XAML or resx question freely — the second call is free.** `xaml_resolve`,
+    `xaml_validate`, `xaml_styles`, `xaml_localization`, `xaml_find`, every `resx_*` tool,
+    `find_registrations` and `list_endpoints` share **one index per workspace** that refreshes itself
+    when a file changes. The first call builds it; every call after that reads no file at all until
+    something on disk moves, and then only the changed files are re-parsed. So do **not** batch
+    questions "to save a scan", do not cache answers yourself, and never fall back to globbing or
+    grepping the tree because you think re-asking is expensive — `find_files` on `**/*.xaml` answers
+    "which files exist", which is almost never the question; `xaml_resolve`, `xaml_styles` and
+    `xaml_find` answer "where is this key / style / name", from the same index, for less.
+    The exception, so you can plan around it: `xaml_find`, the XAML sweep inside `find_usages` /
+    `rename_symbol` / `explore_symbol`, and `xaml_validate includeUnused=true` need the parsed
+    document of every file, not just its index record, so beyond 128 cached documents they re-parse.
+    Those four are worth asking once and keeping; the rest are free to repeat.
 
 ## Localization (`.resx` / `.resw`)
 
@@ -218,6 +234,13 @@ regenerate it before referencing the key from C#, or the build will not see it.
 
 Covers **WPF, Avalonia (`.axaml`), WinUI and MAUI**; the dialect is detected from the root markup
 namespace and reported on every outline and validation.
+
+`xaml_resolve`, `xaml_validate`, `xaml_styles`, `xaml_localization` and `xaml_find` all answer from
+**one** resource index per workspace. `xaml_resolve`, `xaml_validate`, `xaml_styles` and
+`xaml_localization` answer from its per-file records, so the second and every later question about the
+same solution costs no file read at all — resolve five keys as five calls rather than trying to batch
+them, and never glob the tree instead. `xaml_find` needs the parsed documents, so on a solution with
+more than 128 XAML files it re-parses beyond the cache; ask it once and keep the answer.
 
 `xaml_validate` reports duplicate `x:Key`/`x:Name` and resources that resolve to **no** declaration
 anywhere under the workspace root — a key defined in `App.xaml` or a merged dictionary is not an

@@ -233,7 +233,7 @@ What it covers, and what it deliberately does not:
 
 | | |
 |---|---|
-| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read or listing (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`) **naming a .NET file**, anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read or listing (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`, plus the PowerShell forms `Get-ChildItem`, `gci`, `Get-Content`, `gc`, `Select-String`, `sls`) **naming a .NET file**, anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup, and for a XAML glob or shell walk it names `xaml_find`, `xaml_resolve` and `xaml_styles` **before** `find_files`, because globbing XAML is nearly always a search for a key, a name or a style |
 | **Names a tool that can actually do it** | `Write`/`Edit` on a `.cs` path that **does not exist yet** names `write_text(path, content, force=true)`, because no symbol tool creates a file. Pointing a stuck agent at `replace_symbol_body` for a file that is not there is the dead end that produced a silent `edit_text force=true` fallback in 0.8.0. A relative path the hook process cannot resolve is offered creation only as the "if it does not exist yet" case, so the remedy never recommends overwriting a file that does exist |
 | **Says freshness is handled** | every `.cs` **write** denial adds: a file you create or edit through `write_text` is picked up automatically — no reload, no re-`Read` to check |
 | **Allows** | everything else, including plain `.css`, `.js`, `.csv` and `.csx` — matching is by **file extension** plus the `.razor.css`/`.razor.js` pair, not substring, so an ordinary stylesheet stays editable |
@@ -311,7 +311,23 @@ It now tracks the tree:
 
 ```
 watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0
+index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) documents=9/128 parses=9
 ```
+
+The second line is the **workspace index**. `xaml_resolve`, `xaml_validate`, `xaml_styles`,
+`xaml_localization`, `xaml_find`, the `resx_*` tools, `find_registrations` and `list_endpoints` used
+to walk and re-parse the whole tree on every call — thirteen sites, and `xaml_localization` did it
+twice in one call. They now share one index per workspace, built once per generation and reused until
+the counter above it moves, so **ask the same question again freely: the second call reads no file at
+all.** When a generation does move, only the files whose `(LastWriteTimeUtc, Length)` changed are
+re-parsed — a one-file edit in a 200-file tree costs one parse, not 200. When the watcher is off or
+degraded the index verifies by stamp sweep before answering, so `--no-watch` is still correct. Parsed
+documents live behind a bounded LRU (`documents=9/128`) because an `XDocument` costs 5-10× its file;
+the per-file records most of those tools answer from are always kept, so only `xaml_find` and the XAML
+sweep inside `find_usages` — which need every parsed document, not a record — re-parse beyond the cache
+on a solution with more than 128 XAML files. No tool's response format changed, and
+nothing about the index is printed on a response — the counters live here so proving the hit rate
+costs one status call rather than tokens on every answer.
 
 `load_workspace(reload: true)` forces a reload. `--no-watch` (or `TERSE_WATCH=0`) turns the watcher
 off for constrained containers where inotify limits would make it unreliable; `terse doctor` reports
@@ -575,8 +591,9 @@ siblings and every `<Card …>` in markup.
 | Per-kind generation counters (Code / Project / Xaml / Resx), carried across a reload | ✅ |
 | Undo provenance: a snapshot overtaken by an external change is dropped and reported | ✅ |
 | `load_workspace(reload)`, `--no-watch` / `TERSE_WATCH=0`, `doctor` watcher line | ✅ |
+| Per-workspace XAML / resx / DI index, memoized per generation, incremental, bounded | ✅ |
 | Shared warm workspace daemon across processes | 🔜 |
-| Content-addressed index, trigram search | 🔜 |
+| Content-addressed (hashed) index, cross-session persistence, trigram search | 🔜 |
 
 Changes are recorded in [CHANGELOG.md](CHANGELOG.md). Versioning and the release pipeline are
 described in [RELEASING.md](RELEASING.md).

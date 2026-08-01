@@ -1,9 +1,8 @@
-using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
 
-public static partial class XamlService
+public static class XamlService
 {
     public static Result<string> Outline(LoadedWorkspace workspace, string path, int depth, string filter)
     {
@@ -61,7 +60,7 @@ public static partial class XamlService
 
     public static Result<string> Resolve(LoadedWorkspace workspace, string key)
     {
-        var graph = XamlResourceGraph.Build(workspace.Root);
+        var graph = workspace.Indexes.Xaml();
         var declarations = graph.Of(key);
         var response = new ResponseBuilder("xaml_resolve", key);
 
@@ -141,29 +140,21 @@ public static partial class XamlService
 
     public static Result<string> Validate(LoadedWorkspace workspace, string path)
     {
-        var opened = Open(workspace, path);
+        var located = Located(workspace, path);
 
-        if (!opened.IsOk)
-            return Result.Fail<string>(opened.Error!);
+        if (!located.IsOk)
+            return Result.Fail<string>(located.Error!);
 
-        var graph = XamlResourceGraph.Build(workspace.Root);
-        var (document, relative) = opened.Value;
-        var issues = Issues(document, relative, graph).ToArray();
-        var response = new ResponseBuilder("xaml_validate", relative);
+        var graph = workspace.Indexes.Xaml();
 
-        response.Summary(issues.Length, issues.Length, "issues");
-        response.Note("dialect=" + document.Dialect);
-        Unread(response, graph);
-
-        foreach (var issue in issues)
-            response.Line(issue);
-
-        return Result.Ok(response.ToString());
+        return graph.Record(located.Value!) is { Failure: null } indexed
+            ? Result.Ok(Rendered(indexed, graph))
+            : Reread(workspace, located.Value!, graph);
     }
 
     public static Result<string> ValidateAll(LoadedWorkspace workspace, int maxResults, bool includeUnused)
     {
-        var graph = XamlResourceGraph.Build(workspace.Root);
+        var graph = workspace.Indexes.Xaml();
         var unused = includeUnused ? XamlDeadCode.Unused(workspace.Root, graph) : [];
         var issues = graph.Files.SelectMany(file => Collect(file, graph)).Concat(unused).ToArray();
         var response = new ResponseBuilder("xaml_validate", "solution");
@@ -175,6 +166,21 @@ public static partial class XamlService
             response.Line(issue);
 
         return Result.Ok(response.ToString());
+    }
+
+    private static string Rendered(XamlFileRecord file, XamlResourceGraph graph)
+    {
+        var issues = Issues(file, graph).ToArray();
+        var response = new ResponseBuilder("xaml_validate", file.Relative);
+
+        response.Summary(issues.Length, issues.Length, "issues");
+        response.Note("dialect=" + file.Dialect);
+        Unread(response, graph);
+
+        foreach (var issue in issues)
+            response.Line(issue);
+
+        return response.ToString();
     }
 
     private static void Unread(ResponseBuilder response, XamlResourceGraph graph)
@@ -189,14 +195,11 @@ public static partial class XamlService
 
     public static Result<string> Find(LoadedWorkspace workspace, string query, string kind, int maxResults)
     {
-        var hits = new List<string>();
-
-        foreach (var file in XamlFiles.Enumerate(workspace.Root))
-            Scan(file, workspace.Root, query, kind, hits);
-
+        var graph = workspace.Indexes.Xaml();
+        var hits = graph.Files.SelectMany(file => Found(file, graph, query, kind)).ToArray();
         var response = new ResponseBuilder("xaml_find", query);
 
-        response.Summary(Math.Min(maxResults, hits.Count), hits.Count, "matches", "kind= or maxResults=");
+        response.Summary(Math.Min(maxResults, hits.Length), hits.Length, "matches", "kind= or maxResults=");
 
         foreach (var hit in hits.Take(maxResults))
             response.Line(hit);
@@ -204,10 +207,10 @@ public static partial class XamlService
         return Result.Ok(response.ToString());
     }
 
-    private static IEnumerable<string> Collect(XamlIndexedFile file, XamlResourceGraph graph) =>
-        file.Document is null
-            ? [Issue(file.Relative, 1, "XAML000", file.Failure ?? "could not be read")]
-            : Issues(file.Document, file.Relative, graph);
+    private static IEnumerable<string> Collect(XamlFileRecord file, XamlResourceGraph graph) =>
+        file.Failure is { } failure
+            ? [Issue(file.Relative, 1, "XAML000", failure)]
+            : Issues(file, graph);
 
     private static async Task<string> CheckAsync(
         LoadedWorkspace workspace,
@@ -305,21 +308,17 @@ public static partial class XamlService
         _ => _ => true,
     };
 
-    private static void Scan(string file, string root, string query, string kind, List<string> hits)
+    private static IEnumerable<string> Found(XamlFileRecord file, XamlResourceGraph graph, string query, string kind)
     {
-        var loaded = XamlDocument.Load(file);
+        if (graph.Document(file) is not { } document)
+            return [];
 
-        if (!loaded.IsOk)
-            return;
-
-        var relative = PositionFormat.Relative(root, file);
-
-        foreach (var element in loaded.Value!.Elements().Where(element => Matches(element, query, kind)))
-        {
-            hits.Add(string.Create(
+        return document
+            .Elements()
+            .Where(element => Matches(element, query, kind))
+            .Select(element => string.Create(
                 CultureInfo.InvariantCulture,
-                $"{relative}:{element.Line}  HEURISTIC  {element.TypeName}  {element.Path}"));
-        }
+                $"{file.Relative}:{element.Line}  HEURISTIC  {element.TypeName}  {element.Path}"));
     }
 
     private static bool Matches(XamlElementInfo element, string query, string kind) => kind.ToLowerInvariant() switch
@@ -331,40 +330,26 @@ public static partial class XamlService
         _ => element.TypeName.Equals(query, StringComparison.Ordinal),
     };
 
-    private static IEnumerable<string> Issues(XamlDocument document, string relative, XamlResourceGraph graph)
+    private static IEnumerable<string> Issues(XamlFileRecord file, XamlResourceGraph graph)
     {
         var keys = new HashSet<string>(StringComparer.Ordinal);
         var names = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var element in document.Elements())
+        foreach (var element in file.Elements)
         {
             if (element.Key is { } key && !keys.Add(key))
-                yield return Issue(relative, element.Line, "XAML001", $"duplicate x:Key '{key}'");
+                yield return Issue(file.Relative, element.Line, "XAML001", $"duplicate x:Key '{key}'");
 
             if (element.Name is { } name && !names.Add(name))
-                yield return Issue(relative, element.Line, "XAML002", $"duplicate x:Name '{name}'");
+                yield return Issue(file.Relative, element.Line, "XAML002", $"duplicate x:Name '{name}'");
         }
 
-        foreach (var (Key, Line) in MissingResources(document, graph))
-            yield return Issue(relative, Line, "XAML003", $"unresolved resource '{Key}', declared in no XAML file under the workspace root");
+        foreach (var reference in MissingResources(file, graph))
+            yield return Issue(file.Relative, reference.Line, "XAML003", $"unresolved resource '{reference.Key}', declared in no XAML file under the workspace root");
     }
 
-    private static IEnumerable<(string Key, int Line)> MissingResources(XamlDocument document, XamlResourceGraph graph)
-    {
-        if (graph.SkippedCount > 0)
-            yield break;
-
-        foreach (var element in document.Elements())
-        {
-            foreach (var attribute in element.Element.Attributes())
-            {
-                var match = ResourceReference().Match(attribute.Value);
-
-                if (match.Success && !graph.Declares(match.Groups[1].Value))
-                    yield return (match.Groups[1].Value, XamlDocument.Line(attribute));
-            }
-        }
-    }
+    private static IEnumerable<XamlResourceReference> MissingResources(XamlFileRecord file, XamlResourceGraph graph) =>
+        graph.SkippedCount > 0 ? [] : file.References.Where(reference => !graph.Declares(reference.Key));
 
     private static string Issue(string relative, int line, string id, string message) =>
         string.Create(CultureInfo.InvariantCulture, $"{relative}:{line}  {id}  {message}");
@@ -381,23 +366,29 @@ public static partial class XamlService
 
     private static int Depth(string path) => path.Count(character => character is '/');
 
-    private static Result<(XamlDocument Document, string Relative)> Open(LoadedWorkspace workspace, string path)
+    private static Result<string> Located(LoadedWorkspace workspace, string path)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
         if (!resolved.IsOk)
-            return Result.Fail<(XamlDocument, string)>(resolved.Error!);
+            return resolved;
 
-        if (!XamlDocument.IsXaml(resolved.Value!))
-        {
-            return Result.Fail<(XamlDocument, string)>(
-                Errors.Invalid($"'{path}' is not a XAML file", "pass a .xaml, .axaml or .paml file"));
-        }
+        return XamlDocument.IsXaml(resolved.Value!)
+            ? resolved
+            : Result.Fail<string>(Errors.Invalid($"'{path}' is not a XAML file", "pass a .xaml, .axaml or .paml file"));
+    }
 
-        var document = XamlDocument.Load(resolved.Value!);
+    private static Result<(XamlDocument Document, string Relative)> Open(LoadedWorkspace workspace, string path)
+    {
+        var located = Located(workspace, path);
+
+        if (!located.IsOk)
+            return Result.Fail<(XamlDocument, string)>(located.Error!);
+
+        var document = workspace.Indexes.Markup(located.Value!);
 
         return document.IsOk
-            ? Result.Ok((document.Value!, PositionFormat.Relative(workspace.Root, resolved.Value!)))
+            ? Result.Ok((document.Value!, PositionFormat.Relative(workspace.Root, located.Value!)))
             : Result.Fail<(XamlDocument, string)>(document.Error!);
     }
 
@@ -413,6 +404,12 @@ public static partial class XamlService
             : Result.Fail<string>(opened.Error!);
     }
 
-    [GeneratedRegex(@"\{(?:DynamicResource|StaticResource|ThemeResource)\s+([^}\s]+)\s*\}")]
-    private static partial Regex ResourceReference();
+    private static Result<string> Reread(LoadedWorkspace workspace, string fullPath, XamlResourceGraph graph)
+    {
+        var opened = workspace.Indexes.Markup(fullPath);
+
+        return opened.IsOk
+            ? Result.Ok(Rendered(XamlResourceGraph.Scan(fullPath, workspace.Root, workspace.Indexes.Documents), graph))
+            : Result.Fail<string>(opened.Error!);
+    }
 }

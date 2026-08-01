@@ -119,7 +119,7 @@ public sealed class XamlTools(ToolContext context)
         [Description("Element type, e.g. Button.")] string typeName,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, null, loaded =>
-            NavigationTools.Unwrap(XamlStyleGraph.Render(XamlResourceGraph.Build(loaded.Root), typeName)));
+            NavigationTools.Unwrap(XamlStyleGraph.Render(loaded.Indexes.Xaml(), typeName)));
 
     [McpServerTool(Name = "xaml_localization")]
     [Description("Every x:Uid in the workspace joined to the .resx/.resw entries that name it. A uid with no entry is reported UNRESOLVED rather than omitted, so an untranslated element is visible.")]

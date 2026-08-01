@@ -16,6 +16,7 @@ public static class ToolGuard
     [
         "grep", "rg", "cat", "head", "tail", "sed", "awk", "findstr", "type",
         "find", "fd", "ls", "dir", "tree", "wc", "nl",
+        "get-childitem", "gci", "get-content", "gc", "select-string", "sls",
     ];
 
     public static GuardVerdict Inspect(string tool, JsonObject input) => tool switch
@@ -189,17 +190,19 @@ public static class ToolGuard
         _ => "the matching razor_ tool",
     };
 
-    private static string Replacement(string tool, string target) => IsRazor(target)
-        ? Razor(tool)
-        : IsResource(target)
-        ? Resource(tool)
-        : Code(tool, target);
+    private static string Replacement(string tool, string target) => target switch
+    {
+        var razor when IsRazor(razor) => Razor(tool),
+        var resource when IsResource(resource) => Resource(tool),
+        var markup when IsMarkup(markup) => Markup(tool),
+        _ => Code(tool, target),
+    };
 
     private static string Resource(string tool) => tool switch
     {
         "Read" => "resx_get, resx_find or resx_validate",
-        "Grep" => "resx_find or resx_usages",
-        "Glob" => "resx_files or find_files",
+        "Grep" => "resx_find, resx_usages or resx_validate",
+        "Glob" or "Bash" => "resx_files, resx_find or resx_validate before find_files - the resx tools answer from one index and keep the family grouping",
         "Write" or "Edit" or "MultiEdit" or "NotebookEdit" => "resx_set, resx_remove or resx_rename",
         _ => "the matching resx_ tool",
     };
@@ -242,4 +245,22 @@ public static class ToolGuard
         "write_text(path, content, force=true) to create it, then add_member or replace_symbol";
 
     private static bool IsWrite(string tool) => tool is "Write" or "Edit" or "MultiEdit" or "NotebookEdit";
+    private static bool IsMarkup(string text) => Tokens(text)
+        .Select(token => token.TrimEnd('.', ':', ';'))
+        .Any(token => MarkupExtensions.Contains(Path.GetExtension(token), StringComparer.OrdinalIgnoreCase)
+            || MarkupTypes.Contains(token, StringComparer.OrdinalIgnoreCase));
+
+    private static string Markup(string tool) => tool switch
+    {
+        "Read" => "xaml_outline, xaml_names, xaml_resources, xaml_codebehind or read_text",
+        "Grep" => "xaml_find, xaml_resolve, xaml_styles, find_usages or search_text",
+        "Glob" or "Bash" => "xaml_find, xaml_resolve or xaml_styles before find_files - globbing XAML is nearly always a search for a key, a name or a style",
+        "Write" or "Edit" or "MultiEdit" or "NotebookEdit" =>
+            "xaml_set_property, xaml_add_element, xaml_remove_element or edit_text",
+        _ => "the matching xaml_ tool",
+    };
+
+    private static readonly string[] MarkupExtensions = [".xaml", ".axaml", ".paml"];
+
+    private static readonly string[] MarkupTypes = ["xaml", "axaml", "paml"];
 }

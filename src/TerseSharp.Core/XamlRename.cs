@@ -6,9 +6,9 @@ public sealed record XamlRenameResult(int Files, int Sites, IReadOnlyList<XamlUs
 
 public static class XamlRename
 {
-    public static XamlRenameResult Apply(string root, ISymbol symbol, string newName, bool dryRun)
+    public static XamlRenameResult Apply(LoadedWorkspace workspace, ISymbol symbol, string newName, bool dryRun)
     {
-        var usages = XamlUsageService.Find(root, symbol, newName);
+        var usages = XamlUsageService.Find(workspace, symbol, newName);
         var exact = usages.Where(usage => usage.Confidence is "EXACT").ToArray();
         var skipped = usages.Where(usage => usage.Confidence is not "EXACT").ToArray();
         var files = exact.Select(usage => usage.File).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -16,7 +16,7 @@ public static class XamlRename
         if (!dryRun)
         {
             foreach (var file in files)
-                Rewrite(Path.Combine(root, file), exact.Where(usage => Same(usage.File, file)));
+                Rewrite(Path.Combine(workspace.Root, file), exact.Where(usage => Same(usage.File, file)));
         }
 
         return new XamlRenameResult(files.Length, exact.Length, skipped);

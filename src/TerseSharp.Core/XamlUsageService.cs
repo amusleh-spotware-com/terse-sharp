@@ -6,25 +6,26 @@ public sealed record XamlUsage(string File, int Line, string Kind, string Confid
 
 public static class XamlUsageService
 {
-    public static IReadOnlyList<XamlUsage> Find(string root, ISymbol symbol, string newName)
+    public static IReadOnlyList<XamlUsage> Find(LoadedWorkspace workspace, ISymbol symbol, string newName)
     {
+        var graph = workspace.Indexes.Xaml();
         var usages = new List<XamlUsage>();
 
-        foreach (var file in XamlFiles.Enumerate(root))
-            Collect(usages, file, root, symbol, newName);
+        foreach (var file in graph.Files)
+            Collect(usages, graph.Document(file), file.Relative, symbol, newName);
 
         return usages;
     }
 
-    private static void Collect(List<XamlUsage> usages, string file, string root, ISymbol symbol, string newName)
+    private static void Collect(
+        List<XamlUsage> usages,
+        XamlDocument? document,
+        string relative,
+        ISymbol symbol,
+        string newName)
     {
-        var loaded = XamlDocument.Load(file);
-
-        if (!loaded.IsOk)
+        if (document is null)
             return;
-
-        var document = loaded.Value!;
-        var relative = PositionFormat.Relative(root, file);
 
         usages.AddRange(Handlers(document, relative, symbol, newName));
         usages.AddRange(Bindings(document, relative, symbol, newName));

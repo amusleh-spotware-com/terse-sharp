@@ -71,17 +71,32 @@ public sealed class ResxIndexTests : IDisposable
     public void Read_ReturnsTheCachedDocumentWhileTheFileIsUnchanged()
     {
         var path = Write("Strings.resx", Entry("Alpha", "First"));
+        var index = Index();
 
-        Assert.Same(ResxIndex.Read(path).Value, ResxIndex.Read(path).Value);
+        Assert.Same(index.Read(path).Value, index.Read(path).Value);
     }
 
     [Fact]
     public void Read_OnAMissingFile_ReportsDocumentNotFound()
     {
-        var parsed = ResxIndex.Read(Path.Combine(directory.FullName, "Absent.resx"));
+        var parsed = Index().Read(Path.Combine(directory.FullName, "Absent.resx"));
 
         Assert.False(parsed.IsOk);
         Assert.Equal(TerseErrorCode.DocumentNotFound, parsed.Error!.Code);
+    }
+
+    [Fact]
+    public void Forget_OnOneWorkspacesIndex_LeavesAnotherWorkspacesCacheIntact()
+    {
+        var path = Write("Strings.resx", Entry("Alpha", "First"));
+        var mine = Index();
+        var theirs = Index();
+        var kept = theirs.Read(path).Value;
+
+        mine.Forget(path);
+
+        Assert.Same(kept, theirs.Read(path).Value);
+        Assert.NotSame(kept, mine.Read(path).Value);
     }
 
     [Theory]
@@ -94,7 +109,9 @@ public sealed class ResxIndexTests : IDisposable
     public void IsCulture_AcceptsOnlyRealCultures(string token, bool expected) =>
         Assert.Equal(expected, ResxCulture.IsCulture(token));
 
-    private ResxFamily Single() => Assert.Single(ResxIndex.Build(directory.FullName).Families);
+    private ResxIndex Index() => ResxIndex.Of(directory.FullName, new ParsedDocumentCache());
+
+    private ResxFamily Single() => Assert.Single(Index().Families);
 
     private string Write(string name, string entries)
     {

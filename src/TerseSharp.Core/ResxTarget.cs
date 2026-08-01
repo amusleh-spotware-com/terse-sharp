@@ -12,7 +12,7 @@ public sealed record ResxTarget(ResxIndex Index, ResxFamily Family, string Path)
         if (!resolved.IsOk)
             return Result.Fail<ResxTarget>(resolved.Error!);
 
-        var index = ResxIndex.Build(workspace.Root);
+        var index = workspace.Indexes.Resx();
         var family = index.FamilyOf(resolved.Value!);
 
         return family is null

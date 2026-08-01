@@ -6,10 +6,10 @@ public static class XamlLocalization
 {
     public static Result<string> Render(LoadedWorkspace workspace, int maxResults)
     {
-        var graph = XamlResourceGraph.Build(workspace.Root);
-        var index = ResxIndex.Build(workspace.Root);
+        var graph = workspace.Indexes.Xaml();
+        var index = workspace.Indexes.Resx();
         var entries = Entries(index);
-        var uids = Uids(graph).ToArray();
+        var uids = graph.Uids.ToArray();
         var response = new ResponseBuilder("xaml_localization", "solution");
 
         response.Summary(Math.Min(maxResults, uids.Length), uids.Length, "x:Uid declarations", "maxResults=");
@@ -23,16 +23,7 @@ public static class XamlLocalization
         return Result.Ok(response.ToString());
     }
 
-    private static IEnumerable<UidSite> Uids(XamlResourceGraph graph)
-    {
-        foreach (var file in graph.Files.Where(file => file.Document is not null))
-        {
-            foreach (var element in file.Document!.Elements().Where(element => element.Uid is not null))
-                yield return new UidSite(file.Relative, element.Line, element.Uid!, element.TypeName);
-        }
-    }
-
-    private static string Describe(UidSite uid, ILookup<string, ResourceEntry> entries)
+    private static string Describe(XamlUidSite uid, ILookup<string, ResourceEntry> entries)
     {
         var matches = entries[uid.Uid].Concat(entries.Where(group => group.Key.StartsWith(uid.Uid + ".", StringComparison.Ordinal)).SelectMany(group => group)).ToArray();
 
@@ -42,14 +33,12 @@ public static class XamlLocalization
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{uid.File}:{uid.Line}  {(matches.Length is 0 ? "HEURISTIC" : "EXACT")}  {uid.Element}  uid={uid.Uid}  {resolution}");
+            $"{uid.File}:{uid.Line}  {(matches.Length is 0 ? "HEURISTIC" : "EXACT")}  {uid.TypeName}  uid={uid.Uid}  {resolution}");
     }
 
     private static ILookup<string, ResourceEntry> Entries(ResxIndex index) => index
         .Families
         .SelectMany(family => family.Files)
-        .SelectMany(file => ResxIndex.Entries(file).Select(entry => new ResourceEntry(file.Relative, entry.Name, entry.Value)))
+        .SelectMany(file => index.Entries(file).Select(entry => new ResourceEntry(file.Relative, entry.Name, entry.Value)))
         .ToLookup(entry => entry.Name, StringComparer.Ordinal);
-
-    private readonly record struct UidSite(string File, int Line, string Uid, string Element);
 }

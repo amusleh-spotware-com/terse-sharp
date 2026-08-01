@@ -16,12 +16,9 @@ public static partial class XamlDeadCode
         }
     }
 
-    private static IEnumerable<Declaration> Declarations(XamlIndexedFile file)
+    private static IEnumerable<Declaration> Declarations(XamlFileRecord file)
     {
-        if (file.Document is null)
-            yield break;
-
-        foreach (var element in file.Document.Elements())
+        foreach (var element in file.Elements)
         {
             if (element.Key is { } key)
                 yield return new Declaration(file.Relative, element.Line, "XAML004", "x:Key", key);
@@ -35,18 +32,15 @@ public static partial class XamlDeadCode
     {
         var found = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var file in graph.Files.Where(file => file.Document is not null))
-        {
-            foreach (var attribute in file.Document!.Document.Descendants().SelectMany(element => element.Attributes()))
-                Collect(found, attribute.Value, attribute.Name.LocalName);
-        }
+        foreach (var file in graph.Files)
+            Collect(found, graph.Document(file));
 
         return found;
     }
 
     private static void Collect(HashSet<string> found, string value, string attribute)
     {
-        foreach (Match match in ResourceReference().Matches(value))
+        foreach (Match match in XamlResourceGraph.ResourceReference().Matches(value))
             found.Add(match.Groups[1].Value);
 
         if (attribute is "ElementName" or "TargetName" or "Source" or "BasedOn")
@@ -109,12 +103,18 @@ public static partial class XamlDeadCode
 
     private readonly record struct Declaration(string File, int Line, string Code, string Kind, string Value);
 
-    [GeneratedRegex(@"\{(?:DynamicResource|StaticResource|ThemeResource)\s+([^}\s]+)\s*\}")]
-    private static partial Regex ResourceReference();
-
     [GeneratedRegex(@"ElementName\s*=\s*([A-Za-z_][A-Za-z0-9_]*)")]
     private static partial Regex BindingElementName();
 
     [GeneratedRegex("[A-Za-z_][A-Za-z0-9_]*")]
     private static partial Regex QuotedLiteral();
+
+    private static void Collect(HashSet<string> found, XamlDocument? document)
+    {
+        if (document is null)
+            return;
+
+        foreach (var attribute in document.Document.Descendants().SelectMany(element => element.Attributes()))
+            Collect(found, attribute.Value, attribute.Name.LocalName);
+    }
 }

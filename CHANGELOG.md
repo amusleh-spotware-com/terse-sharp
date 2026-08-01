@@ -38,6 +38,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `unload_workspace` reported success while MSBuild kept its file locks — defeating the documented
   unload → build → load recipe.
 
+- **The resx document cache was `static`, unbounded and shared by every workspace in the process.**
+  Keyed by absolute path and pruned only by an edit, it grew monotonically for the life of the server
+  and outlived the workspace that filled it. It is now a per-workspace bounded cache that dies with
+  its workspace, so a long-lived server holding several worktrees cannot accumulate parsed resources
+  it will never read again.
+
+- **An edit made through TerseSharp's own tools now moves the generation counters.** The counters only
+  ever moved for a change the watcher *found on disk*, and an edit applied through `add_member`,
+  `replace_symbol`, `rename_symbol` or `undo_last_change` leaves the in-memory solution and the file
+  byte-identical, so the drain saw nothing to report. That was invisible while nothing depended on the
+  counters; with an index keyed on them it would have meant `find_registrations` answering *"no
+  AddSingleton/AddScoped/AddTransient call mentions this type"* for a registration the same session had
+  just written — a confident wrong answer with no staleness marker. Applying a solution change now
+  bumps `Code`, and `xaml_set_property`/`xaml_add_element`/`xaml_remove_element` and the `resx_*`
+  writers bump `Xaml` and `Resx`, so a tool's own write invalidates the indexes that read it instead of
+  waiting on watcher latency.
+
 ### Added
 
 - **`load_workspace(reload: true)`** discards the in-memory solution and reads it from disk again.
@@ -80,6 +97,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 - **`write_text` and `edit_text` tell the workspace what they wrote**, and the six file and text tools
   opt out of the sync point: they answer from disk, so forcing a reload before a `read_text` would be
   pure cost.
+
+- **XAML, resx and DI questions are answered from a per-workspace index instead of re-walking and
+  re-parsing the whole tree on every call.** Thirteen call sites each did a full recursive scan:
+  `xaml_resolve` re-parsed every `.xaml` in the solution to answer about **one** key, `xaml_validate`
+  did it to check **one** file, `xaml_styles` to look up **one** type name, and `xaml_localization`
+  paid **two** whole-tree walks — one for markup, one for resources — in a single call. The index is
+  built once per (kind, generation) and reused until the watcher's per-kind counter moves, so a repeat
+  question costs one interlocked read and **zero** file I/O; concurrent callers that all miss share a
+  single build rather than one each. When a generation does move, only the files whose
+  `(LastWriteTimeUtc, Length)` changed are re-parsed and the rest are carried over: on a 200-file tree
+  a one-file edit costs **1 parse instead of 200**. When the watcher is `Off` or `Degraded` the index
+  verifies by stamp sweep before answering, which is why `--no-watch` still sees an external change on
+  the next call. Any doubt — a watcher gap, an over-cap pending set, a reload in flight — rebuilds from
+  scratch rather than guessing. Per-file *records* (keys, names, styles, `x:Uid`s, resource references)
+  are always cached; parsed documents live behind a bounded LRU (128 documents or 32 MB of estimated
+  document bytes, whichever binds first) because an `XDocument` costs 5-10× its file and caching 1 500
+  of them would be a 150-300 MB regression. No tool's response format changed.
+
+- **`workspace_status` reports the index counters** — one more line,
+  `index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) documents=9/128 parses=9` —
+  so the hit rate is provable from a status call rather than paid for on every response.
+
+- **The guard names the XAML query tools before `find_files`, and sees PowerShell.** `Glob` or a shell
+  walk over a `.xaml`/`.axaml`/`.paml` pattern now names `xaml_find`, `xaml_resolve` and `xaml_styles`
+  first, because globbing XAML is nearly always a search for a key, a name or a style rather than a
+  question about which files exist; the `.resx` remedies name `resx_find` and `resx_validate` beside
+  `resx_files`. `Get-ChildItem`, `gci`, `Get-Content`, `gc`, `Select-String` and `sls` joined the shell
+  text-read list — on Windows the fallback is PowerShell, and it walked straight past the guard.
 
 ## [0.11.0] - 2026-08-01
 

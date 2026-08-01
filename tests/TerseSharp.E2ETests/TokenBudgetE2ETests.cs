@@ -212,13 +212,15 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         $"{tool}: {Tokens(response)} tokens vs {Tokens(baseline)} for the raw file");
 
     [Fact]
-    public async Task WorkspaceStatus_WithTheFreshnessLine_StaysWithinItsBudget()
+    public async Task WorkspaceStatus_WithTheFreshnessAndIndexLines_StaysWithinItsBudget()
     {
         var text = await server.CallAsync("workspace_status", []);
 
         Assert.Contains("watch=", text, StringComparison.Ordinal);
         Assert.Contains("gen=c", text, StringComparison.Ordinal);
-        Assert.Equal(5, text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.True(Tokens(text) <= 220, Report("workspace_status", text));
+        Assert.Contains("index=xaml(", text, StringComparison.Ordinal);
+        Assert.Contains("documents=", text, StringComparison.Ordinal);
+        Assert.Equal(6, text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.True(Tokens(text) <= 260, Report("workspace_status", text));
     }
 }

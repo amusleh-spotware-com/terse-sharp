@@ -38,7 +38,7 @@ public static class RenameService
         EditOptions options,
         string applied)
     {
-        var xaml = XamlRename.Apply(workspace.Root, symbol, newName, options.DryRun);
+        var xaml = XamlRename.Apply(workspace, symbol, newName, options.DryRun);
 
         if (xaml.Sites is 0 && xaml.Skipped.Count is 0)
             return applied;

@@ -247,4 +247,59 @@ public sealed class ToolGuardTests
 
     private static string MissingSourcePath() =>
         Path.Combine(Path.GetTempPath(), "terse-guard-" + Guid.NewGuid().ToString("N") + ".cs");
+
+    [Fact]
+    public void Inspect_ForAGlobOverXaml_NamesTheXamlToolsBeforeFindFiles()
+    {
+        var verdict = ToolGuard.Inspect("Glob", new JsonObject { ["pattern"] = "**/*.xaml" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("xaml_find", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("xaml_styles", verdict.Reason, StringComparison.Ordinal);
+        Assert.True(
+            verdict.Reason.IndexOf("xaml_resolve", StringComparison.Ordinal)
+                < verdict.Reason.IndexOf("find_files", StringComparison.Ordinal),
+            verdict.Reason);
+    }
+
+    [Fact]
+    public void Inspect_ForAShellWalkOverXaml_NamesTheXamlTools()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "ls src/App/Views/*.xaml" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("xaml_find", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Glob", "pattern", "**/*.resx")]
+    [InlineData("Grep", "glob", "*.resw")]
+    public void Inspect_ForAGlobOrGrepOverResources_NamesTheResxQueryTools(string tool, string key, string value)
+    {
+        var verdict = ToolGuard.Inspect(tool, new JsonObject { [key] = value });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("resx_find", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("resx_validate", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Get-ChildItem -Recurse -Filter *.cs")]
+    [InlineData("gci src/App/Views/*.xaml")]
+    [InlineData("Select-String Submit src/App/OrderService.cs")]
+    [InlineData("sls TODO src/App/App.csproj")]
+    [InlineData("Get-Content src/App/OrderService.cs")]
+    [InlineData("gc src/App/Strings.resx")]
+    public void Inspect_ForAPowerShellTextReadOnDotNetSource_Denies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+    [Fact]
+    public void Inspect_ForAGrepTypedToXaml_NamesTheXamlToolsRatherThanTheCSharpOnes()
+    {
+        var verdict = ToolGuard.Inspect("Grep", new JsonObject { ["type"] = "xaml" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("xaml_find", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("find_usages", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("search_symbols", verdict.Reason, StringComparison.Ordinal);
+    }
 }

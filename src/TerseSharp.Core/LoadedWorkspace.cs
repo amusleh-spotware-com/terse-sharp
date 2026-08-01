@@ -27,6 +27,7 @@ public sealed class LoadedWorkspace : IDisposable
         LastUsedUtc = DateTimeOffset.UtcNow;
         dropped = seed.UndoNote;
         Sync = new WorkspaceSync(Root, seed.Generations);
+        Indexes = new WorkspaceIndexes(Root, Sync);
         watcher = WorkspaceWatcher.Create(Root, Sync, seed.Watch);
     }
 
@@ -37,6 +38,8 @@ public sealed class LoadedWorkspace : IDisposable
     public string Root { get; }
 
     public WorkspaceSync Sync { get; }
+
+    public WorkspaceIndexes Indexes { get; }
 
     public string SolutionPath => Load.SolutionPath;
 
@@ -73,6 +76,8 @@ public sealed class LoadedWorkspace : IDisposable
 
         foreach (var path in entry.Paths)
             Sync.Settled(path);
+
+        Sync.Bumped(ChangeKind.Code);
 
         return true;
     }
@@ -133,8 +138,8 @@ public sealed class LoadedWorkspace : IDisposable
     {
         workspace.Dispose();
         Sync.Dispose();
+        Indexes.Dispose();
     }
-
     private Solution Restore(HistoryEntry entry)
     {
         var solution = workspace.CurrentSolution;

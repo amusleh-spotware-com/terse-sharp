@@ -76,7 +76,7 @@ public static class ExploreService
             locations.Count(location => TestScope.Of(location.Document.Project) is "test"),
             implementations.Count(),
             [.. Grouped(workspace.Root, locations)],
-            [.. XamlUsageService.Find(workspace.Root, symbol, symbol.Name).Select(Describe)]);
+            [.. XamlUsageService.Find(workspace, symbol, symbol.Name).Select(Describe)]);
     }
 
     private static IEnumerable<string> Grouped(string root, IReadOnlyList<ReferenceLocation> locations) => locations

@@ -221,12 +221,12 @@ public sealed class WorkspaceSyncE2ETests
         solution.CallAsync("search_symbols", new() { ["query"] = "OrderService" });
 
     private static Task<bool> SettlesAsync(TerseTempSolution solution, string expected) =>
-        PollAsync(solution, () => solution.CallAsync("workspace_status", []), expected);
+        PollAsync(() => solution.CallAsync("workspace_status", []), expected);
 
     private static Task<bool> FindsAsync(TerseTempSolution solution, string name) =>
-        PollAsync(solution, () => solution.CallAsync("search_symbols", new() { ["query"] = name }), name);
+        PollAsync(() => solution.CallAsync("search_symbols", new() { ["query"] = name }), name);
 
-    private static async Task<bool> PollAsync(TerseTempSolution solution, Func<Task<string>> call, string expected)
+    private static async Task<bool> PollAsync(Func<Task<string>> call, string expected)
     {
         var deadline = DateTime.UtcNow + WatcherDeadline;
 

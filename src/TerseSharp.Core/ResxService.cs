@@ -6,7 +6,8 @@ public static class ResxService
 
     public static Result<string> Files(LoadedWorkspace workspace, string? filter, int maxResults)
     {
-        var families = ResxIndex.Build(workspace.Root).Families;
+        var index = workspace.Indexes.Resx();
+        var families = index.Families;
         var matched = filter is { Length: > 0 }
             ? families.Where(family => family.Relative.Contains(filter, StringComparison.OrdinalIgnoreCase)).ToArray()
             : [.. families];
@@ -16,7 +17,7 @@ public static class ResxService
         response.Summary(Math.Min(maxResults, matched.Length), matched.Length, "families", "filter=");
 
         foreach (var family in matched.Take(maxResults))
-            response.Line(Describe(family));
+            response.Line(Describe(index, family));
 
         return Result.Ok(response.ToString());
     }
@@ -42,7 +43,7 @@ public static class ResxService
             ? Result.Fail<string>(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"no file in the family matches cultures='{cultures}'"),
                 "pass neutral, all, or a comma-separated list of the cultures resx_files printed"))
-            : Result.Ok(Rendered(family, selected, prefix, key, values, maxResults));
+            : Result.Ok(Rendered(located.Value!.Index, family, selected, new Selection(prefix, key, values), maxResults));
     }
 
     public static Result<string> Find(
@@ -52,7 +53,7 @@ public static class ResxService
         string? culture,
         int maxResults)
     {
-        var hits = Hits(ResxIndex.Build(workspace.Root), query, scope, culture).ToArray();
+        var hits = Hits(workspace.Indexes.Resx(), query, scope, culture).ToArray();
         var response = new ResponseBuilder("resx_find", query);
 
         response.Summary(Math.Min(maxResults, hits.Length), hits.Length, "entries", "culture=");
@@ -67,7 +68,7 @@ public static class ResxService
     {
         foreach (var file in index.Families.SelectMany(family => family.Files).Where(file => InCulture(file, culture)))
         {
-            foreach (var entry in ResxIndex.Entries(file).Where(entry => Matches(entry, query, scope)))
+            foreach (var entry in index.Entries(file).Where(entry => Matches(entry, query, scope)))
                 yield return Hit(file, entry, scope);
         }
     }
@@ -101,31 +102,31 @@ public static class ResxService
     };
 
     private static string Rendered(
+        ResxIndex index,
         ResxFamily family,
         IReadOnlyList<ResxFile> selected,
-        string? prefix,
-        string? key,
-        bool values,
+        Selection selection,
         int maxResults)
     {
-        var keys = Keys(family, prefix, key);
+        var keys = Keys(index, family, selection);
         var response = new ResponseBuilder("resx_get", family.Relative);
 
         response.Summary(Math.Min(maxResults, keys.Count), keys.Count, "keys", "prefix=");
         response.Note(Header(family, selected));
 
         foreach (var name in keys.Take(maxResults))
-            response.Line(Row(name, selected, values));
+            response.Line(Row(index, name, selected, selection.Values));
 
         return response.ToString();
     }
 
-    private static IReadOnlyList<string> Keys(ResxFamily family, string? prefix, string? key) =>
+    private static IReadOnlyList<string> Keys(ResxIndex index, ResxFamily family, Selection selection) =>
     [
-        .. ResxIndex.Entries(family.Neutral)
+        .. index
+            .Entries(family.Neutral)
             .Select(entry => entry.Name)
-            .Where(name => key is not { Length: > 0 } || string.Equals(name, key, StringComparison.Ordinal))
-            .Where(name => prefix is not { Length: > 0 } || name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Where(name => selection.Key is not { Length: > 0 } || string.Equals(name, selection.Key, StringComparison.Ordinal))
+            .Where(name => selection.Prefix is not { Length: > 0 } || name.StartsWith(selection.Prefix, StringComparison.OrdinalIgnoreCase))
             .Distinct(StringComparer.Ordinal),
     ];
 
@@ -133,9 +134,9 @@ public static class ResxService
         CultureInfo.InvariantCulture,
         $"cultures={string.Join(",", selected.Select(file => file.Culture ?? "neutral"))}  designer={family.Designer ?? "-"}  kind={Kind(family)}");
 
-    private static string Row(string name, IReadOnlyList<ResxFile> selected, bool values)
+    private static string Row(ResxIndex index, string name, IReadOnlyList<ResxFile> selected, bool values)
     {
-        var entries = selected.Select(file => (File: file, Entry: ResxIndex.Entries(file).FirstOrDefault(entry => string.Equals(entry.Name, name, StringComparison.Ordinal)))).ToArray();
+        var entries = selected.Select(file => (File: file, Entry: index.Entries(file).FirstOrDefault(entry => string.Equals(entry.Name, name, StringComparison.Ordinal)))).ToArray();
         var kind = entries[0].Entry?.Kind ?? ResxEntryKind.Text;
         var columns = values ? entries.Select(pair => Column(pair.File, pair.Entry)) : [];
 
@@ -162,16 +163,16 @@ public static class ResxService
             .Any(wanted => string.Equals(file.Culture ?? "neutral", wanted, StringComparison.OrdinalIgnoreCase)))],
     };
 
-    private static string Describe(ResxFamily family)
+    private static string Describe(ResxIndex index, ResxFamily family)
     {
-        var neutral = Names(family.Neutral).Distinct(StringComparer.Ordinal).Count();
+        var neutral = Names(index, family.Neutral).Distinct(StringComparer.Ordinal).Count();
         var cultures = family.Cultures.Count is 0
             ? "-"
-            : string.Join(" ", family.Cultures.Select(file => string.Create(CultureInfo.InvariantCulture, $"{file.Culture}={Names(file).Distinct(StringComparer.Ordinal).Count()}")));
+            : string.Join(" ", family.Cultures.Select(file => string.Create(CultureInfo.InvariantCulture, $"{file.Culture}={Names(index, file).Distinct(StringComparer.Ordinal).Count()}")));
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{family.Relative}  {Kind(family)}  neutral={neutral}  {cultures}  missing={Missing(family)}  designer={family.Designer ?? "-"}  project={Project(family)}");
+            $"{family.Relative}  {Kind(family)}  neutral={neutral}  {cultures}  missing={Missing(index, family)}  designer={family.Designer ?? "-"}  project={Project(family)}");
     }
 
     private static string Kind(ResxFamily family) => family.Kind switch
@@ -181,19 +182,20 @@ public static class ResxService
         _ => "localization",
     };
 
-    public static int Missing(ResxFamily family)
+    public static int Missing(ResxIndex index, ResxFamily family)
     {
         if (family.Kind is ResxKind.WinForms)
         {
             return 0;
         }
 
-        var neutral = Names(family.Neutral).ToHashSet(StringComparer.Ordinal);
+        var neutral = Names(index, family.Neutral).ToHashSet(StringComparer.Ordinal);
 
-        return family.Cultures.Sum(file => neutral.Except(Names(file), StringComparer.Ordinal).Count());
+        return family.Cultures.Sum(file => neutral.Except(Names(index, file), StringComparer.Ordinal).Count());
     }
 
-    private static IEnumerable<string> Names(ResxFile file) => ResxIndex.Translatable(file).Select(entry => entry.Name);
+    private static IEnumerable<string> Names(ResxIndex index, ResxFile file) =>
+        index.Translatable(file).Select(entry => entry.Name);
 
     private static string Shorten(string value)
     {
@@ -201,8 +203,11 @@ public static class ResxService
 
         return single.Length <= ValueWidth ? single : single[..ValueWidth] + "...";
     }
+
     private static string Project(ResxFamily family) =>
-            ResxProject.Nearest(Path.GetDirectoryName(family.Neutral.Path)) is { } project
-                ? Path.GetFileNameWithoutExtension(project)
-                : "-";
+        ResxProject.Nearest(Path.GetDirectoryName(family.Neutral.Path)) is { } project
+            ? Path.GetFileNameWithoutExtension(project)
+            : "-";
+
+    private readonly record struct Selection(string? Prefix, string? Key, bool Values);
 }

@@ -25,7 +25,7 @@ public static class ReferenceService
 
         var razor = await RazorUsageService.MarkupAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
-        return await RenderAsync(workspace.Root, symbol, locations, razor, maxResults, containers, cancellationToken)
+        return await RenderAsync(workspace, symbol, locations, razor, maxResults, containers, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -60,7 +60,7 @@ public static class ReferenceService
         $"{SymbolFormat.Location(root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Describe(symbol)}");
 
     private static async Task<string> RenderAsync(
-        string root,
+        LoadedWorkspace workspace,
         ISymbol symbol,
         ReferenceLocation[] locations,
         IReadOnlyList<RazorUsage> razor,
@@ -82,7 +82,7 @@ public static class ReferenceService
             string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"),
             "a more specific symbol, or raise maxResults=");
 
-        var grouped = await GroupAsync(root, locations.Take(shown), containers, cancellationToken).ConfigureAwait(false);
+        var grouped = await GroupAsync(workspace.Root, locations.Take(shown), containers, cancellationToken).ConfigureAwait(false);
 
         foreach (var group in grouped.GroupBy(entry => entry.Group))
             response.Line(Describe(group.Key, group.Select(entry => entry.Location)));
@@ -90,7 +90,7 @@ public static class ReferenceService
         foreach (var usage in razor)
             response.Line(RazorUsageService.Describe(usage));
 
-        foreach (var usage in XamlUsageService.Find(root, symbol, symbol.Name))
+        foreach (var usage in XamlUsageService.Find(workspace, symbol, symbol.Name))
             response.Line(DescribeXaml(usage));
 
         return response.ToString();

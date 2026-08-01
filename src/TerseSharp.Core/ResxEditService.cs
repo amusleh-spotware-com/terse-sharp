@@ -16,7 +16,7 @@ public static class ResxEditService
         string? culture,
         string? comment,
         bool dryRun)
-    {
+{
         var located = ResxTarget.Locate(workspace, path);
 
         if (!located.IsOk)
@@ -25,10 +25,9 @@ public static class ResxEditService
         var pairs = Pairs(key, value, entries);
 
         return pairs.IsOk
-            ? Upsert(workspace, located.Value!, pairs.Value!, culture, comment, dryRun)
+            ? Settled(workspace, Upsert(workspace, located.Value!, pairs.Value!, culture, comment, dryRun), dryRun)
             : Result.Fail<string>(pairs.Error!);
     }
-
     public static async Task<Result<string>> RemoveAsync(
         LoadedWorkspace workspace,
         string path,
@@ -37,7 +36,7 @@ public static class ResxEditService
         bool force,
         bool dryRun,
         CancellationToken cancellationToken)
-    {
+{
         var located = ResxTarget.Locate(workspace, path);
 
         if (!located.IsOk)
@@ -56,9 +55,8 @@ public static class ResxEditService
 
         return blocking.Count > 0
             ? Result.Fail<string>(StillUsed(key, blocking))
-            : Delete(located.Value!, key, culture, dryRun);
+            : Settled(workspace, Delete(located.Value!, key, culture, dryRun), dryRun);
     }
-
     public static Result<string> Rename(
         LoadedWorkspace workspace,
         string path,
@@ -66,20 +64,19 @@ public static class ResxEditService
         string newKey,
         bool updateReferences,
         bool dryRun)
-    {
+{
         var located = ResxTarget.Locate(workspace, path);
 
         if (!located.IsOk)
             return Result.Fail<string>(located.Error!);
 
-        var checkedNames = Names(located.Value!.Family, key, newKey);
+        var checkedNames = Names(located.Value!, key, newKey);
 
         return checkedNames is null
-            ? Renamed(workspace, located.Value!, key, newKey, updateReferences, dryRun)
+            ? Settled(workspace, Renamed(workspace, located.Value!, key, newKey, updateReferences, dryRun), dryRun)
             : Result.Fail<string>(checkedNames);
     }
-
-    private static TerseError? Names(ResxFamily family, string key, string newKey)
+    private static TerseError? Names(ResxTarget target, string key, string newKey)
     {
         if (key is not { Length: > 0 } || newKey is not { Length: > 0 })
         {
@@ -98,7 +95,7 @@ public static class ResxEditService
                 "use letters, digits, '_', '.' and '-' only, starting with a letter or '_'");
         }
 
-        return family.Files.Any(file => ResxIndex.Entries(file).Any(entry => string.Equals(entry.Name, newKey, StringComparison.Ordinal)))
+        return target.Family.Files.Any(file => target.Index.Entries(file).Any(entry => string.Equals(entry.Name, newKey, StringComparison.Ordinal)))
             ? Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'{newKey}' already exists in this family"),
                 "pick a free key, or remove the existing one first")
@@ -113,7 +110,7 @@ public static class ResxEditService
         bool updateReferences,
         bool dryRun)
     {
-        var writes = target.Family.Files.Select(file => RenameIn(file, key, newKey)).OfType<Pending>().ToList();
+        var writes = target.Family.Files.Select(file => RenameIn(target.Index, file, key, newKey)).OfType<Pending>().ToList();
 
         if (writes.Count is 0)
         {
@@ -124,12 +121,12 @@ public static class ResxEditService
             ? Rewrite(workspace.Root, target.Family.Name, key, newKey)
             : NoReferences;
 
-        return Apply("resx_rename", [.. writes, .. references], Notes(target.Family, references.Count), dryRun);
+        return Apply(target.Index, "resx_rename", [.. writes, .. references], Notes(target.Family, references.Count), dryRun);
     }
 
-    private static Pending? RenameIn(ResxFile file, string key, string newKey)
+    private static Pending? RenameIn(ResxIndex index, ResxFile file, string key, string newKey)
     {
-        var document = ResxIndex.Read(file.Path);
+        var document = index.Read(file.Path);
 
         if (document is not { IsOk: true, Value: { } loaded } || loaded.Find(key) is not { } entry)
         {
@@ -188,18 +185,18 @@ public static class ResxEditService
     private static Result<string> Delete(ResxTarget target, string key, string? culture, bool dryRun)
     {
         var writes = Targets(target, culture)
-            .Select(file => DeleteIn(file, key))
+            .Select(file => DeleteIn(target.Index, file, key))
             .OfType<Pending>()
             .ToArray();
 
         return writes.Length is 0
             ? Result.Fail<string>(Missing(key, target.Family))
-            : Apply("resx_remove", writes, Notes(target.Family, 0), dryRun);
+            : Apply(target.Index, "resx_remove", writes, Notes(target.Family, 0), dryRun);
     }
 
-    private static Pending? DeleteIn(ResxFile file, string key)
+    private static Pending? DeleteIn(ResxIndex index, ResxFile file, string key)
     {
-        var document = ResxIndex.Read(file.Path);
+        var document = index.Read(file.Path);
 
         if (document is not { IsOk: true, Value: { } loaded } || loaded.Find(key) is not { } entry)
             return null;
@@ -240,7 +237,7 @@ public static class ResxEditService
         }
 
         var path = destination.Value!;
-        var seed = Seed(target.Family, path);
+        var seed = Seed(target.Index, target.Family, path);
 
         if (!seed.IsOk)
         {
@@ -273,7 +270,7 @@ public static class ResxEditService
             seed.Existing ?? string.Empty,
             applied.Value!.Text);
 
-        return Apply("resx_set", [pending], Created(target, path, applied.Value!.Added, notes), dryRun);
+        return Apply(target.Index, "resx_set", [pending], Created(target, path, applied.Value!.Added, notes), dryRun);
     }
 
     private static List<string> Created(ResxTarget target, string destination, bool added, List<string> notes)
@@ -408,9 +405,9 @@ public static class ResxEditService
                 "pass a culture such as fr or pt-BR, or neutral"));
     }
 
-    private static string? Template(ResxFamily family)
+    private static string? Template(ResxIndex index, ResxFamily family)
     {
-        var document = ResxIndex.Read(family.Neutral.Path);
+        var document = index.Read(family.Neutral.Path);
 
         if (document is not { IsOk: true, Value: { } loaded })
             return null;
@@ -466,7 +463,12 @@ public static class ResxEditService
         return separator <= 0 ? null : new ResxPair(line[..separator].Trim(), line[(separator + 1)..]);
     }
 
-    private static Result<string> Apply(string tool, IReadOnlyList<Pending> writes, IReadOnlyList<string> notes, bool dryRun)
+    private static Result<string> Apply(
+        ResxIndex index,
+        string tool,
+        IReadOnlyList<Pending> writes,
+        IReadOnlyList<string> notes,
+        bool dryRun)
     {
         var malformed = writes.Select(Validated).FirstOrDefault(error => error is not null);
 
@@ -476,7 +478,7 @@ public static class ResxEditService
         if (dryRun)
             return Result.Ok(Render(tool, writes, notes, dryRun));
 
-        var written = WriteAll(writes);
+        var written = WriteAll(index, writes);
 
         return written is null ? Result.Ok(Render(tool, writes, notes, dryRun)) : Result.Fail<string>(written);
     }
@@ -485,7 +487,7 @@ public static class ResxEditService
         ? ResxDocument.Parse(write.Relative, write.After).Error
         : null;
 
-    private static TerseError? WriteAll(IReadOnlyList<Pending> writes)
+    private static TerseError? WriteAll(ResxIndex index, IReadOnlyList<Pending> writes)
     {
         var done = new List<Pending>(writes.Count);
 
@@ -494,7 +496,7 @@ public static class ResxEditService
             foreach (var write in writes)
             {
                 AtomicWrite.Text(write.Path, write.After);
-                ResxIndex.Forget(write.Path);
+                index.Forget(write.Path);
                 done.Add(write);
             }
 
@@ -502,11 +504,11 @@ public static class ResxEditService
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return Errors.EditConflict(Rolled(Restore(done), exception));
+            return Errors.EditConflict(Rolled(Restore(index, done), exception));
         }
     }
 
-    private static List<string> Restore(IEnumerable<Pending> done)
+    private static List<string> Restore(ResxIndex index, IEnumerable<Pending> done)
     {
         var stranded = new List<string>();
 
@@ -521,7 +523,7 @@ public static class ResxEditService
                 stranded.Add(write.Relative);
             }
 
-            ResxIndex.Forget(write.Path);
+            index.Forget(write.Path);
         }
 
         return stranded;
@@ -588,7 +590,7 @@ public static class ResxEditService
 
     private sealed record Pending(string Path, string Relative, string Before, string After);
     private static readonly IReadOnlyList<Pending> NoReferences = [];
-    private static Result<Seeded> Seed(ResxFamily family, string path)
+    private static Result<Seeded> Seed(ResxIndex index, ResxFamily family, string path)
     {
         if (File.Exists(path))
         {
@@ -599,7 +601,7 @@ public static class ResxEditService
                 : Result.Ok(new Seeded(existing, existing));
         }
 
-        var template = Template(family);
+        var template = Template(index, family);
 
         return template is null
             ? Result.Fail<Seeded>(Unreadable(family.Neutral.Relative))
@@ -644,4 +646,12 @@ public static class ResxEditService
         : string.Create(
             CultureInfo.InvariantCulture,
             $"PARTIAL - {stranded.Count} file(s) could not be restored and are still modified: {string.Join(", ", stranded)} ({exception.Message})");
+
+    private static Result<string> Settled(LoadedWorkspace workspace, Result<string> written, bool dryRun)
+    {
+        if (written.IsOk && !dryRun)
+            workspace.Sync.Bumped(ChangeKind.Resx);
+
+        return written;
+    }
 }

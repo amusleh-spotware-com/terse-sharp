@@ -351,4 +351,16 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
         Assert.Contains("TextBlock", text, StringComparison.Ordinal);
         Assert.Contains("1 matches", text, StringComparison.Ordinal);
     }
+    [Fact]
+    public async Task XamlValidate_OnAPathThatDoesNotExist_ReportsDocumentNotFoundRatherThanBadMarkup()
+    {
+        var text = await server.CallAsync("xaml_validate", new()
+        {
+            ["path"] = "src/Fixture.Trading/Views/Absent.xaml",
+        });
+
+        Assert.Contains("ERROR DocumentNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("use find_files to locate it", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("fix the markup", text, StringComparison.Ordinal);
+    }
 }

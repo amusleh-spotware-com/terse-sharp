@@ -85,6 +85,7 @@ public sealed class WorkspaceTools(ToolContext context)
             CultureInfo.InvariantCulture,
             $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} lastUsedUtc={workspace.LastUsedUtc:O}"));
         response.Note(DescribeSync(workspace.Sync));
+        response.Note(workspace.Indexes.Describe());
 
         if (RazorIndex.Build(workspace.Root).Count is var razor and > 0)
             response.Note(await RazorHealthAsync(workspace, razor, cancellationToken).ConfigureAwait(false));

@@ -322,18 +322,6 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     private static bool IsProjectName(string path) =>
         ProjectNames.Contains(Path.GetFileName(path), StringComparer.OrdinalIgnoreCase);
 
-    private readonly record struct FileStamp(long Ticks, long Length)
-    {
-        public static readonly FileStamp Missing = new(-1, -1);
-
-        public static FileStamp Of(string path)
-        {
-            var info = new FileInfo(path);
-
-            return info.Exists ? new FileStamp(info.LastWriteTimeUtc.Ticks, info.Length) : Missing;
-        }
-    }
-
     private void Restore(string[] paths)
     {
         foreach (var path in paths)
@@ -341,4 +329,10 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     }
 
     private bool Countable(ChangeKind kind) => kind is ChangeKind.Xaml or ChangeKind.Resx || !Reloading;
+
+    internal void Bumped(ChangeKind kind)
+    {
+        lock (generationGate)
+            generations = generations.Bump(kind);
+    }
 }

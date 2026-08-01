@@ -4,19 +4,20 @@ public sealed record XamlStyle(string File, int Line, string? Key, string Target
 
 public static class XamlStyleGraph
 {
-    public static IReadOnlyList<XamlStyle> Styles(XamlResourceGraph graph)
-    {
-        var styles = new List<XamlStyle>();
-
-        foreach (var file in graph.Files.Where(file => file.Document is not null))
-            styles.AddRange(In(file));
-
-        return styles;
-    }
+    public static XamlStyle? Of(string relative, XamlElementInfo element) =>
+        IsStyle(element) && Target(element) is { Length: > 0 } target
+            ? new XamlStyle(
+                relative,
+                element.Line,
+                element.Key,
+                Simple(target) ?? target,
+                Simple(element.Attribute("BasedOn")),
+                Scope(element))
+            : null;
 
     public static Result<string> Render(XamlResourceGraph graph, string typeName)
     {
-        var styles = Styles(graph);
+        var styles = graph.Styles;
         var applicable = styles.Where(style => Applies(style, typeName)).ToArray();
         var response = new ResponseBuilder("xaml_styles", typeName);
 
@@ -30,15 +31,6 @@ public static class XamlStyleGraph
             response.Line(Describe(style, styles));
 
         return Result.Ok(response.ToString());
-    }
-
-    private static IEnumerable<XamlStyle> In(XamlIndexedFile file)
-    {
-        foreach (var element in file.Document!.Elements().Where(IsStyle))
-        {
-            if (Target(element) is { Length: > 0 } target)
-                yield return new XamlStyle(file.Relative, element.Line, element.Key, Simple(target) ?? target, Simple(element.Attribute("BasedOn")), Scope(element));
-        }
     }
 
     private static string? Target(XamlElementInfo element) =>

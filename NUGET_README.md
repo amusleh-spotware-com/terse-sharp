@@ -85,7 +85,7 @@ zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolU
 
 | | |
 | --- | --- |
-| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · a shell text read or listing on them (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`) · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · a shell text read or listing on them (`grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `findstr`, `type`, `find`, `fd`, `ls`, `dir`, `tree`, `wc`, `nl`, plus the PowerShell forms `Get-ChildItem`, `gci`, `Get-Content`, `gc`, `Select-String`, `sls`) · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup, and for a XAML glob or shell walk it names `xaml_find`, `xaml_resolve` and `xaml_styles` **before** `find_files` |
 | **Names a tool that can do it** | `Write`/`Edit` on a `.cs` path that does not exist yet names `write_text(path, content, force=true)` — no symbol tool creates a file, and a denial with no legal move is what produces a silent fallback. A relative path the hook cannot resolve is offered creation only as the "if it does not exist yet" case, never as an unconditional overwrite |
 | **Says freshness is handled** | every `.cs` **write** denial adds that a file created or edited through `write_text` is picked up automatically, with no reload |
 | **Allowed** | plain `.css`, `.js`, `.csv`, `.csx` — matching is by file **extension** plus the `.razor.css`/`.razor.js` pair, not substring, so an ordinary stylesheet stays editable |
@@ -210,7 +210,19 @@ state **with an `EXACT` tag**. It now tracks the tree.
   snapshot and every one above it, and `undo_last_change` says so instead of silently reverting
   someone else's work.
 
-`workspace_status` reports `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0`.
+- **Repeat questions are answered from an index, not a rescan** — `xaml_resolve`, `xaml_validate`,
+  `xaml_styles`, `xaml_localization`, `xaml_find`, the `resx_*` tools, `find_registrations` and
+  `list_endpoints` used to walk and re-parse the whole tree on every call. They now share one index
+  per workspace, built once per generation and reused until that counter moves, so **the second call
+  reads no file at all**. When a generation moves, only the files whose `(LastWriteTimeUtc, Length)`
+  changed are re-parsed — a one-file edit in a 200-file tree costs one parse, not 200. When the
+  watcher is off or degraded, the index verifies by stamp sweep before answering. Parsed documents sit
+  behind a bounded LRU (128 documents or 32 MB) because an `XDocument` costs 5-10× its file, so
+  `xaml_find` and the XAML sweep inside `find_usages` — the two that need every document rather than
+  its index record — still re-parse beyond that cap.
+
+`workspace_status` reports `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0` and
+`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) documents=9/128 parses=9`.
 `load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`) turns the watcher
 off for constrained containers, and `terse doctor` reports whether this platform supports file
 watching at all.
