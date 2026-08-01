@@ -37,6 +37,9 @@ public sealed class UpdateE2ETests : IAsyncLifetime
     public async Task TheAnnouncementIsOneLineAppendedToTheResponseTheToolWouldHaveGivenAnyway()
     {
         var feed = Feed("v99.9.9");
+
+        await WriteAsync(StateFile, new UpdateState(DateTimeOffset.UtcNow, new ReleaseVersion(42, 0, 0, false)).Render());
+
         var server = await StartAsync(feed, checks: true);
 
         var announced = await AnnouncedAsync(server);
@@ -46,6 +49,7 @@ public sealed class UpdateE2ETests : IAsyncLifetime
         Assert.Equal(1, lines.Count(line => line.StartsWith(Marker, StringComparison.Ordinal)));
         Assert.Equal(lines[^1], lines.Single(line => line.StartsWith(Marker, StringComparison.Ordinal)));
         Assert.True(lines[^1].Length < 120, lines[^1]);
+        Assert.Equal(0, feed.Requests);
     }
 
     [Fact]
