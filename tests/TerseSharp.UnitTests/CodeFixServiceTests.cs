@@ -86,4 +86,20 @@ public sealed class CodeFixServiceTests
 
         return result.Value!;
     }
+
+    [Theory]
+    [InlineData("CA1822")]
+    [InlineData("ca1822")]
+    [InlineData("Ca1822")]
+    public async Task Producing_MatchesTheRequestedIdWhateverItsCasing(string requested)
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+        var project = lease.Workspace.Solution.Projects.First(candidate => ProjectDiagnostics.Analyzers(candidate).Length > 0);
+
+        Assert.False(ProjectDiagnostics.Producing(project, [requested]).IsEmpty);
+    }
 }

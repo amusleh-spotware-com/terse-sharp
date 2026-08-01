@@ -27,7 +27,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Path to the .csproj to add.")] string project,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded => SolutionFile.AddProject(loaded.SolutionPath, project, dryRun));
+        GuardedSolution(workspace, project, dryRun, loaded => SolutionFile.AddProject(loaded.SolutionPath, project, dryRun));
 
     [McpServerTool(Name = "solution_remove_project")]
     [Description("Remove a project from the .slnx solution without deleting it from disk. Returns the diff.")]
@@ -35,7 +35,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Path to the .csproj to remove.")] string project,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded => SolutionFile.RemoveProject(loaded.SolutionPath, project, dryRun));
+        GuardedSolution(workspace, project, dryRun, loaded => SolutionFile.RemoveProject(loaded.SolutionPath, project, dryRun));
 
     [McpServerTool(Name = "project_create")]
     [Description("Create a new SDK-style .csproj. Use solution_add_project afterwards to put it in the solution.")]
@@ -45,7 +45,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Optional target framework, e.g. net10.0. Omit to inherit from Directory.Build.props.")] string? targetFramework = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded =>
+        Guarded(workspace, project, dryRun, loaded =>
             ProjectFile.Create(Resolve(loaded, project), kind ?? "classlib", targetFramework, dryRun));
 
     [McpServerTool(Name = "project_properties")]
@@ -64,7 +64,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Property value.")] string value,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded => ProjectFile.SetProperty(Resolve(loaded, project), name, value, dryRun));
+        Guarded(workspace, project, dryRun, loaded => ProjectFile.SetProperty(Resolve(loaded, project), name, value, dryRun));
 
     [McpServerTool(Name = "project_add_reference")]
     [Description("Add a ProjectReference from one project to another.")]
@@ -73,7 +73,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Path to the .csproj to reference.")] string target,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded => ProjectFile.AddReference(Resolve(loaded, project), Resolve(loaded, target), dryRun));
+        Guarded(workspace, project, dryRun, loaded => ProjectFile.AddReference(Resolve(loaded, project), Resolve(loaded, target), dryRun));
 
     [McpServerTool(Name = "project_remove_reference")]
     [Description("Remove a ProjectReference from a project.")]
@@ -82,7 +82,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Path to the referenced .csproj.")] string target,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded => ProjectFile.RemoveReference(Resolve(loaded, project), Resolve(loaded, target), dryRun));
+        Guarded(workspace, project, dryRun, loaded => ProjectFile.RemoveReference(Resolve(loaded, project), Resolve(loaded, target), dryRun));
 
     [McpServerTool(Name = "package_list")]
     [Description("List the package and project references declared in a project file.")]
@@ -99,7 +99,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Package version. Required when the solution uses central package management.")] string? version = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded => ProjectFile.AddPackage(loaded.Root, Resolve(loaded, project), package, version, dryRun));
+        Guarded(workspace, project, dryRun, loaded => ProjectFile.AddPackage(loaded.Root, Resolve(loaded, project), package, version, dryRun));
 
     [McpServerTool(Name = "package_remove")]
     [Description("Remove a PackageReference from a project.")]
@@ -108,24 +108,29 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Package id to remove.")] string package,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Guarded(workspace, project, loaded => ProjectFile.RemovePackage(Resolve(loaded, project), package, dryRun));
+        Guarded(workspace, project, dryRun, loaded => ProjectFile.RemovePackage(Resolve(loaded, project), package, dryRun));
 
     private static string Resolve(LoadedWorkspace workspace, string path) =>
         Path.IsPathRooted(path) ? path : Path.Combine(workspace.Root, path);
 
-    private Task<string> Guarded(string? workspace, string path, Func<LoadedWorkspace, Task<Result<string>>> action)
+    private Task<string> Guarded(
+        string? workspace,
+        string path,
+        bool dryRun,
+        Func<LoadedWorkspace, string> written,
+        Func<LoadedWorkspace, Task<Result<string>>> action)
     {
         if (context.RejectWrite() is { } rejection)
             return Task.FromResult(rejection);
 
         return ReadingAsync(workspace, path, async loaded =>
         {
-            var written = await action(loaded).ConfigureAwait(false);
+            var result = await action(loaded).ConfigureAwait(false);
 
-            if (written.IsOk)
-                loaded.Sync.Noticed(Resolve(loaded, path), ChangeKind.Project);
+            if (result.IsOk && !dryRun)
+                loaded.Sync.Noticed(written(loaded), ChangeKind.Project);
 
-            return written;
+            return result;
         });
     }
 
@@ -154,4 +159,10 @@ public sealed class ProjectTools(ToolContext context)
             return guard.IsOk ? NavigationTools.Unwrap(action(loaded)) : guard.Error!.Render();
         });
     }
+
+    private Task<string> Guarded(string? workspace, string path, bool dryRun, Func<LoadedWorkspace, Task<Result<string>>> action) =>
+        Guarded(workspace, path, dryRun, loaded => Resolve(loaded, path), action);
+
+    private Task<string> GuardedSolution(string? workspace, string path, bool dryRun, Func<LoadedWorkspace, Task<Result<string>>> action) =>
+        Guarded(workspace, path, dryRun, loaded => loaded.SolutionPath, action);
 }

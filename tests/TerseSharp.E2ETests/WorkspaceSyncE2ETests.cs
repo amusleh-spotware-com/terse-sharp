@@ -309,6 +309,6 @@ public sealed class WorkspaceSyncE2ETests
         var after = await solution.CallAsync("read_text", new() { ["path"] = AddedRelativePath });
 
         Assert.Contains("// marker", after, StringComparison.Ordinal);
-        Assert.Contains("42", after, StringComparison.Ordinal);
+        Assert.Contains("Value() => 42;", after, StringComparison.Ordinal);
     }
 }

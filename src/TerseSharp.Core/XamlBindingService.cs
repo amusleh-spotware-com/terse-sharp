@@ -177,4 +177,11 @@ public static partial class XamlBindingService
 
     [GeneratedRegex(@"\{d:DesignInstance\s+(?:Type\s*=\s*)?([^,}\s]+)")]
     private static partial Regex DesignInstanceExpression();
+
+    public static string? ExpressionIn(string value)
+    {
+        var match = BindingExpression().Match(value);
+
+        return match.Success ? match.Value : null;
+    }
 }

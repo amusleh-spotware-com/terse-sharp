@@ -19,15 +19,18 @@ public static class GeneratedCode
 
         var relative = Path.GetRelativePath(root, file).AsSpan();
 
-        while (relative.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) is var next and >= 0)
+        while (true)
         {
-            if (IsOutput(relative[..next]))
+            var next = relative.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            if (IsOutput(next < 0 ? relative : relative[..next]))
                 return true;
+
+            if (next < 0)
+                return false;
 
             relative = relative[(next + 1)..];
         }
-
-        return false;
     }
 
     private static bool IsOutput(ReadOnlySpan<char> segment) =>

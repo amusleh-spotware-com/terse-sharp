@@ -215,8 +215,11 @@ public sealed partial class XamlResourceGraph
             return;
         }
 
-        if (!attribute.Value.StartsWith('{') || XamlBindingService.PathOf(attribute.Value) is not { } path)
+        if (XamlBindingService.ExpressionIn(attribute.Value) is not { } expression
+            || XamlBindingService.PathOf(expression) is not { } path)
+        {
             return;
+        }
 
         foreach (var segment in path.Split('.'))
             mentions.Add(segment);

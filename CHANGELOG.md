@@ -8,6 +8,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-08-01
+
+Six defects the 0.15.0 review found, five of them shipped in 0.15.0.
+
+### Fixed
+
+- **`PathBoundary.SameFile` no longer calls `File.ResolveLinkTarget` on every comparison.** Because `||`
+  short-circuits the other way, the symlink clause added in 0.15.0 ran a filesystem syscall on **both**
+  operands for every pair that did *not* match — the common case in every scan over documents. Measured
+  at ~108 µs per non-matching call, **~270× slower** than 0.14.0 (8 ms → 2 164 ms over 20 000
+  comparisons), on `DocumentLookup`, `CodeFixService` (per diagnostic × per file × up to 25 passes) and
+  `RazorContext`. Worse, it did not do what it was added for: a symlinked worktree is a *directory*
+  link, so `File.ResolveLinkTarget` on the solution file returns `null`. Link resolution now lives in
+  `WorkspaceRegistry` identity only, resolves the **parent directory** with `Directory.ResolveLinkTarget`,
+  and runs once per `load_workspace` rather than once per comparison.
+- **A `.razor` edit invalidates the generated-symbol cache again.** 0.15.0 replaced
+  `RazorIndex.Invalidate` with `Sync.Noticed` and deleted the method — which was `RazorGeneratedMap.Forget`'s
+  only caller. Since that map self-invalidates only on a *count* change, editing a component's content
+  left `razor_usages`, `razor_codebehind` and `rename_symbol` resolving members from the pre-edit
+  compilation, tagged `EXACT`, for the life of the process. `Noticed` now forgets the map on a Razor bump.
+- **`project_*`, `package_*` and `solution_*` no longer force a solution reload for a `dryRun`.** The
+  0.15.0 write-guard notified on any `IsOk`, and a `dryRun` returns `IsOk`; `ChangeKind.Project`
+  unconditionally requests a rebuild, so previewing a diff cost a full MSBuild reload on the next call.
+- **`solution_add_project` and `solution_remove_project` notify the solution file they actually wrote**,
+  not the `.csproj` argument — which for `project_create` may not even exist yet.
+- **`cleanup ids=` is case-insensitive again.** The 0.15.0 analyzer filter compared ids ordinally while
+  the result filter used `OrdinalIgnoreCase`, so `cleanup fix=all ids=ca1822` selected no analyzer,
+  produced no diagnostics and reported a clean pass having fixed nothing — a silent wrong answer.
+- **The XAML `Mentions` pre-filter and the binding finder share one predicate.** The filter only looked
+  at values *starting* with `{` while `XamlBindingService` matches a binding anywhere in the value, so
+  `Text=" {Binding Amount}"` could make `rename_symbol` skip the file and report success.
+- `GeneratedCode.InOutputDirectory` tests the final path segment again, matching pre-0.15.0 behaviour for
+  a path that ends in `obj` or `bin`.
+
 ## [0.15.0] - 2026-08-01
 
 Closes every remaining row in the improvements backlog.
@@ -1021,7 +1055,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.1
 [0.15.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.0
 [0.14.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.14.0
 [0.13.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.13.0

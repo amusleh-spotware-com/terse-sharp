@@ -18,14 +18,18 @@ public static class PathBoundary
     public static bool SameFile(string? left, string? right) =>
         left is { Length: > 0 } first
         && right is { Length: > 0 } second
-        && (Path.GetFullPath(first).Equals(Path.GetFullPath(second), Comparison)
-            || Resolved(first).Equals(Resolved(second), Comparison));
+        && Path.GetFullPath(first).Equals(Path.GetFullPath(second), Comparison);
 
-    private static string Resolved(string path)
+    public static string RealPath(string path)
     {
         try
         {
-            return File.ResolveLinkTarget(path, returnFinalTarget: true)?.FullName ?? Path.GetFullPath(path);
+            var file = Path.GetFullPath(path);
+            var directory = Path.GetDirectoryName(file);
+
+            return directory is { Length: > 0 } parent && Directory.ResolveLinkTarget(parent, returnFinalTarget: true) is { } target
+                ? Path.Combine(target.FullName, Path.GetFileName(file))
+                : file;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {

@@ -226,9 +226,14 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     {
         lock (map)
         {
-            return workspaces.TryGetValue(full, out var direct)
-                ? direct
-                : workspaces.Values.FirstOrDefault(workspace => PathBoundary.SameFile(workspace.SolutionPath, full));
+            if (workspaces.TryGetValue(full, out var direct))
+                return direct;
+
+            var real = PathBoundary.RealPath(full);
+
+            return workspaces.Values.FirstOrDefault(workspace =>
+                PathBoundary.SameFile(workspace.SolutionPath, full)
+                || PathBoundary.RealPath(workspace.SolutionPath).Equals(real, PathBoundary.Comparison));
         }
     }
 

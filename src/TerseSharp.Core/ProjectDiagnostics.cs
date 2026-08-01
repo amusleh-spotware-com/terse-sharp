@@ -37,7 +37,7 @@ internal static class ProjectDiagnostics
             : await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
     }
 
-    private static bool Produces(DiagnosticAnalyzer analyzer, IReadOnlyCollection<string> ids)
+    private static bool Produces(DiagnosticAnalyzer analyzer, HashSet<string> ids)
     {
         try
         {
@@ -49,10 +49,15 @@ internal static class ProjectDiagnostics
         }
     }
 
-    public static ImmutableArray<DiagnosticAnalyzer> Producing(Project project, IReadOnlyCollection<string> ids) =>
-        ids.Count is 0
-            ? Analyzers(project)
-            : [.. Analyzers(project).Where(analyzer => Produces(analyzer, ids))];
+    public static ImmutableArray<DiagnosticAnalyzer> Producing(Project project, IReadOnlyCollection<string> ids)
+    {
+        if (ids.Count is 0)
+            return Analyzers(project);
+
+        var wanted = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+
+        return [.. Analyzers(project).Where(analyzer => Produces(analyzer, wanted))];
+    }
 
     public static async Task<ImmutableArray<Diagnostic>> OfProjectAsync(
         Project project,
