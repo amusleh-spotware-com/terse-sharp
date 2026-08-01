@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-01
+
 ### Added
 
 - **`clean` — the `dotnet clean` equivalent, surface 72 → 73.** It deletes the `bin` and `obj` directories of the workspace or of one project and answers with `projects=`, `files=` and `freedBytes=` instead of MSBuild output. Unlike `dotnet clean` it also removes `obj`, which is the case that actually unsticks a stale build, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads - the recovery `build` already had, now shared. It refuses any path outside the workspace root, only ever deletes a directory literally named `bin` or `obj`, honours `--read-only`, and `dryRun=true` lists what would go. It is **not** covered by `undo_last_change`, because that history holds Roslyn solutions, not files.
@@ -642,7 +644,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.10.0
 [0.9.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.9.0
 [0.8.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.8.0
 [0.7.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.7.0
