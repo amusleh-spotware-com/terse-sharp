@@ -9,7 +9,7 @@ public static partial class DotnetRunner
 
     private const int MaxFailures = 20;
 
-    private const int MaxMessageLines = 12;
+    private const int MaxMessageLines = 30;
 
     private const int MaxTestNames = 200;
 
@@ -18,16 +18,28 @@ public static partial class DotnetRunner
     public static async Task<BuildRun> BuildAsync(
         WorkspaceTarget workspace,
         string? project,
+        bool verbose,
         CancellationToken cancellationToken)
     {
         var target = project ?? workspace.SolutionPath;
         var run = await RunAsync(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"], workspace.Root, DefaultTimeout, cancellationToken)
             .ConfigureAwait(false);
 
-        return new BuildRun(RenderBuild(target, run), Locked(run));
+        return new BuildRun(RenderBuild(target, run, verbose), Locked(run));
     }
 
     private static bool Locked(ProcessRun run) => IsLockedOutput(run.ExitCode, run.Output);
+
+    private static bool IsGreen(ProcessRun run, TestRunReport report) =>
+        run.ExitCode is 0 && !run.TimedOut && report.Total > 0 && report.Failures.Length is 0;
+
+    private static string QuietBuild(ProcessRun run) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"build ok  0 diagnostics  elapsedMs={run.ElapsedMilliseconds}  (verbose=true for the full report)");
+
+    private static string QuietTest(TestRunReport report) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs}  (verbose=true for the full report)");
 
     internal static bool IsLockedOutput(int exitCode, string output) =>
         exitCode is not 0 && LockedOutput().IsMatch(output);
@@ -99,13 +111,16 @@ public static partial class DotnetRunner
         return [.. arguments];
     }
 
-    private static string RenderBuild(string target, ProcessRun run)
+    private static string RenderBuild(string target, ProcessRun run, bool verbose)
     {
         var diagnostics = DiagnosticLine()
             .Matches(run.Output)
             .Select(match => match.Value.Trim())
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+
+        if (!verbose && run.ExitCode is 0 && diagnostics.Length is 0 && !Locked(run))
+            return QuietBuild(run);
 
         var response = new ResponseBuilder("build", target);
 
@@ -135,6 +150,9 @@ public static partial class DotnetRunner
     {
         if (report.Total is 0 && run.ExitCode is not 0)
             return RenderNoResults(request.Target, run);
+
+        if (IsGreen(run, report) && !request.WantsDetail)
+            return QuietTest(report);
 
         var shown = Math.Min(report.Failures.Length, MaxFailures);
         var response = new ResponseBuilder("run_tests", request.Target);

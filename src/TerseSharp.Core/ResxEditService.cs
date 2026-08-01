@@ -7,7 +7,7 @@ public sealed record ResxPair(string Key, string Value);
 
 public static class ResxEditService
 {
-    public static Result<string> Set(
+    public static async Task<Result<string>> Set(
         LoadedWorkspace workspace,
         string path,
         string? key,
@@ -16,7 +16,7 @@ public static class ResxEditService
         string? culture,
         string? comment,
         bool dryRun)
-{
+    {
         var located = ResxTarget.Locate(workspace, path);
 
         if (!located.IsOk)
@@ -25,7 +25,7 @@ public static class ResxEditService
         var pairs = Pairs(key, value, entries);
 
         return pairs.IsOk
-            ? Settled(workspace, Upsert(workspace, located.Value!, pairs.Value!, culture, comment, dryRun), dryRun)
+            ? Settled(workspace, await Upsert(workspace, located.Value!, pairs.Value!, culture, comment, dryRun).ConfigureAwait(false), dryRun)
             : Result.Fail<string>(pairs.Error!);
     }
     public static async Task<Result<string>> RemoveAsync(
@@ -36,7 +36,7 @@ public static class ResxEditService
         bool force,
         bool dryRun,
         CancellationToken cancellationToken)
-{
+    {
         var located = ResxTarget.Locate(workspace, path);
 
         if (!located.IsOk)
@@ -55,16 +55,16 @@ public static class ResxEditService
 
         return blocking.Count > 0
             ? Result.Fail<string>(StillUsed(key, blocking))
-            : Settled(workspace, Delete(located.Value!, key, culture, dryRun), dryRun);
+            : Settled(workspace, await Delete(located.Value!, key, culture, dryRun).ConfigureAwait(false), dryRun);
     }
-    public static Result<string> Rename(
+    public static async Task<Result<string>> Rename(
         LoadedWorkspace workspace,
         string path,
         string key,
         string newKey,
         bool updateReferences,
         bool dryRun)
-{
+    {
         var located = ResxTarget.Locate(workspace, path);
 
         if (!located.IsOk)
@@ -73,7 +73,7 @@ public static class ResxEditService
         var checkedNames = Names(located.Value!, key, newKey);
 
         return checkedNames is null
-            ? Settled(workspace, Renamed(workspace, located.Value!, key, newKey, updateReferences, dryRun), dryRun)
+            ? Settled(workspace, await Renamed(workspace, located.Value!, key, newKey, updateReferences, dryRun).ConfigureAwait(false), dryRun)
             : Result.Fail<string>(checkedNames);
     }
     private static TerseError? Names(ResxTarget target, string key, string newKey)
@@ -102,7 +102,7 @@ public static class ResxEditService
             : null;
     }
 
-    private static Result<string> Renamed(
+    private static async Task<Result<string>> Renamed(
         LoadedWorkspace workspace,
         ResxTarget target,
         string key,
@@ -121,7 +121,7 @@ public static class ResxEditService
             ? Rewrite(workspace.Root, target.Family.Name, key, newKey)
             : NoReferences;
 
-        return Apply(target.Index, "resx_rename", [.. writes, .. references], Notes(target.Family, references.Count), dryRun);
+        return await Apply(target.Index, "resx_rename", [.. writes, .. references], Notes(target.Family, references.Count), dryRun).ConfigureAwait(false);
     }
 
     private static Pending? RenameIn(ResxIndex index, ResxFile file, string key, string newKey)
@@ -182,7 +182,7 @@ public static class ResxEditService
             : new Pending(file, PositionFormat.Relative(root, file), before, after);
     }
 
-    private static Result<string> Delete(ResxTarget target, string key, string? culture, bool dryRun)
+    private static async Task<Result<string>> Delete(ResxTarget target, string key, string? culture, bool dryRun)
     {
         var writes = Targets(target, culture)
             .Select(file => DeleteIn(target.Index, file, key))
@@ -191,7 +191,7 @@ public static class ResxEditService
 
         return writes.Length is 0
             ? Result.Fail<string>(Missing(key, target.Family))
-            : Apply(target.Index, "resx_remove", writes, Notes(target.Family, 0), dryRun);
+            : await Apply(target.Index, "resx_remove", writes, Notes(target.Family, 0), dryRun).ConfigureAwait(false);
     }
 
     private static Pending? DeleteIn(ResxIndex index, ResxFile file, string key)
@@ -221,7 +221,7 @@ public static class ResxEditService
         _ => target.Family.Culture(culture) is { } file ? [file] : [],
     };
 
-    private static Result<string> Upsert(
+    private static async Task<Result<string>> Upsert(
         LoadedWorkspace workspace,
         ResxTarget target,
         IReadOnlyList<ResxPair> pairs,
@@ -244,10 +244,10 @@ public static class ResxEditService
             return Result.Fail<string>(seed.Error!);
         }
 
-        return Written(workspace, target, path, seed.Value!, pairs, comment, dryRun);
+        return await Written(workspace, target, path, seed.Value!, pairs, comment, dryRun).ConfigureAwait(false);
     }
 
-    private static Result<string> Written(
+    private static async Task<Result<string>> Written(
         LoadedWorkspace workspace,
         ResxTarget target,
         string path,
@@ -270,7 +270,7 @@ public static class ResxEditService
             seed.Existing ?? string.Empty,
             applied.Value!.Text);
 
-        return Apply(target.Index, "resx_set", [pending], Created(target, path, applied.Value!.Added, notes), dryRun);
+        return await Apply(target.Index, "resx_set", [pending], Created(target, path, applied.Value!.Added, notes), dryRun).ConfigureAwait(false);
     }
 
     private static List<string> Created(ResxTarget target, string destination, bool added, List<string> notes)
@@ -463,7 +463,7 @@ public static class ResxEditService
         return separator <= 0 ? null : new ResxPair(line[..separator].Trim(), line[(separator + 1)..]);
     }
 
-    private static Result<string> Apply(
+    private static async Task<Result<string>> Apply(
         ResxIndex index,
         string tool,
         IReadOnlyList<Pending> writes,
@@ -478,7 +478,7 @@ public static class ResxEditService
         if (dryRun)
             return Result.Ok(Render(tool, writes, notes, dryRun));
 
-        var written = WriteAll(index, writes);
+        var written = await WriteAll(index, writes).ConfigureAwait(false);
 
         return written is null ? Result.Ok(Render(tool, writes, notes, dryRun)) : Result.Fail<string>(written);
     }
@@ -487,7 +487,7 @@ public static class ResxEditService
         ? ResxDocument.Parse(write.Relative, write.After).Error
         : null;
 
-    private static TerseError? WriteAll(ResxIndex index, IReadOnlyList<Pending> writes)
+    private static async Task<TerseError?> WriteAll(ResxIndex index, IReadOnlyList<Pending> writes)
     {
         var done = new List<Pending>(writes.Count);
 
@@ -495,7 +495,7 @@ public static class ResxEditService
         {
             foreach (var write in writes)
             {
-                AtomicWrite.Text(write.Path, write.After);
+                await AtomicWrite.TextAsync(write.Path, write.After).ConfigureAwait(false);
                 index.Forget(write.Path);
                 done.Add(write);
             }
@@ -504,11 +504,11 @@ public static class ResxEditService
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return Errors.EditConflict(Rolled(Restore(index, done), exception));
+            return Errors.EditConflict(Rolled(await Restore(index, done).ConfigureAwait(false), exception));
         }
     }
 
-    private static List<string> Restore(ResxIndex index, IEnumerable<Pending> done)
+    private static async Task<List<string>> Restore(ResxIndex index, IEnumerable<Pending> done)
     {
         var stranded = new List<string>();
 
@@ -516,7 +516,7 @@ public static class ResxEditService
         {
             try
             {
-                AtomicWrite.Text(write.Path, write.Before);
+                await AtomicWrite.TextAsync(write.Path, write.Before).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {

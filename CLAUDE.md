@@ -254,6 +254,43 @@ just this once" · "the agent should have known which tool to call" (interface d
 instructions — if the agent guessed wrong, the schema or the description is the defect) · "too small
 to log" · "I'll note it next time".
 
+## 🚫 HARD GATE — the file system is async, everywhere
+
+Every file-system and process call on the request path is **asynchronous**. Before writing
+`File.ReadAllText`, `File.WriteAllText`, `File.ReadLines`, `File.ReadAllBytes`, `new StreamReader(...)
+.ReadToEnd()`, `XDocument.Load(path)` or a `FileStream` without `useAsync`, stop: the async overload
+exists, use it, and `await … .ConfigureAwait(false)`. `AtomicWrite` exposes only `TextAsync`; there is
+no synchronous writer. A `FileStream` opened for scanning takes
+`FileOptions.Asynchronous | FileOptions.SequentialScan`.
+
+The same rule holds for anything else with an async API: `Process` draining, Roslyn's
+`GetTextAsync`/`GetSemanticModelAsync`/`GetSyntaxRootAsync`, `SemaphoreSlim.WaitAsync`. Sync-over-async
+(`.Result`, `.Wait()`, `.GetAwaiter().GetResult()`) is banned outright — it deadlocks under a
+synchronization context and burns a thread-pool thread per call, and this server serves one stdio
+client that must answer the MCP handshake inside 60 s.
+
+**Two exceptions, both narrow, both stated at the call:** a one-shot bootstrap read outside the
+request path (`LoadedWorkspace.DetectLineEnding` reads the solution file once, lazily, to learn the
+repo's dominant line ending), and a cheap metadata probe with no async overload (`File.Exists`,
+`Directory.CreateDirectory`, `FileInfo.Length` from an enumeration, `AtomicWrite`'s three-byte
+byte-order-mark sniff). Anything that reads or writes *content* on the request path is async.
+
+Converting a leaf to async ripples up the call chain: propagate it, do not stop the ripple with a
+blocking call.
+
+## 🚫 HARD GATE — success costs nothing
+
+A tool that succeeded with nothing to report must say so in **one line**. `build`, `run_tests` and
+`rerun_failed` already do: a clean build and a green suite answer in a single line and take
+`verbose=true` to restore the full report. When adding or changing a tool whose usual outcome is
+"fine", ask what the agent would *act* on in the success case; if the answer is nothing, emit a
+one-liner and put the detail behind `verbose=true`.
+
+The rule has one hard edge: **the short form may only be emitted for a result that has nothing else to
+say.** Any failure, any diagnostic, any warning, a timeout, a zero-result run, a locked file — all keep
+the full response. Condensing a result that carried a caveat is the same defect as a confident wrong
+answer, because the agent cannot see what was dropped.
+
 ## Code style
 
 `Directory.Build.props` sets `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild` and

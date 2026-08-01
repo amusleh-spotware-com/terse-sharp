@@ -32,7 +32,7 @@ public static class RazorRename
 
         return Result.Ok(options.DryRun
             ? Render(workspace, "dryRun", moves, rewrites)
-            : Apply(workspace, moves, rewrites));
+            : await Apply(workspace, moves, rewrites).ConfigureAwait(false));
     }
 
     private static bool Occupied(Move move) =>
@@ -106,14 +106,14 @@ public static class RazorRename
         }
     }
 
-    private static string Apply(LoadedWorkspace workspace, IReadOnlyList<Move> moves, IReadOnlyList<Rewrite> rewrites)
+    private static Task<string> Apply(LoadedWorkspace workspace, IReadOnlyList<Move> moves, IReadOnlyList<Rewrite> rewrites)
     {
         var done = new List<Move>(moves.Count);
 
         return Apply(workspace, moves, rewrites, done);
     }
 
-    private static string Apply(
+    private static async Task<string> Apply(
         LoadedWorkspace workspace,
         IReadOnlyList<Move> moves,
         IReadOnlyList<Rewrite> rewrites,
@@ -121,7 +121,7 @@ public static class RazorRename
     {
         foreach (var rewrite in rewrites)
         {
-            AtomicWrite.Text(rewrite.Path, rewrite.After);
+            await AtomicWrite.TextAsync(rewrite.Path, rewrite.After).ConfigureAwait(false);
             RazorIndex.Invalidate(rewrite.Path);
         }
 

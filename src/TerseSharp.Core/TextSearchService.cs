@@ -7,6 +7,8 @@ public static class TextSearchService
 {
     private const int MaxLineLength = 200;
 
+    private const int BinaryProbe = 4096;
+
     private const long MaxSearchableBytes = 16L * 1024 * 1024;
 
     private static readonly string[] ExcludedDirectories = [".git", "bin", "obj", "node_modules", ".vs", ".idea"];
@@ -19,38 +21,26 @@ public static class TextSearchService
         ".ttf", ".otf", ".woff", ".woff2", ".eot", ".mp3", ".mp4", ".wav", ".snk", ".pfx",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    public static string Search(LoadedWorkspace workspace, string pattern, string glob, bool regex, int maxResults)
+    public static async Task<string> SearchAsync(
+        LoadedWorkspace workspace,
+        string pattern,
+        string glob,
+        bool regex,
+        int maxResults,
+        CancellationToken cancellationToken)
     {
         var matcher = TextMatcher.Create(pattern, regex);
-        var hits = new List<string>(Math.Min(maxResults, 512));
-        var total = 0;
-        var skipped = 0;
+        var candidates = Files(workspace.Root, glob).Where(IsSearchable).ToArray();
+        var perFile = new FileHits[candidates.Length];
 
-        foreach (var file in Files(workspace.Root, glob).Where(IsSearchable))
-        {
-            if (TooLarge(file.FullPath))
-                skipped++;
-            else
-                total += Scan(file, matcher, hits, maxResults);
-        }
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, candidates.Length),
+            ParallelWork.Options(cancellationToken),
+            async (index, token) => perFile[index] = await ScanAsync(candidates[index], matcher, maxResults, token).ConfigureAwait(false))
+            .ConfigureAwait(false);
 
-        return Render(regex ? "search_regex" : "search_text", pattern, hits, total, skipped);
+        return Render(regex ? "search_regex" : "search_text", pattern, perFile, maxResults);
     }
-
-    private static bool TooLarge(string path)
-    {
-        try
-        {
-            return new FileInfo(path).Length > MaxSearchableBytes;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-    }
-
-    private static bool IsSearchable(SourceCandidate file) =>
-        !BinaryExtensions.Contains(Path.GetExtension(file.FullPath));
 
     public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults)
     {
@@ -65,56 +55,124 @@ public static class TextSearchService
         return response.ToString();
     }
 
-    private static int Scan(SourceCandidate file, TextMatcher matcher, List<string> hits, int maxResults)
+    private static bool IsSearchable(SourceCandidate file) =>
+        !BinaryExtensions.Contains(Path.GetExtension(file.FullPath));
+
+    private static async Task<FileHits> ScanAsync(
+        SourceCandidate file,
+        TextMatcher matcher,
+        int maxResults,
+        CancellationToken cancellationToken)
     {
-        var found = 0;
-        var lineNumber = 0;
+        if (file.Length > MaxSearchableBytes)
+            return FileHits.Oversized;
 
-        foreach (var line in ReadLines(file.FullPath))
+        var text = await ReadAsync(file.FullPath, cancellationToken).ConfigureAwait(false);
+
+        return text is null || IsBinary(text) ? FileHits.None : Collect(file.RelativePath, text, matcher, maxResults);
+    }
+
+    private static bool IsBinary(string text) =>
+        text.AsSpan(0, Math.Min(text.Length, BinaryProbe)).Contains('\0');
+
+    private static FileHits Collect(string relativePath, string text, TextMatcher matcher, int maxResults)
+    {
+        var span = text.AsSpan();
+        var hits = new List<string>();
+        var tracker = new LineTracker();
+        var total = 0;
+        var index = 0;
+
+        while (index < span.Length && matcher.Next(span, index) is var at and >= 0)
         {
-            lineNumber++;
+            total++;
 
-            if (line.Contains('\0'))
-                break;
+            if (hits.Count < maxResults)
+                hits.Add(Format(relativePath, span, at, ref tracker));
 
-            if (!matcher.Matches(line))
-                continue;
-
-            found++;
-            Collect(hits, maxResults, file.RelativePath, lineNumber, line);
+            index = EndOfLine(span, at) + 1;
         }
 
-        return found;
+        return new FileHits(hits, total, 0);
     }
 
-    private static void Collect(List<string> hits, int maxResults, string relativePath, int lineNumber, string line)
+    private static string Format(string relativePath, ReadOnlySpan<char> text, int at, ref LineTracker tracker)
     {
-        if (hits.Count >= maxResults)
-            return;
+        tracker.Advance(text, at);
 
-        hits.Add(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{relativePath}:{lineNumber}  HEURISTIC  {Shorten(line.Trim())}"));
+        var start = text[..at].LastIndexOf('\n') + 1;
+        var line = text[start..EndOfLine(text, at)].Trim();
+
+        return string.Create(CultureInfo.InvariantCulture, $"{relativePath}:{tracker.Line}  HEURISTIC  {Shorten(line)}");
     }
 
-    private static string Shorten(string line) => line.Length <= MaxLineLength
-        ? line
+    private static int EndOfLine(ReadOnlySpan<char> text, int at) =>
+        text[at..].IndexOf('\n') is var offset and >= 0 ? at + offset : text.Length;
+
+    private static string Shorten(ReadOnlySpan<char> line) => line.Length <= MaxLineLength
+        ? new string(line)
         : string.Create(CultureInfo.InvariantCulture, $"{line[..MaxLineLength]}... (+{line.Length - MaxLineLength} chars)");
 
-    private static string Render(string tool, string pattern, List<string> hits, int total, int skipped)
+    private static string Render(string tool, string pattern, FileHits[] perFile, int maxResults)
     {
         var response = new ResponseBuilder(tool, pattern);
+        var shown = new List<string>(Math.Min(maxResults, 512));
+        var total = 0;
+        var skipped = 0;
 
-        response.Summary(hits.Count, total, "matches", "glob= or maxResults=");
+        foreach (var file in perFile)
+        {
+            total += file.Total;
+            skipped += file.Skipped;
+            shown.AddRange(file.Hits.Take(Math.Max(0, maxResults - shown.Count)));
+        }
+
+        return Write(response, shown, total, skipped);
+    }
+
+    private static string Write(ResponseBuilder response, List<string> shown, int total, int skipped)
+    {
+        response.Summary(shown.Count, total, "matches", "glob= or maxResults=");
 
         if (skipped > 0)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));
 
-        foreach (var hit in hits)
+        foreach (var hit in shown)
             response.Line(hit);
 
         return response.ToString();
     }
+
+    private static async Task<string?> ReadAsync(string file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var stream = new FileStream(file, Options());
+
+            await using (stream.ConfigureAwait(false))
+            {
+                using var reader = new StreamReader(stream);
+
+                return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static FileStreamOptions Options() => new()
+    {
+        Mode = FileMode.Open,
+        Access = FileAccess.Read,
+        Share = FileShare.ReadWrite | FileShare.Delete,
+        Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+    };
 
     private static IEnumerable<SourceCandidate> Files(string root, string glob)
     {
@@ -136,20 +194,19 @@ public static class TextSearchService
             foreach (var child in Subdirectories(directory))
                 pending.Push(child);
 
-            foreach (var file in Entries(directory, Directory.EnumerateFiles))
-                yield return new SourceCandidate(file, Path.GetRelativePath(root, file));
+            foreach (var file in Entries(directory))
+                yield return new SourceCandidate(file.FullName, Path.GetRelativePath(root, file.FullName), file.Length);
         }
     }
 
     private static IEnumerable<string> Subdirectories(string directory) =>
-        Entries(directory, Directory.EnumerateDirectories)
-            .Where(child => !ExcludedDirectories.Contains(Path.GetFileName(child), StringComparer.OrdinalIgnoreCase));
+        Directories(directory).Where(child => !ExcludedDirectories.Contains(Path.GetFileName(child), StringComparer.OrdinalIgnoreCase));
 
-    private static string[] Entries(string directory, Func<string, IEnumerable<string>> enumerate)
+    private static FileInfo[] Entries(string directory)
     {
         try
         {
-            return [.. enumerate(directory)];
+            return new DirectoryInfo(directory).GetFiles();
         }
         catch (IOException)
         {
@@ -161,60 +218,68 @@ public static class TextSearchService
         }
     }
 
-    private static IEnumerable<string> ReadLines(string file)
-    {
-        using var reader = TryOpen(file);
-
-        if (reader is null)
-            yield break;
-
-        while (TryReadLine(reader) is { } line)
-            yield return line;
-    }
-
-    private static StreamReader? TryOpen(string file)
+    private static string[] Directories(string directory)
     {
         try
         {
-            return new StreamReader(File.Open(
-                file,
-                new FileStreamOptions
-                {
-                    Mode = FileMode.Open,
-                    Access = FileAccess.Read,
-                    Share = FileShare.ReadWrite | FileShare.Delete,
-                }));
+            return [.. Directory.EnumerateDirectories(directory)];
         }
         catch (IOException)
         {
-            return null;
+            return [];
         }
         catch (UnauthorizedAccessException)
         {
-            return null;
+            return [];
         }
     }
 
-    private static string? TryReadLine(StreamReader reader)
+    private readonly record struct SourceCandidate(string FullPath, string RelativePath, long Length);
+
+    private readonly record struct FileHits(IReadOnlyList<string> Hits, int Total, int Skipped)
     {
-        try
-        {
-            return reader.ReadLine();
-        }
-        catch (IOException)
-        {
-            return null;
-        }
+        public static FileHits None => new([], 0, 0);
+
+        public static FileHits Oversized => new([], 0, 1);
     }
 
-    private readonly record struct SourceCandidate(string FullPath, string RelativePath);
+    private struct LineTracker
+    {
+        private int scanned;
+
+        public int Line { get; private set; } = 1;
+
+        public LineTracker() => scanned = 0;
+
+        public void Advance(ReadOnlySpan<char> text, int to)
+        {
+            var window = text[scanned..to];
+            var offset = 0;
+
+            while (window[offset..].IndexOf('\n') is var next and >= 0)
+            {
+                Line++;
+                offset += next + 1;
+            }
+
+            scanned = to;
+        }
+    }
 
     private readonly record struct TextMatcher(string Pattern, Regex? Expression)
     {
         public static TextMatcher Create(string pattern, bool regex) => new(pattern, regex ? Compile(pattern) : null);
 
-        public bool Matches(string line) =>
-            Expression is null ? line.Contains(Pattern, StringComparison.Ordinal) : Expression.IsMatch(line);
+        public int Next(ReadOnlySpan<char> text, int from)
+        {
+            if (Expression is null)
+                return text[from..].IndexOf(Pattern, StringComparison.Ordinal) is var offset and >= 0 ? from + offset : -1;
+
+            foreach (var match in Expression.EnumerateMatches(text, from))
+                return match.Index;
+
+            return -1;
+        }
 
         private static Regex Compile(string pattern)
         {

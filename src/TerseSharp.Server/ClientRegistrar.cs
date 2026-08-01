@@ -18,32 +18,36 @@ public static class ClientRegistrar
         new("windsurf", Path.Combine(Home(), ".codeium", "windsurf", "mcp_config.json")),
     ];
 
-    public static string Register(string? client, string? workspace)
+    public static async Task<string> Register(string? client, string? workspace)
     {
-        var targets = Select(client);
-        var lines = targets.Select(target => Apply(target, workspace)).ToArray();
+        var lines = new List<string>();
 
-        return Joined(lines);
+        foreach (var target in Select(client))
+            lines.Add(await Apply(target, workspace).ConfigureAwait(false));
+
+        return Joined([.. lines]);
     }
 
-    public static string InstallSkill()
+    public static async Task<string> InstallSkill()
     {
         var content = SkillAsset.Read();
         var target = Path.Combine(ClaudeSkillsDirectory(), ServerName, "SKILL.md");
 
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        File.WriteAllText(target, content);
+
+        await File.WriteAllTextAsync(target, content).ConfigureAwait(false);
 
         return "installed skill -> " + target;
     }
 
-    public static string InstallGuard()
+    public static async Task<string> InstallGuard()
     {
         var target = Path.Combine(ClaudeConfigDirectory() ?? Path.Combine(Home(), ".claude"), "settings.json");
         var root = (File.Exists(target) ? Parse(target) : null) ?? [];
 
         Hooks(root)["PreToolUse"] = GuardMatchers(Hooks(root)["PreToolUse"] as JsonArray);
-        Save(target, root);
+
+        await SaveAsync(target, root).ConfigureAwait(false);
 
         return "installed guard -> " + target;
     }
@@ -96,11 +100,14 @@ public static class ClientRegistrar
         return hooks;
     }
 
-    public static string Unregister(string? client)
+    public static async Task<string> Unregister(string? client)
     {
-        var lines = Select(client).Select(Remove).ToArray();
+        var lines = new List<string>();
 
-        return Joined(lines);
+        foreach (var target in Select(client))
+            lines.Add(await Remove(target).ConfigureAwait(false));
+
+        return Joined([.. lines]);
     }
 
     public static ClientConfigState State(ClientTarget target)
@@ -129,7 +136,7 @@ public static class ClientRegistrar
     private static string Joined(string[] lines) =>
         lines.Length is 0 ? "no MCP clients matched" : string.Join("\n", lines);
 
-    private static string Apply(ClientTarget target, string? workspace)
+    private static async Task<string> Apply(ClientTarget target, string? workspace)
     {
         if (State(target) is ClientConfigState.Invalid)
             return Skipped(target, "not valid JSON");
@@ -138,12 +145,12 @@ public static class ClientRegistrar
         var servers = Servers(root);
 
         servers[ServerName] = Entry(workspace);
-        Save(target.ConfigPath, root);
+
+        await SaveAsync(target.ConfigPath, root).ConfigureAwait(false);
 
         return "registered " + target.Name + " -> " + target.ConfigPath;
     }
-
-    private static string Remove(ClientTarget target)
+    private static async Task<string> Remove(ClientTarget target)
     {
         if (State(target) is ClientConfigState.Invalid)
             return Skipped(target, "not valid JSON");
@@ -156,11 +163,10 @@ public static class ClientRegistrar
         if (root["mcpServers"] is not JsonObject servers || !servers.Remove(ServerName))
             return Skipped(target, "not registered");
 
-        Save(target.ConfigPath, root);
+        await SaveAsync(target.ConfigPath, root).ConfigureAwait(false);
 
         return "removed from " + target.Name;
     }
-
     private static string Skipped(ClientTarget target, string reason) =>
         "skipped " + target.Name + " (" + reason + ": " + target.ConfigPath + ")";
 
@@ -204,11 +210,11 @@ public static class ClientRegistrar
         }
     }
 
-    private static void Save(string path, JsonObject root)
+    private static async Task SaveAsync(string path, JsonObject root)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        AtomicWrite.Text(path, root.ToJsonString(Indented));
+        await AtomicWrite.TextAsync(path, root.ToJsonString(Indented)).ConfigureAwait(false);
     }
 
     private static string Home() =>

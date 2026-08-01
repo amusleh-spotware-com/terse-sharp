@@ -4,14 +4,12 @@ public static class FileService
 {
     private const int MaxResponseCharacters = 128 * 1024;
 
-    private const int MaxScannedLines = 5_000_000;
+    private const int MaxNearMisses = 3;
 
-    public static Result<string> ReadText(
+    public static async Task<Result<string>> ReadTextAsync(
         LoadedWorkspace workspace,
         string path,
-        int startLine,
-        int endLine,
-        int maxLines,
+        ReadRequest request,
         CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace, path);
@@ -24,11 +22,21 @@ public static class FileService
         if (!File.Exists(full))
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
-        return BinaryContent.Reject(full, path)
-            ?? Result.Ok(Render(path, full, new LineRange(startLine, endLine, maxLines), cancellationToken));
+        if (BinaryContent.Reject(full, path) is { } binary)
+            return binary;
+
+        var text = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
+
+        return Present(path, text, request);
     }
 
-    public static Result<string> WriteText(LoadedWorkspace workspace, string path, string content, bool dryRun, bool force)
+    public static async Task<Result<string>> WriteTextAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string content,
+        bool dryRun,
+        bool force,
+        CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
@@ -40,15 +48,21 @@ public static class FileService
         if (SourceFile.Reject(path, full, force) is { } refusal)
             return refusal;
 
-        var before = File.Exists(full) ? File.ReadAllText(full) : string.Empty;
+        var exists = File.Exists(full);
+        var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
+        var after = LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
 
         if (!dryRun)
-            Write(workspace, full, content);
+            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DiffResponse("write_text", path, before, content, dryRun));
+        return Result.Ok(DiffResponse("write_text", path, before, after, dryRun));
     }
 
-    public static Result<string> EditText(LoadedWorkspace workspace, string path, string oldText, string newText, bool dryRun, bool force)
+    public static async Task<Result<string>> EditTextAsync(
+        LoadedWorkspace workspace,
+        string path,
+        EditRequest request,
+        CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
@@ -57,47 +71,90 @@ public static class FileService
 
         var full = resolved.Value!;
 
-        if (SourceFile.Reject(path, full, force) is { } refusal)
+        if (SourceFile.Reject(path, full, request.Force) is { } refusal)
             return refusal;
 
         if (!File.Exists(full))
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
-        return Replace(workspace, full, path, oldText, newText, dryRun);
+        var before = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
+        var rewritten = Rewrite(before, request);
+
+        return rewritten.IsOk
+            ? await ApplyAsync(workspace, full, path, before, rewritten.Value!, request.DryRun, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(rewritten.Error!);
     }
 
-    private static Result<string> Replace(
+    private static Result<string> Rewrite(string before, EditRequest request) => request.Section is { Length: > 0 } section
+        ? Section(before, section, request.NewText)
+        : Snippet(before, request.OldText, request.NewText);
+
+    private static Result<string> Snippet(string before, string oldText, string newText)
+    {
+        if (oldText.Length is 0)
+            return Result.Fail<string>(Errors.Blank("oldText"));
+
+        var match = SnippetSearch.Find(before, oldText);
+
+        if (!match.IsUnique)
+            return Result.Fail<string>(NoMatch(before, oldText, match));
+
+        var ending = LineEndings.Dominant(before);
+
+        return Result.Ok(string.Concat(
+            before.AsSpan(0, match.Start),
+            LineEndings.Adopt(newText, ending),
+            before.AsSpan(match.Start + match.Length)));
+    }
+
+    private static Result<string> Section(string before, string heading, string newText)
+    {
+        var located = DocumentOutline.Locate(DocumentOutline.Headings(before), heading);
+
+        if (!located.IsOk)
+            return Result.Fail<string>(located.Error!);
+
+        var ending = LineEndings.Dominant(before);
+        var lines = before.ReplaceLineEndings(ending).Split(ending);
+        var section = located.Value!;
+        var tail = lines.Skip(section.EndLine);
+
+        return Result.Ok(string.Join(ending, lines.Take(section.StartLine - 1)
+            .Concat(LineEndings.Adopt(newText, ending).Split(ending))
+            .Concat(tail)));
+    }
+
+    private static async Task<Result<string>> ApplyAsync(
         LoadedWorkspace workspace,
         string full,
         string path,
-        string oldText,
-        string newText,
-        bool dryRun)
+        string before,
+        string after,
+        bool dryRun,
+        CancellationToken cancellationToken)
     {
-        var before = File.ReadAllText(full);
-        var occurrences = Count(before, oldText);
-
-        if (occurrences is not 1)
-            return Result.Fail<string>(AmbiguousMatch(occurrences));
-
-        var after = before.Replace(oldText, newText, StringComparison.Ordinal);
-
         if (!dryRun)
-            Write(workspace, full, after);
+            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(DiffResponse("edit_text", path, before, after, dryRun));
     }
 
-    private static TerseError AmbiguousMatch(int occurrences) => Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"oldText matched {occurrences} times, expected exactly 1"),
-        "include more surrounding text so the match is unique");
+    private static TerseError NoMatch(string before, string oldText, SnippetMatch match) => match.Occurrences > 1
+        ? Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"oldText matched {match.Occurrences} times, expected exactly 1"),
+            "include more surrounding text so the match is unique, or pass section= for a markdown heading")
+        : Errors.Invalid(
+            "oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)",
+            Nearest(before, oldText));
 
-    private static int Count(string text, string value) =>
-        string.IsNullOrEmpty(value) ? 0 : (text.Length - text.Replace(value, string.Empty, StringComparison.Ordinal).Length) / value.Length;
+    private static string Nearest(string before, string oldText) =>
+        SnippetSearch.NearMisses(before, oldText, MaxNearMisses) is { Count: > 0 } hits
+            ? "the file's closest lines are - copy one verbatim from read_text: " + string.Join(" | ", hits)
+            : "no line of the file resembles the first line of oldText; re-read the file with read_text, or pass section= for a markdown heading";
 
-    private static void Write(LoadedWorkspace workspace, string full, string content)
+    private static async Task WriteAsync(LoadedWorkspace workspace, string full, string content, CancellationToken cancellationToken)
     {
-        AtomicWrite.Text(full, content);
+        await AtomicWrite.TextAsync(full, content, cancellationToken).ConfigureAwait(false);
         workspace.Sync.Notice(full);
     }
 
@@ -112,9 +169,48 @@ public static class FileService
         return response.ToString();
     }
 
-    private static string Render(string path, string full, LineRange range, CancellationToken cancellationToken)
+    private static Result<string> Present(string path, string text, ReadRequest request)
     {
-        var selection = Collect(full, range, cancellationToken);
+        if (request.Headings)
+            return Outline(path, text);
+
+        return request.Section is { Length: > 0 } heading
+            ? Slice(path, text, heading, request)
+            : Result.Ok(Render(path, text, request.Range));
+    }
+
+    private static Result<string> Outline(string path, string text)
+    {
+        if (!DocumentOutline.IsMarkdown(path))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{path}' is not markdown, so it has no headings"),
+                "drop headings=true, or use get_file_outline for a .cs file"));
+        }
+
+        var sections = DocumentOutline.Headings(text);
+        var response = new ResponseBuilder("read_text", path + " headings");
+
+        response.Summary(sections.Count, sections.Count, "sections");
+
+        foreach (var section in sections)
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"{section.StartLine}-{section.EndLine}  {section.Heading}"));
+
+        return Result.Ok(response.ToString());
+    }
+
+    private static Result<string> Slice(string path, string text, string heading, ReadRequest request)
+    {
+        var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading);
+
+        return located.IsOk
+            ? Result.Ok(Render(path, text, new LineRange(located.Value!.StartLine, located.Value!.EndLine, request.Range.MaxLines)))
+            : Result.Fail<string>(located.Error!);
+    }
+
+    private static string Render(string path, string text, LineRange range)
+    {
+        var selection = Collect(text, range);
         var response = new ResponseBuilder("read_text", path);
 
         response.Summary(selection.Lines.Count, selection.TotalLines, "lines");
@@ -125,40 +221,62 @@ public static class FileService
         return response.ToString();
     }
 
-    private static LineSelection Collect(string full, LineRange range, CancellationToken cancellationToken)
+    private static LineSelection Collect(string text, LineRange range)
     {
+        var total = CountLines(text);
         var lines = new List<string>(Math.Min(range.MaxLines, 512));
         var budget = MaxResponseCharacters;
         var number = 0;
 
-        foreach (var line in File.ReadLines(full))
+        foreach (var line in text.AsSpan().EnumerateLines())
         {
-            cancellationToken.ThrowIfCancellationRequested();
             number++;
 
-            if (number > MaxScannedLines)
+            if (number > total)
                 break;
 
-            if (range.Covers(number) && lines.Count < range.MaxLines && budget > 0)
-            {
-                var text = Fit(line, budget);
+            if (!range.Covers(number) || lines.Count >= range.MaxLines || budget <= 0)
+                continue;
 
-                budget -= text.Length;
-                lines.Add(string.Create(CultureInfo.InvariantCulture, $"{number}: {text}"));
-            }
+            lines.Add(Numbered(number, line, budget));
+            budget -= Math.Min(line.Length, budget);
         }
 
-        return new LineSelection(lines, number);
+        return new LineSelection(lines, total);
     }
 
-    private static string Fit(string line, int budget) => line.Length <= budget
-        ? line
-        : string.Create(CultureInfo.InvariantCulture, $"{line[..budget]}... (+{line.Length - budget} chars)");
+    private static string Numbered(int number, ReadOnlySpan<char> line, int budget) => line.Length <= budget
+        ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
+        : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    private readonly record struct LineRange(int Start, int End, int MaxLines)
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section);
+
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force);
+
+    public readonly record struct LineRange(int Start, int End, int MaxLines)
     {
         public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
     }
 
     private readonly record struct LineSelection(IReadOnlyList<string> Lines, int TotalLines);
+    private static int CountLines(ReadOnlySpan<char> text)
+    {
+        if (text.Length is 0)
+            return 0;
+
+        var count = 1;
+        var start = 0;
+
+        while (text[start..].IndexOf('\n') is var offset and >= 0)
+        {
+            start += offset + 1;
+
+            if (start >= text.Length)
+                return count;
+
+            count++;
+        }
+
+        return count;
+    }
 }

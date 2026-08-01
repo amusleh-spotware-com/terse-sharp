@@ -74,8 +74,8 @@ public sealed class ResxTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(
-                ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun)));
+            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
+                await ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun).ConfigureAwait(false)));
 
     [McpServerTool(Name = "resx_remove")]
     [Description("Remove a key from one culture, or from every file of the family when culture is omitted. Refused while the key is still referenced - by the designer property through Roslyn or by a textual lookup - unless force=true. Not covered by undo_last_change.")]
@@ -106,8 +106,8 @@ public sealed class ResxTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(
-                ResxEditService.Rename(loaded, path, key, newKey, updateReferences, dryRun)));
+            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
+                await ResxEditService.Rename(loaded, path, key, newKey, updateReferences, dryRun).ConfigureAwait(false)));
 
     [McpServerTool(Name = "resx_validate")]
     [Description("Lint the resource families: RESX001 missing translation, RESX002 placeholder mismatch, RESX003 unused key, RESX004 duplicate name, RESX005 orphan, RESX006 empty value, RESX007 trimmed whitespace, RESX008 unsorted, RESX009 stale designer. Answers 'which keys are untranslated' without reading a single file.")]

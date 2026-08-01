@@ -69,8 +69,10 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `node_modules` excluded |
 | `Grep` in non-code files | `search_text` / `search_regex` | tagged `HEURISTIC` |
 | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response |
+| `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges, then only that section |
+| `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
 | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated |
-| `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | refuses an ambiguous match |
+| `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
 | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call |
 | find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
@@ -95,8 +97,8 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` | element-addressed, formatting preserved, compile-gated through the Razor generator |
 | "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
 | "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
-| `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew |
-| `Bash: dotnet test` / `vstest` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
+| `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a clean build is one line |
+| `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
@@ -305,7 +307,12 @@ server ships. Component and parameter answers are then unavailable rather than e
 
 ## Running tests
 
-`run_tests` reports `passed= failed= skipped= total= durationMs=` on every run, then one block per
+**A green run answers in one line** —
+`run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371` — so running the suite after every
+change is nearly free, and `build` behaves the same way (`build ok  0 diagnostics  elapsedMs=4235`).
+The short form is only ever emitted when there is nothing else to report, so do not pass
+`verbose=true` "to be sure". Anything that is not a clean pass returns the full report:
+`run_tests` reports `passed= failed= skipped= total= durationMs=`, then one block per
 failure: the message, expected and actual values, and one workspace-relative `file:line` frame. Fix
 the test from that block — do not shell out to `dotnet test` for the stack trace.
 
@@ -319,6 +326,7 @@ the test from that block — do not shell out to `dotnet test` for the stack tra
 | only what just failed | `rerun_failed` |
 | the slowest N | `run_tests(slowest: 10)` |
 | names without running | `list_tests(contains)` |
+| the full report on a green run | `run_tests(verbose: true)` |
 
 `test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs
 `…SubmitsTwice`) runs both — check `total=`, and use `filter="FullyQualifiedName=<name>"` for exactly

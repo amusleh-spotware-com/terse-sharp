@@ -5,6 +5,8 @@ namespace TerseSharp.Core;
 
 public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
 {
+    private const int MaxStackPath = 512;
+
     public static FileGlob Compile(string glob) => new(
         new Regex(Translate(glob), RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
         IsPathPattern(glob));
@@ -12,13 +14,28 @@ public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
     public static bool IsPathPattern(string glob) =>
         glob.Contains('/', StringComparison.Ordinal) || glob.Contains('\\', StringComparison.Ordinal);
 
-    public bool Matches(string path) => Pattern.IsMatch(path.Replace('\\', '/'));
+    public bool Matches(ReadOnlySpan<char> path)
+    {
+        if (!path.Contains('\\'))
+            return Pattern.IsMatch(path);
+
+        if (path.Length > MaxStackPath)
+            return Pattern.IsMatch(path.ToString().Replace('\\', '/'));
+
+        Span<char> buffer = stackalloc char[MaxStackPath];
+        var target = buffer[..path.Length];
+
+        path.CopyTo(target);
+        target.Replace('\\', '/');
+
+        return Pattern.IsMatch(target);
+    }
 
     public bool MatchesFile(string root, string file) =>
-        Matches(MatchesPath ? Path.GetRelativePath(root, file) : Path.GetFileName(file));
+        MatchesPath ? Matches(Path.GetRelativePath(root, file)) : Matches(Path.GetFileName(file.AsSpan()));
 
-    public bool MatchesRelative(string relativePath) =>
-        Matches(MatchesPath ? relativePath : Path.GetFileName(relativePath));
+    public bool MatchesRelative(ReadOnlySpan<char> relativePath) =>
+        MatchesPath ? Matches(relativePath) : Matches(Path.GetFileName(relativePath));
 
     private static string Translate(string glob)
     {

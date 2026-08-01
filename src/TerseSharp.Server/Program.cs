@@ -26,21 +26,22 @@ serve.SetAction((result, cancellationToken) =>
 static bool Watching(bool disabled) =>
     !disabled && !string.Equals(Environment.GetEnvironmentVariable("TERSE_WATCH"), "0", StringComparison.Ordinal);
 
-install.SetAction(result =>
+install.SetAction(async result =>
 {
-    Console.WriteLine(ClientRegistrar.Register(result.GetValue(clientOption), result.GetValue(workspaceOption)));
+    Console.WriteLine(await ClientRegistrar.Register(result.GetValue(clientOption), result.GetValue(workspaceOption)).ConfigureAwait(false));
 
     if (result.GetValue(skillOption))
-        Console.WriteLine(ClientRegistrar.InstallSkill());
+        Console.WriteLine(await ClientRegistrar.InstallSkill().ConfigureAwait(false));
 
     if (result.GetValue(guardOption))
-        Console.WriteLine(ClientRegistrar.InstallGuard());
+        Console.WriteLine(await ClientRegistrar.InstallGuard().ConfigureAwait(false));
 });
 
 guard.SetAction((_, cancellationToken) =>
     ToolGuard.RunAsync(Console.In, Console.Out, cancellationToken));
 
-uninstall.SetAction(result => Console.WriteLine(ClientRegistrar.Unregister(result.GetValue(clientOption))));
+uninstall.SetAction(async result =>
+    Console.WriteLine(await ClientRegistrar.Unregister(result.GetValue(clientOption)).ConfigureAwait(false)));
 
 doctor.SetAction(async (result, cancellationToken) =>
     Console.WriteLine(await Doctor.RunAsync(result.GetValue(workspaceOption), cancellationToken).ConfigureAwait(false)));

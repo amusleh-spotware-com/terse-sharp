@@ -85,8 +85,8 @@ public sealed class XamlTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspace(workspace, path, loaded =>
-                NavigationTools.Unwrap(XamlEditService.SetProperty(loaded, path, target, property, value, dryRun)));
+            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
+                await XamlEditService.SetProperty(loaded, path, target, property, value, dryRun).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_add_element")]
     [Description("Insert markup as the last child of one XAML element, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]
@@ -98,8 +98,8 @@ public sealed class XamlTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspace(workspace, path, loaded =>
-                NavigationTools.Unwrap(XamlEditService.AddElement(loaded, path, target, markup, dryRun)));
+            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
+                await XamlEditService.AddElement(loaded, path, target, markup, dryRun).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_remove_element")]
     [Description("Remove one XAML element and its children, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]
@@ -110,8 +110,8 @@ public sealed class XamlTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspace(workspace, path, loaded =>
-                NavigationTools.Unwrap(XamlEditService.RemoveElement(loaded, path, target, dryRun)));
+            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
+                await XamlEditService.RemoveElement(loaded, path, target, dryRun).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_styles")]
     [Description("Every Style, ControlTemplate and DataTemplate that targets an element type, keyed and implicit, with its BasedOn chain resolved. Answers \"why does this control look like that\" without reading Generic.xaml and every theme dictionary.")]

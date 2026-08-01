@@ -13,6 +13,7 @@ public sealed class LoadedWorkspace : IDisposable
     private readonly Lock historyGate = new();
     private readonly Lock leaseGate = new();
     private readonly WorkspaceWatcher watcher;
+    private readonly Lazy<string> lineEnding;
 
     private int leases;
     private bool retired;
@@ -29,6 +30,7 @@ public sealed class LoadedWorkspace : IDisposable
         Sync = new WorkspaceSync(Root, seed.Generations);
         Indexes = new WorkspaceIndexes(Root, Sync);
         watcher = WorkspaceWatcher.Create(Root, Sync, seed.Watch);
+        lineEnding = new Lazy<string>(() => DetectLineEnding(load.SolutionPath));
     }
 
     public WorkspaceLoadResult Load { get; }
@@ -42,6 +44,8 @@ public sealed class LoadedWorkspace : IDisposable
     public WorkspaceIndexes Indexes { get; }
 
     public string SolutionPath => Load.SolutionPath;
+
+    public string LineEnding => lineEnding.Value;
 
     public DateTimeOffset LastUsedUtc { get; private set; }
 
@@ -140,6 +144,22 @@ public sealed class LoadedWorkspace : IDisposable
         Sync.Dispose();
         Indexes.Dispose();
     }
+    private static string DetectLineEnding(string solutionPath)
+    {
+        try
+        {
+            return LineEndings.Dominant(File.ReadAllText(solutionPath));
+        }
+        catch (IOException)
+        {
+            return Environment.NewLine;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Environment.NewLine;
+        }
+    }
+
     private Solution Restore(HistoryEntry entry)
     {
         var solution = workspace.CurrentSolution;

@@ -4,7 +4,7 @@ namespace TerseSharp.Core;
 
 public static class XamlEditService
 {
-    public static Result<string> SetProperty(
+    public static Task<Result<string>> SetProperty(
         LoadedWorkspace workspace,
         string path,
         string target,
@@ -13,10 +13,10 @@ public static class XamlEditService
         bool dryRun) =>
         Apply(workspace, path, "xaml_set_property", target, (text, span) => Rewrite(text, span, property, value), dryRun);
 
-    public static Result<string> RemoveElement(LoadedWorkspace workspace, string path, string target, bool dryRun) =>
+    public static Task<Result<string>> RemoveElement(LoadedWorkspace workspace, string path, string target, bool dryRun) =>
         Apply(workspace, path, "xaml_remove_element", target, Cut, dryRun);
 
-    public static Result<string> AddElement(
+    public static Task<Result<string>> AddElement(
         LoadedWorkspace workspace,
         string path,
         string target,
@@ -126,14 +126,14 @@ public static class XamlEditService
         return new string(' ', start - lineStart);
     }
 
-    private static Result<string> Apply(
+    private static async Task<Result<string>> Apply(
         LoadedWorkspace workspace,
         string path,
         string tool,
         string target,
         Func<string, TagSpan, Result<string>> change,
         bool dryRun)
-{
+    {
         var resolved = PathGuard.Resolve(workspace, path);
 
         if (!resolved.IsOk)
@@ -150,14 +150,14 @@ public static class XamlEditService
         if (!located.IsOk)
             return Result.Fail<string>(located.Error!);
 
-        var written = Write(tool, full, PositionFormat.Relative(workspace.Root, full), located.Value, change, dryRun);
+        var written = await Write(tool, full, PositionFormat.Relative(workspace.Root, full), located.Value, change, dryRun).ConfigureAwait(false);
 
         if (written.IsOk && !dryRun)
             workspace.Sync.Bumped(ChangeKind.Xaml);
 
         return written;
     }
-    private static Result<string> Write(
+    private static async Task<Result<string>> Write(
         string tool,
         string full,
         string relative,
@@ -165,7 +165,7 @@ public static class XamlEditService
         Func<string, TagSpan, Result<string>> change,
         bool dryRun)
     {
-        var before = File.ReadAllText(full);
+        var before = await File.ReadAllTextAsync(full).ConfigureAwait(false);
         var span = TagSpan.At(before, line);
 
         if (span is null)
@@ -182,7 +182,7 @@ public static class XamlEditService
             return Result.Fail<string>(malformed);
 
         if (!dryRun)
-            AtomicWrite.Text(full, after);
+            await AtomicWrite.TextAsync(full, after).ConfigureAwait(false);
 
         return Result.Ok(Describe(tool, relative, before, after, dryRun));
     }

@@ -48,21 +48,20 @@ public sealed class ProjectFileTests : IDisposable
         """;
 
     [Fact]
-    public void AddPackage_WhenCentralPackageManagementIsInsideTheWorkspace_WritesTheVersionThere()
+    public async Task AddPackage_WhenCentralPackageManagementIsInsideTheWorkspace_WritesTheVersionThere()
     {
         var project = Project("src");
 
         File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), Central);
 
-        var result = ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.True(result.IsOk, result.Error?.Message);
         Assert.Contains("""<PackageVersion Include="Serilog" Version="4.0.0" />""", Props(), StringComparison.Ordinal);
         Assert.Contains("""<PackageReference Include="Serilog" />""", File.ReadAllText(project), StringComparison.Ordinal);
     }
-
     [Fact]
-    public void AddPackage_WhenCentralPackageManagementSitsAboveTheWorkspace_IsRefusedAndWritesNothing()
+    public async Task AddPackage_WhenCentralPackageManagementSitsAboveTheWorkspace_IsRefusedAndWritesNothing()
     {
         var workspace = Directory.CreateDirectory(Path.Combine(root, "nested")).FullName;
         var project = Project(Path.Combine("nested", "src"));
@@ -70,54 +69,50 @@ public sealed class ProjectFileTests : IDisposable
         File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), Central);
 
         var before = File.ReadAllText(Path.Combine(root, "Directory.Packages.props"));
-        var result = ProjectFile.AddPackage(workspace, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(workspace, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.False(result.IsOk);
         Assert.Contains("above the workspace root", result.Error!.Message, StringComparison.Ordinal);
         Assert.Equal(before, Props());
     }
-
     [Fact]
-    public void AddPackage_WithoutCentralPackageManagement_WritesTheVersionOnTheReference()
+    public async Task AddPackage_WithoutCentralPackageManagement_WritesTheVersionOnTheReference()
     {
         var project = Project("src");
 
-        var result = ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.True(result.IsOk, result.Error?.Message);
         Assert.Contains("""Include="Serilog" Version="4.0.0" """, File.ReadAllText(project), StringComparison.Ordinal);
     }
-
     [Fact]
-    public void AddPackage_WhenDirectoryPackagesPropsExistsButCentralManagementIsOff_WritesTheVersionOnTheReference()
+    public async Task AddPackage_WhenDirectoryPackagesPropsExistsButCentralManagementIsOff_WritesTheVersionOnTheReference()
     {
         var project = Project("src");
 
         File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), CentralDisabled);
 
-        var result = ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.True(result.IsOk, result.Error?.Message);
         Assert.Contains("""Include="Serilog" Version="4.0.0" """, File.ReadAllText(project), StringComparison.Ordinal);
         Assert.DoesNotContain("Serilog", Props(), StringComparison.Ordinal);
     }
-
     [Fact]
-    public void AddPackage_WhenCentralManagementIsDeclaredInDirectoryBuildProps_WritesTheVersionCentrally()
+    public async Task AddPackage_WhenCentralManagementIsDeclaredInDirectoryBuildProps_WritesTheVersionCentrally()
     {
         var project = Project("src");
 
         File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), EmptyVersions);
         File.WriteAllText(Path.Combine(root, "Directory.Build.props"), Enabled);
 
-        var result = ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.True(result.IsOk, result.Error?.Message);
         Assert.Contains("""<PackageVersion Include="Serilog" Version="4.0.0" />""", Props(), StringComparison.Ordinal);
     }
-
     [Fact]
-    public void AddPackage_WhenCentralManagementIsDeclaredInTheProject_WritesTheVersionCentrally()
+    public async Task AddPackage_WhenCentralManagementIsDeclaredInTheProject_WritesTheVersionCentrally()
     {
         var directory = Directory.CreateDirectory(Path.Combine(root, "src")).FullName;
         var project = Path.Combine(directory, "App.csproj");
@@ -125,14 +120,13 @@ public sealed class ProjectFileTests : IDisposable
         File.WriteAllText(project, EnabledProject);
         File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), EmptyVersions);
 
-        var result = ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.True(result.IsOk, result.Error?.Message);
         Assert.Contains("""<PackageVersion Include="Serilog" Version="4.0.0" />""", Props(), StringComparison.Ordinal);
     }
-
     [Fact]
-    public void AddPackage_WhenCentralManagementIsAnUnresolvedExpression_TreatsItAsEnabled()
+    public async Task AddPackage_WhenCentralManagementIsAnUnresolvedExpression_TreatsItAsEnabled()
     {
         var project = Project("src");
         var expression = """
@@ -147,30 +141,29 @@ public sealed class ProjectFileTests : IDisposable
 
         File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), expression);
 
-        var result = ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.True(result.IsOk, result.Error?.Message);
         Assert.Contains("""<PackageVersion Include="Serilog" Version="4.0.0" />""", Props(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AddPackage_WhenAnUnmanagedPropsFileSitsAboveTheWorkspace_IsNotTreatedAsCentralManagement()
+    public async Task AddPackage_WhenAnUnmanagedPropsFileSitsAboveTheWorkspace_IsNotTreatedAsCentralManagement()
     {
         var workspace = Directory.CreateDirectory(Path.Combine(root, "nested")).FullName;
         var project = Project(Path.Combine("nested", "src"));
 
         File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), CentralDisabled);
 
-        var result = ProjectFile.AddPackage(workspace, project, "Serilog", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(workspace, project, "Serilog", "4.0.0", dryRun: false);
 
         Assert.True(result.IsOk, result.Error?.Message);
         Assert.Contains("""Include="Serilog" Version="4.0.0" """, File.ReadAllText(project), StringComparison.Ordinal);
     }
-
     [Fact]
-    public void AddPackage_WithABlankPackage_IsRefused()
+    public async Task AddPackage_WithABlankPackage_IsRefused()
     {
-        var result = ProjectFile.AddPackage(root, Project("src"), "  ", "4.0.0", dryRun: false);
+        var result = await ProjectFile.AddPackage(root, Project("src"), "  ", "4.0.0", dryRun: false);
 
         Assert.False(result.IsOk);
         Assert.Equal(TerseErrorCode.InvalidArgument, result.Error!.Code);

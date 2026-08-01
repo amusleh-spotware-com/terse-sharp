@@ -4,7 +4,7 @@ namespace TerseSharp.Core;
 
 public static class ProjectFile
 {
-    public static Result<string> Create(string projectPath, string kind, string? targetFramework, bool dryRun)
+    public static async Task<Result<string>> Create(string projectPath, string kind, string? targetFramework, bool dryRun)
     {
         var full = Path.GetFullPath(projectPath);
 
@@ -20,30 +20,30 @@ public static class ProjectFile
         if (!dryRun)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            AtomicWrite.Text(full, document.ToString() + Environment.NewLine);
+            await AtomicWrite.TextAsync(full, document.ToString() + Environment.NewLine).ConfigureAwait(false);
         }
 
         return Rendered("project_create", projectPath, string.Empty, document.ToString(), dryRun);
     }
 
-    public static Result<string> AddReference(string projectPath, string targetProject, bool dryRun) =>
+    public static Task<Result<string>> AddReference(string projectPath, string targetProject, bool dryRun) =>
         AddItem(projectPath, "ProjectReference", Relative(projectPath, targetProject), dryRun, "project_add_reference");
 
-    public static Result<string> RemoveReference(string projectPath, string targetProject, bool dryRun) =>
+    public static Task<Result<string>> RemoveReference(string projectPath, string targetProject, bool dryRun) =>
         RemoveItem(projectPath, "ProjectReference", Relative(projectPath, targetProject), dryRun, "project_remove_reference");
 
-    public static Result<string> AddPackage(string root, string projectPath, string package, string? version, bool dryRun)
+    public static Task<Result<string>> AddPackage(string root, string projectPath, string package, string? version, bool dryRun)
     {
         if (string.IsNullOrWhiteSpace(package))
-            return Result.Fail<string>(Errors.Blank("package"));
+            return Task.FromResult(Result.Fail<string>(Errors.Blank("package")));
 
         var central = CentralVersionsFile(root, projectPath);
 
         if (central is null && CentralVersionsFile(null, projectPath) is not null)
         {
-            return Result.Fail<string>(Errors.Invalid(
+            return Task.FromResult(Result.Fail<string>(Errors.Invalid(
                 "this project's Directory.Packages.props sits above the workspace root",
-                "load the workspace at the repository root, or edit Directory.Packages.props directly"));
+                "load the workspace at the repository root, or edit Directory.Packages.props directly")));
         }
 
         return central is null
@@ -51,9 +51,9 @@ public static class ProjectFile
             : AddCentralPackage(projectPath, central, package, version, dryRun);
     }
 
-    public static Result<string> RemovePackage(string projectPath, string package, bool dryRun) =>
+    public static Task<Result<string>> RemovePackage(string projectPath, string package, bool dryRun) =>
         string.IsNullOrWhiteSpace(package)
-            ? Result.Fail<string>(Errors.Blank("package"))
+            ? Task.FromResult(Result.Fail<string>(Errors.Blank("package")))
             : RemoveItem(projectPath, "PackageReference", package, dryRun, "package_remove");
 
     public static Result<string> ListPackages(string projectPath)
@@ -101,7 +101,7 @@ public static class ProjectFile
         return Result.Ok(response.ToString());
     }
 
-    public static Result<string> SetProperty(string projectPath, string name, string value, bool dryRun)
+    public static async Task<Result<string>> SetProperty(string projectPath, string name, string value, bool dryRun)
     {
         var document = Load(projectPath);
 
@@ -116,10 +116,10 @@ public static class ProjectFile
         else
             existing.Value = value;
 
-        return Save(projectPath, document, before, dryRun, "project_set_property", name + "=" + value);
+        return await Save(projectPath, document, before, dryRun, "project_set_property", name + "=" + value).ConfigureAwait(false);
     }
 
-    private static Result<string> AddCentralPackage(
+    private static async Task<Result<string>> AddCentralPackage(
         string projectPath,
         string centralPath,
         string package,
@@ -140,16 +140,16 @@ public static class ProjectFile
             Group(central).Add(new XElement("PackageVersion", new XAttribute("Include", package), new XAttribute("Version", version)));
 
         if (!dryRun)
-            AtomicWrite.Text(centralPath, central.ToString() + Environment.NewLine);
+            await AtomicWrite.TextAsync(centralPath, central.ToString() + Environment.NewLine).ConfigureAwait(false);
 
-        var added = AddItem(projectPath, "PackageReference", package, dryRun, "package_add");
+        var added = await AddItem(projectPath, "PackageReference", package, dryRun, "package_add").ConfigureAwait(false);
 
         return added.IsOk
             ? Result.Ok(added.Value + "\n" + UnifiedDiff.Between(centralPath, before, central.ToString()))
             : added;
     }
 
-    private static Result<string> AddItem(
+    private static async Task<Result<string>> AddItem(
         string projectPath,
         string itemName,
         string include,
@@ -173,10 +173,10 @@ public static class ProjectFile
 
         ItemGroup(document, itemName).Add(element);
 
-        return Save(projectPath, document, before, dryRun, tool, include);
+        return await Save(projectPath, document, before, dryRun, tool, include).ConfigureAwait(false);
     }
 
-    private static Result<string> RemoveItem(string projectPath, string itemName, string include, bool dryRun, string tool)
+    private static async Task<Result<string>> RemoveItem(string projectPath, string itemName, string include, bool dryRun, string tool)
     {
         var document = Load(projectPath);
 
@@ -191,7 +191,7 @@ public static class ProjectFile
 
         element.Remove();
 
-        return Save(projectPath, document, before, dryRun, tool, include);
+        return await Save(projectPath, document, before, dryRun, tool, include).ConfigureAwait(false);
     }
 
     private static bool Named(XElement element, string include) =>
@@ -321,7 +321,7 @@ public static class ProjectFile
         }
     }
 
-    private static Result<string> Save(
+    private static async Task<Result<string>> Save(
         string projectPath,
         XDocument document,
         string before,
@@ -332,7 +332,7 @@ public static class ProjectFile
         var after = document.ToString() + Environment.NewLine;
 
         if (!dryRun)
-            AtomicWrite.Text(Path.GetFullPath(projectPath), after);
+            await AtomicWrite.TextAsync(Path.GetFullPath(projectPath), after).ConfigureAwait(false);
 
         return Rendered(tool, argument, before, after, dryRun);
     }

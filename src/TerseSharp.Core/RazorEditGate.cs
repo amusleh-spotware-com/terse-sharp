@@ -31,7 +31,7 @@ public static class RazorEditGate
         if (report is { NewErrors.Count: > 0 })
             return Result.Fail<string>(Errors.CompileRegression([.. report.NewErrors]));
 
-        AtomicWrite.Text(context.FullPath, updatedText);
+        await AtomicWrite.TextAsync(context.FullPath, updatedText, cancellationToken).ConfigureAwait(false);
         RazorIndex.Invalidate(context.FullPath);
 
         return Result.Ok(Render(context, updatedText, options.Tool, "applied", report, Refresh(context, updatedText)));

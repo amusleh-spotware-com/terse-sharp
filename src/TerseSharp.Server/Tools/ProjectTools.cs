@@ -113,12 +113,25 @@ public sealed class ProjectTools(ToolContext context)
     private static string Resolve(LoadedWorkspace workspace, string path) =>
         Path.IsPathRooted(path) ? path : Path.Combine(workspace.Root, path);
 
-    private Task<string> Guarded(string? workspace, string path, Func<LoadedWorkspace, Result<string>> action)
+    private Task<string> Guarded(string? workspace, string path, Func<LoadedWorkspace, Task<Result<string>>> action)
     {
         if (context.RejectWrite() is { } rejection)
             return Task.FromResult(rejection);
 
-        return Reading(workspace, path, action);
+        return ReadingAsync(workspace, path, action);
+    }
+
+    private Task<string> ReadingAsync(string? workspace, string path, Func<LoadedWorkspace, Task<Result<string>>> action)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return Task.FromResult(Errors.Blank("path").Render());
+
+        return context.WithWorkspaceAsync(workspace, path, async loaded =>
+        {
+            var guard = PathGuard.Resolve(loaded, path);
+
+            return guard.IsOk ? NavigationTools.Unwrap(await action(loaded).ConfigureAwait(false)) : guard.Error!.Render();
+        });
     }
 
     private Task<string> Reading(string? workspace, string path, Func<LoadedWorkspace, Result<string>> action)

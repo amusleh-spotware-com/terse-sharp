@@ -129,13 +129,13 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
     private static Result<WorkspaceLease> ByHint(LoadedWorkspace[] loaded, string hint)
     {
-        var matches = loaded.Where(workspace => Matches(workspace, hint)).ToArray();
+        var best = Best(loaded, hint);
 
-        return matches.Length switch
+        return best switch
         {
-            1 => Ok(matches[0]),
-            0 => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Paths(loaded))),
-            _ => Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Paths(loaded))),
+            [var only] => Ok(only),
+            [] => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Names(loaded))),
+            _ => Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(best))),
         };
     }
 
@@ -146,17 +146,33 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
         var matches = loaded.Where(workspace => workspace.Contains(pathHint)).ToArray();
 
-        return matches.Length is 1 ? Ok(matches[0]) : null;
+        return matches.Length is 0 ? null : Ok(matches.MaxBy(workspace => workspace.Root.Length)!);
     }
 
     private static Result<WorkspaceLease> Single(LoadedWorkspace[] loaded) =>
         loaded.Length is 1
             ? Ok(loaded[0])
-            : Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Paths(loaded)));
+            : Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(loaded)));
 
-    private static bool Matches(LoadedWorkspace workspace, string hint) =>
-        workspace.SolutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase)
-        || workspace.Git.WorktreeName.Equals(hint, StringComparison.OrdinalIgnoreCase);
+    private static int Tier(LoadedWorkspace workspace, string hint)
+    {
+        if (Path.IsPathRooted(hint) && PathBoundary.SameFile(workspace.SolutionPath, Path.GetFullPath(hint)))
+            return 0;
+
+        if (Same(Path.GetFileName(workspace.SolutionPath), hint))
+            return 1;
+
+        if (Same(Path.GetFileNameWithoutExtension(workspace.SolutionPath), hint))
+            return 2;
+
+        if (Same(workspace.Git.WorktreeName, hint))
+            return 3;
+
+        if (Same(Path.GetFileName(workspace.Root), hint))
+            return 4;
+
+        return workspace.SolutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase) ? 5 : int.MaxValue;
+    }
 
     private static Result<WorkspaceLease> Ok(LoadedWorkspace workspace)
     {
@@ -165,7 +181,21 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         return Result.Ok(workspace.Lease());
     }
 
-    private static string[] Paths(LoadedWorkspace[] loaded) => [.. loaded.Select(workspace => workspace.SolutionPath)];
+    private static LoadedWorkspace[] Best(LoadedWorkspace[] loaded, string hint)
+    {
+        var ranked = loaded.Select(workspace => (Workspace: workspace, Tier: Tier(workspace, hint)))
+            .Where(entry => entry.Tier is not int.MaxValue)
+            .ToArray();
+
+        return ranked.Length is 0
+            ? []
+            : [.. ranked.Where(entry => entry.Tier == ranked.Min(other => other.Tier)).Select(entry => entry.Workspace)];
+    }
+
+    private static bool Same(string left, string right) => left.Equals(right, StringComparison.OrdinalIgnoreCase);
+
+    private static string[] Names(LoadedWorkspace[] loaded) =>
+        [.. loaded.Select(workspace => Path.GetFileName(workspace.SolutionPath) + " (" + workspace.Git.WorktreeName + ") -> " + workspace.SolutionPath)];
 
     public async Task<WorkspaceLoadResult> ReloadAsync(string path, CancellationToken cancellationToken) =>
         (await SwapAsync(Path.GetFullPath(path), null, cancellationToken).ConfigureAwait(false)).Load;

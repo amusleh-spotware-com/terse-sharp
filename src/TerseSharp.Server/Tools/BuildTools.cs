@@ -10,13 +10,14 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
     [McpServerTool(Name = "build")]
-    [Description("Build the workspace and return deduplicated diagnostics only, never raw MSBuild output.")]
+    [Description("Build the workspace and return deduplicated diagnostics only, never raw MSBuild output. A clean build answers in one line; pass verbose=true for the full report.")]
     public Task<string> Build(
         [Description("Project path; empty builds the solution.")] string? project = null,
+        [Description("Return the full report even when the build is clean. Default false, which answers a clean build in one line.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
-            Contained(target, project, resolved => BuildWithRecoveryAsync(target, resolved, cancellationToken)));
+            Contained(target, project, resolved => BuildWithRecoveryAsync(target, resolved, verbose, cancellationToken)));
 
     [McpServerTool(Name = "clean")]
     [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. Not covered by undo_last_change.")]
@@ -36,7 +37,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. Returns passed/failed/skipped/total counters plus every failure with its message, expected and actual values, and one source frame - never the raw runner output.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; any failure returns the full report with each failure's message, expected and actual values, and one source frame. Pass verbose=true to get the full report on a green run too.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
@@ -44,6 +45,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
         [Description("List passing tests too.")] bool includePassed = false,
         [Description("List the N slowest tests.")] int slowest = 0,
+        [Description("Return the full report even when every test passed. Default false, which answers a green run in one line.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
@@ -54,15 +56,16 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             return selection.IsOk
                 ? Contained(target, project, resolved => RunAsync(
                     target,
-                    new TestRunRequest(resolved ?? target.SolutionPath, selection.Value, noBuild, includePassed, slowest, Seconds(timeoutSeconds)),
+                    new TestRunRequest(resolved ?? target.SolutionPath, selection.Value, noBuild, includePassed, slowest, Seconds(timeoutSeconds), verbose),
                     cancellationToken))
                 : Task.FromResult(selection.Error!.Render());
         });
 
     [McpServerTool(Name = "rerun_failed")]
-    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target.")]
+    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target. A green re-run answers in one line.")]
     public Task<string> RerunFailed(
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
+        [Description("Return the full report even when every re-run test passed.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
@@ -71,7 +74,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             var memory = lastRun.Memory;
 
             return memory.Covers(target.Root)
-                ? RunAsync(target, new TestRunRequest(memory.Target, Rerun(memory), noBuild, false, 0, Seconds(timeoutSeconds)), cancellationToken)
+                ? RunAsync(target, new TestRunRequest(memory.Target, Rerun(memory), noBuild, false, 0, Seconds(timeoutSeconds), verbose), cancellationToken)
                 : Task.FromResult(Errors.Invalid(
                     "no failing test is remembered for this workspace",
                     "call run_tests in this workspace first; a green run leaves nothing to re-run").Render());
@@ -93,10 +96,10 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                 Seconds(timeoutSeconds),
                 cancellationToken)));
 
-    private Task<string> BuildWithRecoveryAsync(WorkspaceTarget target, string? project, CancellationToken cancellationToken) =>
+    private Task<string> BuildWithRecoveryAsync(WorkspaceTarget target, string? project, bool verbose, CancellationToken cancellationToken) =>
         RecoveredAsync(target, "build", async () =>
         {
-            var run = await DotnetRunner.BuildAsync(target, project, cancellationToken).ConfigureAwait(false);
+            var run = await DotnetRunner.BuildAsync(target, project, verbose, cancellationToken).ConfigureAwait(false);
 
             return new LockedRun(run.Response, run.Locked);
         }, cancellationToken);

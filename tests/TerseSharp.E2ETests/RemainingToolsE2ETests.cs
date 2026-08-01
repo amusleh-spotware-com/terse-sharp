@@ -48,7 +48,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task Build_ReportsTheExitCodeAndNoMsBuildSpew()
     {
-        var text = await server.CallAsync("build", []);
+        var text = await server.CallAsync("build", new() { ["verbose"] = true });
 
         Assert.Contains("exitCode=0", text, StringComparison.Ordinal);
         Assert.Contains("0 diagnostics", text, StringComparison.Ordinal);
@@ -132,5 +132,15 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
             .ToArray();
 
         return int.Parse(digits, CultureInfo.InvariantCulture);
+    }
+    [Fact]
+    public async Task Build_WhenClean_AnswersInOneLineUnlessVerboseIsAsked()
+    {
+        var quiet = await server.CallAsync("build", []);
+
+        Assert.StartsWith("build ok", quiet, StringComparison.Ordinal);
+        Assert.Contains("0 diagnostics", quiet, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", quiet, StringComparison.Ordinal);
+        Assert.True(quiet.Length < 120, quiet);
     }
 }

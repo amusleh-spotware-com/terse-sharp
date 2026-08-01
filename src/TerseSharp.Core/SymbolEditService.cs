@@ -72,7 +72,7 @@ public static class SymbolEditService
         var member = MemberDeclaration.Parse(declaration);
 
         return member.IsOk
-            ? await SwapAsync(workspace, target, type.AddMembers(member.Value!), options, cancellationToken).ConfigureAwait(false)
+            ? await SwapAsync(workspace, target, Appended(type, member.Value!), options, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(member.Error!);
     }
 
@@ -192,6 +192,26 @@ public static class SymbolEditService
         LocalFunctionStatementSyntax local => local.WithBody(block).WithExpressionBody(null).WithSemicolonToken(default),
         _ => null,
     };
+
+    private static MemberDeclarationSyntax Separated(MemberDeclarationSyntax member, bool blankLineBefore)
+    {
+        var leading = member.GetLeadingTrivia();
+        var spaced = blankLineBefore
+            ? leading.Insert(0, SyntaxFactory.ElasticCarriageReturnLineFeed)
+            : leading;
+
+        return member
+            .WithLeadingTrivia(spaced)
+            .WithTrailingTrivia(member.GetTrailingTrivia().Add(SyntaxFactory.ElasticCarriageReturnLineFeed));
+    }
+
+    private static TypeDeclarationSyntax Appended(TypeDeclarationSyntax type, MemberDeclarationSyntax member) =>
+        type.AddMembers(Separated(member, type.Members.Count > 0)).WithCloseBraceToken(OnItsOwnLine(type.CloseBraceToken));
+
+    private static SyntaxToken OnItsOwnLine(SyntaxToken closeBrace) =>
+        closeBrace.LeadingTrivia.Any(SyntaxKind.EndOfLineTrivia)
+            ? closeBrace
+            : closeBrace.WithLeadingTrivia(closeBrace.LeadingTrivia.Insert(0, SyntaxFactory.ElasticCarriageReturnLineFeed));
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

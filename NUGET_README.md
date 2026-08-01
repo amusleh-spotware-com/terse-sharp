@@ -136,8 +136,8 @@ Prefer to configure it by hand:
 | `Read` a `.resx` file | `resx_get` | keys and values per culture; a missing translation prints `MISSING` |
 | `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
 | `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
-| `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
-| `dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
+| `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew; a clean build is one line |
+| `dotnet test` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
 | `dotnet format` | `format`, `cleanup fix=all`, `cleanup verify=true` | compile-gated code fixes and a one-line verdict, never raw CLI output |
 | `dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
 

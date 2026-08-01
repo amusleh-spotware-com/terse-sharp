@@ -27,7 +27,7 @@ public static class Errors
     public static TerseError AmbiguousWorkspace(IReadOnlyList<string> loaded) => new(
         TerseErrorCode.AmbiguousWorkspace,
         "several workspaces are loaded and the request does not identify one",
-        "pass workspace=<path or worktree name>; loaded: " + string.Join(", ", loaded));
+        "pass workspace=<solution file name, worktree name or full path>; loaded: " + string.Join(" | ", loaded));
 
     public static TerseError SymbolNotFound(string symbolId, IReadOnlyList<string> nearest) => new(
         TerseErrorCode.SymbolNotFound,

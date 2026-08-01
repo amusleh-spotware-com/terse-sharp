@@ -155,6 +155,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         {
             ["project"] = TestProject,
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.PassesWithData(volume: 1)",
+            ["verbose"] = true,
         });
 
         Assert.Contains("passed=2 failed=0 skipped=0 total=2", text, StringComparison.Ordinal);
@@ -183,12 +184,26 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
         });
 
-        Assert.Contains("0 failures", text, StringComparison.Ordinal);
-        Assert.Contains("passed=1 failed=0 skipped=0 total=1", text, StringComparison.Ordinal);
-        Assert.True(Tokens(text) <= 120, text);
+        Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
+        Assert.Contains("passed=1 skipped=0 total=1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", text, StringComparison.Ordinal);
+        Assert.True(Tokens(text) <= 40, text);
     }
 
     private Task<string> RunAsync(Dictionary<string, object?> arguments) => server.CallAsync("run_tests", arguments);
 
     private static int Tokens(string text) => (text.Length + 3) / 4;
+    [Fact]
+    public async Task RunTests_WithVerbose_KeepsTheFullReportOnAGreenRun()
+    {
+        var text = await RunAsync(new()
+        {
+            ["project"] = TestProject,
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("0 failures", text, StringComparison.Ordinal);
+        Assert.Contains("passed=1 failed=0 skipped=0 total=1", text, StringComparison.Ordinal);
+    }
 }

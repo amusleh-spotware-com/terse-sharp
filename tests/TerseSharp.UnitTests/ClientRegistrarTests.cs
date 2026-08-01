@@ -18,11 +18,11 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public void Register_WritesTheServerEntryWithTheWorkspaceArgument()
+    public async Task Register_WritesTheServerEntryWithTheWorkspaceArgument()
     {
         File.WriteAllText(ClaudeConfig, "{}");
 
-        ClientRegistrar.Register("claude-code", @"C:\repo\App.slnx");
+        await ClientRegistrar.Register("claude-code", @"C:\repo\App.slnx");
 
         var servers = Load()["mcpServers"]!.AsObject();
 
@@ -33,11 +33,11 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public void Register_PreservesEveryOtherServer()
+    public async Task Register_PreservesEveryOtherServer()
     {
         File.WriteAllText(ClaudeConfig, """{"mcpServers":{"other":{"command":"x"}},"unrelated":42}""");
 
-        ClientRegistrar.Register("claude-code", null);
+        await ClientRegistrar.Register("claude-code", null);
 
         var root = Load();
 
@@ -47,12 +47,12 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public void Unregister_RemovesOnlyTheTerseEntry()
+    public async Task Unregister_RemovesOnlyTheTerseEntry()
     {
         File.WriteAllText(ClaudeConfig, """{"mcpServers":{"other":{"command":"x"}}}""");
 
-        ClientRegistrar.Register("claude-code", null);
-        ClientRegistrar.Unregister("claude-code");
+        await ClientRegistrar.Register("claude-code", null);
+        await ClientRegistrar.Unregister("claude-code");
 
         var servers = Load()["mcpServers"]!.AsObject();
 
@@ -61,11 +61,11 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public void Register_WithoutAWorkspace_OmitsTheWorkspaceArgument()
+    public async Task Register_WithoutAWorkspace_OmitsTheWorkspaceArgument()
     {
         File.WriteAllText(ClaudeConfig, "{}");
 
-        ClientRegistrar.Register("claude-code", null);
+        await ClientRegistrar.Register("claude-code", null);
 
         Assert.Equal(
             ["serve"],
@@ -73,53 +73,53 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public void Register_WhenClaudeConfigDirectoryIsSet_WritesIntoThatDirectory()
+    public async Task Register_WhenClaudeConfigDirectoryIsSet_WritesIntoThatDirectory()
     {
         var configDirectory = Path.Combine(home, "profile");
 
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
 
-        ClientRegistrar.Register("claude-code", null);
+        await ClientRegistrar.Register("claude-code", null);
 
         Assert.False(File.Exists(ClaudeConfig));
         Assert.NotNull(LoadFrom(Path.Combine(configDirectory, ".claude.json"))["mcpServers"]!["terse-sharp"]);
     }
 
     [Fact]
-    public void Unregister_WhenClaudeConfigDirectoryIsSet_RemovesFromThatDirectory()
+    public async Task Unregister_WhenClaudeConfigDirectoryIsSet_RemovesFromThatDirectory()
     {
         var configDirectory = Path.Combine(home, "profile");
 
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
 
-        ClientRegistrar.Register("claude-code", null);
-        ClientRegistrar.Unregister("claude-code");
+        await ClientRegistrar.Register("claude-code", null);
+        await ClientRegistrar.Unregister("claude-code");
 
         Assert.Null(LoadFrom(Path.Combine(configDirectory, ".claude.json"))["mcpServers"]!["terse-sharp"]);
     }
 
     [Fact]
-    public void InstallSkill_WhenClaudeConfigDirectoryIsSet_WritesUnderThatDirectory()
+    public async Task InstallSkill_WhenClaudeConfigDirectoryIsSet_WritesUnderThatDirectory()
     {
         var configDirectory = Path.Combine(home, "profile");
 
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
 
-        ClientRegistrar.InstallSkill();
+        await ClientRegistrar.InstallSkill();
 
         Assert.True(File.Exists(Path.Combine(configDirectory, "skills", "terse-sharp", "SKILL.md")));
     }
 
     [Fact]
-    public void InstallSkill_WithoutClaudeConfigDirectory_WritesUnderTheHomeClaudeDirectory()
+    public async Task InstallSkill_WithoutClaudeConfigDirectory_WritesUnderTheHomeClaudeDirectory()
     {
-        ClientRegistrar.InstallSkill();
+        await ClientRegistrar.InstallSkill();
 
         Assert.True(File.Exists(Path.Combine(home, ".claude", "skills", "terse-sharp", "SKILL.md")));
     }
 
     [Fact]
-    public void State_MovesToRegisteredOnlyOnceTheEntryExistsInTheConfigInUse()
+    public async Task State_MovesToRegisteredOnlyOnceTheEntryExistsInTheConfigInUse()
     {
         var configDirectory = Path.Combine(home, "profile");
 
@@ -134,7 +134,7 @@ public sealed class ClientRegistrarTests : IDisposable
 
         Assert.Equal(ClientConfigState.NotRegistered, ClientRegistrar.State(target));
 
-        ClientRegistrar.Register("claude-code", null);
+        await ClientRegistrar.Register("claude-code", null);
 
         Assert.Equal(ClientConfigState.Registered, ClientRegistrar.State(target));
     }
@@ -148,43 +148,42 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public void Register_WithoutAClientAndAnUncreatedClaudeConfigDirectory_StillRegistersClaudeCode()
+    public async Task Register_WithoutAClientAndAnUncreatedClaudeConfigDirectory_StillRegistersClaudeCode()
     {
         var configDirectory = Path.Combine(home, "profile");
 
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", configDirectory);
 
-        ClientRegistrar.Register(null, null);
+        await ClientRegistrar.Register(null, null);
 
         Assert.Equal(ClientConfigState.Registered, ClientRegistrar.State(ClaudeCode()));
     }
 
     [Fact]
-    public void Register_WhenNoClientMatches_SaysSoInsteadOfReturningNothing() =>
-        Assert.Equal("no MCP clients matched", ClientRegistrar.Register("emacs", null));
-
+    public async Task Register_WhenNoClientMatches_SaysSoInsteadOfReturningNothing()
+    {
+        Assert.Equal("no MCP clients matched", await ClientRegistrar.Register("emacs", null));
+    }
     [Fact]
-    public void Register_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
+    public async Task Register_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
     {
         File.WriteAllText(ClaudeConfig, Malformed);
 
-        var message = ClientRegistrar.Register("claude-code", null);
+        var message = await ClientRegistrar.Register("claude-code", null);
 
         Assert.Contains("skipped claude-code", message, StringComparison.Ordinal);
         Assert.Equal(Malformed, File.ReadAllText(ClaudeConfig));
     }
-
     [Fact]
-    public void Unregister_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
+    public async Task Unregister_WhenTheConfigIsNotValidJson_SkipsItAndLeavesTheFileUntouched()
     {
         File.WriteAllText(ClaudeConfig, Malformed);
 
-        var message = ClientRegistrar.Unregister("claude-code");
+        var message = await ClientRegistrar.Unregister("claude-code");
 
         Assert.Contains("skipped claude-code", message, StringComparison.Ordinal);
         Assert.Equal(Malformed, File.ReadAllText(ClaudeConfig));
     }
-
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("TERSE_HOME", null);

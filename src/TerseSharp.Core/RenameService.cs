@@ -29,16 +29,18 @@ public static class RenameService
 
         var applied = await EditGate.ApplyAsync(workspace, updated, changed, options, cancellationToken).ConfigureAwait(false);
 
-        return applied.IsOk ? Result.Ok(WithXaml(workspace, symbol, newName, options, applied.Value!)) : applied;
+        return applied.IsOk
+            ? Result.Ok(await WithXaml(workspace, symbol, newName, options, applied.Value!).ConfigureAwait(false))
+            : applied;
     }
-    private static string WithXaml(
+    private static async Task<string> WithXaml(
         LoadedWorkspace workspace,
         ISymbol symbol,
         string newName,
         EditOptions options,
         string applied)
     {
-        var xaml = XamlRename.Apply(workspace, symbol, newName, options.DryRun);
+        var xaml = await XamlRename.Apply(workspace, symbol, newName, options.DryRun).ConfigureAwait(false);
 
         if (xaml.Sites is 0 && xaml.Skipped.Count is 0)
             return applied;

@@ -10,7 +10,7 @@ public static class SolutionFile
     public static IReadOnlyList<string> Projects(string solutionPath) =>
         IsXml(solutionPath) ? XmlProjects(solutionPath) : ClassicProjects(solutionPath);
 
-    public static Result<string> AddProject(string solutionPath, string projectPath, bool dryRun)
+    public static async Task<Result<string>> AddProject(string solutionPath, string projectPath, bool dryRun)
     {
         if (!IsXml(solutionPath))
             return Result.Fail<string>(Unsupported(solutionPath, "add"));
@@ -34,10 +34,10 @@ public static class SolutionFile
 
         document.Root!.Add(new XElement("Project", new XAttribute("Path", relative)));
 
-        return Write(solutionPath, document, dryRun, "solution_add_project", relative);
+        return await Write(solutionPath, document, dryRun, "solution_add_project", relative).ConfigureAwait(false);
     }
 
-    public static Result<string> RemoveProject(string solutionPath, string projectPath, bool dryRun)
+    public static async Task<Result<string>> RemoveProject(string solutionPath, string projectPath, bool dryRun)
     {
         if (!IsXml(solutionPath))
             return Result.Fail<string>(Unsupported(solutionPath, "remove"));
@@ -51,7 +51,7 @@ public static class SolutionFile
 
         element.Remove();
 
-        return Write(solutionPath, document, dryRun, "solution_remove_project", relative);
+        return await Write(solutionPath, document, dryRun, "solution_remove_project", relative).ConfigureAwait(false);
     }
 
     private static bool Matches(XElement element, string relative) =>
@@ -61,13 +61,13 @@ public static class SolutionFile
     private static bool IsProjectFile(string path) =>
         Path.GetExtension(path) is ".csproj" or ".fsproj" or ".vbproj";
 
-    private static Result<string> Write(string solutionPath, XDocument document, bool dryRun, string tool, string relative)
+    private static async Task<Result<string>> Write(string solutionPath, XDocument document, bool dryRun, string tool, string relative)
     {
-        var before = File.ReadAllText(solutionPath);
+        var before = await File.ReadAllTextAsync(solutionPath).ConfigureAwait(false);
         var after = document.ToString() + Environment.NewLine;
 
         if (!dryRun)
-            AtomicWrite.Text(solutionPath, after);
+            await AtomicWrite.TextAsync(solutionPath, after).ConfigureAwait(false);
 
         var response = new ResponseBuilder(tool, relative);
 

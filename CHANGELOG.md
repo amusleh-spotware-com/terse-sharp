@@ -8,6 +8,80 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-01
+
+### Changed
+
+- **A green `run_tests` and a clean `build` now answer in one line.** Measured over this repo's own
+  sessions, a passing suite cost 60-150 tokens of counters, warnings and timing blocks that no agent
+  ever acts on. `run_tests` on a run where `exitCode=0`, nothing timed out, `total > 0` and there are
+  no failures returns
+  `run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371  (verbose=true for the full report)`;
+  `build` with `exitCode=0`, zero diagnostics and no locked output returns
+  `build ok  0 diagnostics  elapsedMs=4235  (verbose=true for the full report)`. **Any failure, any
+  diagnostic, a timeout, a zero-test run and a locked output all keep the full report** - the short
+  form is only ever emitted for a result that has nothing else to say. `verbose=true` restores the old
+  response, and `includePassed` or `slowest` on `run_tests` imply it. `rerun_failed` takes `verbose`
+  too. This is a **response-format change** to `build`, `run_tests` and `rerun_failed`.
+- `run_tests` prints up to 30 lines of a failure message, was 12, so a multi-line assertion diff
+  survives.
+- `AmbiguousWorkspace` and `WorkspaceNotFound` now list each workspace as
+  `App.slnx (worktree) -> C:\full\path` instead of the path alone, so the remedy names something that
+  actually resolves.
+
+### Added
+
+- **`read_text(path, headings: true)`** returns a markdown file's heading map with line ranges and no
+  body, and **`read_text(path, section: "## Commands")`** returns one section. Locating two sections of
+  a 216-line `CLAUDE.md` used to mean pulling the whole file (~2.6k tokens); the heading map is ~40
+  lines. Closes **I1**.
+- **`edit_text(path, section: "## Commands", newText: ...)`** replaces a whole markdown section with no
+  `oldText` at all, which removes the read-then-match round trip on every documentation edit. Closes
+  **I2**. `oldText` is now optional; passing neither `oldText` nor `section` is refused.
+- `write_text` creates the directories its target needs instead of failing with
+  `DirectoryNotFoundException`. Closes **I3**.
+
+### Fixed
+
+- **`edit_text` no longer fails on a line-ending mismatch.** Matching falls back to a
+  line-ending-normalized comparison and maps the result back to the file's real offsets, so an `\n`
+  `oldText` matches a CRLF file and only the replaced region is rewritten. Measured on this repo's own
+  session log, **130 of 577 `edit_text` calls (22.5%) failed with `oldText matched 0 times`**, and the
+  remedy - "include more surrounding text" - made the next attempt *less* likely to match. When
+  nothing matches, the error now names the file's closest lines
+  (`L21: public static async Task<Result<string>> ...`) instead. Closes **I7**.
+- `write_text` keeps the line endings of the file it overwrites, and uses the solution file's dominant
+  ending for a new file, so the next `format` no longer rewrites the whole document. Closes **I12**.
+- **`add_member` no longer glues the new member to the previous one or to the type's closing brace.**
+  It inserts a blank line before the member and keeps `}` on its own line. In two prior tasks this
+  defect cost **9 `add_member` calls -> 12 corrective `edit_text` calls** and **6 -> 8** - every one of
+  them a `force=true` line edit on C#, the exact fallback the server exists to remove. Closes **I11**.
+- **`workspace=` resolution no longer answers `AmbiguousWorkspace` for a hint that names exactly one
+  workspace.** Hints are ranked - full path, solution file name, solution name without extension,
+  worktree name, root directory name, then substring - and only ties *within the best tier* are
+  ambiguous. Loading a repo and a solution nested inside it (this repo and its `fixtures/`) now
+  resolves a path hint to the **innermost** workspace containing it rather than refusing. 88
+  `AmbiguousWorkspace` errors appear in this repo's own session log. Closes **I5** and **I13**.
+- `read_text` no longer counts a phantom trailing line: a file ending in a newline reported
+  `total=N+1`.
+
+### Performance
+
+- **Every file-system call on the request path is asynchronous.** `read_text`, `write_text`,
+  `edit_text`, `search_text`, `search_regex`, every `.resx`, XAML and Razor writer, the project and
+  solution file writers and `terse install` now use `File.ReadAllTextAsync`/`WriteAllTextAsync` and
+  `FileStream` with `FileOptions.Asynchronous`; `AtomicWrite.Text` became `AtomicWrite.TextAsync`.
+- **`search_text` and `search_regex` scan files in parallel and allocate nothing per non-matching
+  line.** They used to materialize one `string` per line of every file and call `string.Contains` on
+  each. They now read each file once and walk it with a vectorized `MemoryExtensions.IndexOf` over the
+  span (`Regex.EnumerateMatches` for `search_regex`), materializing a string only for a line that
+  matched, and fan out over `Parallel.ForEachAsync`. File sizes come from the directory enumeration
+  rather than a `FileInfo` stat per candidate.
+- `edit_text` counts occurrences with a span scan instead of allocating a full copy of the file with
+  every occurrence removed.
+- `FileGlob` matches against a `stackalloc` buffer instead of allocating a separator-normalized copy of
+  every path it tests, and skips the copy entirely for a path that has no backslash.
+
 ## [0.12.0] - 2026-08-01
 
 ### Fixed
@@ -830,7 +904,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.13.0
 [0.12.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.12.0
 [0.11.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.11.0
 [0.10.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.10.0
