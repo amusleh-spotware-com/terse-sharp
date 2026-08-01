@@ -62,7 +62,11 @@ public sealed class WorkspaceTools(ToolContext context)
     public Task<string> WorkspaceStatus(
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, null, loaded => RenderStatusAsync(loaded, cancellationToken));
+        context.WithWorkspaceAsync(
+            workspace,
+            null,
+            loaded => RenderStatusAsync(loaded, cancellationToken),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects")]
     [Description("List the projects of a loaded workspace: name, target framework, document count.")]

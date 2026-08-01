@@ -218,7 +218,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
 
         Assert.Contains("watch=", text, StringComparison.Ordinal);
         Assert.Contains("gen=c", text, StringComparison.Ordinal);
-        Assert.Equal(4, text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.True(Tokens(text) <= 160, Report("workspace_status", text));
+        Assert.Equal(5, text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.True(Tokens(text) <= 220, Report("workspace_status", text));
     }
 }

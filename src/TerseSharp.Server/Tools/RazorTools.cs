@@ -13,8 +13,12 @@ public sealed class RazorTools(ToolContext context)
         [Description("Max nodes (200).")] int maxResults = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-            await RazorService.OutlineAsync(loaded, path, elements, NavigationTools.Cap(maxResults, 200), cancellationToken).ConfigureAwait(false)));
+        context.WithWorkspaceAsync(
+            workspace,
+            path,
+            async loaded => NavigationTools.Unwrap(
+                await RazorService.OutlineAsync(loaded, path, elements, NavigationTools.Cap(maxResults, 200), cancellationToken).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_component")]
     [Description("How to use a Blazor component: every [Parameter] and [CascadingParameter] with its type, which are [EditorRequired], the routes it declares, and where it comes from - source or a referenced package.")]
@@ -22,8 +26,12 @@ public sealed class RazorTools(ToolContext context)
         [Description("Component name, e.g. Card or MudBlazor.MudButton.")] string name,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, null, async loaded => NavigationTools.Unwrap(
-            await RazorService.ComponentAsync(loaded, name, cancellationToken).ConfigureAwait(false)));
+        context.WithWorkspaceAsync(
+            workspace,
+            null,
+            async loaded => NavigationTools.Unwrap(
+                await RazorService.ComponentAsync(loaded, name, cancellationToken).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_find")]
     [Description("Find components, elements, attributes, directives, expressions or routes across every Razor file in the workspace. Use instead of Grep on .razor or .cshtml.")]
@@ -42,8 +50,12 @@ public sealed class RazorTools(ToolContext context)
         [Description("Resolve each binding against the component type (default false).")] bool validate = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-            await RazorBindingService.BindingsAsync(loaded, path, validate, cancellationToken).ConfigureAwait(false)));
+        context.WithWorkspaceAsync(
+            workspace,
+            path,
+            async loaded => NavigationTools.Unwrap(
+                await RazorBindingService.BindingsAsync(loaded, path, validate, cancellationToken).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_codebehind")]
     [Description("The four collocated files of one component - the .razor, its .razor.cs partial, its .razor.css scoped styles and its .razor.js module - plus the _Imports chain and the members declared in @code.")]
@@ -51,8 +63,12 @@ public sealed class RazorTools(ToolContext context)
         [Description("Path to the .razor or .cshtml file.")] string path,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-            await RazorService.CodeBehindAsync(loaded, path, cancellationToken).ConfigureAwait(false)));
+        context.WithWorkspaceAsync(
+            workspace,
+            path,
+            async loaded => NavigationTools.Unwrap(
+                await RazorService.CodeBehindAsync(loaded, path, cancellationToken).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_validate")]
     [Description("Report Razor faults the compiler does not catch: unknown component, unknown or missing [Parameter], a @bind with no setter, a route parameter with no property, duplicate @page routes, a bad @ref, an orphan .razor.css, an unregistered @inject, and markup that will not parse.")]
@@ -63,14 +79,18 @@ public sealed class RazorTools(ToolContext context)
         [Description("Max findings (200).")] int maxResults = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-            await RazorValidation.RunAsync(
-                loaded,
-                path,
-                scope ?? "file",
-                rules,
-                NavigationTools.Cap(maxResults, 200),
-                cancellationToken).ConfigureAwait(false)));
+        context.WithWorkspaceAsync(
+            workspace,
+            path,
+            async loaded => NavigationTools.Unwrap(
+                await RazorValidation.RunAsync(
+                    loaded,
+                    path,
+                    scope ?? "file",
+                    rules,
+                    NavigationTools.Cap(maxResults, 200),
+                    cancellationToken).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_set_attribute")]
     [Description("Set, change or remove one attribute on one element addressed by the path razor_outline prints or by #ref. Formatting is preserved, the result is re-parsed, and the Razor generator re-runs so an edit that breaks the build is rolled back. Use instead of Edit on a Razor file.")]
@@ -85,15 +105,19 @@ public sealed class RazorTools(ToolContext context)
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await RazorEditService.SetAttributeAsync(
-                    loaded,
-                    path,
-                    target,
-                    attribute,
-                    value,
-                    new RazorEditOptions("razor_set_attribute", dryRun, allowErrors),
-                    cancellationToken).ConfigureAwait(false)));
+            : context.WithWorkspaceAsync(
+                workspace,
+                path,
+                async loaded => NavigationTools.Unwrap(
+                    await RazorEditService.SetAttributeAsync(
+                        loaded,
+                        path,
+                        target,
+                        attribute,
+                        value,
+                        new RazorEditOptions("razor_set_attribute", dryRun, allowErrors),
+                        cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_add_element")]
     [Description("Insert markup relative to one element addressed by the path razor_outline prints or by #ref. Compile-gated through the Razor generator, and refused when the result would not parse.")]
@@ -108,15 +132,19 @@ public sealed class RazorTools(ToolContext context)
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await RazorEditService.AddElementAsync(
-                    loaded,
-                    path,
-                    parent,
-                    markup,
-                    position ?? "last",
-                    new RazorEditOptions("razor_add_element", dryRun, allowErrors),
-                    cancellationToken).ConfigureAwait(false)));
+            : context.WithWorkspaceAsync(
+                workspace,
+                path,
+                async loaded => NavigationTools.Unwrap(
+                    await RazorEditService.AddElementAsync(
+                        loaded,
+                        path,
+                        parent,
+                        markup,
+                        position ?? "last",
+                        new RazorEditOptions("razor_add_element", dryRun, allowErrors),
+                        cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_remove_element")]
     [Description("Remove one element and its children, addressed by the path razor_outline prints or by #ref. Compile-gated through the Razor generator.")]
@@ -129,13 +157,17 @@ public sealed class RazorTools(ToolContext context)
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await RazorEditService.RemoveElementAsync(
-                    loaded,
-                    path,
-                    target,
-                    new RazorEditOptions("razor_remove_element", dryRun, allowErrors),
-                    cancellationToken).ConfigureAwait(false)));
+            : context.WithWorkspaceAsync(
+                workspace,
+                path,
+                async loaded => NavigationTools.Unwrap(
+                    await RazorEditService.RemoveElementAsync(
+                        loaded,
+                        path,
+                        target,
+                        new RazorEditOptions("razor_remove_element", dryRun, allowErrors),
+                        cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "razor_set_directive")]
     [Description("Add, replace or remove a file-level directive - @page, @using, @inject, @rendermode, @attribute, @implements, @layout, @typeparam, @model. Compile-gated through the Razor generator.")]
@@ -150,13 +182,17 @@ public sealed class RazorTools(ToolContext context)
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await RazorEditService.SetDirectiveAsync(
-                    loaded,
-                    path,
-                    directive,
-                    value,
-                    remove,
-                    new RazorEditOptions("razor_set_directive", dryRun, allowErrors),
-                    cancellationToken).ConfigureAwait(false)));
+            : context.WithWorkspaceAsync(
+                workspace,
+                path,
+                async loaded => NavigationTools.Unwrap(
+                    await RazorEditService.SetDirectiveAsync(
+                        loaded,
+                        path,
+                        directive,
+                        value,
+                        remove,
+                        new RazorEditOptions("razor_set_directive", dryRun, allowErrors),
+                        cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken);
 }

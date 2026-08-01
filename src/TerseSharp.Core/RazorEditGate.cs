@@ -42,7 +42,8 @@ public static class RazorEditGate
         if (AdditionalId(context) is not { } id)
             return false;
 
-        return context.Workspace.TryApply(context.Workspace.Solution.WithAdditionalDocumentText(id, SourceText.From(updatedText)));
+        return context.Workspace.Adopt(
+            context.Workspace.Solution.WithAdditionalDocumentText(id, SourceText.From(updatedText)));
     }
 
     private static DocumentId? AdditionalId(RazorContext context) => context

@@ -58,7 +58,8 @@ public sealed class ResxTools(ToolContext context)
         context.WithWorkspaceAsync(workspace, null, async loaded => NavigationTools.Unwrap(
             await ResxUsageService
                 .UsagesAsync(loaded, key, NavigationTools.Cap(maxResults, 100), cancellationToken)
-                .ConfigureAwait(false)));
+                .ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "resx_set")]
     [Description("Add or update one key, or several as Key=Value lines, in a .resx file. Preserves the file's schema header, ordering, indentation, line endings and byte order mark, and refuses an edit that would produce malformed XML. Use instead of Edit on a .resx file. Not covered by undo_last_change - pass dryRun first if unsure.")]
@@ -91,7 +92,8 @@ public sealed class ResxTools(ToolContext context)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
                 await ResxEditService
                     .RemoveAsync(loaded, path, key, culture, force, dryRun, cancellationToken)
-                    .ConfigureAwait(false)));
+                    .ConfigureAwait(false)),
+                cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "resx_rename")]
     [Description("Rename a key across every file of the family and, unless updateReferences=false, in the C#, XAML and Razor sites that name it. All or nothing: nothing is written if any file would end up malformed. Not covered by undo_last_change.")]
