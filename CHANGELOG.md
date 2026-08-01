@@ -10,6 +10,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ### Changed
 
+- **The guard intercepts `dotnet build` and `dotnet test`.** It only ever denied reads and edits, so
+  the two shell-outs the server most obviously replaces — `build` and `run_tests` — went straight
+  through, and the README even documented `dotnet build App.csproj` as an intentional allow. Now
+  `dotnet build`, `dotnet test`, `dotnet msbuild`, `dotnet vstest` and bare `msbuild` are denied
+  wherever they appear in a compound command, naming the tool that replaces them. `dotnet clean`,
+  `restore`, `pack`, `publish`, `format`, `run` and `tool` stay allowed: **no TerseSharp tool replaces
+  them**, and a denial that cannot name an alternative is a wall rather than a redirect. The shell
+  text-read check is also evaluated per command segment now rather than against the whole string.
+
 - **The README and NuGet page document `terse install --guard`.** It shipped in 0.8.0 but the
   enforcement section still described the hook as something you write yourself; both files now give
   the command, a worked example of a denial, and the exact matrix of what the guard denies, what it

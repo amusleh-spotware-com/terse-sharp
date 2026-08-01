@@ -232,7 +232,9 @@ What it covers, and what it deliberately does not:
 |---|---|
 | **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command |
 | **Allows** | everything else, including `.css`, `.csv`, `.cshtml` and `.csx` — matching is by **file extension**, not substring, so a Blazor or MAUI repo keeps working |
-| **Allows** | `dotnet build App.csproj`, `git add OrderService.cs` — the path is mentioned, but the command is not a text read |
+| **Denies** | `dotnet build`, `dotnet test`, `dotnet msbuild`, `dotnet vstest`, bare `msbuild` — anywhere in a compound command — because `build`, `run_tests`, `rerun_failed` and `list_tests` replace them |
+| **Allows** | `dotnet clean`, `restore`, `pack`, `publish`, `format`, `run`, `tool update` — **no TerseSharp tool replaces these**, and a denial that names no alternative is just a wall |
+| **Allows** | `git add OrderService.cs` — the path is mentioned, but the command is not a text read |
 | **Never blocks on failure** | malformed or unexpected hook input allows the call, so a guard fault cannot wedge a session |
 
 Re-running `install --guard` replaces only TerseSharp's own hook and leaves any other hooks in the

@@ -21,8 +21,12 @@ question:
 it in the table below.
 
 **The shell does not launder it.** `grep`, `rg`, `find`, `cat`, `head`, `tail`, `sed`, `awk`, `ls`,
-`type`, `dotnet build`, `dotnet test` run through `Bash` are built-ins too and are covered by the same
-gate.
+`type`, `dotnet build`, `dotnet test`, `dotnet msbuild` and `msbuild` run through `Bash` are built-ins
+too and are covered by the same gate — including later in a compound command
+(`cd src && dotnet test`).
+
+`dotnet clean`, `restore`, `pack`, `publish`, `format`, `run` and `tool` are **not** covered: no
+TerseSharp tool replaces them, so shelling out is the right call.
 
 **Banned reasoning.** Every one of these has produced a breach: "just this once" · "Grep is faster" ·
 "I only need one line" · "the workspace looked stale" · "the tool errored so I'll use Grep" · "I
@@ -70,8 +74,8 @@ A silent drop is the breach, even when the reason would have been valid.
 | judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
 | "why does this control look like that" | `xaml_styles(typeName)` | implicit and keyed styles with the `BasedOn` chain |
 | "is this element translated" | `xaml_localization()` | every `x:Uid` joined to its `.resx`/`.resw` entry |
-| `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
-| `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
+| `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew |
+| `Bash: dotnet test` / `vstest` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | `dotnet format` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |

@@ -102,4 +102,28 @@ public sealed class ToolGuardTests
 
         Assert.Equal("{}", output.ToString().Trim());
     }
+
+    [Theory]
+    [InlineData("Read", "file_path", "src/App/Strings.resx")]
+    [InlineData("Edit", "file_path", "src/App/Strings.fr.resx")]
+    [InlineData("Read", "file_path", "src/App/Views/Resources.resw")]
+    public void Inspect_ForABuiltInOnAResourceFile_Denies(string tool, string key, string value) =>
+        Assert.True(ToolGuard.Inspect(tool, new JsonObject { [key] = value }).Denied);
+
+    [Fact]
+    public void Render_ForAResourceDenial_NamesTheResxTools()
+    {
+        var verdict = ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/App/Strings.resx" });
+
+        Assert.Contains("resx_get", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("get_file_outline", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForAResourceEdit_NamesTheResxWriters()
+    {
+        var verdict = ToolGuard.Inspect("Edit", new JsonObject { ["file_path"] = "src/App/Strings.resx" });
+
+        Assert.Contains("resx_set", verdict.Reason, StringComparison.Ordinal);
+    }
 }
