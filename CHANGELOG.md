@@ -8,6 +8,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **The README and NuGet page document `terse install --guard`.** It shipped in 0.8.0 but the
+  enforcement section still described the hook as something you write yourself; both files now give
+  the command, a worked example of a denial, and the exact matrix of what the guard denies, what it
+  allows (`.css`, `.csv`, `.cshtml`, `.csx` — matching is by file extension, not substring) and why a
+  malformed payload allows rather than blocks. Every row was verified against the shipped binary.
+
 ## [0.8.0] - 2026-08-01
 
 ### Added

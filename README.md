@@ -94,6 +94,7 @@ Register it with your agent — TerseSharp writes the config itself, you don't h
 terse install                       # detects installed clients and registers with all of them
 terse install --client claude-code  # or pick one: claude-code | cursor | vscode | windsurf
 terse install --skill               # also install the agent skill (teaches the tool-for-built-in swaps)
+terse install --guard               # also install the hook that BLOCKS Read/Grep/Edit on C# and XAML
 terse doctor                        # verify SDK, MSBuild, workspace load, client registration
 ```
 
@@ -205,12 +206,40 @@ escape this gate because they run in a shell.
 When you do drop to a built-in, say why in the same message — a silent drop is the breach.
 ```
 
-### 3️⃣ Enforce it in the harness
+### 3️⃣ Enforce it in the harness — `terse install --guard`
 
-Instructions can be read and then ignored; a hook cannot. Claude Code can **block** the call rather
-than ask nicely — a `PreToolUse` hook in `.claude/settings.json` that denies `Read`/`Grep`/`Edit` on
-C# paths and names the tool to use instead. This is the only level that survives a long session,
-because it does not depend on the model remembering.
+Instructions can be read and then ignored; a hook cannot. This is the only level that survives a long
+session, because it does not depend on the model remembering.
+
+```bash
+terse install --guard        # writes the PreToolUse hook into Claude Code's settings.json
+```
+
+That registers `terse guard` as a `PreToolUse` hook. Claude Code hands it every `Read`, `Write`,
+`Edit`, `MultiEdit`, `Grep`, `Glob` and `Bash` call before it runs, and the guard **denies** the ones
+that target .NET source, naming the tool to use instead:
+
+```
+$ echo '{"tool_name":"Read","tool_input":{"file_path":"src/App/OrderService.cs"}}' | terse guard
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
+ "permissionDecisionReason":"TerseSharp guard: Read on 'src/App/OrderService.cs' is C#/.NET source.
+  Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outline or read_text."}}
+```
+
+What it covers, and what it deliberately does not:
+
+| | |
+|---|---|
+| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command |
+| **Allows** | everything else, including `.css`, `.csv`, `.cshtml` and `.csx` — matching is by **file extension**, not substring, so a Blazor or MAUI repo keeps working |
+| **Allows** | `dotnet build App.csproj`, `git add OrderService.cs` — the path is mentioned, but the command is not a text read |
+| **Never blocks on failure** | malformed or unexpected hook input allows the call, so a guard fault cannot wedge a session |
+
+Re-running `install --guard` replaces only TerseSharp's own hook and leaves any other hooks in the
+same matcher untouched. Remove it by deleting the `terse guard` entry from `settings.json`.
+
+> [!TIP]
+> `terse install --skill --guard` in one go: the skill teaches the swaps, the guard enforces them.
 
 ---
 

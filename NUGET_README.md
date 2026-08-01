@@ -74,8 +74,18 @@ Register it with your agent — TerseSharp writes the config itself, you don't h
 terse install                       # detect installed clients and register with all of them
 terse install --client claude-code  # or pick one: claude-code | cursor | vscode | windsurf
 terse install --skill               # also install the agent skill
+terse install --guard               # also install the hook that BLOCKS Read/Grep/Edit on C# and XAML
 terse doctor                        # verify SDK, MSBuild, workspace load, client registration
 ```
+
+**🔒 Make it stick.** The most expensive failure mode is an agent that has TerseSharp installed and
+reaches for `Read`/`Grep` anyway — every token the server saves on a call the agent never makes is
+zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolUse` hook that
+**denies** built-in reads and edits on `.cs`, `.csproj`, `.xaml`, `.axaml` and friends, and names the
+tool to use instead. It matches by file extension, so `.css`/`.csv`/`.cshtml` keep working; it catches
+`grep`/`cat`/`sed` anywhere in a compound shell command; and malformed hook input allows rather than
+blocks, so it can never wedge a session. Pair it with `--skill`: the skill teaches the swaps, the
+guard enforces them.
 
 **🎮 Unity:** works on Unity game code too — Unity generates a real `.sln` with
 `Assembly-CSharp.csproj`, so outlines, `find_usages`, symbol-addressed edits and compile-gated rename
