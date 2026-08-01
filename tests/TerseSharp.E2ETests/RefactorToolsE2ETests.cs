@@ -84,10 +84,27 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task UndoLastChange_WithNothingApplied_SaysSo()
+    public async Task UndoLastChange_OnAFreshWorkspaceWithNothingApplied_SaysSo()
     {
-        var text = await server.CallAsync("undo_last_change", []);
+        var fresh = await TerseServerProcess.StartAsync(
+            TerseServerFixture.FixtureRoot,
+            [
+                TerseServerFixture.ServerAssemblyPath(),
+                "serve",
+                "--workspace",
+                Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+            ],
+            TestContext.Current.CancellationToken);
 
-        Assert.Contains("nothing to undo", text, StringComparison.Ordinal);
+        try
+        {
+            var text = await fresh.CallAsync("undo_last_change", [], TestContext.Current.CancellationToken);
+
+            Assert.Contains("nothing to undo", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await fresh.StopAsync();
+        }
     }
 }

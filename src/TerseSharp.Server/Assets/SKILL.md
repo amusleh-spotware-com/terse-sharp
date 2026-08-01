@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML or .resx localization in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 72 of them, so a .cs file is never read whole, a symbol is never found by text search, and neither a .xaml nor a .resx file is ever edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML or .resx localization in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 73 of them, so a .cs file is never read whole, a symbol is never found by text search, and neither a .xaml nor a .resx file is ever edited by line number.
 ---
 
 # TerseSharp
@@ -26,7 +26,7 @@ it in the table below.
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
 
-`dotnet clean`, `restore`, `pack`, `publish`, `format`, `run` and `tool` are **not** covered: no
+`dotnet format` and `dotnet clean` are covered too: `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them. `dotnet restore`, `pack`, `publish`, `run` and `tool` are **not** covered: no
 TerseSharp tool replaces them, so shelling out is the right call.
 
 **Banned reasoning.** Every one of these has produced a breach: "just this once" · "Grep is faster" ·
@@ -84,7 +84,10 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Bash: dotnet test` / `vstest` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
-| `dotnet format` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
+| `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
+| `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
+| `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
+| `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
 | editing a `.csproj` by hand | `project_*` · `package_*` · `solution_*` | CPM-aware, containment-checked |
 
 ## The whole surface, by job
@@ -99,7 +102,7 @@ A silent drop is the breach, even when the reason would have been valid.
 
 **Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `sinceLast=true` reports
 only what appeared since the previous run of the same scope, plus what was fixed) ·
-`get_diagnostics` · `format` · `cleanup`.
+`get_diagnostics` · `format` (whitespace; `verify=true` for a one-line verdict, `path=` takes a file, a directory or a glob) · `cleanup` (`fix=usings` by default; `fix=style|analyzers|all` applies the referenced analyzers' code fixes with `ids=` and `severity=` filters, reports `UNFIXED <id>` for what no fixer covers, and never rewrites generated code) · `clean` (deletes `bin`/`obj`, `dryRun=true` to preview, not covered by `undo_last_change`).
 
 **Edit** — `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol`
 · `undo_last_change`.
@@ -126,7 +129,7 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
 
-**Build and test** — `build` · `run_tests` · `rerun_failed` · `list_tests`.
+**Build and test** — `build` · `clean` · `run_tests` · `rerun_failed` · `list_tests`.
 
 ## Working rules
 

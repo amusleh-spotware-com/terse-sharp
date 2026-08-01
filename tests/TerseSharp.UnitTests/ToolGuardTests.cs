@@ -44,6 +44,37 @@ public sealed class ToolGuardTests
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
     [Theory]
+    [InlineData("dotnet format analyzers TerseSharp.slnx --verify-no-changes")]
+    [InlineData("dotnet format style --severity info")]
+    [InlineData("dotnet clean")]
+    [InlineData("cd src && dotnet clean App.csproj")]
+    public void Inspect_ForADotnetCommandTerseSharpReplaces_Denies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+
+    [Theory]
+    [InlineData("dotnet restore")]
+    [InlineData("dotnet pack src/App -c Release")]
+    [InlineData("dotnet publish")]
+    [InlineData("dotnet run --project src/App")]
+    [InlineData("dotnet tool update -g TerseSharp")]
+    public void Inspect_ForADotnetCommandNoToolReplaces_Allows(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+
+    [Fact]
+    public void Inspect_ForDotnetFormat_NamesTheCleanupReplacement() =>
+        Assert.Contains(
+            "cleanup verify=true",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet format --verify-no-changes" }).Reason,
+            StringComparison.Ordinal);
+
+    [Fact]
+    public void Inspect_ForDotnetClean_NamesTheCleanTool() =>
+        Assert.Contains(
+            "use clean",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet clean" }).Reason,
+            StringComparison.Ordinal);
+
+    [Theory]
     [InlineData("site/theme.css")]
     [InlineData("data/export.csv")]
     [InlineData("Pages/Index.cshtml")]

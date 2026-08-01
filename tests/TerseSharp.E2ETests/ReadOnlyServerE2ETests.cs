@@ -58,7 +58,7 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
     [
         "write_text", "edit_text",
         "replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol",
-        "format", "cleanup",
+        "format", "cleanup", "clean",
         "extract_interface", "move_type_to_file", "move_type_to_namespace", "change_signature",
         "undo_last_change",
         "solution_add_project", "solution_remove_project",

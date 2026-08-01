@@ -110,18 +110,28 @@ public static class ToolGuard
         {
             "build" or "msbuild" => "build",
             "test" or "vstest" => "test",
+            "format" => "format",
+            "clean" => "clean",
             _ => null,
         };
     }
 
     private static string BuildReason(string segment, string subcommand) => string.Create(
         CultureInfo.InvariantCulture,
-        $"TerseSharp guard: '{Trim(segment.Trim())}' is replaced by the terse-sharp MCP - {BuildReplacement(subcommand)}. Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.");
+        $"TerseSharp guard: '{Trim(segment.Trim())}' is replaced by the terse-sharp MCP - {BuildReplacement(subcommand)}. {Rationale(subcommand)}");
 
     private static string BuildReplacement(string subcommand) => subcommand switch
     {
         "build" => "use build",
+        "format" => "use format, cleanup fix=all, or cleanup verify=true for --verify-no-changes",
+        "clean" => "use clean",
         _ => "use run_tests, rerun_failed or list_tests",
+    };
+
+    private static string Rationale(string subcommand) => subcommand switch
+    {
+        "format" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, and names every diagnostic no fixer covers.",
+        _ => "Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.",
     };
 
     private static string[] Segments(string command) =>

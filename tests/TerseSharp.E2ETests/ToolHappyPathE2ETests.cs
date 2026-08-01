@@ -101,6 +101,7 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("analyze", new() { ["minSeverity"] = "warning" }, "engines=compiler"),
         ("format", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["dryRun"] = true }, "dryRun"),
         ("cleanup", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["dryRun"] = true }, "files changed"),
+        ("clean", new() { ["dryRun"] = true }, "directories"),
         ("read_text", new() { ["path"] = "appsettings.json" }, "1: "),
         ("write_text", new() { ["path"] = "happy.json", ["content"] = "{}", ["dryRun"] = true }, "changedLines="),
         ("edit_text", new() { ["path"] = "appsettings.json", ["oldText"] = "MaxVolume", ["newText"] = "PeakVolume", ["dryRun"] = true }, "changedLines="),

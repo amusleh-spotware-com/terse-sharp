@@ -1,0 +1,39 @@
+using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
+
+namespace TerseSharp.Core;
+
+internal static class ProjectDiagnostics
+{
+    public static ImmutableArray<DiagnosticAnalyzer> Analyzers(Project project) =>
+        [.. project.AnalyzerReferences.SelectMany(reference => reference.GetAnalyzers(project.Language))];
+
+    public static async Task<ImmutableArray<Diagnostic>> RunAsync(
+        Compilation compilation,
+        Project project,
+        ImmutableArray<DiagnosticAnalyzer> analyzers,
+        CancellationToken cancellationToken)
+    {
+        var options = new CompilationWithAnalyzersOptions(
+            project.AnalyzerOptions,
+            onAnalyzerException: null,
+            concurrentAnalysis: true,
+            logAnalyzerExecutionTime: false);
+
+        return await compilation
+            .WithAnalyzers(analyzers, options)
+            .GetAnalyzerDiagnosticsAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public static async Task<ImmutableArray<Diagnostic>> OfProjectAsync(Project project, CancellationToken cancellationToken)
+    {
+        var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+        var analyzers = Analyzers(project);
+
+        return compilation is null || analyzers.IsEmpty
+            ? []
+            : await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
+    }
+}

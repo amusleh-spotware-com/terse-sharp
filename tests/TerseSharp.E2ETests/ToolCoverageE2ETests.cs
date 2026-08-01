@@ -10,7 +10,7 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
         "find_usages", "find_implementations", "get_diagnostics",
         "replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol",
         "read_text", "write_text", "edit_text", "find_files", "search_text", "search_regex",
-        "build", "run_tests", "rerun_failed", "list_tests",
+        "build", "clean", "run_tests", "rerun_failed", "list_tests",
         "analyze", "format", "cleanup",
         "extract_interface", "move_type_to_file", "move_type_to_namespace", "change_signature", "undo_last_change",
         "solution_projects", "solution_add_project", "solution_remove_project",

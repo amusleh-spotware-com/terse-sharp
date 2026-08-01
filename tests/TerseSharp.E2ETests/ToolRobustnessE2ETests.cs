@@ -11,6 +11,8 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
 
     private static readonly string[] WorkspaceMutating = ["load_workspace", "unload_workspace"];
 
+    private static readonly string[] Destructive = ["clean"];
+
     [Fact]
     public async Task EveryTool_WithGarbageArguments_AnswersWithAStructuredErrorAndNoStackTrace()
     {
@@ -90,7 +92,9 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
     }
 
     private static bool Excluded(string name) =>
-        ProcessSpawning.Contains(name, StringComparer.Ordinal) || WorkspaceMutating.Contains(name, StringComparer.Ordinal);
+        ProcessSpawning.Contains(name, StringComparer.Ordinal)
+        || WorkspaceMutating.Contains(name, StringComparer.Ordinal)
+        || Destructive.Contains(name, StringComparer.Ordinal);
 
     private async Task<string> CallAsync(McpClientTool tool, Dictionary<string, object?> arguments)
     {

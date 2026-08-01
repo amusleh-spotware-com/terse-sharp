@@ -166,6 +166,42 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.True(Tokens(text) <= 250, Report("resx_usages", text));
     }
 
+    [Fact]
+    public async Task FormatVerify_OnACleanFile_CostsAVerdictNotADiff()
+    {
+        var verdict = await server.CallAsync("format", new()
+        {
+            ["path"] = "src/Fixture.Trading/Order.cs",
+            ["verify"] = true,
+        });
+
+        var diff = await server.CallAsync("format", new()
+        {
+            ["path"] = "src/Fixture.Trading/Order.cs",
+            ["dryRun"] = true,
+        });
+
+        Assert.True(Tokens(verdict) <= 60, Report("format verify", verdict));
+        Assert.True(Tokens(verdict) <= Tokens(diff), Report("format verify", verdict, diff));
+    }
+
+    [Fact]
+    public async Task CleanupVerify_OnTheWholeSolution_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("cleanup", new() { ["verify"] = true });
+
+        Assert.True(Tokens(text) <= 150, Report("cleanup verify", text));
+    }
+
+    [Fact]
+    public async Task CleanDryRun_ReportsCountersNotAFileList()
+    {
+        var text = await server.CallAsync("clean", new() { ["dryRun"] = true });
+
+        Assert.True(Tokens(text) <= 300, Report("clean", text));
+        Assert.Contains("projects=", text, StringComparison.Ordinal);
+    }
+
     private static int Tokens(string text) => (text.Length + 3) / 4;
 
     private static string Report(string tool, string response) =>

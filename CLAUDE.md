@@ -32,7 +32,7 @@ Dropping to a built-in or to `Bash` is allowed only when:
    target — a rejected glob means fix the glob, not abandon the server.
 2. The task is verifying a **just-built** binary whose behaviour differs from the running server (the
    connected `terse` is whatever was installed, not `HEAD` — say which binary answered).
-3. Neither the server nor any tool exposes the action: `git` plumbing, `dotnet pack`, `dotnet format`,
+3. Neither the server nor any tool exposes the action: `git` plumbing, `dotnet pack`, `dotnet restore`,
    `dotnet tool install`, running the server by hand over stdio.
 
 Say which of the three applies **at the call**, in one clause. A silent drop is the breach, and the
@@ -48,7 +48,7 @@ dotnet test  TerseSharp.slnx                      # unit + E2E
 dotnet test tests/TerseSharp.UnitTests/TerseSharp.UnitTests.csproj
 dotnet test tests/TerseSharp.E2ETests/TerseSharp.E2ETests.csproj --filter "FullyQualifiedName~NavigationToolsE2ETests"
 
-# required before a PR (CI runs both on ubuntu)
+# required before a PR (CI runs both on ubuntu; from an agent, use cleanup verify=true fix=all)
 dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info
 dotnet format style     TerseSharp.slnx --verify-no-changes --severity info
 
@@ -69,7 +69,7 @@ child process over stdio and throws `build TerseSharp.Server first` if it is mis
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **64 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **65 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
 `DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,

@@ -9,18 +9,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 {
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
-    private const string Recovered =
-        "\nNOTE the workspace held MSBuild file locks; it was unloaded, the build retried, and the workspace reloaded. Symbol ids are unchanged; undo_last_change history was discarded.";
-
-    private const string StillLocked =
-        "\nNOTE the workspace was unloaded and the build retried, and the output is still locked. The holder is another running process that owns the file, not the workspace - stop it and build again.";
-
-    private const string ReloadFailed =
-        "\nWARNING the workspace was unloaded to retry the build and could not be reloaded; call load_workspace before using the semantic tools again.";
-
-    private const string NotRecovered =
-        "\nNOTE the output is locked, and more than one workspace is loaded, so the build was not retried; unload_workspace the one you are building and try again.";
-
     [McpServerTool(Name = "build")]
     [Description("Build the workspace and return deduplicated diagnostics only, never raw MSBuild output.")]
     public Task<string> Build(
@@ -29,6 +17,23 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
             Contained(target, project, resolved => BuildWithRecoveryAsync(target, resolved, cancellationToken)));
+
+    [McpServerTool(Name = "clean")]
+    [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. Not covered by undo_last_change.")]
+    public Task<string> Clean(
+        [Description("Project path; empty cleans every project under the workspace root.")] string? project = null,
+        [Description("Also delete obj, the intermediate output. Default true; false leaves obj as dotnet clean does.")] bool includeIntermediate = true,
+        [Description("List what would be deleted and delete nothing.")] bool dryRun = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default)
+    {
+        var rejection = context.RejectWrite();
+
+        return rejection is not null
+            ? Task.FromResult(rejection)
+            : context.WithTargetAsync(workspace, project, target => CleanWithRecoveryAsync(
+                target, project, includeIntermediate, dryRun, cancellationToken));
+    }
 
     [McpServerTool(Name = "run_tests")]
     [Description("Replaces Bash dotnet test. Returns passed/failed/skipped/total counters plus every failure with its message, expected and actual values, and one source frame - never the raw runner output.")]
@@ -88,25 +93,68 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                 Seconds(timeoutSeconds),
                 cancellationToken)));
 
-    private async Task<string> BuildWithRecoveryAsync(WorkspaceTarget target, string? project, CancellationToken cancellationToken)
+    private Task<string> BuildWithRecoveryAsync(WorkspaceTarget target, string? project, CancellationToken cancellationToken) =>
+        RecoveredAsync(target, "build", async () =>
+        {
+            var run = await DotnetRunner.BuildAsync(target, project, cancellationToken).ConfigureAwait(false);
+
+            return new LockedRun(run.Response, run.Locked);
+        }, cancellationToken);
+
+    private Task<string> CleanWithRecoveryAsync(
+        WorkspaceTarget target,
+        string? project,
+        bool includeIntermediate,
+        bool dryRun,
+        CancellationToken cancellationToken) =>
+        RecoveredAsync(target, "clean", () =>
+        {
+            var run = CleanService.Clean(target, project, includeIntermediate, dryRun, cancellationToken);
+
+            return Task.FromResult(run.IsOk
+                ? new LockedRun(run.Value!.Response, run.Value!.Locked)
+                : new LockedRun(run.Error!.Render(), false));
+        }, cancellationToken);
+
+    private async Task<string> RecoveredAsync(
+        WorkspaceTarget target,
+        string operation,
+        Func<Task<LockedRun>> run,
+        CancellationToken cancellationToken)
     {
-        var first = await DotnetRunner.BuildAsync(target, project, cancellationToken).ConfigureAwait(false);
+        var first = await run().ConfigureAwait(false);
 
         if (!first.Locked)
             return first.Response;
 
         if (context.Registry.All().Count is not 1)
-            return first.Response + NotRecovered;
+            return first.Response + NotRecovered(operation);
 
         if (!context.Registry.Unload(target.SolutionPath))
             return first.Response;
 
-        var second = await DotnetRunner.BuildAsync(target, project, cancellationToken).ConfigureAwait(false);
-
+        var second = await run().ConfigureAwait(false);
         var reloaded = await ReloadAsync(target.SolutionPath, cancellationToken).ConfigureAwait(false);
 
-        return second.Response + (second.Locked ? StillLocked : Recovered) + (reloaded ? string.Empty : ReloadFailed);
+        return second.Response
+            + (second.Locked ? StillLocked(operation) : Recovered(operation))
+            + (reloaded ? string.Empty : ReloadFailed);
     }
+
+    private static string Recovered(string operation) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"\nNOTE the workspace held MSBuild file locks; it was unloaded, the {operation} retried, and the workspace reloaded. Symbol ids are unchanged; undo_last_change history was discarded.");
+
+    private static string StillLocked(string operation) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. Something other than the reloaded workspace holds the file - another running process, a test host, or an analyzer assembly this server loaded - so stop it, or restart the server, and try again.");
+
+    private static string NotRecovered(string operation) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"\nNOTE the output is locked, and more than one workspace is loaded, so the {operation} was not retried; unload_workspace the one you are targeting and try again.");
+
+    private const string ReloadFailed =
+        "\nWARNING the workspace was unloaded to retry the operation and could not be reloaded; call load_workspace before using the semantic tools again.";
 
     private async Task<bool> ReloadAsync(string solutionPath, CancellationToken cancellationToken)
     {
@@ -184,4 +232,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 
         return resolved.IsOk ? action(resolved.Value!) : Task.FromResult(resolved.Error!.Render());
     }
+
+    private readonly record struct LockedRun(string Response, bool Locked);
 }

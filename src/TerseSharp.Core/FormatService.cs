@@ -7,25 +7,11 @@ namespace TerseSharp.Core;
 
 public static class FormatService
 {
-    public static Task<Result<string>> FormatAsync(
+    public static async Task<Result<string>> RunAsync(
         LoadedWorkspace workspace,
         string? path,
+        FixRequest request,
         EditOptions options,
-        CancellationToken cancellationToken) =>
-        RewriteAsync(workspace, path, options, FormatOnlyAsync, cancellationToken);
-
-    public static Task<Result<string>> CleanupAsync(
-        LoadedWorkspace workspace,
-        string? path,
-        EditOptions options,
-        CancellationToken cancellationToken) =>
-        RewriteAsync(workspace, path, options, CleanDocumentAsync, cancellationToken);
-
-    private static async Task<Result<string>> RewriteAsync(
-        LoadedWorkspace workspace,
-        string? path,
-        EditOptions options,
-        Func<Document, CancellationToken, Task<Document>> rewrite,
         CancellationToken cancellationToken)
     {
         var documents = Targets(workspace, path);
@@ -33,14 +19,102 @@ public static class FormatService
         if (documents.Length is 0)
             return Result.Fail<string>(Errors.DocumentNotFound(path ?? "solution"));
 
-        var updated = workspace.Solution;
+        var outcome = request.AppliesCodeFixes
+            ? await CodeFixService.ApplyAsync(workspace.Solution, documents, request, cancellationToken).ConfigureAwait(false)
+            : new FixOutcome(workspace.Solution, []);
 
-        foreach (var document in documents)
-            updated = await ApplyAsync(updated, document.Id, rewrite, cancellationToken).ConfigureAwait(false);
+        var updated = await RewriteAsync(outcome.Solution, documents, Rewriter(request), cancellationToken).ConfigureAwait(false);
 
-        return await EditGate
-            .ApplyAsync(workspace, updated, [.. documents.Select(document => document.Id)], options, cancellationToken)
-            .ConfigureAwait(false);
+        if (request.Verify)
+            return Result.Ok(await VerifyAsync(workspace, updated, documents, options.Tool, outcome, cancellationToken).ConfigureAwait(false));
+
+        var applied = await EditGate.ApplyAsync(workspace, updated, documents, options, cancellationToken).ConfigureAwait(false);
+
+        return Annotated(applied, outcome.Unfixed);
+    }
+
+    private static Func<Document, CancellationToken, Task<Document>> Rewriter(FixRequest request) =>
+        request.CleansUsings ? CleanDocumentAsync : FormatOnlyAsync;
+
+    private static Result<string> Annotated(Result<string> applied, IReadOnlyList<string> unfixed) =>
+        applied.IsOk && unfixed.Count > 0
+            ? Result.Ok(applied.Value + "\n" + string.Join("\n", unfixed))
+            : applied;
+
+    private static async Task<Solution> RewriteAsync(
+        Solution solution,
+        IReadOnlyList<DocumentId> documents,
+        Func<Document, CancellationToken, Task<Document>> rewrite,
+        CancellationToken cancellationToken)
+    {
+        var updated = solution;
+
+        foreach (var id in documents)
+            updated = await ApplyAsync(updated, id, rewrite, cancellationToken).ConfigureAwait(false);
+
+        return updated;
+    }
+
+    private static async Task<string> VerifyAsync(
+        LoadedWorkspace workspace,
+        Solution updated,
+        IReadOnlyList<DocumentId> documents,
+        string tool,
+        FixOutcome outcome,
+        CancellationToken cancellationToken)
+    {
+        var changed = await ChangedAsync(workspace, updated, documents, cancellationToken).ConfigureAwait(false);
+        var response = new ResponseBuilder(tool, "verify");
+
+        response.Summary(changed.Length, changed.Length, "files would change");
+        response.Note(changed.Length is 0
+            ? "clean"
+            : string.Create(CultureInfo.InvariantCulture, $"VERIFY_FAILED {changed.Length} file(s) would change"));
+
+        foreach (var file in changed)
+            response.Line(file);
+
+        foreach (var line in outcome.Unfixed)
+            response.Note(line);
+
+        return response.ToString();
+    }
+
+    private static async Task<string[]> ChangedAsync(
+        LoadedWorkspace workspace,
+        Solution updated,
+        IReadOnlyList<DocumentId> documents,
+        CancellationToken cancellationToken)
+    {
+        var changed = new List<string>();
+
+        foreach (var id in documents)
+        {
+            if (await DiffersAsync(workspace.Solution, updated, id, cancellationToken).ConfigureAwait(false))
+                changed.Add(PositionFormat.Relative(workspace.Root, updated.GetDocument(id)?.FilePath));
+        }
+
+        changed.Sort(StringComparer.Ordinal);
+
+        return [.. changed];
+    }
+
+    private static async Task<bool> DiffersAsync(
+        Solution before,
+        Solution after,
+        DocumentId id,
+        CancellationToken cancellationToken)
+    {
+        var original = before.GetDocument(id);
+        var updated = after.GetDocument(id);
+
+        if (original is null || updated is null)
+            return false;
+
+        var originalText = await original.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var updatedText = await updated.GetTextAsync(cancellationToken).ConfigureAwait(false);
+
+        return !originalText.ContentEquals(updatedText);
     }
 
     private static async Task<Solution> ApplyAsync(
@@ -114,13 +188,46 @@ public static class FormatService
 
     private static string Name(UsingDirectiveSyntax directive) => directive.Name?.ToString() ?? string.Empty;
 
-    private static Document[] Targets(LoadedWorkspace workspace, string? path)
+    private static DocumentId[] Targets(LoadedWorkspace workspace, string? path)
     {
         if (path is null)
-            return [.. workspace.Solution.Projects.SelectMany(project => project.Documents)];
+            return [.. Editable(workspace).Select(document => document.Id)];
 
-        var document = DocumentLookup.Find(workspace, path);
+        if (string.IsNullOrWhiteSpace(path))
+            return [];
 
-        return document is null ? [] : [document];
+        if (IsGlob(path))
+            return [.. Matching(workspace, FileGlob.Compile(path)).Select(document => document.Id)];
+
+        if (DocumentLookup.Find(workspace, path) is { } document)
+            return [document.Id];
+
+        return [.. UnderDirectory(workspace, path)];
     }
+
+    private static bool IsGlob(string path) =>
+        path.Contains('*', StringComparison.Ordinal) || path.Contains('?', StringComparison.Ordinal);
+
+    private static IEnumerable<Document> Sources(LoadedWorkspace workspace) =>
+        workspace.Solution.Projects.SelectMany(project => project.Documents);
+
+    private static bool Matches(string root, Document document, FileGlob glob) =>
+        document.FilePath is { Length: > 0 } file && glob.MatchesFile(root, file);
+
+    private static IEnumerable<DocumentId> UnderDirectory(LoadedWorkspace workspace, string path)
+    {
+        var resolved = PathGuard.Resolve(workspace, path);
+
+        return resolved.IsOk && Directory.Exists(resolved.Value)
+            ? Editable(workspace).Where(document => Inside(resolved.Value!, document)).Select(document => document.Id)
+            : [];
+    }
+
+    private static bool Inside(string directory, Document document) =>
+        document.FilePath is { Length: > 0 } file && PathBoundary.Contains(directory, file);
+    private static IEnumerable<Document> Editable(LoadedWorkspace workspace) =>
+        Sources(workspace).Where(document => !GeneratedCode.IsGenerated(workspace.Root, document.FilePath));
+
+    private static IEnumerable<Document> Matching(LoadedWorkspace workspace, FileGlob glob) =>
+        Editable(workspace).Where(document => Matches(workspace.Root, document, glob));
 }

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace TerseSharp.Core;
 
@@ -78,36 +77,16 @@ public static class AnalysisService
         foreach (var diagnostic in compilation.GetDiagnostics(cancellationToken))
             found.Add(diagnostic);
 
-        var analyzers = Analyzers(project);
+        var analyzers = ProjectDiagnostics.Analyzers(project);
 
         if (analyzers.IsEmpty)
             return;
 
         analyzed.Add("analyzers(" + project.Name + ")");
 
-        foreach (var diagnostic in await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false))
+        foreach (var diagnostic in await ProjectDiagnostics.RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false))
             found.Add(diagnostic);
     }
-
-    private static async Task<ImmutableArray<Diagnostic>> RunAsync(
-        Compilation compilation,
-        Project project,
-        ImmutableArray<DiagnosticAnalyzer> analyzers,
-        CancellationToken cancellationToken)
-    {
-        var options = new CompilationWithAnalyzersOptions(
-            project.AnalyzerOptions,
-            onAnalyzerException: null,
-            concurrentAnalysis: true,
-            logAnalyzerExecutionTime: false);
-
-        var withAnalyzers = compilation.WithAnalyzers(analyzers, options);
-
-        return await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private static ImmutableArray<DiagnosticAnalyzer> Analyzers(Project project) =>
-        [.. project.AnalyzerReferences.SelectMany(reference => reference.GetAnalyzers(project.Language))];
 
     private static Diagnostic[] Filter(
         ConcurrentBag<Diagnostic> found,

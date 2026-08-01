@@ -233,7 +233,8 @@ What it covers, and what it deliberately does not:
 | **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command. A denial on a resource file names `resx_get`, `resx_find` and `resx_set` rather than the C# tools |
 | **Allows** | everything else, including `.css`, `.csv`, `.cshtml` and `.csx` — matching is by **file extension**, not substring, so a Blazor or MAUI repo keeps working |
 | **Denies** | `dotnet build`, `dotnet test`, `dotnet msbuild`, `dotnet vstest`, bare `msbuild` — anywhere in a compound command — because `build`, `run_tests`, `rerun_failed` and `list_tests` replace them |
-| **Allows** | `dotnet clean`, `restore`, `pack`, `publish`, `format`, `run`, `tool update` — **no TerseSharp tool replaces these**, and a denial that names no alternative is just a wall |
+| **Denies** | `dotnet format`, `dotnet clean` — because `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them, compile-gated and without the raw CLI output |
+| **Allows** | `dotnet restore`, `pack`, `publish`, `run`, `tool update` — **no TerseSharp tool replaces these**, and a denial that names no alternative is just a wall |
 | **Allows** | `git add OrderService.cs` — the path is mentioned, but the command is not a text read |
 | **Never blocks on failure** | malformed or unexpected hook input allows the call, so a guard fault cannot wedge a session |
 
@@ -247,7 +248,7 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 
 ## 🧰 The tools
 
-72 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+73 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` / `HEURISTIC` tag. Paths are workspace-relative. Truncation names the parameter that narrows it.
 
 | Group | Tools |
@@ -255,7 +256,7 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
 | **Navigation** | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
 | **.NET semantics grep cannot reach** | `find_registrations` · `list_endpoints` |
-| **Analyze & clean** | `analyze` · `format` · `cleanup` · `get_diagnostics` |
+| **Analyze & clean** | `analyze` · `format` · `cleanup` · `clean` · `get_diagnostics` |
 | **Edit** | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
@@ -282,6 +283,8 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
+| `Bash: dotnet format` | `format` · `cleanup fix=all` · `cleanup verify=true` | compile-gated code fixes and a one-line verdict, never raw CLI output |
+| `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's own file locks |
 
 </details>
 
@@ -291,7 +294,9 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 StyleCop, SonarAnalyzer, Roslynator, whatever is in your `PackageReference` list — down to `info` and
 `hidden` severity, which a normal build hides. It reports **dead code** in the same list, so one call
 covers everything. `cleanup` removes unused `using` directives, sorts what remains System-first and
-reformats to your `.editorconfig`. All Roslyn: **no IDE, no external tool, no licence, no network.**
+reformats to your `.editorconfig`; `cleanup fix=style|analyzers|all` goes further and **applies the code fixes** of every analyzer the project references - the in-process equivalent of `dotnet format style` and `dotnet format analyzers`, compile-gated and rolled back if it breaks the build, with an `UNFIXED <id>` line for anything no fixer covers. `format verify=true` and `cleanup verify=true` replace `--verify-no-changes`: one verdict line instead of a diff. `path=` takes a file, a directory or a glob, and generated code (`obj/`, `*.g.cs`, `*.Designer.cs`) is never rewritten. All Roslyn: **no IDE, no external tool, no licence, no network.**
+
+`clean` replaces `dotnet clean`: it deletes the `bin` and `obj` directories of the workspace or of one project and reports `projects=`, `files=` and `freedBytes=` instead of MSBuild output. Unlike `dotnet clean` it also removes `obj`, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads - the same recovery `build` uses. It only ever deletes a directory literally named `bin` or `obj` inside the workspace root, and `dryRun=true` lists what would go without touching anything. It is **not** covered by `undo_last_change`.
 
 ### Tests an agent can act on
 
@@ -438,6 +443,7 @@ built as compact text rather than JSON.
 | Extract interface, move type, change signature, undo | ✅ |
 | Project, solution and package editing, full `.slnx` support | ✅ |
 | `analyze` / `format` / `cleanup`, Roslyn-only | ✅ |
+| `cleanup fix=style\|analyzers\|all` code fixes, `verify` mode, glob scope, `clean` | ✅ |
 | XAML outline, names, resources, bindings, validation, search | ✅ |
 | XAML resource graph, typed binding validation, dialect fixtures | ✅ |
 | `xaml_codebehind`, `xaml_set_property`, XAML-aware `rename_symbol` and `find_usages` | ✅ |

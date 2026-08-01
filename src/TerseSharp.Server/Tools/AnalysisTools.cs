@@ -21,24 +21,54 @@ public sealed class AnalysisTools(ToolContext context)
             loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, cancellationToken));
 
     [McpServerTool(Name = "format")]
-    [Description("Reformat C# to the project's .editorconfig using the Roslyn formatter. Returns the diff, never the file.")]
+    [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob; verify=true returns a one-line verdict instead of a diff, replacing dotnet format --verify-no-changes. Returns the diff, never the file.")]
     public Task<string> Format(
-        [Description("File path; empty formats every document.")] string? path = null,
+        [Description("File, directory or glob such as src/**/*.cs; empty formats every document.")] string? path = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing.")] bool verify = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        Guarded(workspace, path, loaded => FormatService.FormatAsync(
-            loaded, path, new EditOptions("format", dryRun, AllowErrors: false), cancellationToken));
+        Guarded(workspace, path, loaded => FormatService.RunAsync(
+            loaded,
+            path,
+            new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
+            new EditOptions("format", dryRun, AllowErrors: false),
+            cancellationToken));
 
     [McpServerTool(Name = "cleanup")]
-    [Description("Remove unused using directives, sort the remaining ones System-first, then reformat. Returns the diff and is rolled back if it breaks the build.")]
+    [Description("Replaces Bash dotnet format style and dotnet format analyzers. Removes unused using directives, sorts the remaining ones System-first, then reformats; fix=style, analyzers or all also applies the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob. Returns the diff and is rolled back if it breaks the build.")]
     public Task<string> Cleanup(
-        [Description("File path; empty cleans every document.")] string? path = null,
+        [Description("File, directory or glob such as src/**/*.cs; empty cleans every document.")] string? path = null,
+        [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, or all.")] string? fix = null,
+        [Description("Optional comma-separated diagnostic ids to fix, e.g. IDE0005,CA1822.")] string? ids = null,
+        [Description("Minimum severity to fix: error, warning, info, hidden. Default info.")] string? severity = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing.")] bool verify = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) =>
-        Guarded(workspace, path, loaded => FormatService.CleanupAsync(
-            loaded, path, new EditOptions("cleanup", dryRun, AllowErrors: false), cancellationToken));
+        CancellationToken cancellationToken = default)
+    {
+        var mode = Mode(fix);
+
+        return mode.IsOk
+            ? Guarded(workspace, path, loaded => FormatService.RunAsync(
+                loaded,
+                path,
+                new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
+                new EditOptions("cleanup", dryRun, AllowErrors: false),
+                cancellationToken))
+            : Task.FromResult(mode.Error!.Render());
+    }
+
+    private static Result<FixMode> Mode(string? fix) => fix?.ToLowerInvariant() switch
+    {
+        null or "" or "usings" => Result.Ok(FixMode.Usings),
+        "style" => Result.Ok(FixMode.Style),
+        "analyzers" => Result.Ok(FixMode.Analyzers),
+        "all" => Result.Ok(FixMode.All),
+        _ => Result.Fail<FixMode>(Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"fix='{fix}' is not a known mode"),
+            "pass fix=usings, style, analyzers or all")),
+    };
 
     private static string[] Split(string? ids) =>
         string.IsNullOrWhiteSpace(ids) ? [] : [.. ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
