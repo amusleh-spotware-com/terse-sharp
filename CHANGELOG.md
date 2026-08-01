@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-01
+
 ### Fixed
 
 - **A file created or edited outside the symbol tools is now part of the workspace.** A loaded
@@ -828,7 +830,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.12.0
 [0.11.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.11.0
 [0.10.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.10.0
 [0.9.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.9.0
