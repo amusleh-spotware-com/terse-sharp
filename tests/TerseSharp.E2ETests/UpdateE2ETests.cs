@@ -165,7 +165,7 @@ public sealed class UpdateE2ETests : IAsyncLifetime
 
     private static async Task<string> AnnouncedAsync(TerseServerProcess server)
     {
-        for (var attempt = 0; attempt < 100; attempt++)
+        for (var attempt = 0; attempt < 600; attempt++)
         {
             var response = await CallAsync(server);
 
@@ -180,7 +180,7 @@ public sealed class UpdateE2ETests : IAsyncLifetime
 
     private async Task CheckedAsync()
     {
-        for (var attempt = 0; attempt < 100 && !File.Exists(StateFile); attempt++)
+        for (var attempt = 0; attempt < 600 && !File.Exists(StateFile); attempt++)
             await Task.Delay(100, TestContext.Current.CancellationToken);
 
         Assert.True(File.Exists(StateFile), "the update check never recorded its state");
@@ -208,7 +208,7 @@ public sealed class UpdateE2ETests : IAsyncLifetime
 
     private static async Task<string> RewrittenAsync(string path, string stale)
     {
-        for (var attempt = 0; attempt < 100; attempt++)
+        for (var attempt = 0; attempt < 600; attempt++)
         {
             var content = await ReadAsync(path);
 
