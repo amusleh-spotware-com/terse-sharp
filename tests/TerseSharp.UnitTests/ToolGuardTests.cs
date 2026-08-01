@@ -37,7 +37,7 @@ public sealed class ToolGuardTests
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
     [Theory]
-    [InlineData("dotnet build src/App/App.csproj")]
+    [InlineData("dotnet pack src/App/App.csproj")]
     [InlineData("git add src/App/OrderService.cs")]
     [InlineData("grep -rn TODO docs/")]
     public void Inspect_ForAShellCommandThatIsNotATextRead_Allows(string command) =>
