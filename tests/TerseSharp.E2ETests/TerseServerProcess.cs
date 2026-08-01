@@ -25,20 +25,15 @@ internal sealed class TerseServerProcess
         IEnumerable<string> arguments,
         CancellationToken cancellationToken)
     {
-        var process = Launch(workingDirectory, arguments);
+        var launched = arguments.ToArray();
 
         try
         {
-            var transport = new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream);
-            var client = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
-
-            return new TerseServerProcess(process, client);
+            return await ConnectAsync(workingDirectory, launched, cancellationToken);
         }
-        catch
+        catch (Exception exception) when (exception is TimeoutException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            Terminate(process);
-
-            throw;
+            return await ConnectAsync(workingDirectory, launched, cancellationToken);
         }
     }
 
@@ -111,6 +106,27 @@ internal sealed class TerseServerProcess
         }
         catch (Win32Exception)
         {
+        }
+    }
+    private static async Task<TerseServerProcess> ConnectAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        var process = Launch(workingDirectory, arguments);
+
+        try
+        {
+            var transport = new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream);
+            var client = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+
+            return new TerseServerProcess(process, client);
+        }
+        catch
+        {
+            Terminate(process);
+
+            throw;
         }
     }
 }

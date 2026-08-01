@@ -8,6 +8,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- The E2E fixture retries the MCP handshake once when it times out. `initialize` has a fixed 60 s
+  ceiling that no client option raises, and a cold Windows CI runner can exceed it while MSBuild and
+  Roslyn warm up - one job failed that way on the 0.14.0 tag and passed unchanged on rerun. A flake
+  that only reproduces on a cold runner is indistinguishable from a regression until it is rerun, which
+  is exactly the signal CI exists to give.
+
 ## [0.14.0] - 2026-08-01
 
 ### Changed
