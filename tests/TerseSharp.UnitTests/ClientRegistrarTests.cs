@@ -197,4 +197,95 @@ public sealed class ClientRegistrarTests : IDisposable
     private string ClaudeConfig => Path.Combine(home, ".claude.json");
 
     private JsonObject Load() => LoadFrom(ClaudeConfig);
+
+    private string SkillFile => Path.Combine(home, ".claude", "skills", "terse-sharp", "SKILL.md");
+
+    private string SettingsFile => Path.Combine(home, ".claude", "settings.json");
+
+    [Fact]
+    public async Task RefreshAsync_WhenTheInstalledSkillIsStale_RewritesItFromTheShippedAsset()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SkillFile)!);
+        await File.WriteAllTextAsync(SkillFile, "# an older skill", TestContext.Current.CancellationToken);
+
+        var refreshed = await ClientRegistrar.RefreshAsync(TestContext.Current.CancellationToken);
+
+        Assert.Contains("installed skill", refreshed!, StringComparison.Ordinal);
+        Assert.Equal(SkillAsset.Read(), await File.ReadAllTextAsync(SkillFile, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WhenTheSkillWasNeverInstalled_DoesNotCreateIt()
+    {
+        Assert.Null(await ClientRegistrar.RefreshAsync(TestContext.Current.CancellationToken));
+        Assert.False(File.Exists(SkillFile));
+    }
+
+    private async Task WriteSettingsAsync(string content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(SettingsFile)!);
+
+        await File.WriteAllTextAsync(SettingsFile, content, TestContext.Current.CancellationToken);
+    }
+
+    private static string? Matcher(JsonNode? entry) => entry?["matcher"]?.GetValue<string>();
+
+    [Fact]
+    public async Task RefreshAsync_WhenTheInstalledGuardIsStale_RewritesItAndKeepsEveryOtherHook()
+    {
+        await WriteSettingsAsync("""
+            {"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"terse guard"}]},{"matcher":"Bash","hooks":[{"type":"command","command":"other-tool"}]}]}}
+            """);
+
+        var refreshed = await ClientRegistrar.RefreshAsync(TestContext.Current.CancellationToken);
+        var matchers = LoadFrom(SettingsFile)["hooks"]!["PreToolUse"]!.AsArray();
+
+        Assert.Contains("installed guard", refreshed!, StringComparison.Ordinal);
+        Assert.Contains(matchers, entry => entry!["hooks"]![0]!["command"]!.GetValue<string>() is "other-tool");
+        Assert.Contains(matchers, entry => Matcher(entry) is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash");
+        Assert.DoesNotContain(matchers, entry => Matcher(entry) is "Read");
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WhenNoGuardIsInstalled_LeavesTheSettingsFileUntouched()
+    {
+        const string Settings = """{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"other-tool"}]}]}}""";
+
+        await WriteSettingsAsync(Settings);
+
+        Assert.Null(await ClientRegistrar.RefreshAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(Settings, await File.ReadAllTextAsync(SettingsFile, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AssetsAsync_ReportsWhatIsInstalledAndWhetherItMatchesThisBuild()
+    {
+        Assert.Equal(new AssetState(false, false, false, false), await ClientRegistrar.AssetsAsync(TestContext.Current.CancellationToken));
+
+        await ClientRegistrar.InstallSkill();
+        await ClientRegistrar.InstallGuard();
+
+        Assert.Equal(new AssetState(true, true, true, true), await ClientRegistrar.AssetsAsync(TestContext.Current.CancellationToken));
+
+        await File.WriteAllTextAsync(SkillFile, "# an older skill", TestContext.Current.CancellationToken);
+
+        Assert.Equal(new AssetState(true, false, true, true), await ClientRegistrar.AssetsAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("""{"hooks":[]}""")]
+    [InlineData("""{"hooks":"yes"}""")]
+    [InlineData("""{"hooks":{"PreToolUse":"all"}}""")]
+    [InlineData("""{"hooks":{"PreToolUse":["terse guard"]}}""")]
+    [InlineData("""{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":["terse guard"]}]}}""")]
+    public async Task AssetsAsync_WhenTheSettingsShapeIsUnexpected_ReportsNoGuardInsteadOfThrowing(string settings)
+    {
+        await WriteSettingsAsync(settings);
+
+        var state = await ClientRegistrar.AssetsAsync(TestContext.Current.CancellationToken);
+
+        Assert.False(state.GuardInstalled);
+        Assert.Null(await ClientRegistrar.RefreshAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(settings, await File.ReadAllTextAsync(SettingsFile, TestContext.Current.CancellationToken));
+    }
 }

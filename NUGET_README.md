@@ -108,6 +108,32 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 `terse install` and `terse doctor` follow it, `--skill` lands in `$CLAUDE_CONFIG_DIR/skills` (else
 `~/.claude/skills`), and `doctor` prints the config path it read.
 
+**✂️ Success costs nothing.** All 30 mutating tools — `replace_symbol*`, `add_member`, `delete_symbol`,
+`rename_symbol`, the refactors, `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`,
+`package_*`, `solution_*` — answer a successful edit in **one line per changed file**
+(workspace-relative `path  changedLines=N`, plus the compile gate's `errors=/warnings=` counters), not
+a unified diff you already know the content of. `verbose=true` restores the diff; `dryRun=true` is
+never condensed, because there the diff *is* the answer; and **every caveat prints in full
+regardless** — a rollback, a new compile error, `0 files changed`, `compileGate=unavailable`,
+`workspace=stale`, `UNFIXED`, `designerStale`, or the `NOT rewritten` list a XAML-aware rename leaves.
+
+**🔔 Staying current.** A new release is announced to your agent for the cost of **one `HEAD` request to
+GitHub's `releases/latest` — empty body, no token, no rate limit — at most once every 24 hours**, on a
+background task that never blocks the handshake or a tool call. The result is cached in
+`~/.terse/update`, so a restart inside that window makes no request at all, and a failed check is cached
+too. When a newer release exists the **next tool response carries one extra last line**, the one channel
+every MCP client shows its agent:
+
+```
+UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp
+```
+
+It appears once per server process and never repeats; the response above it is untouched. `terse doctor`
+answers on demand. After you update, the next `terse serve` rewrites the installed `SKILL.md` and
+re-applies the `terse guard` hook so both match the new binary — only for what you installed: an absent
+skill is never created, an absent hook never added, other hooks never touched. `TERSE_UPDATE=0` turns
+the check and the refresh off; `TERSE_UPDATE_URL` points them at another endpoint.
+
 Prefer to configure it by hand:
 
 ```json

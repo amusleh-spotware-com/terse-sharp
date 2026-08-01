@@ -15,7 +15,8 @@ public static class ResxEditService
         string? entries,
         string? culture,
         string? comment,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var located = ResxTarget.Locate(workspace, path);
 
@@ -25,7 +26,7 @@ public static class ResxEditService
         var pairs = Pairs(key, value, entries);
 
         return pairs.IsOk
-            ? Settled(workspace, await Upsert(workspace, located.Value!, pairs.Value!, culture, comment, dryRun).ConfigureAwait(false), dryRun)
+            ? Settled(workspace, await Upsert(workspace, located.Value!, pairs.Value!, culture, comment, dryRun, verbose).ConfigureAwait(false), dryRun)
             : Result.Fail<string>(pairs.Error!);
     }
     public static async Task<Result<string>> RemoveAsync(
@@ -35,6 +36,7 @@ public static class ResxEditService
         string? culture,
         bool force,
         bool dryRun,
+        bool verbose,
         CancellationToken cancellationToken)
     {
         var located = ResxTarget.Locate(workspace, path);
@@ -55,7 +57,7 @@ public static class ResxEditService
 
         return blocking.Count > 0
             ? Result.Fail<string>(StillUsed(key, blocking))
-            : Settled(workspace, await Delete(located.Value!, key, culture, dryRun).ConfigureAwait(false), dryRun);
+            : Settled(workspace, await Delete(located.Value!, key, culture, dryRun, verbose).ConfigureAwait(false), dryRun);
     }
     public static async Task<Result<string>> Rename(
         LoadedWorkspace workspace,
@@ -63,7 +65,8 @@ public static class ResxEditService
         string key,
         string newKey,
         bool updateReferences,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var located = ResxTarget.Locate(workspace, path);
 
@@ -73,7 +76,7 @@ public static class ResxEditService
         var checkedNames = Names(located.Value!, key, newKey);
 
         return checkedNames is null
-            ? Settled(workspace, await Renamed(workspace, located.Value!, key, newKey, updateReferences, dryRun).ConfigureAwait(false), dryRun)
+            ? Settled(workspace, await Renamed(workspace, located.Value!, key, newKey, updateReferences, dryRun, verbose).ConfigureAwait(false), dryRun)
             : Result.Fail<string>(checkedNames);
     }
     private static TerseError? Names(ResxTarget target, string key, string newKey)
@@ -108,7 +111,8 @@ public static class ResxEditService
         string key,
         string newKey,
         bool updateReferences,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var writes = target.Family.Files.Select(file => RenameIn(target.Index, file, key, newKey)).OfType<Pending>().ToList();
 
@@ -121,7 +125,7 @@ public static class ResxEditService
             ? Rewrite(workspace.Root, target.Family.Name, key, newKey)
             : NoReferences;
 
-        return await Apply(target.Index, "resx_rename", [.. writes, .. references], Notes(target.Family, references.Count), dryRun).ConfigureAwait(false);
+        return await Apply(target.Index, "resx_rename", [.. writes, .. references], Notes(target.Family, references.Count), dryRun, verbose).ConfigureAwait(false);
     }
 
     private static Pending? RenameIn(ResxIndex index, ResxFile file, string key, string newKey)
@@ -182,7 +186,7 @@ public static class ResxEditService
             : new Pending(file, PositionFormat.Relative(root, file), before, after);
     }
 
-    private static async Task<Result<string>> Delete(ResxTarget target, string key, string? culture, bool dryRun)
+    private static async Task<Result<string>> Delete(ResxTarget target, string key, string? culture, bool dryRun, bool verbose)
     {
         var writes = Targets(target, culture)
             .Select(file => DeleteIn(target.Index, file, key))
@@ -191,7 +195,7 @@ public static class ResxEditService
 
         return writes.Length is 0
             ? Result.Fail<string>(Missing(key, target.Family))
-            : await Apply(target.Index, "resx_remove", writes, Notes(target.Family, 0), dryRun).ConfigureAwait(false);
+            : await Apply(target.Index, "resx_remove", writes, Notes(target.Family, 0), dryRun, verbose).ConfigureAwait(false);
     }
 
     private static Pending? DeleteIn(ResxIndex index, ResxFile file, string key)
@@ -227,7 +231,8 @@ public static class ResxEditService
         IReadOnlyList<ResxPair> pairs,
         string? culture,
         string? comment,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var destination = Destination(workspace, target, culture);
 
@@ -244,7 +249,7 @@ public static class ResxEditService
             return Result.Fail<string>(seed.Error!);
         }
 
-        return await Written(workspace, target, path, seed.Value!, pairs, comment, dryRun).ConfigureAwait(false);
+        return await Written(workspace, target, path, seed.Value!, pairs, comment, dryRun, verbose).ConfigureAwait(false);
     }
 
     private static async Task<Result<string>> Written(
@@ -254,7 +259,8 @@ public static class ResxEditService
         Seeded seed,
         IReadOnlyList<ResxPair> pairs,
         string? comment,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var notes = new List<string>();
         var applied = Fold(path, seed.Text, pairs, comment, notes);
@@ -270,7 +276,7 @@ public static class ResxEditService
             seed.Existing ?? string.Empty,
             applied.Value!.Text);
 
-        return await Apply(target.Index, "resx_set", [pending], Created(target, path, applied.Value!.Added, notes), dryRun).ConfigureAwait(false);
+        return await Apply(target.Index, "resx_set", [pending], Created(target, path, applied.Value!.Added, notes), dryRun, verbose).ConfigureAwait(false);
     }
 
     private static List<string> Created(ResxTarget target, string destination, bool added, List<string> notes)
@@ -468,7 +474,8 @@ public static class ResxEditService
         string tool,
         IReadOnlyList<Pending> writes,
         IReadOnlyList<string> notes,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var malformed = writes.Select(Validated).FirstOrDefault(error => error is not null);
 
@@ -476,11 +483,11 @@ public static class ResxEditService
             return Result.Fail<string>(malformed);
 
         if (dryRun)
-            return Result.Ok(Render(tool, writes, notes, dryRun));
+            return Result.Ok(Render(tool, writes, notes, dryRun, verbose));
 
         var written = await WriteAll(index, writes).ConfigureAwait(false);
 
-        return written is null ? Result.Ok(Render(tool, writes, notes, dryRun)) : Result.Fail<string>(written);
+        return written is null ? Result.Ok(Render(tool, writes, notes, dryRun, verbose)) : Result.Fail<string>(written);
     }
 
     private static TerseError? Validated(Pending write) => ResxIndex.IsResource(write.Path)
@@ -529,18 +536,28 @@ public static class ResxEditService
         return stranded;
     }
 
-    private static string Render(string tool, IReadOnlyList<Pending> writes, IReadOnlyList<string> notes, bool dryRun)
+    private static string Render(string tool, IReadOnlyList<Pending> writes, IReadOnlyList<string> notes, bool dryRun, bool verbose)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied");
 
         response.Summary(writes.Count, writes.Count, "files changed");
 
-        foreach (var write in writes)
-            response.Line(UnifiedDiff.Between(write.Relative, write.Before, write.After));
+        if (!dryRun && !verbose)
+        {
+            foreach (var write in writes)
+                response.Line(string.Create(CultureInfo.InvariantCulture, $"{write.Relative}  changedLines={UnifiedDiff.ChangedLines(write.Before, write.After)}"));
 
-        response.Line(string.Create(
-            CultureInfo.InvariantCulture,
-            $"changedLines={writes.Sum(write => UnifiedDiff.ChangedLines(write.Before, write.After))}"));
+            response.Note("(verbose=true for the diff)");
+        }
+        else
+        {
+            foreach (var write in writes)
+                response.Line(UnifiedDiff.Between(write.Relative, write.Before, write.After));
+
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"changedLines={writes.Sum(write => UnifiedDiff.ChangedLines(write.Before, write.After))}"));
+        }
 
         foreach (var note in notes.Where(note => note.Length > 0))
             response.Line(note);

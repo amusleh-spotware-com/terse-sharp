@@ -106,7 +106,10 @@ public static class RazorRename
         }
     }
 
-    private static Task<string> Apply(LoadedWorkspace workspace, IReadOnlyList<Move> moves, IReadOnlyList<Rewrite> rewrites)
+    private static Task<string> Apply(
+        LoadedWorkspace workspace,
+        IReadOnlyList<Move> moves,
+        IReadOnlyList<Rewrite> rewrites)
     {
         var done = new List<Move>(moves.Count);
 

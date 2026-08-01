@@ -70,8 +70,16 @@ change, the expected saving. Shipped entries keep their measurement so a regress
 
 ## Open
 
-Nothing. Every finding raised by an end-of-task review is either shipped above, or recorded below as a
-limitation with the evidence for why it stays.
+Raised by the end-of-task review of the update-notification task, not fixed there because each one is a
+tool change of its own and the task's scope was the release check.
+
+| Finding | Tool | Proposed change | Expected saving |
+|---|---|---|---|
+| **I29** `replace_symbol_body` on an **expression-bodied** member wrapped the new text in braces and produced `CS0161 not all code paths return a value`; the rollback was correct but the parameter description ("with or without the surrounding braces") never mentions `=>`. Cost 1 failed call plus a switch to `replace_symbol` for a one-line change | `replace_symbol_body` | when the target is expression-bodied, accept a bare expression (and an `=> expr;` form) and re-emit an `ArrowExpressionClause`; say so in the description | 1 failed call per expression-bodied member edit — the common shape in this repo |
+| **I30** Adding a set of members that reference each other costs one failed call per member added out of dependency order: **4 `CompileRegression` rollbacks** in this task, each naming a helper that existed only in the *next* call. `replace_symbol` also refuses two overloads in one declaration (`the declaration is not exactly one member`) | `add_member`, `replace_symbol` | accept several declarations in one call, applied as **one** compile-gated edit, so a mutually-referencing set lands atomically | 4 wasted calls measured here; removes the bottom-up ordering constraint entirely |
+| **I31** `analyze` scopes to **one** file, while `format` and `cleanup` already take a glob, a directory and `changed=true`. The mandatory per-file gate over 17 touched files cost **17 calls**, each repeating a 2-line header | `analyze` | `path=` accepts a glob or a directory, plus `changed=true` for the files modified since the workspace loaded | 17 calls → 1 on a task of this size; the end-of-task gate is paid on every task |
+| **I33** The symbol writers emit **CRLF into an LF file**, leaving mixed endings: after this task `McpHost.cs` was 25 CR in 58 lines and `Doctor.cs` 78 in 127, against 0 in every file the task did not touch (`AtomicWrite.cs`, `DotnetRunner.cs`, `SkillAsset.cs`). A new file is uniform CRLF because `DetectLineEnding` asks `TerseSharp.slnx`, the one CRLF file in an otherwise LF tree. `core.autocrlf=true` normalizes it away on commit here, so the blob is clean — on a repo without it, this is the whole-file diff **I12** was opened to remove | `replace_symbol`, `replace_symbol_body`, `add_member`, `write_text` | take the ending from the **document being edited** (and, for a new file, from the sibling documents rather than the solution file) | mixed endings in 6 of 6 edited files this task; the failure is invisible on a repo that normalizes and total on one that does not |
+| **I32** Learning whether a file already has a `using` (or is covered by a `GlobalUsings.cs`) has no semantic answer: `get_file_outline` prints types and members but not the file's using directives, so it took a `read_text` on a `.cs` file — the exact fallback the gate exists to prevent. Twice this task | `get_file_outline` | print the file's using directives (or `usings: true`), so a new file's header can be written without reading source | 1 `read_text` on a `.cs` removed per new file; closes a gate loophole |
 
 ## Known limitations
 

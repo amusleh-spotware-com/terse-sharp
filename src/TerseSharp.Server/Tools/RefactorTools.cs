@@ -7,48 +7,52 @@ namespace TerseSharp.Server.Tools;
 public sealed class RefactorTools(ToolContext context)
 {
     [McpServerTool(Name = "extract_interface")]
-    [Description("Create an interface beside a type containing its public instance methods and properties. The new file is added to the same project.")]
+    [Description("Create an interface beside a type containing its public instance methods and properties. The new file is added to the same project. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ExtractInterface(
         [Description("Type id, e.g. T:Trading.OrderService.")] string typeSymbolId,
         [Description("Name of the interface to create, e.g. IOrderService.")] string interfaceName,
         [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => RefactorService.ExtractInterfaceAsync(
-            loaded, symbol, interfaceName, Options("extract_interface", dryRun), cancellationToken), cancellationToken);
+            loaded, symbol, interfaceName, Options("extract_interface", dryRun, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "move_type_to_file")]
-    [Description("Move a type out of a shared file into its own file named after it, keeping the usings and namespace.")]
+    [Description("Move a type out of a shared file into its own file named after it, keeping the usings and namespace. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> MoveTypeToFile(
         [Description("Symbol id of the type to move.")] string typeSymbolId,
         [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => RefactorService.MoveTypeToFileAsync(
-            loaded, symbol, Options("move_type_to_file", dryRun), cancellationToken), cancellationToken);
+            loaded, symbol, Options("move_type_to_file", dryRun, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "move_type_to_namespace")]
-    [Description("Change the namespace declared in the file containing a type.")]
+    [Description("Change the namespace declared in the file containing a type. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> MoveTypeToNamespace(
         [Description("Symbol id of the type to move.")] string typeSymbolId,
         [Description("Target namespace, e.g. Trading.Orders.")] string targetNamespace,
         [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => RefactorService.MoveTypeToNamespaceAsync(
-            loaded, symbol, targetNamespace, Options("move_type_to_namespace", dryRun), cancellationToken), cancellationToken);
+            loaded, symbol, targetNamespace, Options("move_type_to_namespace", dryRun, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "change_signature")]
-    [Description("Replace a method's parameter list. The compile gate reports every call site the change breaks, so run it with dryRun first.")]
+    [Description("Replace a method's parameter list. The compile gate reports every call site the change breaks, so run it with dryRun first. A successful change answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ChangeSignature(
         [Description("Symbol id of the method.")] string symbolId,
         [Description("New parameter list without the parentheses, e.g. 'int count, string name'.")] string parameters,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even when call sites stop compiling. Default false.")] bool allowErrors = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => RefactorService.ChangeSignatureAsync(
-            loaded, symbol, parameters, new EditOptions("change_signature", dryRun, allowErrors), cancellationToken), cancellationToken);
+            loaded, symbol, parameters, new EditOptions("change_signature", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "undo_last_change")]
     [Description("Revert the most recent mutation applied by this server. Keeps the last 10 snapshots.")]
@@ -66,7 +70,8 @@ public sealed class RefactorTools(ToolContext context)
         return response.ToString();
     }
 
-    private static EditOptions Options(string tool, bool dryRun) => new(tool, dryRun, AllowErrors: false);
+    private static EditOptions Options(string tool, bool dryRun, bool verbose) =>
+        new(tool, dryRun, AllowErrors: false, verbose);
 
     private Task<string> Guarded(
         string? workspace,

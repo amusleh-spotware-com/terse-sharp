@@ -178,7 +178,19 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
    text or index match — verify before acting on it.
 3. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff, the diagnostic
    counts, and nothing is written.
-4. **Every edit reports its diagnostics.** Each mutation and each `dryRun` carries
+4. **A successful edit answers in one line per changed file, not a diff.** `<tool> applied`, then
+   `<workspace-relative path>  changedLines=N` — you already know what you wrote, so the diff is not
+   repeated back to you. Pass `verbose=true` on any edit, refactor, `write_text`, `edit_text`,
+   `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*` write to get the full
+   unified diff. **`dryRun: true` is never condensed** — there the diff *is* the answer.
+   **Every caveat still prints in full**, condensed or not: the `errors=/warnings=` deltas, a rollback,
+   a new compile error, `0 files changed`, `compileGate=unavailable`, `workspace=stale`, `UNFIXED`,
+   `designerStale`, and the `NOT rewritten` list a XAML-aware rename leaves — so a short answer never
+   hides something you must act on. A rename of a **Razor component** and a Razor edit whose compile
+   gate could not run keep the whole diff, because the result itself carries a caveat. Do not pass
+   `verbose=true` defensively; ask for it when you actually intend to read the diff.
+
+5. **Every edit reports its diagnostics.** Each mutation and each `dryRun` carries
    `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents — you do not need a
    separate `analyze` afterwards. A `dryRun` that *would* be rolled back says
    `WARNING … would be rolled back` and names the errors; a `(+0)` delta alone is **not** proof the
@@ -218,6 +230,15 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
     128 cached documents they re-parse. Those two are worth asking once and keeping; the rest are free
     to repeat. `find_usages`, `rename_symbol` and `explore_symbol` filter by index record first and
     parse only the files that could match, so they are cheap even on a large XAML tree.
+
+12. **A line starting `UPDATE terse` is not part of the answer — it is a message for the user.** Once per
+    server process, at most once a day, the first tool response may carry one extra last line:
+    `UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp`. Everything
+    above it is the tool's real answer and is unaffected. Tell the user the newer version exists and
+    what to run; do **not** run the update yourself, do not retry the call, and do not treat the line as
+    an error. It appears once and never repeats in that session. After the user updates, the next
+    `terse serve` rewrites the installed `SKILL.md` and the `terse guard` hook to match the new binary,
+    so the skill you are reading always describes the binary you are talking to.
 
 ## Localization (`.resx` / `.resw`)
 

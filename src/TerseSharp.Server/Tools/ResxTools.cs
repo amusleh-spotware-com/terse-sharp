@@ -71,11 +71,12 @@ public sealed class ResxTools(ToolContext context)
         [Description("Target culture, e.g. fr. Omitted writes the file named by path; a missing culture file is created from the neutral header.")] string? culture = null,
         [Description("Optional comment for the entry.")] string? comment = null,
         [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Return the full diff instead of one line per changed file. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun).ConfigureAwait(false)));
+                await ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun, verbose).ConfigureAwait(false)));
 
     [McpServerTool(Name = "resx_remove")]
     [Description("Remove a key from one culture, or from every file of the family when culture is omitted. Refused while the key is still referenced - by the designer property through Roslyn or by a textual lookup - unless force=true. Not covered by undo_last_change.")]
@@ -85,13 +86,14 @@ public sealed class ResxTools(ToolContext context)
         [Description("Only this culture, or neutral. Omitted removes it from every file of the family.")] string? culture = null,
         [Description("Remove even though the key is still referenced.")] bool force = false,
         [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Return the full diff instead of one line per changed file. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
                 await ResxEditService
-                    .RemoveAsync(loaded, path, key, culture, force, dryRun, cancellationToken)
+                    .RemoveAsync(loaded, path, key, culture, force, dryRun, verbose, cancellationToken)
                     .ConfigureAwait(false)),
                 cancellationToken: cancellationToken);
 
@@ -103,11 +105,12 @@ public sealed class ResxTools(ToolContext context)
         [Description("The new key.")] string newKey,
         [Description("Also rewrite the references that name the key. Default true.")] bool updateReferences = true,
         [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Return the full diff instead of one line per changed file. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await ResxEditService.Rename(loaded, path, key, newKey, updateReferences, dryRun).ConfigureAwait(false)));
+                await ResxEditService.Rename(loaded, path, key, newKey, updateReferences, dryRun, verbose).ConfigureAwait(false)));
 
     [McpServerTool(Name = "resx_validate")]
     [Description("Lint the resource families: RESX001 missing translation, RESX002 placeholder mismatch, RESX003 unused key, RESX004 duplicate name, RESX005 orphan, RESX006 empty value, RESX007 trimmed whitespace, RESX008 unsorted, RESX009 stale designer. Answers 'which keys are untranslated' without reading a single file.")]

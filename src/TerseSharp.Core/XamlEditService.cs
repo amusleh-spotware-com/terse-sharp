@@ -10,11 +10,12 @@ public static class XamlEditService
         string target,
         string property,
         string value,
-        bool dryRun) =>
-        Apply(workspace, path, "xaml_set_property", target, (text, span) => Rewrite(text, span, property, value), dryRun);
+        bool dryRun,
+        bool verbose) =>
+        Apply(workspace, path, "xaml_set_property", target, (text, span) => Rewrite(text, span, property, value), dryRun, verbose);
 
-    public static Task<Result<string>> RemoveElement(LoadedWorkspace workspace, string path, string target, bool dryRun) =>
-        Apply(workspace, path, "xaml_remove_element", target, Cut, dryRun);
+    public static Task<Result<string>> RemoveElement(LoadedWorkspace workspace, string path, string target, bool dryRun, bool verbose) =>
+        Apply(workspace, path, "xaml_remove_element", target, Cut, dryRun, verbose);
 
     public static Task<Result<string>> AddElement(
         LoadedWorkspace workspace,
@@ -22,10 +23,11 @@ public static class XamlEditService
         string target,
         string markup,
         string position,
-        bool dryRun) =>
+        bool dryRun,
+        bool verbose) =>
         RejectPosition(position) is { } refusal
             ? Task.FromResult(refusal)
-            : Apply(workspace, path, "xaml_add_element", target, (text, span) => Nest(text, span, markup, position), dryRun);
+            : Apply(workspace, path, "xaml_add_element", target, (text, span) => Nest(text, span, markup, position), dryRun, verbose);
 
     private static Result<string> Cut(string text, TagSpan span)
     {
@@ -150,7 +152,8 @@ public static class XamlEditService
         string tool,
         string target,
         Func<string, TagSpan, Result<string>> change,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
@@ -168,7 +171,7 @@ public static class XamlEditService
         if (!located.IsOk)
             return Result.Fail<string>(located.Error!);
 
-        var written = await Write(tool, full, PositionFormat.Relative(workspace.Root, full), located.Value, change, dryRun).ConfigureAwait(false);
+        var written = await Write(tool, full, PositionFormat.Relative(workspace.Root, full), located.Value, change, dryRun, verbose).ConfigureAwait(false);
 
         if (written.IsOk && !dryRun)
         {
@@ -184,7 +187,8 @@ public static class XamlEditService
         string relative,
         int line,
         Func<string, TagSpan, Result<string>> change,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         var before = await File.ReadAllTextAsync(full).ConfigureAwait(false);
         var span = TagSpan.At(before, line);
@@ -205,7 +209,7 @@ public static class XamlEditService
         if (!dryRun)
             await AtomicWrite.TextAsync(full, after).ConfigureAwait(false);
 
-        return Result.Ok(Describe(tool, relative, before, after, dryRun));
+        return Result.Ok(Describe(tool, relative, before, after, dryRun, verbose));
     }
 
     private static TerseError? WellFormed(string text)
@@ -267,13 +271,18 @@ public static class XamlEditService
     private static Regex Attribute(string property) =>
         new(@"\s" + Regex.Escape(property) + @"\s*=\s*""[^""]*""", RegexOptions.None, TimeSpan.FromSeconds(2));
 
-    private static string Describe(string tool, string relative, string before, string after, bool dryRun)
+    private static string Describe(string tool, string relative, string before, string after, bool dryRun, bool verbose)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied");
+        var changed = UnifiedDiff.ChangedLines(before, after);
 
         response.Summary(1, 1, "files changed");
+
+        if (!dryRun && !verbose)
+            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={changed}")).Note("(verbose=true for the diff)").ToString();
+
         response.Line(UnifiedDiff.Between(relative, before, after));
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={UnifiedDiff.ChangedLines(before, after)}"));
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
 
         return response.ToString();
     }

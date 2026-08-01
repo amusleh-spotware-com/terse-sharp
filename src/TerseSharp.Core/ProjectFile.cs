@@ -4,7 +4,7 @@ namespace TerseSharp.Core;
 
 public static class ProjectFile
 {
-    public static async Task<Result<string>> Create(string projectPath, string kind, string? targetFramework, bool dryRun)
+    public static async Task<Result<string>> Create(string projectPath, string kind, string? targetFramework, bool dryRun, bool verbose)
     {
         var full = Path.GetFullPath(projectPath);
 
@@ -23,16 +23,22 @@ public static class ProjectFile
             await AtomicWrite.TextAsync(full, document.ToString() + Environment.NewLine).ConfigureAwait(false);
         }
 
-        return Rendered("project_create", projectPath, string.Empty, document.ToString(), dryRun);
+        return Rendered("project_create", projectPath, projectPath, string.Empty, document.ToString(), dryRun, verbose);
     }
 
-    public static Task<Result<string>> AddReference(string projectPath, string targetProject, bool dryRun) =>
-        AddItem(projectPath, "ProjectReference", Relative(projectPath, targetProject), dryRun, "project_add_reference");
+    public static Task<Result<string>> AddReference(string projectPath, string targetProject, bool dryRun, bool verbose) =>
+        AddItem(projectPath, "ProjectReference", Relative(projectPath, targetProject), dryRun, verbose, "project_add_reference");
 
-    public static Task<Result<string>> RemoveReference(string projectPath, string targetProject, bool dryRun) =>
-        RemoveItem(projectPath, "ProjectReference", Relative(projectPath, targetProject), dryRun, "project_remove_reference");
+    public static Task<Result<string>> RemoveReference(string projectPath, string targetProject, bool dryRun, bool verbose) =>
+        RemoveItem(projectPath, "ProjectReference", Relative(projectPath, targetProject), dryRun, verbose, "project_remove_reference");
 
-    public static Task<Result<string>> AddPackage(string root, string projectPath, string package, string? version, bool dryRun)
+    public static Task<Result<string>> AddPackage(
+        string root,
+        string projectPath,
+        string package,
+        string? version,
+        bool dryRun,
+        bool verbose = false)
     {
         if (string.IsNullOrWhiteSpace(package))
             return Task.FromResult(Result.Fail<string>(Errors.Blank("package")));
@@ -47,14 +53,14 @@ public static class ProjectFile
         }
 
         return central is null
-            ? AddItem(projectPath, "PackageReference", package, dryRun, "package_add", version)
-            : AddCentralPackage(projectPath, central, package, version, dryRun);
+            ? AddItem(projectPath, "PackageReference", package, dryRun, verbose, "package_add", version)
+            : AddCentralPackage(projectPath, central, package, version, dryRun, verbose);
     }
 
-    public static Task<Result<string>> RemovePackage(string projectPath, string package, bool dryRun) =>
+    public static Task<Result<string>> RemovePackage(string projectPath, string package, bool dryRun, bool verbose) =>
         string.IsNullOrWhiteSpace(package)
             ? Task.FromResult(Result.Fail<string>(Errors.Blank("package")))
-            : RemoveItem(projectPath, "PackageReference", package, dryRun, "package_remove");
+            : RemoveItem(projectPath, "PackageReference", package, dryRun, verbose, "package_remove");
 
     public static Result<string> ListPackages(string projectPath)
     {
@@ -101,7 +107,7 @@ public static class ProjectFile
         return Result.Ok(response.ToString());
     }
 
-    public static async Task<Result<string>> SetProperty(string projectPath, string name, string value, bool dryRun)
+    public static async Task<Result<string>> SetProperty(string projectPath, string name, string value, bool dryRun, bool verbose)
     {
         var document = Load(projectPath);
 
@@ -116,7 +122,7 @@ public static class ProjectFile
         else
             existing.Value = value;
 
-        return await Save(projectPath, document, before, dryRun, "project_set_property", name + "=" + value).ConfigureAwait(false);
+        return await Save(projectPath, document, before, dryRun, verbose, "project_set_property", name + "=" + value).ConfigureAwait(false);
     }
 
     private static async Task<Result<string>> AddCentralPackage(
@@ -124,7 +130,8 @@ public static class ProjectFile
         string centralPath,
         string package,
         string? version,
-        bool dryRun)
+        bool dryRun,
+        bool verbose)
     {
         if (version is null)
         {
@@ -142,11 +149,16 @@ public static class ProjectFile
         if (!dryRun)
             await AtomicWrite.TextAsync(centralPath, central.ToString() + Environment.NewLine).ConfigureAwait(false);
 
-        var added = await AddItem(projectPath, "PackageReference", package, dryRun, "package_add").ConfigureAwait(false);
+        var added = await AddItem(projectPath, "PackageReference", package, dryRun, verbose, "package_add").ConfigureAwait(false);
 
-        return added.IsOk
-            ? Result.Ok(added.Value + "\n" + UnifiedDiff.Between(centralPath, before, central.ToString()))
-            : added;
+        if (!added.IsOk)
+            return added;
+
+        var relative = PositionFormat.Relative(Path.GetDirectoryName(Path.GetFullPath(projectPath))!, centralPath);
+
+        return Result.Ok(added.Value + "\n" + (dryRun || verbose
+            ? UnifiedDiff.Between(relative, before, central.ToString())
+            : string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={UnifiedDiff.ChangedLines(before, central.ToString())}")));
     }
 
     private static async Task<Result<string>> AddItem(
@@ -154,6 +166,7 @@ public static class ProjectFile
         string itemName,
         string include,
         bool dryRun,
+        bool verbose,
         string tool,
         string? version = null)
     {
@@ -173,10 +186,16 @@ public static class ProjectFile
 
         ItemGroup(document, itemName).Add(element);
 
-        return await Save(projectPath, document, before, dryRun, tool, include).ConfigureAwait(false);
+        return await Save(projectPath, document, before, dryRun, verbose, tool, include).ConfigureAwait(false);
     }
 
-    private static async Task<Result<string>> RemoveItem(string projectPath, string itemName, string include, bool dryRun, string tool)
+    private static async Task<Result<string>> RemoveItem(
+        string projectPath,
+        string itemName,
+        string include,
+        bool dryRun,
+        bool verbose,
+        string tool)
     {
         var document = Load(projectPath);
 
@@ -191,7 +210,7 @@ public static class ProjectFile
 
         element.Remove();
 
-        return await Save(projectPath, document, before, dryRun, tool, include).ConfigureAwait(false);
+        return await Save(projectPath, document, before, dryRun, verbose, tool, include).ConfigureAwait(false);
     }
 
     private static bool Named(XElement element, string include) =>
@@ -326,6 +345,7 @@ public static class ProjectFile
         XDocument document,
         string before,
         bool dryRun,
+        bool verbose,
         string tool,
         string argument)
     {
@@ -334,16 +354,32 @@ public static class ProjectFile
         if (!dryRun)
             await AtomicWrite.TextAsync(Path.GetFullPath(projectPath), after).ConfigureAwait(false);
 
-        return Rendered(tool, argument, before, after, dryRun);
+        return Rendered(tool, argument, projectPath, before, after, dryRun, verbose);
     }
 
-    private static Result<string> Rendered(string tool, string argument, string before, string after, bool dryRun)
+    private static Result<string> Rendered(
+        string tool,
+        string argument,
+        string file,
+        string before,
+        string after,
+        bool dryRun,
+        bool verbose)
     {
         var response = new ResponseBuilder(tool, argument);
 
         response.Summary(1, 1, "files changed");
         response.Note(dryRun ? "dryRun" : "applied");
-        response.Line(UnifiedDiff.Between(argument, before, after));
+
+        if (!dryRun && !verbose)
+        {
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"{file}  changedLines={UnifiedDiff.ChangedLines(before, after)}"));
+            response.Note("(verbose=true for the diff)");
+
+            return Result.Ok(response.ToString());
+        }
+
+        response.Line(UnifiedDiff.Between(file, before, after));
 
         return Result.Ok(response.ToString());
     }

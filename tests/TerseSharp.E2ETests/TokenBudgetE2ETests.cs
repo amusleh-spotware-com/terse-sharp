@@ -223,4 +223,26 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.Equal(6, text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
         Assert.True(Tokens(text) <= 260, Report("workspace_status", text));
     }
+
+    [Fact]
+    public async Task RenameSymbol_OnTheWidestSymbol_AnswersWellUnderTheDiffItReplaces()
+    {
+        var quiet = await server.CallAsync("rename_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.Order",
+            ["newName"] = "OrderBudgetProbe",
+        });
+
+        var loud = await server.CallAsync("rename_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.OrderBudgetProbe",
+            ["newName"] = "Order",
+            ["verbose"] = true,
+        });
+
+        Assert.DoesNotContain("@@", quiet, StringComparison.Ordinal);
+        Assert.DoesNotContain(":\\", quiet, StringComparison.Ordinal);
+        Assert.True(Tokens(quiet) <= 200, Report("rename_symbol", quiet));
+        Assert.True(Tokens(quiet) * 3 < Tokens(loud), Report("rename_symbol", quiet, loud));
+    }
 }

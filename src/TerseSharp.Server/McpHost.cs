@@ -23,6 +23,7 @@ public static class McpHost
         var host = builder.Build();
 
         Preload(host.Services, workspace, cancellationToken);
+        BeginMaintenance(cancellationToken);
 
         await host.RunAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -39,4 +40,26 @@ public static class McpHost
 
     private static string? Discovered() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
+
+    private static async Task MaintainAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (await ClientRegistrar.RefreshAsync(cancellationToken).ConfigureAwait(false) is { } refreshed)
+                await Console.Error.WriteLineAsync(refreshed).ConfigureAwait(false);
+
+            if (UpdateSettings.Requested() is { } request)
+                UpdateBanner.Publish(UpdateCheck.Notice(request.Running, await UpdateCheck.RunAsync(request, cancellationToken).ConfigureAwait(false)));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await Console.Error.WriteLineAsync("terse maintenance failed: " + exception.Message).ConfigureAwait(false);
+        }
+    }
+
+    private static void BeginMaintenance(CancellationToken cancellationToken)
+    {
+        if (UpdateSettings.Enabled())
+            _ = Task.Run(() => MaintainAsync(cancellationToken), cancellationToken);
+    }
 }

@@ -82,11 +82,12 @@ public sealed class XamlTools(ToolContext context)
         [Description("Attribute name, e.g. Background.")] string property,
         [Description("Attribute value.")] string value,
         [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await XamlEditService.SetProperty(loaded, path, target, property, value, dryRun).ConfigureAwait(false)));
+                await XamlEditService.SetProperty(loaded, path, target, property, value, dryRun, verbose).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_add_element")]
     [Description("Insert markup as a child of one XAML element, addressed by its element path from xaml_outline, #Name or key=Key. position=last (default) puts it before the closing tag, position=first right after the opening tag. Refuses an edit that would produce malformed XAML.")]
@@ -96,11 +97,12 @@ public sealed class XamlTools(ToolContext context)
         [Description("Markup to insert, e.g. <TextBlock Text=\"Hi\" />.")] string markup,
         [Description("last (default) or first.")] string? position = null,
         [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await XamlEditService.AddElement(loaded, path, target, markup, position ?? "last", dryRun).ConfigureAwait(false)));
+                await XamlEditService.AddElement(loaded, path, target, markup, position ?? "last", dryRun, verbose).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_remove_element")]
     [Description("Remove one XAML element and its children, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]
@@ -108,11 +110,12 @@ public sealed class XamlTools(ToolContext context)
         [Description("Path to the XAML file.")] string path,
         [Description("Element: path from xaml_outline, #Name or key=Key.")] string target,
         [Description("Return the diff without writing.")] bool dryRun = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await XamlEditService.RemoveElement(loaded, path, target, dryRun).ConfigureAwait(false)));
+                await XamlEditService.RemoveElement(loaded, path, target, dryRun, verbose).ConfigureAwait(false)));
 
     [McpServerTool(Name = "xaml_styles")]
     [Description("Every Style, ControlTemplate and DataTemplate that targets an element type, keyed and implicit, with its BasedOn chain resolved. Answers \"why does this control look like that\" without reading Generic.xaml and every theme dictionary.")]

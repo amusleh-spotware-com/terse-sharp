@@ -355,18 +355,44 @@ Judgement, not ritual: a one-shot call on the startup path, or a place where the
 genuinely less clear for no measured gain, stays simple — **and says so at the call**. What is banned
 is the per-file, per-element or per-line allocation nobody measured.
 
-## 🚫 HARD GATE — success costs nothing
+## 🚫 HARD GATE — success costs nothing: minimum response, `verbose=true` restores it
 
-A tool that succeeded with nothing to report must say so in **one line**. `build`, `run_tests` and
-`rerun_failed` already do: a clean build and a green suite answer in a single line and take
-`verbose=true` to restore the full report. When adding or changing a tool whose usual outcome is
-"fine", ask what the agent would *act* on in the success case; if the answer is nothing, emit a
-one-liner and put the detail behind `verbose=true`.
+**Every tool answers a success with the absolute minimum, and puts everything else behind
+`verbose=true`.** This is not a per-tool judgement call and not a nicety — it is the prime directive
+applied to the most common outcome there is. An agent that already knows the edit landed pays for the
+diff it will never read, on every call, in every session.
 
-The rule has one hard edge: **the short form may only be emitted for a result that has nothing else to
-say.** Any failure, any diagnostic, any warning, a timeout, a zero-result run, a locked file — all keep
-the full response. Condensing a result that carried a caveat is the same defect as a confident wrong
-answer, because the agent cannot see what was dropped.
+Before shipping or changing **any** tool, answer one question:
+
+> **"In the success case, what would the agent actually act on?"**
+
+Whatever is not in that answer does not go in the response. It goes behind `verbose=true`.
+
+**The contract, on every tool that mutates or verifies:**
+
+1. **Success is one line, or one line per changed file** — never a diff, never file contents, never a
+   per-item table. `build`, `run_tests`, `rerun_failed`, `format`, `cleanup` and `clean` are the
+   reference shape; every edit, refactor, project/package/solution, `.resx`, XAML and Razor writer
+   answers the same way: `<tool> applied  <path>  changedLines=N  errors=0 warnings=0`.
+2. **`verbose=true` restores the full report, byte for byte** — the diff, the per-file detail, the
+   counters. Every tool with a short form must accept it, and it must be a real C# default
+   (`bool verbose = false`), or the MCP SDK marks it required.
+3. **`dryRun=true` is never condensed.** There the diff *is* the answer — the whole reason the call
+   was made.
+4. **The short form is only ever emitted for a result that has nothing else to say.** Any failure, any
+   new diagnostic, any warning, a rollback, a timeout, a zero-result run, a locked file, a
+   `NOT rewritten` list, a stale-workspace note, **a "0 files changed" that means nothing landed** —
+   all keep the full response. Condensing a result that carried a caveat is the same defect as a
+   confident wrong answer, because the agent cannot see what was dropped.
+5. **A read tool is not exempt, but its answer is not a "success report".** `get_file_outline`,
+   `find_usages`, `search_symbols` and friends exist to return that payload — it is the answer, not
+   ceremony, and it is not condensed away. What *is* banned there is the ceremony around it: echoed
+   arguments, absolute paths, redundant ids, columns nobody reads, a header restating the question.
+
+A new mutating tool that returns a diff on success, or that has no `verbose` parameter, is
+**incomplete** — the same as one with no E2E test. Assert the short form's size in
+`TokenBudgetE2ETests` against the widest fixture case, so the next format change cannot quietly give
+it back.
 
 ## Code style
 
@@ -377,7 +403,22 @@ by default, pattern matching and switch expressions over `if`/`else` ladders, ex
 never bare interpolation as a converter — `System.Globalization` is a global using), and **no
 comments**: make the code say it.
 
-## 🚫 HARD GATE — a release is not cut until the changelog links it
+## 🚫 HARD GATE — a release is not cut until the review is closed and the changelog links it
+
+**No tag, no `dotnet pack`, no `dotnet nuget push`, no GitHub release, while a code review is open.**
+Before any of those four, both must hold:
+
+1. **The code-review agent has finished** — not "was spawned", not "is probably fine": its report
+   exists and has been read. A review still running is a blocker; wait for it.
+2. **Every CRITICAL and WARNING it found is fixed**, the gates and the affected suites were re-run
+   green *after* those fixes, and the fix round was itself re-reviewed. A finding may only stay open if
+   it is written down — in the report and in the release notes — as a deliberate, justified decision;
+   "I disagree" is not a justification, and neither is "it is a NIT to me".
+
+Cutting a release with an unread or unaddressed review is the one failure this project cannot walk
+back: the package is public the moment it is pushed, `nuget delete` only unlists it, and a shipped
+wrong answer costs every agent that installs it. If the release is urgent, the correct move is to
+narrow the change set, not to skip the review.
 
 Every `## [x.y.z] - yyyy-mm-dd` heading in `CHANGELOG.md` has a matching link definition at the bottom
 of the file, and `[Unreleased]` compares against the newest tag. Those link definitions are what make

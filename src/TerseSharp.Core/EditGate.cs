@@ -18,17 +18,17 @@ public static class EditGate
             : await AnalyseAsync(workspace.Solution, updated, changed, cancellationToken).ConfigureAwait(false);
 
         if (options.DryRun)
-            return Result.Ok(Render(options, diff, "dryRun", report));
+            return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root));
 
         if (report is { NewErrors.Length: > 0 })
             return Result.Fail<string>(Errors.CompileRegression(report.NewErrors));
 
         return await workspace.TryApplyAsync(updated, changed, cancellationToken).ConfigureAwait(false)
-            ? Result.Ok(Render(options, diff, "applied", report))
+            ? Result.Ok(Render(options, diff, "applied", report, workspace.Root))
             : Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
     }
 
-    private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report)
+    private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root)
     {
         var response = new ResponseBuilder(options.Tool, state);
 
@@ -37,8 +37,8 @@ public static class EditGate
         if (report is not null)
             Announce(response, report);
 
-        if (options.Quiet && !options.DryRun && report is not { NewErrors.Length: > 0 })
-            return Compact(response, diffs);
+        if (Condensed(options, diffs, report))
+            return Compact(response, diffs, root);
 
         foreach (var diff in diffs)
             response.Line(diff.Text).Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={diff.ChangedLines}"));
@@ -174,11 +174,21 @@ public static class EditGate
     private sealed record GateReport(string[] NewErrors, int Errors, int ErrorDelta, int Warnings, int WarningDelta);
 
     private readonly record struct Tally(Dictionary<string, int> Errors, int ErrorCount, int WarningCount);
-    private static string Compact(ResponseBuilder response, DocumentDiff[] diffs)
+    private static string Compact(ResponseBuilder response, DocumentDiff[] diffs, string root)
     {
         foreach (var diff in diffs)
-            response.Line(string.Create(CultureInfo.InvariantCulture, $"{diff.Path}  changedLines={diff.ChangedLines}"));
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{PositionFormat.Relative(root, diff.Path)}  changedLines={diff.ChangedLines}"));
+        }
 
         return response.Note("(verbose=true for the diff)").ToString();
     }
+
+    private static bool Condensed(EditOptions options, DocumentDiff[] diffs, GateReport? report) =>
+        !options.Verbose
+        && !options.DryRun
+        && diffs.Length is not 0
+        && report is not { NewErrors.Length: > 0 };
 }

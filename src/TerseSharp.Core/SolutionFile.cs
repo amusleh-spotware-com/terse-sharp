@@ -10,7 +10,7 @@ public static class SolutionFile
     public static IReadOnlyList<string> Projects(string solutionPath) =>
         IsXml(solutionPath) ? XmlProjects(solutionPath) : ClassicProjects(solutionPath);
 
-    public static async Task<Result<string>> AddProject(string solutionPath, string projectPath, bool dryRun)
+    public static async Task<Result<string>> AddProject(string solutionPath, string projectPath, bool dryRun, bool verbose)
     {
         if (!IsXml(solutionPath))
             return Result.Fail<string>(Unsupported(solutionPath, "add"));
@@ -34,10 +34,10 @@ public static class SolutionFile
 
         document.Root!.Add(new XElement("Project", new XAttribute("Path", relative)));
 
-        return await Write(solutionPath, document, dryRun, "solution_add_project", relative).ConfigureAwait(false);
+        return await Write(solutionPath, document, dryRun, verbose, "solution_add_project", relative).ConfigureAwait(false);
     }
 
-    public static async Task<Result<string>> RemoveProject(string solutionPath, string projectPath, bool dryRun)
+    public static async Task<Result<string>> RemoveProject(string solutionPath, string projectPath, bool dryRun, bool verbose)
     {
         if (!IsXml(solutionPath))
             return Result.Fail<string>(Unsupported(solutionPath, "remove"));
@@ -51,7 +51,7 @@ public static class SolutionFile
 
         element.Remove();
 
-        return await Write(solutionPath, document, dryRun, "solution_remove_project", relative).ConfigureAwait(false);
+        return await Write(solutionPath, document, dryRun, verbose, "solution_remove_project", relative).ConfigureAwait(false);
     }
 
     private static bool Matches(XElement element, string relative) =>
@@ -61,7 +61,13 @@ public static class SolutionFile
     private static bool IsProjectFile(string path) =>
         Path.GetExtension(path) is ".csproj" or ".fsproj" or ".vbproj";
 
-    private static async Task<Result<string>> Write(string solutionPath, XDocument document, bool dryRun, string tool, string relative)
+    private static async Task<Result<string>> Write(
+        string solutionPath,
+        XDocument document,
+        bool dryRun,
+        bool verbose,
+        string tool,
+        string relative)
     {
         var before = await File.ReadAllTextAsync(solutionPath).ConfigureAwait(false);
         var after = document.ToString() + Environment.NewLine;
@@ -73,6 +79,16 @@ public static class SolutionFile
 
         response.Summary(1, 1, "files changed");
         response.Note(dryRun ? "dryRun" : "applied");
+
+        if (!dryRun && !verbose)
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{Path.GetFileName(solutionPath.AsSpan())}  changedLines={UnifiedDiff.ChangedLines(before, after)}"));
+
+            return Result.Ok(response.Note("(verbose=true for the diff)").ToString());
+        }
+
         response.Line(UnifiedDiff.Between(solutionPath, before, after));
 
         return Result.Ok(response.ToString());

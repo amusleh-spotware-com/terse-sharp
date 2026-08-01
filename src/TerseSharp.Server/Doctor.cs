@@ -9,6 +9,8 @@ public static class Doctor
             SdkLine(),
             Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
             ClientLine(),
+            await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
+            await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
             WatcherLine(),
             await WorkspaceLineAsync(workspace, cancellationToken).ConfigureAwait(false)
         };
@@ -82,5 +84,53 @@ public static class Doctor
         {
             return Check("watcher", exception.Message, false, "run with --no-watch; freshness then rests on the per-file stamp check");
         }
+    }
+
+    private static string UpdateDetail(ReleaseVersion running, ReleaseVersion? latest) => latest switch
+    {
+        { } published when published.IsNewerThan(running) => string.Create(CultureInfo.InvariantCulture, $"terse {running} -> {published} is available"),
+        { } => string.Create(CultureInfo.InvariantCulture, $"terse {running} is current"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"terse {running}; the latest release could not be read"),
+    };
+
+    private static string Asset(bool installed, bool current) => (installed, current) switch
+    {
+        (false, _) => "absent",
+        (_, true) => "current",
+        _ => "stale",
+    };
+
+    private static async Task<string> UpdateLineAsync(CancellationToken cancellationToken)
+    {
+        if (!UpdateSettings.Enabled())
+            return Check("update", "checks are off (TERSE_UPDATE=0)", true, string.Empty);
+
+        if (UpdateSettings.Requested() is not { } request)
+        {
+            return Check(
+                "update",
+                "the running version could not be read ('" + UpdateSettings.Running() + "')",
+                false,
+                "reinstall the tool: dotnet tool update -g TerseSharp");
+        }
+
+        var latest = await UpdateCheck.RunAsync(request with { Window = TimeSpan.Zero }, cancellationToken).ConfigureAwait(false);
+
+        return Check(
+            "update",
+            UpdateDetail(request.Running, latest),
+            latest is not { } published || !published.IsNewerThan(request.Running),
+            "run: dotnet tool update -g TerseSharp");
+    }
+
+    private static async Task<string> AssetsLineAsync(CancellationToken cancellationToken)
+    {
+        var state = await ClientRegistrar.AssetsAsync(cancellationToken).ConfigureAwait(false);
+
+        return Check(
+            "assets",
+            "skill=" + Asset(state.SkillInstalled, state.SkillCurrent) + " guard=" + Asset(state.GuardInstalled, state.GuardCurrent),
+            !state.Stale,
+            "run: terse install --skill --guard");
     }
 }

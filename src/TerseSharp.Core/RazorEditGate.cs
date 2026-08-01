@@ -26,7 +26,7 @@ public static class RazorEditGate
             : await AnalyseAsync(context, updatedText, cancellationToken).ConfigureAwait(false);
 
         if (options.DryRun)
-            return Result.Ok(Render(context, updatedText, options.Tool, "dryRun", report, true));
+            return Result.Ok(Render(context, updatedText, options, "dryRun", report, true));
 
         if (report is { NewErrors.Count: > 0 })
             return Result.Fail<string>(Errors.CompileRegression([.. report.NewErrors]));
@@ -34,7 +34,7 @@ public static class RazorEditGate
         await AtomicWrite.TextAsync(context.FullPath, updatedText, cancellationToken).ConfigureAwait(false);
         context.Workspace.Sync.Noticed(context.FullPath, ChangeKind.Razor);
 
-        return Result.Ok(Render(context, updatedText, options.Tool, "applied", report, Refresh(context, updatedText)));
+        return Result.Ok(Render(context, updatedText, options, "applied", report, Refresh(context, updatedText)));
     }
 
     private static bool Refresh(RazorContext context, string updatedText)
@@ -106,12 +106,13 @@ public static class RazorEditGate
     private static string Render(
         RazorContext context,
         string updatedText,
-        string tool,
+        RazorEditOptions options,
         string state,
         RazorGateReport? report,
         bool refreshed)
     {
-        var response = new ResponseBuilder(tool, state);
+        var response = new ResponseBuilder(options.Tool, state);
+        var changed = UnifiedDiff.ChangedLines(context.Document.Text, updatedText);
 
         response.Summary(1, 1, "files changed");
         response.Note(Announce(report));
@@ -122,10 +123,11 @@ public static class RazorEditGate
         if (report is { NewErrors.Count: > 0 })
             Warn(response, report);
 
+        if (Condensed(options, refreshed, report))
+            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{context.Relative}  changedLines={changed}")).Note("(verbose=true for the diff)").ToString();
+
         response.Line(UnifiedDiff.Between(context.Relative, context.Document.Text, updatedText));
-        response.Line(string.Create(
-            CultureInfo.InvariantCulture,
-            $"changedLines={UnifiedDiff.ChangedLines(context.Document.Text, updatedText)}"));
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
 
         return response.ToString();
     }
@@ -158,6 +160,13 @@ public static class RazorEditGate
         long RegenerationMs);
 
     private readonly record struct Tally(IReadOnlyList<string> Errors, int ErrorCount, int WarningCount);
+
+    private static bool Condensed(RazorEditOptions options, bool refreshed, RazorGateReport? report) =>
+        !options.Verbose
+        && !options.DryRun
+        && refreshed
+        && report is not null
+        && report.NewErrors.Count is 0;
 }
 
-public sealed record RazorEditOptions(string Tool, bool DryRun, bool AllowErrors);
+public sealed record RazorEditOptions(string Tool, bool DryRun, bool AllowErrors, bool Verbose = false);

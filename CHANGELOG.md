@@ -8,6 +8,71 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-01
+
+Two changes, both about what a tool response costs and what it tells you: every mutating tool stops
+echoing back a diff you already know, and the server tells you when a newer release exists.
+
+> **Response-format change (MAJOR under this project's rules).** An agent that parsed the unified diff
+> out of an edit's response must now pass `verbose=true`. Everything a caveat would have told you —
+> diagnostics, rollbacks, stale-workspace notes, `NOT rewritten` lists — still prints in full.
+
+### Added
+
+- **A new GitHub release is announced to the agent, once, on a tool response.** The channel is the only
+  one every MCP client hands to its model — one extra **last line** on a tool response:
+  `UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp`. **Response-format
+  change:** any tool routed through `ToolBoundary` may now carry that trailing line, at most **once per
+  server process**; everything above it is the unchanged answer, and a run with nothing to announce adds
+  nothing at all.
+  The check itself is one `HEAD` request to `https://github.com/…/releases/latest`, whose 302 `Location`
+  names the tag — an empty body, no API token and no rate limit, against `api.github.com`'s 60/hour. It
+  runs on a background task started after the host, so it cannot touch the fixed 60 s `initialize`
+  ceiling, and it is deadlined at 3 s with no retry. The outcome — including a *failed* outcome — is
+  cached in `~/.terse/update` (`TERSE_HOME`-aware) for 24 hours, so a restarted server inside that window
+  makes no network call, and a broken network is not re-probed once per session.
+  `TERSE_UPDATE=0` disables the check, the state file and the asset refresh below; `TERSE_UPDATE_URL`
+  repoints the endpoint at an enterprise mirror or a test stub.
+
+- **`terse serve` refreshes the skill and the guard hook to match the running binary.** After
+  `dotnet tool update -g TerseSharp`, the installed `SKILL.md` still taught the *old* tool surface and the
+  `PreToolUse` matcher could be a version behind — a stale skill is worse than no skill, because the agent
+  acts on the wrong contract. Startup now compares the installed skill with the embedded asset and
+  rewrites it when they differ, and re-applies the `terse guard` entry when its shape changed. It only
+  refreshes what was actually installed: an absent skill is never created, an absent hook is never added,
+  and every other hook in `settings.json` is left untouched.
+
+- **`doctor` reports two new lines.** `assets: skill=current|stale|absent guard=…` (with
+  `run: terse install --skill --guard` as the remedy) and `update: terse <version> is current` /
+  `terse <running> -> <latest> is available`. `doctor` forces a fresh check rather than reading the cache,
+  because it is an explicit diagnostic.
+
+### Changed
+
+- **Every mutating tool answers a success in one line per changed file; the diff moves behind
+  `verbose=true`.** **Response-format change**, and the largest per-call saving in the surface: an edit
+  used to return the whole unified diff on a result the agent had already decided to make.
+  `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`,
+  `extract_interface`, `move_type_to_file`, `move_type_to_namespace`, `change_signature`, `write_text`,
+  `edit_text`, `xaml_set_property`, `xaml_add_element`, `xaml_remove_element`, `razor_set_attribute`,
+  `razor_add_element`, `razor_remove_element`, `razor_set_directive`, `resx_set`, `resx_remove`,
+  `resx_rename`, `project_create`, `project_set_property`, `project_add_reference`,
+  `project_remove_reference`, `package_add`, `package_remove`, `solution_add_project` and
+  `solution_remove_project` now answer `<tool> applied` + `<path>  changedLines=N` (+ `errors=N (+D) warnings=N (+D)`
+  where the compile gate ran), and take `verbose=true` for the previous output.
+  The short form is only emitted when there is nothing else to say: **`dryRun` is never condensed** —
+  there the diff is the answer — and **every caveat still prints in full**: the `errors=/warnings=`
+  deltas, a rollback, a new compile error, `0 files changed`, `compileGate=unavailable`,
+  `workspace=stale`, `UNFIXED`, `designerStale`, and the `NOT rewritten` list a XAML-aware rename
+  leaves. `rename_symbol` on a **Razor component** keeps the whole diff, because that result always
+  carries a staleness caveat. Paths in the condensed line are workspace-relative, like every other
+  path in a response.
+
+- **`load_workspace`, `list_workspaces` and `unload_workspace` route through `ToolBoundary`.** They were
+  the only three tools that bypassed it, so an expected exception surfaced as a raw MCP error instead of a
+  rendered `ERROR … remedy:` line — and they could not carry the update notice. Their success output is
+  unchanged.
+
 ## [0.15.2] - 2026-08-01
 
 Seven defects found after 0.15.0 shipped — six by the review, one by CI on macOS.
@@ -1067,7 +1132,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.15.2...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.16.0
 [0.15.2]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.2
 [0.15.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.0
 [0.14.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.14.0

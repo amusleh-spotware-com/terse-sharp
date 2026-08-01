@@ -8,11 +8,11 @@ public static class ToolBoundary
     {
         try
         {
-            return action();
+            return Announced(action());
         }
         catch (Exception exception) when (IsExpected(exception))
         {
-            return Render(exception);
+            return Announced(Render(exception));
         }
     }
 
@@ -20,11 +20,11 @@ public static class ToolBoundary
     {
         try
         {
-            return await action().ConfigureAwait(false);
+            return Announced(await action().ConfigureAwait(false));
         }
         catch (Exception exception) when (IsExpected(exception))
         {
-            return Render(exception);
+            return Announced(Render(exception));
         }
     }
 
@@ -55,4 +55,7 @@ public static class ToolBoundary
             string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),
             "check the arguments; use search_symbols or find_files to get a valid id or path")
             .Render();
+
+    private static string Announced(string response) =>
+        UpdateBanner.Take() is { } notice ? response + "\n" + notice : response;
 }

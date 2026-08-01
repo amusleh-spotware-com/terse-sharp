@@ -35,6 +35,7 @@ public sealed class WorkspaceSyncE2ETests
         {
             ["symbolId"] = "SyncedType.Value",
             ["declaration"] = "    public int Value() => 42;",
+            ["verbose"] = true,
         });
 
         Assert.Contains("replace_symbol applied", replaced, StringComparison.Ordinal);

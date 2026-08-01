@@ -23,17 +23,18 @@ internal sealed class TerseServerProcess
     public static async Task<TerseServerProcess> StartAsync(
         string workingDirectory,
         IEnumerable<string> arguments,
+        IReadOnlyDictionary<string, string> environment,
         CancellationToken cancellationToken)
     {
         var launched = arguments.ToArray();
 
         try
         {
-            return await ConnectAsync(workingDirectory, launched, cancellationToken);
+            return await ConnectAsync(workingDirectory, launched, environment, cancellationToken);
         }
         catch (Exception exception) when (exception is TimeoutException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            return await ConnectAsync(workingDirectory, launched, cancellationToken);
+            return await ConnectAsync(workingDirectory, launched, environment, cancellationToken);
         }
     }
 
@@ -61,7 +62,10 @@ internal sealed class TerseServerProcess
         process.Dispose();
     }
 
-    private static Process Launch(string workingDirectory, IEnumerable<string> arguments)
+    private static Process Launch(
+        string workingDirectory,
+        IEnumerable<string> arguments,
+        IReadOnlyDictionary<string, string> environment)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -73,6 +77,11 @@ internal sealed class TerseServerProcess
 
         foreach (var argument in arguments)
             start.ArgumentList.Add(argument);
+
+        start.Environment["TERSE_UPDATE"] = "0";
+
+        foreach (var (name, value) in environment)
+            start.Environment[name] = value;
 
         return Process.Start(start) ?? throw new InvalidOperationException("the terse server did not start");
     }
@@ -111,9 +120,10 @@ internal sealed class TerseServerProcess
     private static async Task<TerseServerProcess> ConnectAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
+        IReadOnlyDictionary<string, string> environment,
         CancellationToken cancellationToken)
     {
-        var process = Launch(workingDirectory, arguments);
+        var process = Launch(workingDirectory, arguments, environment);
 
         try
         {
@@ -129,4 +139,10 @@ internal sealed class TerseServerProcess
             throw;
         }
     }
+
+    public static Task<TerseServerProcess> StartAsync(
+        string workingDirectory,
+        IEnumerable<string> arguments,
+        CancellationToken cancellationToken) =>
+        StartAsync(workingDirectory, arguments, new Dictionary<string, string>(StringComparer.Ordinal), cancellationToken);
 }

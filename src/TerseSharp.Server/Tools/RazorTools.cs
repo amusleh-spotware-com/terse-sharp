@@ -101,6 +101,7 @@ public sealed class RazorTools(ToolContext context)
         [Description("Attribute value. Omit to remove the attribute.")] string? value = null,
         [Description("Return the diff without writing.")] bool dryRun = false,
         [Description("Apply even when the edit introduces compile errors.")] bool allowErrors = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
@@ -115,7 +116,7 @@ public sealed class RazorTools(ToolContext context)
                         target,
                         attribute,
                         value,
-                        new RazorEditOptions("razor_set_attribute", dryRun, allowErrors),
+                        new RazorEditOptions("razor_set_attribute", dryRun, allowErrors, verbose),
                         cancellationToken).ConfigureAwait(false)),
                 cancellationToken: cancellationToken);
 
@@ -128,6 +129,7 @@ public sealed class RazorTools(ToolContext context)
         [Description("last (default), first, before or after.")] string? position = null,
         [Description("Return the diff without writing.")] bool dryRun = false,
         [Description("Apply even when the edit introduces compile errors.")] bool allowErrors = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
@@ -142,7 +144,7 @@ public sealed class RazorTools(ToolContext context)
                         parent,
                         markup,
                         position ?? "last",
-                        new RazorEditOptions("razor_add_element", dryRun, allowErrors),
+                        new RazorEditOptions("razor_add_element", dryRun, allowErrors, verbose),
                         cancellationToken).ConfigureAwait(false)),
                 cancellationToken: cancellationToken);
 
@@ -153,6 +155,7 @@ public sealed class RazorTools(ToolContext context)
         [Description("Element: path from razor_outline, or #ref.")] string target,
         [Description("Return the diff without writing.")] bool dryRun = false,
         [Description("Apply even when the edit introduces compile errors.")] bool allowErrors = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
@@ -165,7 +168,7 @@ public sealed class RazorTools(ToolContext context)
                         loaded,
                         path,
                         target,
-                        new RazorEditOptions("razor_remove_element", dryRun, allowErrors),
+                        new RazorEditOptions("razor_remove_element", dryRun, allowErrors, verbose),
                         cancellationToken).ConfigureAwait(false)),
                 cancellationToken: cancellationToken);
 
@@ -178,6 +181,7 @@ public sealed class RazorTools(ToolContext context)
         [Description("Remove the directive instead of setting it.")] bool remove = false,
         [Description("Return the diff without writing.")] bool dryRun = false,
         [Description("Apply even when the edit introduces compile errors.")] bool allowErrors = false,
+        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } refusal
@@ -192,7 +196,7 @@ public sealed class RazorTools(ToolContext context)
                         directive,
                         value,
                         remove,
-                        new RazorEditOptions("razor_set_directive", dryRun, allowErrors),
+                        new RazorEditOptions("razor_set_directive", dryRun, allowErrors, verbose),
                         cancellationToken).ConfigureAwait(false)),
                 cancellationToken: cancellationToken);
 }

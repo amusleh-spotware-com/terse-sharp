@@ -40,6 +40,7 @@ public static class FileService
         bool dryRun,
         bool force,
         bool allowErrors,
+        bool verbose,
         CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace, path);
@@ -56,13 +57,13 @@ public static class FileService
         var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
         var after = LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
 
-        if (await GatedAsync(workspace, path, after, dryRun, allowErrors, cancellationToken).ConfigureAwait(false) is { } gated)
+        if (await GatedAsync(workspace, path, after, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false) is { } gated)
             return gated;
 
         if (!dryRun)
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DiffResponse("write_text", path, before, after, dryRun));
+        return Result.Ok(DiffResponse("write_text", path, before, after, dryRun, verbose));
     }
 
     public static async Task<Result<string>> EditTextAsync(
@@ -88,7 +89,7 @@ public static class FileService
         var rewritten = Rewrite(before, request);
 
         return rewritten.IsOk
-            ? await ApplyAsync(workspace, full, path, before, rewritten.Value!, request.DryRun, cancellationToken).ConfigureAwait(false)
+            ? await ApplyAsync(workspace, full, path, before, rewritten.Value!, request, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(rewritten.Error!);
     }
 
@@ -137,13 +138,13 @@ public static class FileService
         string path,
         string before,
         string after,
-        bool dryRun,
+        EditRequest request,
         CancellationToken cancellationToken)
     {
-        if (!dryRun)
+        if (!request.DryRun)
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DiffResponse("edit_text", path, before, after, dryRun));
+        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose));
     }
 
     private static TerseError NoMatch(string before, string oldText, SnippetMatch match) => match.Occurrences > 1
@@ -165,13 +166,18 @@ public static class FileService
         workspace.Sync.Notice(full);
     }
 
-    private static string DiffResponse(string tool, string path, string before, string after, bool dryRun)
+    private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied");
+        var changed = UnifiedDiff.ChangedLines(before, after);
 
         response.Summary(1, 1, "files changed");
+
+        if (!dryRun && !verbose)
+            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{path}  changedLines={changed}")).Note("(verbose=true for the diff)").ToString();
+
         response.Line(UnifiedDiff.Between(path, before, after));
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={UnifiedDiff.ChangedLines(before, after)}"));
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
 
         return response.ToString();
     }
@@ -258,7 +264,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines)
     {
@@ -292,13 +298,14 @@ public static class FileService
         string content,
         bool dryRun,
         bool allowErrors,
+        bool verbose,
         CancellationToken cancellationToken)
     {
         if (!SourceFile.IsCSharp(path) || DocumentLookup.Find(workspace, path) is not { } document)
             return null;
 
         var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, Encoding.UTF8));
-        var options = new EditOptions("write_text", dryRun, allowErrors, Quiet: true);
+        var options = new EditOptions("write_text", dryRun, allowErrors, verbose);
 
         return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
     }

@@ -159,6 +159,51 @@ the watcher on the next semantic call; `load_workspace(reload: true)` forces it.
 
 </details>
 
+### ✂️ Success costs nothing
+
+Every mutating tool answers a successful edit in **one line per changed file** —
+`replace_symbol applied` · `src/App/OrderService.cs  changedLines=3` · `errors=0 (+0) warnings=0 (+0)` —
+instead of echoing back a unified diff of text the agent just wrote. All 30 of them take
+`verbose=true` to restore the full diff: the symbol edits and refactors, `rename_symbol`, `write_text`,
+`edit_text`, the `xaml_*`, `razor_*` and `resx_*` writers, and `project_*` / `package_*` /
+`solution_*`.
+
+The short form is only ever emitted when there is nothing else to say. `dryRun=true` is never
+condensed — there the diff *is* the answer — and **every caveat prints in full regardless**: a
+rollback, a new compile error, `0 files changed`, `compileGate=unavailable`, `workspace=stale`,
+`UNFIXED`, `designerStale`, and the `NOT rewritten` list a XAML-aware rename leaves. A rename of a
+Razor component keeps the whole diff, because that result always carries a staleness caveat.
+
+### 🔔 Staying current
+
+TerseSharp tells you when a new release lands, and it costs next to nothing: **one `HEAD` request to
+GitHub's `releases/latest` — an empty body, no API token, no rate limit — at most once every 24 hours**,
+on a background task that never blocks the MCP handshake or a tool call. The answer is cached in
+`~/.terse/update`, so a server restarted inside that window makes no request at all, and a failed check
+is cached too, so a broken network is not retried per session.
+
+When a newer release exists, the **next tool response carries one extra last line**. That is the one
+channel every MCP client hands to its agent, so it works on Claude Code, Cursor, VS Code, Windsurf and
+anything else that speaks MCP:
+
+```
+UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp
+```
+
+It is emitted **once per server process** and never repeats — the response above it is untouched.
+`terse doctor` answers the same question on demand.
+
+**After you update, the skill and the guard follow.** The next `terse serve` compares the installed
+`SKILL.md` with the one embedded in the new binary and rewrites it when it has drifted, and re-applies
+the `terse guard` hook when its shape changed — but only for what you actually installed: an absent
+skill is never created, an absent hook is never added, and every other hook in `settings.json` is left
+alone. `doctor` reports it as `assets: skill=current guard=current`, or `stale`.
+
+| Variable | Effect |
+|---|---|
+| `TERSE_UPDATE=0` | no release check, no network call, no state file — and no skill/guard refresh |
+| `TERSE_UPDATE_URL` | check a different endpoint: an enterprise mirror, or a stub in tests |
+
 ---
 
 ## 🔒 Make your agent actually use it
@@ -593,6 +638,9 @@ siblings and every `<Card …>` in markup.
 | Undo provenance: a snapshot overtaken by an external change is dropped and reported | ✅ |
 | `load_workspace(reload)`, `--no-watch` / `TERSE_WATCH=0`, `doctor` watcher line | ✅ |
 | Per-workspace XAML / resx / DI index, memoized per generation, incremental, bounded | ✅ |
+| Success costs nothing: every mutating tool answers in one line per changed file, `verbose=true` for the diff | ✅ |
+| Release check (one cached `HEAD` a day), one-line notice on a tool response, `doctor` update line | ✅ |
+| Skill and `terse guard` hook refreshed to match the running binary on `terse serve` | ✅ |
 | Content-addressed (hashed) index, cross-session persistence, trigram search | 🔜 |
 
 Changes are recorded in [CHANGELOG.md](CHANGELOG.md). Versioning and the release pipeline are

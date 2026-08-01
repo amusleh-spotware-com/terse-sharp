@@ -30,24 +30,18 @@ public static class ClientRegistrar
 
     public static async Task<string> InstallSkill()
     {
-        var content = SkillAsset.Read();
-        var target = Path.Combine(ClaudeSkillsDirectory(), ServerName, "SKILL.md");
+        var target = SkillPath();
 
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-
-        await File.WriteAllTextAsync(target, content).ConfigureAwait(false);
+        await AtomicWrite.TextAsync(target, SkillAsset.Read()).ConfigureAwait(false);
 
         return "installed skill -> " + target;
     }
 
     public static async Task<string> InstallGuard()
     {
-        var target = Path.Combine(ClaudeConfigDirectory() ?? Path.Combine(Home(), ".claude"), "settings.json");
-        var root = (File.Exists(target) ? Parse(target) : null) ?? [];
+        var target = SettingsPath();
 
-        Hooks(root)["PreToolUse"] = GuardMatchers(Hooks(root)["PreToolUse"] as JsonArray);
-
-        await SaveAsync(target, root).ConfigureAwait(false);
+        await SaveAsync(target, Guarded(Settings(target))).ConfigureAwait(false);
 
         return "installed guard -> " + target;
     }
@@ -61,18 +55,18 @@ public static class ClientRegistrar
 
     private static JsonNode? Without(JsonNode? entry)
     {
-        if (entry?["hooks"] is not JsonArray hooks)
+        if (entry is not JsonObject matcher || matcher["hooks"] is not JsonArray hooks)
             return entry?.DeepClone();
 
         var others = hooks.Where(hook => !IsGuard(hook)).Select(hook => hook!.DeepClone()).ToArray();
 
         if (others.Length == hooks.Count)
-            return entry.DeepClone();
+            return matcher.DeepClone();
 
         if (others.Length is 0)
             return null;
 
-        var clone = entry.DeepClone();
+        var clone = matcher.DeepClone();
 
         clone["hooks"] = new JsonArray(others);
 
@@ -80,7 +74,8 @@ public static class ClientRegistrar
     }
 
     private static bool IsGuard(JsonNode? hook) =>
-        hook?["command"]?.GetValue<string>()?.Contains("terse guard", StringComparison.Ordinal) is true;
+        hook is JsonObject declared
+        && declared["command"]?.GetValue<string>()?.Contains("terse guard", StringComparison.Ordinal) is true;
 
     private static JsonObject GuardEntry() => new()
     {
@@ -217,7 +212,7 @@ public static class ClientRegistrar
         await AtomicWrite.TextAsync(path, root.ToJsonString(Indented)).ConfigureAwait(false);
     }
 
-    private static string Home() =>
+    internal static string Home() =>
         Environment.GetEnvironmentVariable("TERSE_HOME") is { Length: > 0 } overridden
             ? overridden
             : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -229,6 +224,85 @@ public static class ClientRegistrar
         Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")?.Trim() is { Length: > 0 } directory
             ? Path.GetFullPath(directory)
             : null;
+
+    private static string SkillPath() => Path.Combine(ClaudeSkillsDirectory(), ServerName, "SKILL.md");
+
+    private static string SettingsPath() =>
+        Path.Combine(ClaudeConfigDirectory() ?? Path.Combine(Home(), ".claude"), "settings.json");
+
+    private static JsonObject Guarded(JsonObject root)
+    {
+        var updated = (JsonObject)root.DeepClone();
+
+        Hooks(updated)["PreToolUse"] = GuardMatchers(Hooks(updated)["PreToolUse"] as JsonArray);
+
+        return updated;
+    }
+
+    private static JsonObject Settings(string path) => (File.Exists(path) ? Parse(path) : null) ?? [];
+
+    private static async Task<string?> ReadAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool GuardPresent(JsonObject? root) =>
+        root?["hooks"] is JsonObject hooks
+        && hooks["PreToolUse"] is JsonArray matchers
+        && matchers.OfType<JsonObject>().Any(entry => entry["hooks"] is JsonArray declared && declared.Any(IsGuard));
+
+    private static bool GuardIsCurrent(JsonObject? root) =>
+        root is not null
+        && string.Equals(root.ToJsonString(Indented), Guarded(root).ToJsonString(Indented), StringComparison.Ordinal);
+
+    private static async Task<bool> SkillIsCurrentAsync(string path, CancellationToken cancellationToken) =>
+        string.Equals(await ReadAsync(path, cancellationToken).ConfigureAwait(false), SkillAsset.Read(), StringComparison.Ordinal);
+
+    public static async Task<AssetState> AssetsAsync(CancellationToken cancellationToken)
+    {
+        var skill = SkillPath();
+        var settings = SettingsPath();
+        var root = File.Exists(settings) ? Parse(settings) : null;
+        var installed = File.Exists(skill);
+
+        return new AssetState(
+            installed,
+            installed && await SkillIsCurrentAsync(skill, cancellationToken).ConfigureAwait(false),
+            GuardPresent(root),
+            GuardIsCurrent(root));
+    }
+
+    private static async Task<string?> RewriteAsync(AssetState state)
+    {
+        var refreshed = new List<string>(2);
+
+        if (state is { SkillInstalled: true, SkillCurrent: false })
+            refreshed.Add(await InstallSkill().ConfigureAwait(false));
+
+        if (state is { GuardInstalled: true, GuardCurrent: false })
+            refreshed.Add(await InstallGuard().ConfigureAwait(false));
+
+        return refreshed.Count is 0 ? null : string.Join("\n", refreshed);
+    }
+
+    public static async Task<string?> RefreshAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await RewriteAsync(await AssetsAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
 }
 
 public sealed record ClientTarget(string Name, string ConfigPath);

@@ -101,7 +101,7 @@ public sealed class FileServiceTests
             var result = await FileService.EditTextAsync(
                 lease.Workspace,
                 name,
-                new FileService.EditRequest("alpha\nbeta", "one\ntwo", null, false, false),
+                new FileService.EditRequest("alpha\nbeta", "one\ntwo", null, false, false, false),
                 TestContext.Current.CancellationToken);
 
             Assert.True(result.IsOk, result.Error?.Message);
@@ -131,7 +131,7 @@ public sealed class FileServiceTests
             var result = await FileService.EditTextAsync(
                 lease.Workspace,
                 name,
-                new FileService.EditRequest("alpha beta delta", "x", null, false, false),
+                new FileService.EditRequest("alpha beta delta", "x", null, false, false, false),
                 TestContext.Current.CancellationToken);
 
             Assert.False(result.IsOk);
@@ -192,7 +192,7 @@ public sealed class FileServiceTests
             var result = await FileService.EditTextAsync(
                 lease.Workspace,
                 name,
-                new FileService.EditRequest(string.Empty, "## Commands\nnew", "## Commands", false, false),
+                new FileService.EditRequest(string.Empty, "## Commands\nnew", "## Commands", false, false, false),
                 TestContext.Current.CancellationToken);
 
             Assert.True(result.IsOk, result.Error?.Message);
@@ -253,6 +253,7 @@ public sealed class FileServiceTests
                 dryRun: false,
                 force: true,
                 allowErrors: false,
+                verbose: false,
                 TestContext.Current.CancellationToken);
 
             Assert.False(result.IsOk);

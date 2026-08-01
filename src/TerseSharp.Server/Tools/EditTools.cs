@@ -5,65 +5,73 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class EditTools(ToolContext context)
 {
+    private const string VerboseHelp = "Return the full diff instead of the one-line summary. Default false.";
+
     [McpServerTool(Name = "replace_symbol_body")]
-    [Description("Replace a method, constructor or accessor body, addressed by symbol id. No line numbers and no surrounding context needed. Rolled back if it introduces a compile error.")]
+    [Description("Replace a method, constructor or accessor body, addressed by symbol id. No line numbers and no surrounding context needed. Rolled back if it introduces a compile error. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbolBody(
         [Description("Symbol id of the member.")] string symbolId,
         [Description("New body, with or without the surrounding braces.")] string body,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description(VerboseHelp)] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => SymbolEditService.ReplaceBodyAsync(
-            loaded, symbol, body, Options("replace_symbol_body", dryRun, allowErrors), cancellationToken), cancellationToken);
+            loaded, symbol, body, Options("replace_symbol_body", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
         [Description("Symbol id of the member.")] string symbolId,
         [Description("Complete new member declaration.")] string declaration,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description(VerboseHelp)] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => SymbolEditService.ReplaceDeclarationAsync(
-            loaded, symbol, declaration, Options("replace_symbol", dryRun, allowErrors), cancellationToken), cancellationToken);
+            loaded, symbol, declaration, Options("replace_symbol", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "add_member")]
-    [Description("Add a member to a type, addressed by the type's symbol id.")]
+    [Description("Add a member to a type, addressed by the type's symbol id. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> AddMember(
         [Description("Symbol id of the containing type.")] string typeSymbolId,
         [Description("Complete member declaration to add.")] string declaration,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description(VerboseHelp)] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId, (loaded, symbol) => SymbolEditService.AddMemberAsync(
-            loaded, symbol, declaration, Options("add_member", dryRun, allowErrors), cancellationToken), cancellationToken);
+            loaded, symbol, declaration, Options("add_member", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "delete_symbol")]
-    [Description("Safe-delete a member or type. Refuses while references exist unless force is set, and lists them.")]
+    [Description("Safe-delete a member or type. Refuses while references exist unless force is set, and lists them. A successful delete answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> DeleteSymbol(
         [Description("Symbol id to delete.")] string symbolId,
         [Description("Delete even when references exist. Default false.")] bool force = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description(VerboseHelp)] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => SymbolEditService.DeleteAsync(
-            loaded, symbol, force, Options("delete_symbol", dryRun, allowErrors: false), cancellationToken), cancellationToken);
+            loaded, symbol, force, Options("delete_symbol", dryRun, allowErrors: false, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "rename_symbol")]
-    [Description("Rename a symbol across the whole solution, including interface implementations, overrides and XML doc crefs. Use instead of a find-and-replace sweep.")]
+    [Description("Rename a symbol across the whole solution, including interface implementations, overrides and XML doc crefs. Use instead of a find-and-replace sweep. A successful rename answers in one line per changed file - plus every XAML or Razor site it could NOT rewrite; pass verbose=true for the diff.")]
     public Task<string> RenameSymbol(
         [Description("Symbol id to rename.")] string symbolId,
         [Description("New identifier.")] string newName,
         [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description(VerboseHelp)] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId, (loaded, symbol) => RenameService.RenameAsync(
-            loaded, symbol, newName, Options("rename_symbol", dryRun, allowErrors: false), cancellationToken), cancellationToken);
+            loaded, symbol, newName, Options("rename_symbol", dryRun, allowErrors: false, verbose), cancellationToken), cancellationToken);
 
-    private static EditOptions Options(string tool, bool dryRun, bool allowErrors) => new(tool, dryRun, allowErrors);
+    private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose) =>
+        new(tool, dryRun, allowErrors, verbose);
 
     private Task<string> Guarded(
         string? workspace,

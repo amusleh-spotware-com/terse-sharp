@@ -208,4 +208,36 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR OutOfWorkspace", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_OnSuccess_AnswersInOneLinePerFileAndKeepsTheDiffBehindVerbose()
+    {
+        var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var quiet = await server.CallAsync("replace_symbol_body", new()
+            {
+                ["symbolId"] = UnusedMethod,
+                ["body"] = "{ return 7; }",
+            });
+
+            var loud = await server.CallAsync("replace_symbol_body", new()
+            {
+                ["symbolId"] = UnusedMethod,
+                ["body"] = "{ return 8; }",
+                ["verbose"] = true,
+            });
+
+            Assert.DoesNotContain("@@", quiet, StringComparison.Ordinal);
+            Assert.Contains("(verbose=true for the diff)", quiet, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", quiet, StringComparison.Ordinal);
+            Assert.Contains("@@", loud, StringComparison.Ordinal);
+            Assert.True(quiet.Length < loud.Length, quiet);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(OrderServicePath, before, TestContext.Current.CancellationToken);
+        }
+    }
 }
