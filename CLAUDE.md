@@ -57,12 +57,73 @@ dotnet run --project src/TerseSharp.Server -- serve --workspace fixtures/Fixture
 dotnet pack src/TerseSharp.Server -c Release -o artifacts/nupkg
 ```
 
+**Those shell forms are for humans and CI.** From an agent they are `build`, `run_tests`,
+`rerun_failed`, `list_tests`, `format verify=true`, `cleanup verify=true fix=all` and `clean` — the
+`dotnet` CLI is a fallback under the gate above, not a shortcut, and `cd … && dotnet …` was the single
+most common breach in this repo's own session log.
+
 .NET 10 SDK required (`global.json` pins `10.0.300`). Central package management: add versions to
 `Directory.Packages.props`, never inline in a `.csproj`.
 
 **E2E tests need `TerseSharp.Server` built first, in the same configuration as the test binaries** —
 `TerseServerFixture` launches `src/TerseSharp.Server/bin/<Configuration>/net10.0/terse.dll` as a real
 child process over stdio and throws `build TerseSharp.Server first` if it is missing.
+
+## 🚫 HARD GATE — the `terse` that answers you is the installed tool, never your working tree
+
+The MCP server in this session is whatever `dotnet tool install`/`update` last put on PATH. It is
+**not** `HEAD`, not your branch, and it does not pick up a `build` you just ran. Sessions have been
+spent arguing with this:
+
+- "`search_text` throws on every call" — that was the 0.3.1 global tool; `main` had six passing E2E
+  tests for it. No defect existed.
+- "`find_usages` still prints absolute paths, F3 is open" — fixed in 0.5.0; the observation came from
+  the 0.3.1 binary.
+- A whole research document was written against behaviour three releases old, then corrected twice.
+
+So: **no claim about tool behaviour is made from the connected server.** A statement of the form "tool
+X does/does not Y" is proven by, in order of preference: (a) an E2E test against the freshly built
+`terse.dll`, (b) a hand-run `dotnet run --project src/TerseSharp.Server -- serve …` child over stdio,
+(c) current source read with `get_symbol_source`. **Say which one answered, and say the version** —
+`workspace_status` and `doctor` both print it. "I called the tool and it did X" is evidence about the
+*installed* version only, and it is worthless the moment you have edited that code.
+
+The same asymmetry bites at release time: the running server holds file locks on `terse.dll`, so
+`dotnet tool update` reports a success it cannot deliver until Claude Code restarts, and nuget.org's
+registration endpoint lags the flat container by about a minute so the first update can no-op on a
+cached index. Report that plainly instead of claiming the local install is current.
+
+## 🚫 HARD GATE — a green build and a green suite are not a green CI
+
+CI runs `dotnet format analyzers` **and** `dotnet format style`, both `--verify-no-changes --severity
+info`, **on the ubuntu leg only** (`.github/workflows/ci.yml`). Two pushes died there — `IDE0022` on a
+block-bodied one-statement test, `IDE0060` on an unused E2E parameter — while `build`, `run_tests`,
+`analyze` and every other local gate were green on all three OSes. An info-severity IDE rule is
+invisible to a build and fatal to that step.
+
+Before every push, in this order, reading each result before trusting the next:
+
+1. **`build` — and read it.** A failed build followed by a test run reports the *previous* binary's
+   result; "167 passed" against a red build has been reported here more than once. Never `--no-build`
+   locally — CI's Test step may use it because a Build step ran immediately before, in the same job.
+   A lingering `testhost` or `terse` process holds the E2E binary and produces the same false green:
+   kill it, rebuild, re-run.
+2. **`run_tests` over the whole solution** — unit and E2E.
+3. **`cleanup verify=true fix=all`** — the closest in-server reading of that step. It is a **superset**,
+   not an equivalent: measured at `b3c381e` it named four files (`ReleaseVersion.cs`,
+   `ResponseBuilderTests.cs`, `UnifiedDiffTests.cs`, `WorkspaceRegistryTests.cs`) that both CI commands
+   accept, and `format verify=true` is Roslyn's whitespace formatter, which CI does not run at all. So a
+   `VERIFY_FAILED` naming a file you did not touch is a prompt to look, not proof CI is red — the two
+   `dotnet format … --verify-no-changes --severity info` commands are the arbiter, and running them
+   scoped to the project you touched is the one legitimate `dotnet` shell-out on this path. Logged as
+   `I37`.
+
+A one-runner red is not automatically a flake, and "it passed on rerun" is not a diagnosis. Real
+one-legged failures have shipped here: a macOS-only race introduced by starting the transport before
+assigning the preload task, and a Windows-only `TimeoutException: Initialization timed out` when a cold
+two-core runner misses the **fixed 60 s MCP handshake ceiling** that `MCP_TIMEOUT` does not raise. Name
+which it is on evidence; if it is a timing budget, widen the budget in the test rather than re-running
+until it passes.
 
 ## Architecture
 
@@ -166,7 +227,7 @@ answer all four:
 4. **CHANGELOG** — under `## [Unreleased]`, with the format change spelled out.
 
 A commit that changes behaviour and leaves any of the four stale is incomplete. "I'll update the docs
-after" is the same failure as "I'll add the test after": both are how a 64-tool surface drifts away
+after" is the same failure as "I'll add the test after": both are how an 83-tool surface drifts away
 from what it claims to be. When you cannot update one of them in the same commit, say which and why in
 the commit body.
 
@@ -403,6 +464,16 @@ by default, pattern matching and switch expressions over `if`/`else` ladders, ex
 never bare interpolation as a converter — `System.Globalization` is a global using), and **no
 comments**: make the code say it.
 
+Write the newest form the compiler accepts, and modernize the lines you touch: collection expressions
+(`[]`, `[.. spread]`) over `new List<T>()` / `Array.Empty` / `Enumerable.Empty`, primary constructors,
+the `field` keyword instead of a hand-written backing field, target-typed `new`, `is null` / `is not
+null` over `== null`, raw string literals for embedded JSON and XML, file-scoped namespaces,
+`required` / `init` over settable properties, `CancelAsync()` over `Cancel()`. The ubuntu format gate
+runs at `--severity info`, so `IDE0022` (expression body), `IDE0060` (unused parameter) and their
+siblings are **CI-breaking** here, not suggestions — and the build will not tell you, because
+`.editorconfig` carries them at `suggestion` and `TreatWarningsAsErrors` escalates warnings, not
+suggestions.
+
 ## 🚫 HARD GATE — a release is not cut until the review is closed and the changelog links it
 
 **No tag, no `dotnet pack`, no `dotnet nuget push`, no GitHub release, while a code review is open.**
@@ -438,6 +509,97 @@ When tagging `vX.Y.Z`, in the same commit as the tag's content:
 Do not create the GitHub release before the changelog says the version exists — the release notes are
 read from it, and a tag pushed against a changelog that still says `[Unreleased]` publishes a release
 describing nothing.
+
+## 🚫 HARD GATE — a rule with no census gate is a suggestion
+
+Every "every X does Y" rule in this file is enforced by a test that **discovers all X from the running
+server** (`tools/list`) or from source, and fails on any non-conforming instance.
+`ToolCoverageE2ETests` is the model: it asserts the advertised list and the enrolled set match **in
+both directions**, so neither a new tool nor a deleted one can slip past it.
+
+A gate that checks only what somebody remembered to enrol is forbidden. It silently exempts everything
+added later, which is exactly how the tool count, the NUGET_README and `SKILL.md` each went stale while
+every local gate stayed green — a docs hard gate written in prose is obeyed until the session that is
+in a hurry. Where an exception is genuinely needed, put it in a checked-in exclusion set with a written
+reason per entry, and treat that set as a **ratchet: it may only shrink**.
+
+Add a rule ⇒ add its census gate in the same change. **Current census gates — this list is exhaustive,
+and being absent from it is the point:**
+
+| Rule | Gate | Discovers its subject from |
+|---|---|---|
+| every tool has an E2E test | `ToolCoverageE2ETests` | `tools/list`, both directions |
+| every tool is named in `SKILL.md`, `README.md`, `NUGET_README.md` | `DocsCoverageE2ETests` | `tools/list` |
+| every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus the `ProcessSpawning` / `WorkspaceMutating` / `Destructive` arrays — an exclusion set that carries no written reason per entry and no ratchet, so it does not yet meet the rule above it |
+| **every mutating tool takes `verbose`** | **none — 7 hand-written spot checks** | — |
+| **every listing tool has a token budget** | **none — `TokenBudgetE2ETests` is 20 per-tool `[Fact]`s, and its `EveryReadToolStaysWithinTheGlobalCap` names four tools by hand** | — |
+
+The last two rows are the ones to close first: they are stated in this file as if enforced, and they
+are not.
+
+**Never delete, skip, `[Fact(Skip=…)]` or weaken a test — or its assertions — to make a suite go
+green.** A red test is resolved by fixing the code, by fixing an expectation that was itself wrong, or
+by making the test deterministic. A genuinely obsolete test is *replaced* in the same change by one
+that covers the same behaviour at least as strongly.
+
+## Traps that cost time — session-hardened
+
+Each burned real tokens in a past session in this repo. They are the fast path, not style.
+
+- **The compile gate rolls back a callee-after-caller edit.** 35 `CompileRegression` rejections were a
+  `replace_symbol` / `add_member` whose new body called a helper that did not exist yet (`FileGlob`,
+  `Separated`, `MinSharedPrefix`). Add the callee **first**, bottom-up — a rejected edit costs the call
+  *and* the whole declaration you sent.
+- **Never hand-write a documentation id.** 15 `SymbolNotFound`s were ids typed from memory, missing a
+  parameter list or a `~ReturnType` suffix. Copy it from `get_file_outline ids=full` /
+  `search_symbols`, or use the short name form (`OrderService.Submit`) — that is what it exists for.
+- **`replace_symbol` takes exactly one member.** Two members answers `the declaration is not exactly
+  one member`; call it once per member.
+- **On a markdown file, address the section — do not recall the text.** 102 `edit_text`
+  `InvalidArgument`s were `oldText matched 0 times` (text remembered from an earlier read, or a file
+  that moved under you) or `matched 48 times` (anchor too short). `read_text headings=true` gives the
+  map; `section="## Commands"` replaces a whole section with no `oldText` at all.
+- **Bulk-editing C# with `python` or `sed` through `Bash` is the recurring breach.** It happened three
+  times in one release and was self-logged each time. A repetitive change across N members is N
+  `replace_symbol_body` calls, or one `write_text force=true` from a *fresh* read — both go through
+  `EditGate`; the shell rewrite does not, and it is the precise fallback this repo exists to remove.
+- **More than one workspace is usually loadable here, so pass `workspace:` on the first call.**
+  `.claude/worktrees/agent-*` holds whole copies of this tree, and a task that loads
+  `fixtures/FixtureSolution` alongside the solution makes every un-hinted call ambiguous.
+  `AmbiguousWorkspace` was the second most frequent error code in the session logs; the resolver was
+  taught to rank hints in **I5/I13**, so a worktree name resolves today — but naming it up front still
+  beats one error plus one retry.
+- **This tree is shared with other sessions and with agent worktrees.** `git add -A` swept an untracked
+  working note into a release commit, and one commit did not contain the edit claimed for it because a
+  parallel session's work landed in between. Stage by path, then `git show --stat HEAD` before saying
+  what shipped.
+- **A test the fixture cannot fail is not coverage.** Dialect detection matched strings that occur in
+  no real markup, so every file reported `dialect=wpf` and no test could fail — there was no non-WPF
+  fixture. Overload selection was untested because the fixture had no overloads. A `find_usages` format
+  change tripled a 46-usage response and passed the 4-usage budget assertion unchanged. Put the case in
+  the fixture, observe the test fail, then make it pass.
+- **A reviewer's snapshot goes stale mid-review.** Fixes applied while a review runs produce findings
+  against code that no longer exists — and one such round still caught a real regression introduced *by*
+  the fix round. Re-verify each finding against the current tree; never dismiss a whole report because
+  part of it is stale.
+- **Changing a guard means changing the tests that assert the old answer.** A push failed on all three
+  runners because a test still asserted `dotnet build` was *allowed* against a guard just taught to deny
+  it, while E2E was 330/330 green locally on the stale expectation.
+
+## Definition of done
+
+- [ ] `build` clean — **read before** any test result; `run_tests` green over the whole solution.
+- [ ] `analyze` down to `info` on every touched file → `format` / `cleanup` → re-`analyze`;
+      `get_diagnostics` for the solution-wide sweep.
+- [ ] `cleanup verify=true fix=all` **and** `format verify=true` — the ubuntu-only CI step.
+- [ ] New behaviour has an E2E test asserting **values** against `fixtures/FixtureSolution`, observed
+      failing first; a new tool is in `ToolCoverageE2ETests.Exercised`; a listing tool has a
+      `TokenBudgetE2ETests` assertion against the **widest** fixture case.
+- [ ] Docs gate, same commit: `README.md`, `NUGET_README.md`,
+      `src/TerseSharp.Server/Assets/SKILL.md`, `CHANGELOG.md`.
+- [ ] Tool-usage review written — all five questions, measured; findings in `IMPROVEMENTS.md`.
+- [ ] `code-review-gate` run; every CRITICAL and WARNING fixed, or left open in writing with a reason.
+- [ ] `git status --porcelain` shows nothing this task did not produce; commit by path, never `-A`.
 
 ## Versioning
 
