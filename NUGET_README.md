@@ -81,11 +81,16 @@ terse doctor                        # verify SDK, MSBuild, workspace load, clien
 **🔒 Make it stick.** The most expensive failure mode is an agent that has TerseSharp installed and
 reaches for `Read`/`Grep` anyway — every token the server saves on a call the agent never makes is
 zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolUse` hook that
-**denies** built-in reads and edits on `.cs`, `.csproj`, `.xaml`, `.axaml` and friends, and names the
-tool to use instead. It matches by file extension, so `.css`/`.csv`/`.cshtml` keep working; it catches
-`grep`/`cat`/`sed` anywhere in a compound shell command; and malformed hook input allows rather than
-blocks, so it can never wedge a session. Pair it with `--skill`: the skill teaches the swaps, the
-guard enforces them.
+**denies** the built-in and names the tool to use instead:
+
+| | |
+| --- | --- |
+| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml` · `Glob`/`Grep` scoped to them · `grep`/`cat`/`sed`/`rg` on them · `dotnet build`, `dotnet test`, `msbuild`, `vstest` — anywhere in a compound command |
+| **Allowed** | `.css`, `.csv`, `.cshtml`, `.csx` — matching is by file **extension**, not substring, so Blazor and MAUI repos keep working |
+| **Allowed** | `dotnet clean`, `restore`, `pack`, `publish`, `format`, `run`, `tool` — no TerseSharp tool replaces these, and a denial that names no alternative is a wall |
+| **Never blocks on failure** | malformed hook input allows the call, so a guard fault cannot wedge a session |
+
+Pair it with `--skill`: the skill teaches the swaps, the guard enforces them.
 
 **🎮 Unity:** works on Unity game code too — Unity generates a real `.sln` with
 `Assembly-CSharp.csproj`, so outlines, `find_usages`, symbol-addressed edits and compile-gated rename
