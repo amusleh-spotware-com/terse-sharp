@@ -8,7 +8,9 @@ public sealed record GuardVerdict(bool Denied, string Reason);
 public static class ToolGuard
 {
     private static readonly string[] Extensions =
-        [".cs", ".razor", ".csproj", ".props", ".targets", ".sln", ".slnx", ".slnf", ".xaml", ".axaml", ".paml", ".resx", ".resw"];
+        [".cs", ".razor", ".cshtml", ".csproj", ".props", ".targets", ".sln", ".slnx", ".slnf", ".xaml", ".axaml", ".paml", ".resx", ".resw"];
+
+    private static readonly string[] RazorSuffixes = [".razor", ".cshtml", ".razor.css", ".razor.js"];
 
     private static readonly string[] TextCommands =
         ["grep", "rg", "cat", "head", "tail", "sed", "awk", "findstr", "type"];
@@ -74,7 +76,7 @@ public static class ToolGuard
     }
 
     private static bool DotNetType(string? type) =>
-        type is "cs" or "csharp" or "xaml" or "razor";
+        type is "cs" or "csharp" or "xaml" or "razor" or "cshtml";
 
     private static GuardVerdict OnBash(string? command)
     {
@@ -156,7 +158,7 @@ public static class ToolGuard
         var trimmed = token.TrimEnd('.', ':', ';');
         var extension = Path.GetExtension(trimmed);
 
-        return Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+        return Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase) || IsRazorFile(trimmed);
     }
 
     private static bool IsResource(string text) => Tokens(text)
@@ -167,7 +169,26 @@ public static class ToolGuard
         CultureInfo.InvariantCulture,
         $"TerseSharp guard: {tool} on '{Trim(target)}' is C#/.NET source. Use the terse-sharp MCP instead - {Replacement(tool, target)}. Read the tool's remedy: line rather than falling back to a built-in.");
 
-    private static string Replacement(string tool, string target) => IsResource(target)
+    private static bool IsRazorFile(string token) =>
+        RazorSuffixes.Any(suffix => token.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsRazor(string text) => Tokens(text)
+        .Select(token => token.TrimEnd('.', ':', ';'))
+        .Any(IsRazorFile);
+
+    private static string Razor(string tool) => tool switch
+    {
+        "Read" => "razor_outline, razor_component or razor_codebehind",
+        "Grep" => "razor_find, find_usages or search_symbols",
+        "Glob" => "find_files",
+        "Write" or "Edit" or "MultiEdit" or "NotebookEdit" =>
+            "razor_set_attribute, razor_add_element, razor_remove_element, razor_set_directive or replace_symbol_body",
+        _ => "the matching razor_ tool",
+    };
+
+    private static string Replacement(string tool, string target) => IsRazor(target)
+        ? Razor(tool)
+        : IsResource(target)
         ? Resource(tool)
         : Code(tool);
 

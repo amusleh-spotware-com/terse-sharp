@@ -1,0 +1,19 @@
+<span class="badge @Kind">
+    @Count
+    @ChildContent
+</span>
+
+@code {
+    [Parameter]
+    [EditorRequired]
+    public string Kind { get; set; } = string.Empty;
+
+    [Parameter]
+    public int Count { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter]
+    public EventCallback<MouseEventArgs> OnDismiss { get; set; }
+}

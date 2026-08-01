@@ -1,0 +1,12 @@
+@page "/"
+@inject IOrderService Orders
+
+<h1>Fixture</h1>
+
+<Card Title="Open orders" Items="@Orders.Open" Bogus="2" />
+<Badge Count="3" />
+<MudButton Kind="primary" />
+
+@code {
+    public string Summary => "orders";
+}

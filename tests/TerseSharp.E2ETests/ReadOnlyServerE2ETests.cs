@@ -65,6 +65,7 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         "project_create", "project_set_property", "project_add_reference", "project_remove_reference",
         "package_add", "package_remove",
         "resx_set", "resx_remove", "resx_rename",
+        "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
     ];
 
     [Theory]
@@ -99,10 +100,16 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         "resx_set" => new() { ["path"] = ResourceFile, ["key"] = "Scratch_Two", ["value"] = "Two" },
         "resx_remove" => new() { ["path"] = ResourceFile, ["key"] = "Scratch_One", ["force"] = true },
         "resx_rename" => new() { ["path"] = ResourceFile, ["key"] = "Scratch_One", ["newKey"] = "Scratch_Renamed" },
+        "razor_set_attribute" => new() { ["path"] = RazorFile, ["target"] = "div", ["attribute"] = "class", ["value"] = "x" },
+        "razor_add_element" => new() { ["path"] = RazorFile, ["parent"] = "div", ["markup"] = "<span />" },
+        "razor_remove_element" => new() { ["path"] = RazorFile, ["target"] = "div" },
+        "razor_set_directive" => new() { ["path"] = RazorFile, ["directive"] = "using", ["value"] = "System" },
         _ => new() { ["project"] = ProjectFile, ["package"] = "Serilog" },
     };
 
     private const string ProjectFile = "src/Fixture.Trading/Fixture.Trading.csproj";
+
+    private const string RazorFile = "src/Fixture.Trading/Views/Home.razor";
 
     private const string ServiceType = "T:Fixture.Trading.OrderService";
 

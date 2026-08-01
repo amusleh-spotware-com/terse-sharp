@@ -1,6 +1,5 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace TerseSharp.Core;
 
@@ -40,9 +39,17 @@ public static class RegistrationService
         CancellationToken cancellationToken)
     {
         var found = await CollectAsync(workspace, Endpoints, string.Empty, cancellationToken).ConfigureAwait(false);
+        var routes = RazorRoutes(workspace);
         var response = new ResponseBuilder("list_endpoints", "solution");
 
-        response.Summary(Math.Min(maxResults, found.Count), found.Count, "endpoint registrations", "maxResults=");
+        response.Summary(
+            Math.Min(maxResults, found.Count) + routes.Count,
+            found.Count + routes.Count,
+            "endpoint registrations",
+            "maxResults=");
+
+        foreach (var route in routes)
+            response.Line(route);
 
         foreach (var registration in found.Take(maxResults))
             response.Line(Describe(registration));
@@ -124,6 +131,18 @@ public static class RegistrationService
 
         return single.Length <= 160 ? single : single[..160] + "...";
     }
+
+    private static IReadOnlyList<string> RazorRoutes(LoadedWorkspace workspace) =>
+    [
+        .. RazorIndex.Build(workspace.Root)
+            .SelectMany(document => document.Directives
+                .Where(directive => string.Equals(directive.Name, "page", StringComparison.Ordinal))
+                .Select(directive => Route(workspace, document, directive))),
+    ];
+
+    private static string Route(LoadedWorkspace workspace, RazorDocument document, RazorDirective directive) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{PositionFormat.Relative(workspace.Root, document.Path)}:{directive.Line}  EXACT  @page  {directive.Value.Trim('"')}  in {Path.GetFileNameWithoutExtension(document.Path)}");
 
     private static string Describe(ServiceRegistration registration) => string.Create(
         CultureInfo.InvariantCulture,

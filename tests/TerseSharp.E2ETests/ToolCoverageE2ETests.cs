@@ -23,6 +23,8 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
         "xaml_add_element", "xaml_remove_element", "xaml_styles", "xaml_localization",
         "resx_files", "resx_get", "resx_find", "resx_usages",
         "resx_set", "resx_remove", "resx_rename", "resx_validate",
+        "razor_outline", "razor_component", "razor_find", "razor_bindings", "razor_codebehind",
+        "razor_validate", "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
     };
 
     [Fact]

@@ -1,0 +1,67 @@
+<div class="dashboard">
+    <header class="dashboard-header">
+        <h1 class="title">Trading dashboard</h1>
+        <p class="subtitle">Open orders, filled orders and the running total.</p>
+    </header>
+
+    <section class="summary">
+        <div class="tile">
+            <span class="tile-label">Open</span>
+            <Badge Kind="info" Count="@rows.Count" />
+        </div>
+        <div class="tile">
+            <span class="tile-label">Filled</span>
+            <Badge Kind="success" Count="0" />
+        </div>
+        <div class="tile">
+            <span class="tile-label">Rejected</span>
+            <Badge Kind="danger" Count="0" />
+        </div>
+    </section>
+
+    <section class="filters">
+        <label class="filter-label" for="symbol">Symbol</label>
+        <input id="symbol" class="filter-input" @bind="filter" />
+        <button class="btn btn-primary" @onclick="Refresh">Refresh</button>
+        <button class="btn btn-secondary" @onclick="Clear">Clear</button>
+    </section>
+
+    <section class="orders">
+        <Card Title="Open orders" Items="@rows" />
+        <Card Title="Filled orders" Items="@rows" />
+    </section>
+
+    <table class="order-table">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Symbol</th>
+                <th>Volume</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var row in rows)
+            {
+                <tr>
+                    <td>@row.Id</td>
+                    <td>@row.Symbol</td>
+                    <td>@row.Volume</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <footer class="dashboard-footer">
+        <span class="hint">Filter: @filter</span>
+    </footer>
+</div>
+
+@code {
+    private IReadOnlyList<Order> rows = [];
+
+    private string filter = string.Empty;
+
+    private void Refresh() => rows = [new Order(1, "EURUSD", 1m)];
+
+    private void Clear() => rows = [];
+}

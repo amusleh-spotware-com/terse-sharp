@@ -69,7 +69,7 @@ child process over stdio and throws `build TerseSharp.Server first` if it is mis
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **65 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **83 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
 `DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,

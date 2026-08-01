@@ -19,6 +19,12 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
 
     private static readonly string[] ErrorPathOnly = ["unload_workspace", "undo_last_change", "package_add", "package_remove"];
 
+    private static readonly string[] NeedRazorFixture =
+    [
+        "razor_outline", "razor_component", "razor_find", "razor_bindings", "razor_codebehind",
+        "razor_validate", "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
+    ];
+
     public static TheoryData<string> HappyPath() => [.. Cases.Select(entry => entry.Tool)];
 
     [Theory]
@@ -69,7 +75,7 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         [.. (await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(tool => tool.Name)];
 
     private static HashSet<string> Accounted() =>
-        [.. Cases.Select(entry => entry.Tool).Concat(SpawnAProcess).Concat(ErrorPathOnly)];
+        [.. Cases.Select(entry => entry.Tool).Concat(SpawnAProcess).Concat(ErrorPathOnly).Concat(NeedRazorFixture)];
 
     private static Dictionary<string, string> Snapshot()
     {

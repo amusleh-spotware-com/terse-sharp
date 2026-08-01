@@ -56,8 +56,10 @@ public sealed class WorkspaceTools(ToolContext context)
 
     [McpServerTool(Name = "workspace_status")]
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, and any project that failed to load.")]
-    public Task<string> WorkspaceStatus([Description("Workspace or worktree name.")] string? workspace = null) =>
-        context.WithWorkspace(workspace, null, RenderStatus);
+    public Task<string> WorkspaceStatus(
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default) =>
+        context.WithWorkspaceAsync(workspace, null, loaded => RenderStatusAsync(loaded, cancellationToken));
 
     [McpServerTool(Name = "list_projects")]
     [Description("List the projects of a loaded workspace: name, target framework, document count.")]
@@ -67,7 +69,7 @@ public sealed class WorkspaceTools(ToolContext context)
     private static string? Discover() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
 
-    private static string RenderStatus(LoadedWorkspace workspace)
+    private static async Task<string> RenderStatusAsync(LoadedWorkspace workspace, CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("workspace_status", workspace.SolutionPath);
 
@@ -76,10 +78,23 @@ public sealed class WorkspaceTools(ToolContext context)
             CultureInfo.InvariantCulture,
             $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} lastUsedUtc={workspace.LastUsedUtc:O}"));
 
+        if (RazorIndex.Build(workspace.Root).Count is var razor and > 0)
+            response.Note(await RazorHealthAsync(workspace, razor, cancellationToken).ConfigureAwait(false));
+
         foreach (var failure in workspace.Load.Failures)
             response.Line("FAILED " + failure);
 
         return response.ToString();
+    }
+
+    private static async Task<string> RazorHealthAsync(LoadedWorkspace workspace, int razor, CancellationToken cancellationToken)
+    {
+        var ran = await RazorGeneratedMap.GeneratorRanAsync(workspace, cancellationToken).ConfigureAwait(false);
+        var health = ran
+            ? "ok"
+            : "unavailable - the Razor source generator produced nothing, so component types cannot be resolved; build the solution, or match its SDK to the terse version";
+
+        return string.Create(CultureInfo.InvariantCulture, $"razor={razor} files generator={health}");
     }
 
     private static string RenderProjects(LoadedWorkspace workspace)

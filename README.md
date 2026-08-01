@@ -26,7 +26,7 @@
   <img src="https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 10"/>
   <img src="https://img.shields.io/badge/Roslyn-semantic-512BD4.svg" alt="Roslyn"/>
   <img src="https://img.shields.io/badge/XAML-WPF_·_Avalonia_·_WinUI_·_MAUI-0078D4.svg" alt="XAML"/>
-  <img src="https://img.shields.io/badge/tools-72-26C281.svg" alt="72 tools"/>
+  <img src="https://img.shields.io/badge/tools-82-26C281.svg" alt="82 tools"/>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"/></a>
 </p>
 
@@ -73,6 +73,7 @@ tool that does not beat the built-in it replaces does not ship.
 | 🔗 **Addressable by name** | An outline prints `OrderService.Submit(Order)`; feed it straight back to any tool. Ambiguous? It lists the candidates instead of guessing. |
 | 🛡️ **Compile-gated edits** | An edit that introduces a new compile error is rolled back. Every mutation reports `errors=N (+D) warnings=N (+D)` — no separate `analyze` needed. |
 | 🎨 **XAML that knows your C#** | WPF · Avalonia · WinUI · MAUI. Type-checked bindings, a workspace-wide resource graph, and renames that carry into the markup. |
+| 🧩 **Razor and Blazor, resolved** | Components, parameters, bindings and routes read through the Razor source generator — plus the unknown-parameter bug that compiles clean and throws at render. |
 | 🔍 **Analysis without a licence** | Compiler + every analyzer your projects already reference + dead code, down to `info` severity. No IDE, no ReSharper, no network. |
 | 🧪 **Tests an agent can act on** | Counters, then each failure's message, expected/actual and **one** source frame — capped so a red suite cannot flood the context. |
 | 🌲 **Parallel worktrees** | Many workspaces at once. An ambiguous request names the candidates rather than answering from the wrong checkout. |
@@ -230,8 +231,8 @@ What it covers, and what it deliberately does not:
 
 | | |
 |---|---|
-| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command. A denial on a resource file names `resx_get`, `resx_find` and `resx_set` rather than the C# tools |
-| **Allows** | everything else, including `.css`, `.csv`, `.cshtml` and `.csx` — matching is by **file extension**, not substring, so a Blazor or MAUI repo keeps working |
+| **Denies** | `Read`/`Write`/`Edit`/`MultiEdit`/`NotebookEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` · `Glob` for those · `Grep` scoped to them by `glob`, `path` or `type` · a shell text read (`grep`, `rg`, `cat`, `head`, `sed`, `awk`, `findstr`) anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Allows** | everything else, including plain `.css`, `.js`, `.csv` and `.csx` — matching is by **file extension** plus the `.razor.css`/`.razor.js` pair, not substring, so an ordinary stylesheet stays editable |
 | **Denies** | `dotnet build`, `dotnet test`, `dotnet msbuild`, `dotnet vstest`, bare `msbuild` — anywhere in a compound command — because `build`, `run_tests`, `rerun_failed` and `list_tests` replace them |
 | **Denies** | `dotnet format`, `dotnet clean` — because `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them, compile-gated and without the raw CLI output |
 | **Allows** | `dotnet restore`, `pack`, `publish`, `run`, `tool update` — **no TerseSharp tool replaces these**, and a denial that names no alternative is just a wall |
@@ -248,7 +249,7 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 
 ## 🧰 The tools
 
-73 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
+83 tools. Every response is one record per line, with an explicit `truncated`/`total` and an
 `EXACT` / `HEURISTIC` tag. Paths are workspace-relative. Truncation names the parameter that narrows it.
 
 | Group | Tools |
@@ -262,6 +263,7 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
 | **XAML** | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_styles` · `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` · `xaml_set_property` · `xaml_add_element` · `xaml_remove_element` |
 | **Localization (`.resx`/`.resw`)** | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
+| **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
 | **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
@@ -280,6 +282,10 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 | `Read` a `.resx` file | `resx_get` | keys and values per culture; a missing translation prints `MISSING` |
 | `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
 | `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
+| `Read` a `.razor` / `.cshtml` file | `razor_outline` | directives, component tree and `@code` members, each component resolved to its type |
+| "how do I use this component" | `razor_component` | every `[Parameter]`, which are `[EditorRequired]`, from source **or** a referenced package |
+| `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_set_directive` | element-addressed, and the Razor generator re-runs so a broken edit is rolled back |
+| eyeballing `<Card Foo="1" />` | `razor_validate` | an unknown parameter compiles clean and throws at render — nothing else catches it |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `Bash: dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `Bash: dotnet test` | `run_tests` | counters plus each failure's message, expected/actual and one source frame |
@@ -430,6 +436,64 @@ built as compact text rather than JSON.
 
 ---
 
+## 🧩 Razor and Blazor, resolved through the compiler
+
+The Razor compiler is a **Roslyn source generator**, so the loaded workspace already knows what every
+`<Card />` in your markup is. TerseSharp reads that — and reports it at the `.razor` line, never at
+the generated file under `obj/`.
+
+### The bug nothing else catches
+
+An attribute that matches no `[Parameter]` compiles **clean** and throws
+`InvalidOperationException` the first time the component renders. `razor_validate` is the only static
+answer:
+
+```
+razor_validate solution
+6 findings (truncated=false, total=6) - narrow with rules=
+
+RZR002  src/App/Components/Home.razor:6   Card.Bogus     UNKNOWN_PARAMETER  Card has no [Parameter] with that name - InvalidOperationException at render
+RZR001  src/App/Components/Home.razor:8   MudButton      UNKNOWN_COMPONENT  resolves to no component - it renders as a plain HTML tag
+RZR006  src/App/Components/Legacy.razor:1 /order/{Id:int} DUPLICATE_ROUTE   also declared by Components/Detail.razor - AmbiguousMatchException on navigation
+```
+
+`RZR003` (missing `[EditorRequired]`), `RZR004` (a `@bind` with no setter), `RZR005` (a route
+parameter with no property), `RZR007` (a mistyped `@ref`), `RZR009` (an `@inject` nothing registers)
+and `RZR010` (markup that will not parse) complete the set.
+
+### Edits the generator has to accept
+
+`razor_set_attribute`, `razor_add_element`, `razor_remove_element` and `razor_set_directive` address
+an element by the path `razor_outline` prints, keep the file's formatting, re-parse the result, then
+**re-run the Razor generator** and compare the error count. An edit that breaks the build is rolled
+back with the error at its `.razor` line — the same contract C# edits already have, measured at
+~170 ms per regeneration.
+
+### One call to learn a component
+
+```
+razor_component Badge
+4 parameters (truncated=false, total=4)
+Fixture.Blazor.Components.Badge  EXACT  src/App/Components/Badge.razor  base=ComponentBase
+
+Kind          string                         [Parameter, EditorRequired]
+Count         int                            [Parameter]
+ChildContent  RenderFragment                 [Parameter]
+OnDismiss     EventCallback<MouseEventArgs>  [Parameter]
+routes=-   captureUnmatched=False
+```
+
+It answers for a component from a **referenced package** too, where there is no `.razor` to read at
+all.
+
+### The C# tools reach into `@code`
+
+`replace_symbol_body`, `replace_symbol`, `delete_symbol` and `add_member` recognise a member declared
+inside a `.razor` and edit the Razor source through the generator's mapping, so the code half of a
+component needs no separate tool. `rename_symbol` on a component renames the **file** — a Blazor
+class name comes from its file name — along with its `.razor.cs`, `.razor.css` and `.razor.js`
+siblings and every `<Card …>` in markup.
+
 ## 📋 Status
 
 | Area | State |
@@ -453,6 +517,9 @@ built as compact text rather than JSON.
 | XAML element insert/remove, dead-resource detection, `terse install --guard` | ✅ |
 | `xaml_styles` (implicit + keyed + `BasedOn` chain), `xaml_localization` (`x:Uid`→resx) | ✅ |
 | `.resx`/`.resw` listing, cross-culture read, search, key usages, surgical edit, rename, `RESX001`–`RESX009` lint | ✅ |
+| Razor/Blazor outline, component API, bindings, validation, element and directive edits | ✅ |
+| Razor-aware `find_usages`, `search_symbols`, `list_endpoints`, diagnostics mapped back to the `.razor` line | ✅ |
+| `@code` members edited through `replace_symbol_body` / `add_member`, component rename incl. its files | ✅ |
 | Shared warm workspace daemon across processes | 🔜 |
 | Content-addressed index, trigram search, file watcher | 🔜 |
 
@@ -472,6 +539,8 @@ described in [RELEASING.md](RELEASING.md).
 - **Translation formats other than `.resx`/`.resw`** — no `.xlf`, no `.restext`, no CSV round trip and no
   machine translation. The resx tools address keys and values; moving strings between systems is a
   localization pipeline's job.
+- **Razor formatting** — the Razor formatter lives in the (unpublished) Razor tooling stack, not in
+  Roslyn. `format` and `cleanup` stay C#-only; `razor_*` edits preserve the formatting already there.
 - **Commit / push** — git access is read-only. Your agent already has git.
 - **Arbitrary shell execution** — only `dotnet build` / `dotnet test`, deadlined and killed on timeout.
 - **VB.NET / F# language tools** — C# first; they load without breaking navigation and language tools

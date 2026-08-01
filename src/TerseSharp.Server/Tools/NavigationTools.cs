@@ -136,7 +136,12 @@ public sealed class NavigationTools(ToolContext context)
         var found = await SymbolSearch.FindAsync(workspace, query, kind, maxResults, cancellationToken).ConfigureAwait(false);
         var response = new ResponseBuilder("search_symbols", query);
 
-        response.Summary(found.Count, found.Count, "symbols");
+        var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
+
+        response.Summary(found.Count + components.Count, found.Count + components.Count, "symbols");
+
+        foreach (var component in components)
+            response.Line(RazorUsageService.Describe(component));
 
         foreach (var symbol in found)
         {

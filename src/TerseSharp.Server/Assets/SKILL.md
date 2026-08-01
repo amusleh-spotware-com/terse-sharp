@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML or .resx localization in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 73 of them, so a .cs file is never read whole, a symbol is never found by text search, and neither a .xaml nor a .resx file is ever edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 83 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
 ---
 
 # TerseSharp
@@ -14,7 +14,7 @@ matches that are not references.
 Before **every** `Read`, `Grep`, `Glob`, `Edit`, `Write` or code-touching `Bash` call, answer one
 question:
 
-> **Is the target a `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`,
+> **Is the target a `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`,
 > `.axaml`, `.paml`, `.resx` or `.resw` file, or a question about C# symbols, references, diagnostics,
 > builds or tests?**
 
@@ -46,7 +46,8 @@ A silent drop is the breach, even when the reason would have been valid.
 - Your built-in calls on C# outnumber your TerseSharp calls for this task.
 - You have used only `search_text` and no `search_symbols`, `find_usages` or `get_file_outline` — you
   are text-grepping through a semantic server.
-- You are about to `Edit` a `.xaml` or `.resx` by line number.
+- You are about to `Edit` a `.xaml`, `.resx` or `.razor` by line number.
+- You are about to open a `*_razor.g.cs` under `obj/` — that file is generated; edit the `.razor`.
 
 ## Replace the built-in on the left
 
@@ -80,6 +81,12 @@ A silent drop is the breach, even when the reason would have been valid.
 | "is this key still used" | `resx_usages(key)` | designer property through Roslyn, plus `GetString`, localizer, `x:Uid`, Razor |
 | "which strings are untranslated" | `resx_validate()` | missing, placeholder mismatch, duplicate, orphan, empty, stale designer |
 | `Edit` a `.resx`/`.resw` | `resx_set` · `resx_remove` · `resx_rename` | one `<data>` element rewritten; header, order, indentation, line endings and BOM kept |
+| `Read` a `.razor` or `.cshtml` file | `razor_outline(path)` | directives, component tree and `@code` members, each component resolved to its type |
+| "how do I use this component" | `razor_component(name)` | every `[Parameter]`, which are `[EditorRequired]`, from source **or** a referenced package |
+| `Grep` a tag, directive or route in markup | `razor_find(query, kind)` | component, element, attribute, directive, expression or route |
+| `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` | element-addressed, formatting preserved, compile-gated through the Razor generator |
+| "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
+| "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
 | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew |
 | `Bash: dotnet test` / `vstest` | `run_tests` | counters plus each failure's message, expected/actual, one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
@@ -126,6 +133,9 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
 `resx_remove` · `resx_rename` · `resx_validate` (`RESX001` missing · `RESX002` placeholder mismatch ·
 `RESX003` unused, `includeUnused` only · `RESX004` duplicate · `RESX005` orphan · `RESX006` empty ·
 `RESX007` trimmed whitespace · `RESX008` unsorted · `RESX009` stale designer).
+**Razor / Blazor** — `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` ·
+`razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` ·
+`razor_remove_element` · `razor_set_directive`.
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
 
@@ -213,6 +223,43 @@ edit whose result would not parse. An ambiguous target is refused with the count
 `xaml_validate scope=solution includeUnused=true` also reports `x:Key` and `x:Name` declarations that
 no XAML attribute and no C# string literal references — `HEURISTIC`, because reflection can reach
 them.
+
+## Razor and Blazor
+
+Razor is compiled by a **Roslyn source generator**, so the loaded workspace already knows the type of
+every `<Card />`. Every Razor answer is reported at the `.razor` line — a path under `obj/` or a
+`*_razor.g.cs` name never appears in a response, and you must never edit one.
+
+`razor_outline` prints the file's directives, its element tree and the members declared in `@code`,
+tagging each component `EXACT <type>` when it resolves and `HEURISTIC unresolved` when it does not —
+an unresolved capitalised tag is a real defect (it renders as raw HTML), not a tool failure.
+
+`razor_validate` owns the checks the compiler does not make: `RZR001` unknown component · `RZR002` an
+attribute that matches no `[Parameter]` (compiles clean, throws at render) · `RZR003` a missing
+`[EditorRequired]` · `RZR004` a `@bind` with no setter · `RZR005` a route parameter with no property ·
+`RZR006` two components on one route · `RZR007` a mistyped `@ref` · `RZR008` an orphan `.razor.css` ·
+`RZR009` an `@inject` nothing registers (`HEURISTIC`) · `RZR010` markup that will not parse. Razor's
+own `RZ####` diagnostics come from `build`, not from `get_diagnostics`.
+
+Razor edits are **compile-gated**: the tool writes the new text into the workspace, the generator
+re-runs, and an edit that adds a compile error is rolled back with the error at its `.razor` line.
+`dryRun: true` shows the diff and the diagnostic counts without writing; `allowErrors: true` skips
+the regeneration when you are mid-refactor.
+
+`razor_outline` hides plain HTML by default — it lists directives, components, anything wired with
+`@bind`/`@on*`/`@ref`, and the `@code` members. Pass `elements: true` for the whole tree.
+
+**The C# edit tools work on `@code` members.** `replace_symbol_body`, `replace_symbol`,
+`delete_symbol` and `add_member` recognise a member declared in a `.razor` and edit the Razor source
+through the generator's mapping — you do not need a Razor-specific tool for the code half of a
+component. `rename_symbol` on a component renames the **file** (its class name comes from the file
+name), its `.razor.cs`/`.razor.css`/`.razor.js` siblings and every markup usage; reload the workspace
+afterwards.
+
+`workspace_status` reports `razor=<n> files generator=ok|unavailable`. **`generator=unavailable`
+means the Razor source generator did not run** — usually the target SDK is newer than the Roslyn the
+server ships. Component and parameter answers are then unavailable rather than empty, and
+`razor_validate` says so as `RZR000` instead of reporting rules it cannot compute.
 
 ## Running tests
 

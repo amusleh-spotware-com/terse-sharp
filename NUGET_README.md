@@ -4,7 +4,7 @@
 
 A Roslyn-powered [MCP](https://modelcontextprotocol.io) server that lets a coding agent navigate,
 read, edit and refactor a .NET solution **semantically** — no `Read`, no `Grep`, no line-number
-`Edit`, no shelling out. **72 tools. One install. No IDE, no licence, no network.**
+`Edit`, no shelling out. **82 tools. One install. No IDE, no licence, no network.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/amusleh-spotware-com/terse-sharp/ci.yml?branch=main&label=CI)](https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
@@ -85,8 +85,8 @@ zero. `terse install --guard` registers `terse guard` as a Claude Code `PreToolU
 
 | | |
 | --- | --- |
-| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · `grep`/`cat`/`sed`/`rg` on them · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A resource file is redirected to `resx_get`/`resx_find`/`resx_set` |
-| **Allowed** | `.css`, `.csv`, `.cshtml`, `.csx` — matching is by file **extension**, not substring, so Blazor and MAUI repos keep working |
+| **Denied** | `Read`/`Write`/`Edit`/`MultiEdit` on `.cs`, `.razor`, `.cshtml`, `.razor.css`, `.razor.js`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`, `.xaml`, `.axaml`, `.resx`, `.resw` · `Glob`/`Grep` scoped to them · `grep`/`cat`/`sed`/`rg` on them · `dotnet build`, `dotnet test`, `msbuild`, `vstest`, `dotnet format`, `dotnet clean` — anywhere in a compound command. A denial names the matching tool family: `resx_*` for a resource file, `razor_*` for Razor markup |
+| **Allowed** | plain `.css`, `.js`, `.csv`, `.csx` — matching is by file **extension** plus the `.razor.css`/`.razor.js` pair, not substring, so an ordinary stylesheet stays editable |
 | **Denied** | `dotnet format`, `dotnet clean` — `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them |
 | **Allowed** | `dotnet restore`, `pack`, `publish`, `run`, `tool` — no TerseSharp tool replaces these, and a denial that names no alternative is a wall |
 | **Never blocks on failure** | malformed hook input allows the call, so a guard fault cannot wedge a session |
@@ -128,6 +128,8 @@ Prefer to configure it by hand:
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
 | `Grep` to find callers | `find_usages` | real references, one line per file with a `src`/`test` marker; `containers=true` also names the member each usage sits in |
 | `Edit` a `.cs` file | `replace_symbol_body` | addressed by symbol id, immune to line drift |
+| `Read` a `.razor` / `.cshtml` file | `razor_outline` | directives, component tree and `@code` members, each component resolved to its type |
+| `Edit` a `.razor` file | `razor_set_attribute` | element-addressed, and the Razor generator re-runs so a broken edit is rolled back |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs |
 | `Read` a `.resx` file | `resx_get` | keys and values per culture; a missing translation prints `MISSING` |
 | `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
@@ -137,7 +139,7 @@ Prefer to configure it by hand:
 | `dotnet format` | `format`, `cleanup fix=all`, `cleanup verify=true` | compile-gated code fixes and a one-line verdict, never raw CLI output |
 | `dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
 
-## The 73 tools
+## The 83 tools
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT` or
 `HEURISTIC` tag. Paths are workspace-relative.
@@ -158,6 +160,11 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
   `resx_validate` reports missing translations, placeholder mismatches, duplicate names, orphans, empty
   values and a stale designer, and the writers rewrite only the `<data>` element they address, keeping the
   schema header, ordering, indentation, line endings and byte order mark intact
+- **Razor / Blazor** — `razor_outline`, `razor_component`, `razor_find`, `razor_bindings`, `razor_codebehind`, `razor_validate`, `razor_set_attribute`, `razor_add_element`, `razor_remove_element`, `razor_set_directive`
+  — components resolve through the Razor source generator, so `razor_outline` names the real type of
+  every `<Card />`, `razor_component` reports the parameters of a component from source **or** a
+  referenced package, and `razor_validate` reports the faults the compiler does not: an unknown
+  `[Parameter]`, a duplicate `@page` route, a `@bind` with no setter, an unregistered `@inject`
 - **Files** — `read_text`, `write_text`, `edit_text`, `find_files`, `search_text`, `search_regex`
 - **Build & test** — `build`, `run_tests`, `rerun_failed`, `list_tests`
 

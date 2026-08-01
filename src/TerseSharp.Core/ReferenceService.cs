@@ -18,12 +18,14 @@ public static class ReferenceService
 
         var locations = references
             .SelectMany(reference => reference.Locations)
-            .Where(location => !location.IsImplicit)
+            .Where(location => !location.IsImplicit && !HiddenInGenerated(location))
             .OrderBy(location => location.Document.FilePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(location => location.Location.SourceSpan.Start)
             .ToArray();
 
-        return await RenderAsync(workspace.Root, symbol, locations, maxResults, containers, cancellationToken)
+        var razor = await RazorUsageService.MarkupAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
+
+        return await RenderAsync(workspace.Root, symbol, locations, razor, maxResults, containers, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -49,6 +51,10 @@ public static class ReferenceService
         return response.ToString();
     }
 
+    private static bool HiddenInGenerated(ReferenceLocation location) =>
+        RazorFiles.IsGenerated(location.Document.FilePath ?? location.Document.Name)
+        && !location.Location.GetMappedLineSpan().HasMappedPath;
+
     private static string Describe(string root, ISymbol symbol) => string.Create(
         CultureInfo.InvariantCulture,
         $"{SymbolFormat.Location(root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Describe(symbol)}");
@@ -57,17 +63,22 @@ public static class ReferenceService
         string root,
         ISymbol symbol,
         ReferenceLocation[] locations,
+        IReadOnlyList<RazorUsage> razor,
         int maxResults,
         bool containers,
         CancellationToken cancellationToken)
     {
         var shown = Math.Min(maxResults, locations.Length);
-        var files = locations.Select(location => location.Document.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        var files = locations
+            .Select(location => PositionFormat.Source(location.Location).Path)
+            .Concat(razor.Select(usage => usage.Path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
         var response = new ResponseBuilder("find_usages", SymbolId.From(symbol).Value);
 
         response.Summary(
             shown,
-            locations.Length,
+            locations.Length + razor.Count,
             string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"),
             "a more specific symbol, or raise maxResults=");
 
@@ -75,6 +86,9 @@ public static class ReferenceService
 
         foreach (var group in grouped.GroupBy(entry => entry.Group))
             response.Line(Describe(group.Key, group.Select(entry => entry.Location)));
+
+        foreach (var usage in razor)
+            response.Line(RazorUsageService.Describe(usage));
 
         foreach (var usage in XamlUsageService.Find(root, symbol, symbol.Name))
             response.Line(DescribeXaml(usage));
@@ -150,7 +164,7 @@ public static class ReferenceService
     private readonly record struct UsageGroup(string Path, string Confidence, string Kind, string Scope, string? Container)
     {
         public static UsageGroup Of(string root, ReferenceLocation location, SyntaxNode? syntax) => new(
-            PositionFormat.Relative(root, location.Location.GetLineSpan().Path),
+            PositionFormat.Relative(root, PositionFormat.Source(location.Location).Path),
             ConfidenceTag.Of(ConfidenceOf(location)),
             ClassifyKind(location),
             TestScope.Of(location.Document.Project),

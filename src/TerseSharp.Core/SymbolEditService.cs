@@ -13,6 +13,9 @@ public static class SymbolEditService
         EditOptions options,
         CancellationToken cancellationToken)
     {
+        if (await RazorAsync(workspace, symbol, RazorMemberEdit.Body, body, options, cancellationToken).ConfigureAwait(false) is { } razor)
+            return razor;
+
         var target = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
         if (target is null)
@@ -32,6 +35,9 @@ public static class SymbolEditService
         EditOptions options,
         CancellationToken cancellationToken)
     {
+        if (await RazorAsync(workspace, symbol, RazorMemberEdit.Declaration, declaration, options, cancellationToken).ConfigureAwait(false) is { } razor)
+            return razor;
+
         var target = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
         if (target is null)
@@ -51,6 +57,13 @@ public static class SymbolEditService
         EditOptions options,
         CancellationToken cancellationToken)
     {
+        var inserted = await RazorSymbolEdit
+            .TryAddAsync(workspace, containingType, declaration, Razor(options), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (inserted is { } razor)
+            return razor;
+
         var target = await TargetAsync(workspace, containingType, cancellationToken).ConfigureAwait(false);
 
         if (target is null || target.Node is not TypeDeclarationSyntax type)
@@ -75,6 +88,9 @@ public static class SymbolEditService
         if (usages > 0 && !force)
             return Result.Fail<string>(UsageBlocked(symbol, usages));
 
+        if (await RazorAsync(workspace, symbol, RazorMemberEdit.Delete, string.Empty, options, cancellationToken).ConfigureAwait(false) is { } razor)
+            return razor;
+
         var target = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
         if (target is null)
@@ -82,6 +98,18 @@ public static class SymbolEditService
 
         return await RemoveAsync(workspace, target, options, cancellationToken).ConfigureAwait(false);
     }
+
+    private static Task<Result<string>?> RazorAsync(
+        LoadedWorkspace workspace,
+        ISymbol symbol,
+        RazorMemberEdit edit,
+        string text,
+        EditOptions options,
+        CancellationToken cancellationToken) =>
+        RazorSymbolEdit.TryAsync(workspace, symbol, edit, text, Razor(options), cancellationToken);
+
+    private static RazorEditOptions Razor(EditOptions options) =>
+        new(options.Tool, options.DryRun, options.AllowErrors);
 
     private static TerseError UsageBlocked(ISymbol symbol, int usages) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"'{symbol.Name}' still has {usages} usages"),

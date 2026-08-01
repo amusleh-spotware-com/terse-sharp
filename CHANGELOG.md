@@ -8,6 +8,70 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **Ten `razor_*` tools — Razor and Blazor answered through the compiler.** The Razor compiler is a
+  Roslyn source generator, so a loaded workspace already knows the type behind every `<Card />`;
+  nothing surfaced it. `razor_outline` prints a `.razor`/`.cshtml` file's directives, its element tree
+  with every component resolved to its type, and the members declared in `@code`, each at its
+  **Razor** line. `razor_component` answers "how do I use this" from source **or** from a referenced
+  package: every `[Parameter]` and `[CascadingParameter]` with its type, which are `[EditorRequired]`,
+  and the routes it declares. `razor_find` searches components, elements, attributes, directives,
+  expressions and routes. `razor_bindings(validate: true)` resolves every `@bind`, `@on*`, `@ref` and
+  `asp-for` against the component's own type and reports `EXACT`, `NO_SETTER`, `UNRESOLVED` or
+  `UNRESOLVED_CONTEXT`. `razor_codebehind` links the `.razor` to its `.razor.cs`, `.razor.css`,
+  `.razor.js` and its `_Imports` chain.
+- **`razor_validate` — the faults the compiler does not catch.** An attribute matching no
+  `[Parameter]` compiles clean and throws `InvalidOperationException` at render; two components on one
+  `@page` route throw `AmbiguousMatchException` at navigation; an `@inject` nothing registers throws at
+  first render. `RZR001`–`RZR010` report those, plus a missing `[EditorRequired]`, a `@bind` with no
+  setter, a route parameter with no property, a mistyped `@ref`, an orphan `.razor.css` and markup
+  that will not parse — each naming the runtime failure it prevents.
+- **`razor_set_attribute`, `razor_add_element`, `razor_remove_element`, `razor_set_directive` —
+  compile-gated Razor edits.** An element is addressed by the path `razor_outline` prints or by
+  `#ref`, formatting outside the edited span survives byte-for-byte, the result is re-parsed, and the
+  **Razor generator re-runs** so an edit that introduces a compile error is rolled back with the error
+  at its `.razor` line (~170 ms per regeneration). `dryRun` and `allowErrors` behave exactly as they do
+  for C# edits.
+
+- **The C# edit tools reach into `@code`.** `replace_symbol_body`, `replace_symbol`, `delete_symbol`
+  and `add_member` now recognise a member whose declaration maps into a `.razor` file, edit the Razor
+  source through that mapping, and go through the same regeneration gate. `add_member` on a component
+  inserts into its `@code` block, creating one when the file has none.
+- **`rename_symbol` renames a component properly.** A Blazor component's class name comes from its
+  file name, so renaming the type alone is meaningless: the file, its `.razor.cs`, `.razor.css` and
+  `.razor.js` siblings, the partial class inside the code-behind and every `<Card …>` / `</Card>` in
+  markup are renamed together, all-or-nothing, with `dryRun` support.
+
+### Fixed
+
+- **Razor answers pointed into `obj/`.** `get_diagnostics` and `analyze` reported a `@code` error at
+  `obj/…/Home_razor.g.cs:117` where `dotnet build` says `Home.razor:13`, and `find_usages` reported a
+  component used in markup inside the generated file. Both now report the **mapped** location, and no
+  response contains a generated `*_razor.g.cs` path — following one meant editing a file the next
+  build overwrites. **Response-format change:** locations for Razor-backed symbols now carry the
+  `.razor` path and line.
+- **`search_symbols` was blind to Blazor components.** Roslyn's source-declaration search skips
+  source-generated documents, so `search_symbols Card` returned nothing for a component declared in
+  `Card.razor`; components are now listed at their `.razor` path.
+
+### Changed
+
+- **`list_endpoints` includes Razor routes.** Every `@page` template is reported with the component
+  it sits in, beside the `Map*` registrations.
+
+- **`workspace_status` reports Razor generator health** — `razor=<n> files generator=ok|unavailable`.
+  When the Razor generator does not run (a target SDK newer than the server's Roslyn), Razor
+  semantics are reported unavailable rather than silently empty, and `razor_validate` says so as
+  `RZR000` instead of reporting component rules it cannot compute.
+
+- **The guard covers Razor.** `.cshtml`, `.razor.css` and `.razor.js` are denied to `Read`/`Edit`
+  alongside `.razor`, `Grep type=cshtml` is denied, and the denial names the `razor_*` tool to use
+  instead. Plain `.css` and `.js` stay allowed — matching is by extension plus the `.razor.css` /
+  `.razor.js` pair. **Behaviour change:** `.cshtml` was previously documented and tested as allowed.
+
+- **The guard intercepts `dotnet build` and `dotnet test`.** It only ever denied reads and edits, so
+
 ## [0.10.0] - 2026-08-01
 
 ### Added

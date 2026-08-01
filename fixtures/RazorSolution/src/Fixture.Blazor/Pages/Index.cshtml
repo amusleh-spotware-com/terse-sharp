@@ -1,0 +1,9 @@
+@page
+@model IndexModel
+
+<h1>@Model.Title</h1>
+
+<form method="post">
+    <label asp-for="Title"></label>
+    <a asp-page="/Index">Home</a>
+</form>

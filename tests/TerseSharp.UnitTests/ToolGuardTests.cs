@@ -38,6 +38,7 @@ public sealed class ToolGuardTests
 
     [Theory]
     [InlineData("dotnet pack src/App/App.csproj")]
+    [InlineData("dotnet restore src/App/App.csproj")]
     [InlineData("git add src/App/OrderService.cs")]
     [InlineData("grep -rn TODO docs/")]
     public void Inspect_ForAShellCommandThatIsNotATextRead_Allows(string command) =>
@@ -77,11 +78,36 @@ public sealed class ToolGuardTests
     [Theory]
     [InlineData("site/theme.css")]
     [InlineData("data/export.csv")]
-    [InlineData("Pages/Index.cshtml")]
+    [InlineData("wwwroot/app.js")]
     [InlineData("scripts/build.csx")]
     [InlineData("notes-about-cs.md")]
     public void Inspect_ForAnExtensionThatMerelyStartsLikeCSharp_Allows(string path) =>
         Assert.False(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = path }).Denied);
+
+    [Fact]
+    public void Inspect_ForARazorFile_DeniesAndNamesTheRazorTools()
+    {
+        foreach (var path in new[] { "Components/Card.razor", "Pages/Index.cshtml", "Components/Card.razor.css", "Components/Card.razor.js" })
+        {
+            var verdict = ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = path });
+
+            Assert.True(verdict.Denied);
+            Assert.Contains("razor_outline", verdict.Reason, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Inspect_ForAnEditOfARazorFile_NamesTheRazorEditTools()
+    {
+        var verdict = ToolGuard.Inspect("Edit", new JsonObject { ["file_path"] = "Components/Card.razor" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("razor_set_attribute", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAGrepTypedToRazor_Denies() =>
+        Assert.True(ToolGuard.Inspect("Grep", new JsonObject { ["type"] = "cshtml" }).Denied);
 
     [Fact]
     public void Inspect_ForAGrepTypedToCSharp_Denies() =>

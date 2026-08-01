@@ -15,6 +15,9 @@ public static class RenameService
         if (!SyntaxFacts.IsValidIdentifier(newName))
             return Result.Fail<string>(Errors.Invalid($"'{newName}' is not a valid C# identifier", "pass a valid identifier"));
 
+        if (await RazorRename.TryAsync(workspace, symbol, newName, options, cancellationToken).ConfigureAwait(false) is { } razor)
+            return razor;
+
         var updated = await Renamer
             .RenameSymbolAsync(workspace.Solution, symbol, new SymbolRenameOptions(), newName, cancellationToken)
             .ConfigureAwait(false);
@@ -28,7 +31,6 @@ public static class RenameService
 
         return applied.IsOk ? Result.Ok(WithXaml(workspace, symbol, newName, options, applied.Value!)) : applied;
     }
-
     private static string WithXaml(
         LoadedWorkspace workspace,
         ISymbol symbol,

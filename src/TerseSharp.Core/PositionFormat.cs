@@ -7,14 +7,14 @@ public static class PositionFormat
 {
     public static string Describe(Location location)
     {
-        var span = location.GetLineSpan();
+        var span = Source(location);
 
         return Describe(span.Path, span.StartLinePosition);
     }
 
     public static string Describe(string root, Location location)
     {
-        var span = location.GetLineSpan();
+        var span = Source(location);
 
         return Describe(Relative(root, span.Path), span.StartLinePosition);
     }
@@ -27,9 +27,16 @@ public static class PositionFormat
             ? "-"
             : PathBoundary.Contains(root, file) ? Path.GetRelativePath(root, file) : file;
 
+    public static FileLinePositionSpan Source(Location location)
+    {
+        var mapped = location.GetMappedLineSpan();
+
+        return mapped.HasMappedPath ? mapped : location.GetLineSpan();
+    }
+
     public static string Range(Location location)
     {
-        var span = location.GetLineSpan();
+        var span = Source(location);
 
         return string.Create(
             CultureInfo.InvariantCulture,
@@ -38,7 +45,7 @@ public static class PositionFormat
 
     public static string LineRange(SyntaxNode node)
     {
-        var span = node.GetLocation().GetLineSpan();
+        var span = Source(node.GetLocation());
 
         return string.Create(
             CultureInfo.InvariantCulture,

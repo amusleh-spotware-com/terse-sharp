@@ -1,0 +1,35 @@
+@implements IDisposable
+@rendermode InteractiveServer
+
+<div class="card">
+    <h3>@Title</h3>
+    <Badge Kind="warning" Count="@Items.Count" />
+    <button class="btn" @onclick="Toggle">Toggle</button>
+    <input @bind-value="Filter" />
+    <span>@Summary</span>
+</div>
+
+@code {
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter]
+    [EditorRequired]
+    public IReadOnlyList<Order> Items { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<bool> OnToggled { get; set; }
+
+    public string Filter { get; set; } = string.Empty;
+
+    public string Summary => Title ?? "untitled";
+
+    private bool expanded;
+
+    private void Toggle() => expanded = !expanded;
+
+    private void Reset()
+    {
+        expanded = false;
+    }
+}
