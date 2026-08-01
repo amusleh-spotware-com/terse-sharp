@@ -69,7 +69,10 @@ public static class XamlService
         Unread(response, graph);
 
         if (declarations.Count is 0)
+        {
             response.Line(string.Create(CultureInfo.InvariantCulture, $"'{key}' is declared in no XAML file under the workspace root"));
+            Implicit(response, graph, key);
+        }
 
         foreach (var declaration in declarations.OrderBy(Rank).ThenBy(declaration => declaration.File, StringComparer.Ordinal))
             response.Line(ResolveRecord(declaration));
@@ -196,7 +199,7 @@ public static class XamlService
     public static Result<string> Find(LoadedWorkspace workspace, string query, string kind, int maxResults)
     {
         var graph = workspace.Indexes.Xaml();
-        var hits = graph.Files.SelectMany(file => Found(file, graph, query, kind)).ToArray();
+        var hits = graph.Files.SelectMany(file => Found(file, query, kind)).ToArray();
         var response = new ResponseBuilder("xaml_find", query);
 
         response.Summary(Math.Min(maxResults, hits.Length), hits.Length, "matches", "kind= or maxResults=");
@@ -308,25 +311,19 @@ public static class XamlService
         _ => _ => true,
     };
 
-    private static IEnumerable<string> Found(XamlFileRecord file, XamlResourceGraph graph, string query, string kind)
-    {
-        if (graph.Document(file) is not { } document)
-            return [];
+    private static IEnumerable<string> Found(XamlFileRecord file, string query, string kind) => file
+        .Elements
+        .Where(element => Matches(element, query, kind))
+        .Select(element => string.Create(
+            CultureInfo.InvariantCulture,
+            $"{file.Relative}:{element.Line}  HEURISTIC  {element.TypeName}  {element.Path}"));
 
-        return document
-            .Elements()
-            .Where(element => Matches(element, query, kind))
-            .Select(element => string.Create(
-                CultureInfo.InvariantCulture,
-                $"{file.Relative}:{element.Line}  HEURISTIC  {element.TypeName}  {element.Path}"));
-    }
-
-    private static bool Matches(XamlElementInfo element, string query, string kind) => kind.ToLowerInvariant() switch
+    private static bool Matches(XamlElementFact element, string query, string kind) => kind.ToLowerInvariant() switch
     {
         "name" => string.Equals(element.Name, query, StringComparison.Ordinal),
         "resource" or "key" => string.Equals(element.Key, query, StringComparison.Ordinal),
         "uid" => string.Equals(element.Uid, query, StringComparison.Ordinal),
-        "binding" => element.Element.Attributes().Any(attribute => attribute.Value.Contains(query, StringComparison.Ordinal)),
+        "binding" => element.Attributes.Any(attribute => attribute.Value.Contains(query, StringComparison.Ordinal)),
         _ => element.TypeName.Equals(query, StringComparison.Ordinal),
     };
 
@@ -411,5 +408,26 @@ public static class XamlService
         return opened.IsOk
             ? Result.Ok(Rendered(XamlResourceGraph.Scan(fullPath, workspace.Root, workspace.Indexes.Documents), graph))
             : Result.Fail<string>(opened.Error!);
+    }
+
+    private static void Implicit(ResponseBuilder response, XamlResourceGraph graph, string key)
+    {
+        var styles = graph.Styles
+            .Where(style => style.Key is null && string.Equals(style.TargetType, key, StringComparison.Ordinal))
+            .ToArray();
+
+        if (styles.Length is 0)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{styles.Length} implicit style(s) target '{key}'. Which one wins depends on the dialect's resource lookup order, which this index does not model, so none is named the winner - call xaml_styles({key}) for the BasedOn chains:"));
+
+        foreach (var style in styles)
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{style.File}:{style.Line}  HEURISTIC  implicit Style TargetType={style.TargetType} scope={style.Scope}"));
+        }
     }
 }

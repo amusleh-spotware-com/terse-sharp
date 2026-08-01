@@ -45,6 +45,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         }
 
         workspace.Dispose();
+        FixerCatalog.Clear();
 
         return true;
     }

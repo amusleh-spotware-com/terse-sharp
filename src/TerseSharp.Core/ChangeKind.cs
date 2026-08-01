@@ -1,4 +1,4 @@
-namespace TerseSharp.Core;
+﻿namespace TerseSharp.Core;
 
 public enum ChangeKind
 {
@@ -6,4 +6,5 @@ public enum ChangeKind
     Project,
     Xaml,
     Resx,
+    Razor,
 }

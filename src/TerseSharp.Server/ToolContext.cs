@@ -13,7 +13,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
     public string? PreloadFailure { get; private set; }
 
     public void BeginPreload(string target, CancellationToken cancellationToken) =>
-        Preload(Registry.LoadAsync(target, cancellationToken));
+        Preload(Task.Run(() => Registry.LoadAsync(target, cancellationToken), cancellationToken));
 
     public Task ReadyAsync() => ready;
 

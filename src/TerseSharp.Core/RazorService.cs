@@ -61,7 +61,7 @@ public static class RazorService
         if (string.IsNullOrWhiteSpace(query))
             return Result.Fail<string>(Errors.Blank("query"));
 
-        var hits = RazorIndex.Build(workspace.Root).SelectMany(document => Match(workspace, document, query, kind)).ToArray();
+        var hits = workspace.Indexes.Razor().Documents.SelectMany(document => Match(workspace, document, query, kind)).ToArray();
         var response = new ResponseBuilder("razor_find", query);
 
         response.Summary(Math.Min(hits.Length, maxResults), hits.Length, "hits", "kind= or path=");
@@ -74,7 +74,7 @@ public static class RazorService
 
     public static IReadOnlyList<string> WorkspaceScopes(LoadedWorkspace workspace)
     {
-        var documents = RazorIndex.Build(workspace.Root);
+        var documents = workspace.Indexes.Razor().Documents;
         var usings = documents.SelectMany(document => document.Usings).Select(entry => entry.Trim());
         var namespaces = workspace.Solution.Projects.Select(project => project.AssemblyName);
 

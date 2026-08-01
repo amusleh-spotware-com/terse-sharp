@@ -24,6 +24,8 @@ public sealed class WorkspaceSyncTests
     [InlineData("Views/Main.paml", ChangeKind.Xaml)]
     [InlineData("Strings.resx", ChangeKind.Resx)]
     [InlineData("Strings.resw", ChangeKind.Resx)]
+    [InlineData("Pages/Index.cshtml", ChangeKind.Razor)]
+    [InlineData("Components/Home.razor", ChangeKind.Razor)]
     public void Classify_ForAKnownExtension_ReturnsItsKind(string path, ChangeKind expected) =>
         Assert.Equal(expected, WorkspaceSync.Classify(path));
 
@@ -31,7 +33,7 @@ public sealed class WorkspaceSyncTests
     [InlineData("notes.md")]
     [InlineData("assets/logo.png")]
     [InlineData("scripts/build.csx")]
-    [InlineData("Pages/Index.cshtml")]
+    [InlineData("docs/diagram.svg")]
     public void Classify_ForAFileNoTerseSharpToolAnswersFor_ReturnsNull(string path) =>
         Assert.Null(WorkspaceSync.Classify(path));
 

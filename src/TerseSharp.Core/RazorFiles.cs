@@ -9,8 +9,16 @@ public static class RazorFiles
     public static IEnumerable<string> Enumerate(string root) =>
         WorkspaceFiles.Enumerate(root, RazorDocument.IsRazor).Where(file => !IsGenerated(file));
 
-    public static bool IsGenerated(string path) =>
-        GeneratedSuffixes.Any(suffix => path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+    public static bool IsGenerated(ReadOnlySpan<char> path)
+    {
+        foreach (var suffix in GeneratedSuffixes)
+        {
+            if (path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
 
     public static RazorAssets AssetsOf(string razorPath)
     {

@@ -310,8 +310,8 @@ It now tracks the tree:
 `workspace_status` reports it in one line:
 
 ```
-watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0
-index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) documents=9/128 parses=9
+watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0
+index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10) documents=9/128 parses=9
 ```
 
 The second line is the **workspace index**. `xaml_resolve`, `xaml_validate`, `xaml_styles`,
@@ -323,9 +323,10 @@ all.** When a generation does move, only the files whose `(LastWriteTimeUtc, Len
 re-parsed — a one-file edit in a 200-file tree costs one parse, not 200. When the watcher is off or
 degraded the index verifies by stamp sweep before answering, so `--no-watch` is still correct. Parsed
 documents live behind a bounded LRU (`documents=9/128`) because an `XDocument` costs 5-10× its file;
-the per-file records most of those tools answer from are always kept, so only `xaml_find` and the XAML
-sweep inside `find_usages` — which need every parsed document, not a record — re-parse beyond the cache
-on a solution with more than 128 XAML files. No tool's response format changed, and
+the per-file records those tools answer from are always kept, and since 0.15.0 the records carry the
+element, attribute, handler and binding facts too — so `xaml_find`, `xaml_validate` and the XAML sweep
+inside `find_usages` answer from records as well, and a solution with more than 128 XAML files no longer
+re-parses. Razor joined the same index in 0.15.0, with its own `rz` generation. No tool's response format changed, and
 nothing about the index is printed on a response — the counters live here so proving the hit rate
 costs one status call rather than tokens on every answer.
 
@@ -592,7 +593,6 @@ siblings and every `<Card …>` in markup.
 | Undo provenance: a snapshot overtaken by an external change is dropped and reported | ✅ |
 | `load_workspace(reload)`, `--no-watch` / `TERSE_WATCH=0`, `doctor` watcher line | ✅ |
 | Per-workspace XAML / resx / DI index, memoized per generation, incremental, bounded | ✅ |
-| Shared warm workspace daemon across processes | 🔜 |
 | Content-addressed (hashed) index, cross-session persistence, trigram search | 🔜 |
 
 Changes are recorded in [CHANGELOG.md](CHANGELOG.md). Versioning and the release pipeline are

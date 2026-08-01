@@ -55,7 +55,7 @@ public static class RazorOpen
                 "pass a .razor or .cshtml file"));
         }
 
-        return RazorIndex.Of(full) is { } document
+        return workspace.Indexes.Razor().Of(full) is { } document
             ? Result.Ok(await BuildAsync(workspace, document, full, cancellationToken).ConfigureAwait(false))
             : Result.Fail<RazorContext>(Errors.DocumentNotFound(path));
     }
@@ -100,7 +100,7 @@ public static class RazorOpen
     [
         .. RazorFiles.ImportsFor(full)
             .Where(import => workspace.Contains(import))
-            .Select(RazorIndex.Of)
+            .Select(workspace.Indexes.Razor().Of)
             .OfType<RazorDocument>(),
     ];
 

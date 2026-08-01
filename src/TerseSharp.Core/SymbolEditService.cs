@@ -191,9 +191,14 @@ public static class SymbolEditService
 
     private static SyntaxNode? ParseBody(SyntaxNode node, string body)
     {
-        var block = SyntaxFactory.ParseStatement(body.TrimStart().StartsWith('{') ? body : "{" + body + "}");
+        var trimmed = body.Trim();
 
-        return block is BlockSyntax parsed ? WithBody(node, parsed) : null;
+        if (trimmed.StartsWith("=>", StringComparison.Ordinal))
+            return WithExpression(node, trimmed);
+
+        var block = SyntaxFactory.ParseStatement(trimmed.StartsWith('{') ? trimmed : "{" + body + "}");
+
+        return block is BlockSyntax parsed && !parsed.ContainsDiagnostics ? WithBody(node, parsed) : null;
     }
 
     private static SyntaxNode? WithBody(SyntaxNode node, BlockSyntax block) => node switch
@@ -252,6 +257,26 @@ public static class SymbolEditService
                     $"this field shares one declaration with {declaration.Variables.Count - 1} other variable(s), so it cannot be replaced or deleted as a whole member"),
                 "split the declaration into one field per line first, or edit it with edit_text force=true")
             : null;
+
+    private static SyntaxNode? WithExpression(SyntaxNode node, string body)
+    {
+        var expression = SyntaxFactory.ParseExpression(body[2..].TrimEnd().TrimEnd(';'));
+
+        if (expression.ContainsDiagnostics)
+            return null;
+
+        var arrow = SyntaxFactory.ArrowExpressionClause(expression);
+        var semicolon = SyntaxFactory.Token(SyntaxKind.SemicolonToken);
+
+        return node switch
+        {
+            MethodDeclarationSyntax method => method.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+            ConstructorDeclarationSyntax ctor => ctor.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+            AccessorDeclarationSyntax accessor => accessor.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+            LocalFunctionStatementSyntax local => local.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+            _ => null,
+        };
+    }
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

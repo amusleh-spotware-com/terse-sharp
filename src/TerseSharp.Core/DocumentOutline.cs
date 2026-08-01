@@ -7,7 +7,7 @@ public readonly record struct DocumentSection(string Heading, int Level, int Sta
 
 public static class DocumentOutline
 {
-    public static bool IsMarkdown(string path) => Path.GetExtension(path.AsSpan()) switch
+    public static bool IsMarkdown(ReadOnlySpan<char> path) => Path.GetExtension(path) switch
     {
         ".md" or ".markdown" or ".mdx" => true,
         _ => false,

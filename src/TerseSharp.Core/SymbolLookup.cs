@@ -128,13 +128,14 @@ public static class SymbolLookup
 
     private static string LastSegment(string symbolId)
     {
-        var withoutPrefix = symbolId.Length > 2 && symbolId[1] is ':' ? symbolId[2..] : symbolId;
-        var withoutParameters = withoutPrefix.Split('(')[0];
+        var text = symbolId.AsSpan();
+        var withoutPrefix = text.Length > 2 && text[1] is ':' ? text[2..] : text;
+        var withoutParameters = withoutPrefix.IndexOf('(') is var open and >= 0 ? withoutPrefix[..open] : withoutPrefix;
         var separator = withoutParameters.LastIndexOf('.');
         var name = separator < 0 ? withoutParameters : withoutParameters[(separator + 1)..];
-        var arity = name.IndexOf('`', StringComparison.Ordinal);
+        var arity = name.IndexOf('`');
 
-        return arity < 0 ? name : name[..arity];
+        return new string(arity < 0 ? name : name[..arity]);
     }
     private static string Addressable(ISymbol symbol) =>
         SymbolReference.RoundTrips(symbol) ? SymbolReference.Brief(symbol) : SymbolId.From(symbol).Value;

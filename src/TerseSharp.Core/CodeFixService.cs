@@ -78,7 +78,7 @@ public static class CodeFixService
         if (project is null)
             return [];
 
-        var diagnostics = await ProjectDiagnostics.OfProjectAsync(project, cancellationToken).ConfigureAwait(false);
+        var diagnostics = await ProjectDiagnostics.OfProjectAsync(project, request.Ids, cancellationToken).ConfigureAwait(false);
 
         var candidates = diagnostics
             .Where(diagnostic => !attempted.Contains(diagnostic.Id) && request.Wants(diagnostic) && InScope(scope, diagnostic))
@@ -226,7 +226,7 @@ public static class CodeFixService
         if (project is null)
             return 0;
 
-        var diagnostics = await ProjectDiagnostics.OfProjectAsync(project, cancellationToken).ConfigureAwait(false);
+        var diagnostics = await ProjectDiagnostics.OfProjectAsync(project, [identifier], cancellationToken).ConfigureAwait(false);
 
         return diagnostics.Count(diagnostic =>
             string.Equals(diagnostic.Id, identifier, StringComparison.Ordinal)

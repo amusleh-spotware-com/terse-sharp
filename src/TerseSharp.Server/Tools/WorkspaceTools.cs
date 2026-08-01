@@ -87,7 +87,7 @@ public sealed class WorkspaceTools(ToolContext context)
         response.Note(DescribeSync(workspace.Sync));
         response.Note(workspace.Indexes.Describe());
 
-        if (RazorIndex.Build(workspace.Root).Count is var razor and > 0)
+        if (workspace.Indexes.Razor().FileCount is var razor and > 0)
             response.Note(await RazorHealthAsync(workspace, razor, cancellationToken).ConfigureAwait(false));
 
         foreach (var failure in workspace.Load.Failures)

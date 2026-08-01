@@ -1,6 +1,6 @@
 namespace TerseSharp.Core;
 
-public sealed record ResourceEntry(string File, string Name, string Value);
+public readonly record struct ResourceEntry(string File, string Name, string Value);
 
 public static class XamlLocalization
 {

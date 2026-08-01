@@ -36,4 +36,34 @@ internal static class ProjectDiagnostics
             ? []
             : await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
     }
+
+    private static bool Produces(DiagnosticAnalyzer analyzer, IReadOnlyCollection<string> ids)
+    {
+        try
+        {
+            return analyzer.SupportedDiagnostics.Any(descriptor => ids.Contains(descriptor.Id));
+        }
+        catch (Exception exception) when (exception is TypeLoadException or MissingMemberException or FileNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    public static ImmutableArray<DiagnosticAnalyzer> Producing(Project project, IReadOnlyCollection<string> ids) =>
+        ids.Count is 0
+            ? Analyzers(project)
+            : [.. Analyzers(project).Where(analyzer => Produces(analyzer, ids))];
+
+    public static async Task<ImmutableArray<Diagnostic>> OfProjectAsync(
+        Project project,
+        IReadOnlyCollection<string> ids,
+        CancellationToken cancellationToken)
+    {
+        var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+        var analyzers = Producing(project, ids);
+
+        return compilation is null || analyzers.IsEmpty
+            ? []
+            : await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
+    }
 }

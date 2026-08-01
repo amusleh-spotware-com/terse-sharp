@@ -275,4 +275,40 @@ public sealed class WorkspaceSyncE2ETests
 
         await File.WriteAllTextAsync(solution.OrderServicePath, updated, TestContext.Current.CancellationToken);
     }
+
+    [Fact]
+    public async Task EditText_ThenASymbolEditOnTheSameFile_KeepsBothChanges()
+    {
+        await using var solution = await StartAsync(watch: true);
+
+        await solution.CallAsync("write_text", new()
+        {
+            ["path"] = AddedRelativePath,
+            ["content"] = AddedSource,
+            ["force"] = true,
+        });
+
+        var edited = await solution.CallAsync("edit_text", new()
+        {
+            ["path"] = AddedRelativePath,
+            ["oldText"] = "public sealed class SyncedType",
+            ["newText"] = "public sealed class SyncedType // marker",
+            ["force"] = true,
+        });
+
+        Assert.Contains("edit_text applied", edited, StringComparison.Ordinal);
+
+        var replaced = await solution.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "SyncedType.Value",
+            ["body"] = "=> 42;",
+        });
+
+        Assert.DoesNotContain("ERROR", replaced, StringComparison.Ordinal);
+
+        var after = await solution.CallAsync("read_text", new() { ["path"] = AddedRelativePath });
+
+        Assert.Contains("// marker", after, StringComparison.Ordinal);
+        Assert.Contains("42", after, StringComparison.Ordinal);
+    }
 }

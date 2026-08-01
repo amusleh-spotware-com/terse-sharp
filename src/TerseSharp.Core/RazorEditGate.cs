@@ -32,7 +32,7 @@ public static class RazorEditGate
             return Result.Fail<string>(Errors.CompileRegression([.. report.NewErrors]));
 
         await AtomicWrite.TextAsync(context.FullPath, updatedText, cancellationToken).ConfigureAwait(false);
-        RazorIndex.Invalidate(context.FullPath);
+        context.Workspace.Sync.Noticed(context.FullPath, ChangeKind.Razor);
 
         return Result.Ok(Render(context, updatedText, options.Tool, "applied", report, Refresh(context, updatedText)));
     }

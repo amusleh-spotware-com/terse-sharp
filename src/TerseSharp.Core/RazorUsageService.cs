@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
 
-public sealed record RazorUsage(string Path, int Line, Confidence Confidence, string Text);
+public readonly record struct RazorUsage(string Path, int Line, Confidence Confidence, string Text);
 
 public static class RazorUsageService
 {
@@ -14,7 +14,7 @@ public static class RazorUsageService
         if (symbol is not INamedTypeSymbol type)
             return [];
 
-        var candidates = RazorIndex.Build(workspace.Root).Where(document => Mentions(document, type.Name)).ToArray();
+        var candidates = workspace.Indexes.Razor().Documents.Where(document => Mentions(document, type.Name)).ToArray();
         var usages = new List<RazorUsage>();
 
         foreach (var document in candidates)

@@ -32,8 +32,8 @@ public static partial class XamlDeadCode
     {
         var found = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var file in graph.Files)
-            Collect(found, graph.Document(file));
+        foreach (var attribute in graph.Files.SelectMany(file => file.Elements).SelectMany(element => element.Attributes))
+            Collect(found, attribute.Value, attribute.Name);
 
         return found;
     }
@@ -108,13 +108,4 @@ public static partial class XamlDeadCode
 
     [GeneratedRegex("[A-Za-z_][A-Za-z0-9_]*")]
     private static partial Regex QuotedLiteral();
-
-    private static void Collect(HashSet<string> found, XamlDocument? document)
-    {
-        if (document is null)
-            return;
-
-        foreach (var attribute in document.Document.Descendants().SelectMany(element => element.Attributes()))
-            Collect(found, attribute.Value, attribute.Name.LocalName);
-    }
 }

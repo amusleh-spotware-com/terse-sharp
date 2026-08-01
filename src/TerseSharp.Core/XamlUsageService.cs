@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
 
-public sealed record XamlUsage(string File, int Line, string Kind, string Confidence, string Text, string Replacement);
+public readonly record struct XamlUsage(string File, int Line, string Kind, string Confidence, string Text, string Replacement);
 
 public static class XamlUsageService
 {
@@ -11,7 +11,7 @@ public static class XamlUsageService
         var graph = workspace.Indexes.Xaml();
         var usages = new List<XamlUsage>();
 
-        foreach (var file in graph.Files)
+        foreach (var file in graph.Files.Where(file => Mentions(file, symbol)))
             Collect(usages, graph.Document(file), file.Relative, symbol, newName);
 
         return usages;
@@ -90,15 +90,18 @@ public static class XamlUsageService
         && symbol.ContainingType is { } type
         && Same(Simple(context), type.Name);
 
-    private static string Simple(string qualified)
+    private static ReadOnlySpan<char> Simple(ReadOnlySpan<char> qualified)
     {
-        var separator = qualified.LastIndexOfAny(['.', ':']);
+        var separator = qualified.LastIndexOfAny('.', ':');
 
         return separator < 0 ? qualified : qualified[(separator + 1)..];
     }
 
-    private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.Ordinal);
+    private static bool Same(ReadOnlySpan<char> left, ReadOnlySpan<char> right) => left.SequenceEqual(right);
 
     private static string Rewrite(string text, string oldName, string newName) =>
         string.Join(newName, text.Split(oldName));
+
+    private static bool Mentions(XamlFileRecord file, ISymbol symbol) =>
+        file.Failure is not null || file.Mentions.Contains(symbol.Name);
 }

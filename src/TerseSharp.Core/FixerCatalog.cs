@@ -171,4 +171,6 @@ public sealed class FixerCatalog
             return path;
         }
     }
+
+    public static void Clear() => Catalogs.Clear();
 }

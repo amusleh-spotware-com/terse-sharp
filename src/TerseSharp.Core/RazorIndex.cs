@@ -1,56 +1,65 @@
-using System.Collections.Concurrent;
+﻿namespace TerseSharp.Core;
 
-namespace TerseSharp.Core;
-
-public static class RazorIndex
+public sealed class RazorIndex
 {
-    private static readonly ConcurrentDictionary<string, Cached> Parsed = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Entry> entries;
 
-    public static IReadOnlyList<RazorDocument> Build(string root)
+    private RazorIndex(Dictionary<string, Entry> entries)
     {
-        var files = RazorFiles.Enumerate(root).ToArray();
-        var documents = new RazorDocument?[files.Length];
-
-        Parallel.For(0, files.Length, index => documents[index] = Of(files[index]));
-
-        return [.. documents.OfType<RazorDocument>()];
+        this.entries = entries;
+        Documents = [.. entries.Values.Select(entry => entry.Document)];
     }
 
-    public static RazorDocument? Of(string fullPath)
+    public IReadOnlyList<RazorDocument> Documents { get; }
+
+    public int FileCount => entries.Count;
+
+    public static RazorIndex Build(string root, RazorIndex? previous)
+    {
+        var files = RazorFiles.Enumerate(root).ToArray();
+        var parsed = new Entry?[files.Length];
+
+        Parallel.For(0, files.Length, index => parsed[index] = Read(files[index], previous));
+
+        return new RazorIndex(Collect(files, parsed));
+    }
+
+    public RazorDocument? Of(string fullPath) =>
+        entries.TryGetValue(fullPath, out var entry) ? entry.Document : Read(fullPath, null)?.Document;
+
+    private static Dictionary<string, Entry> Collect(string[] files, Entry?[] parsed)
+    {
+        var entries = new Dictionary<string, Entry>(files.Length, StringComparer.OrdinalIgnoreCase);
+
+        for (var index = 0; index < files.Length; index++)
+        {
+            if (parsed[index] is { } entry)
+                entries[files[index]] = entry;
+        }
+
+        return entries;
+    }
+
+    private static Entry? Read(string fullPath, RazorIndex? previous)
     {
         try
         {
             var info = new FileInfo(fullPath);
 
-            if (Parsed.TryGetValue(fullPath, out var cached) && cached.Matches(info))
-                return cached.Document;
+            if (previous is not null && previous.entries.TryGetValue(fullPath, out var cached) && cached.Matches(info))
+                return cached;
 
             var document = RazorDocument.Load(fullPath);
 
-            if (!document.IsOk)
-                return null;
-
-            Parsed[fullPath] = new Cached(info.LastWriteTimeUtc, info.Length, document.Value!);
-
-            return document.Value;
+            return document.IsOk ? new Entry(info.LastWriteTimeUtc, info.Length, document.Value!) : null;
         }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return null;
         }
     }
 
-    public static void Invalidate(string fullPath)
-    {
-        Parsed.TryRemove(fullPath, out _);
-        RazorGeneratedMap.Forget();
-    }
-
-    private readonly record struct Cached(DateTime WriteUtc, long Length, RazorDocument Document)
+    private readonly record struct Entry(DateTime WriteUtc, long Length, RazorDocument Document)
     {
         public bool Matches(FileInfo info) => info.LastWriteTimeUtc == WriteUtc && info.Length == Length;
     }

@@ -5,6 +5,8 @@ public sealed class ResxIndex
     private static readonly string[] Extensions = [".resx", ".resw"];
 
     private readonly ParsedDocumentCache documents;
+    private readonly Dictionary<string, IReadOnlyList<string>> names = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock namesGate = new();
 
     private ResxIndex(string root, ParsedDocumentCache documents)
     {
@@ -35,7 +37,13 @@ public sealed class ResxIndex
     public IReadOnlyList<ResxEntry> Translatable(ResxFile file) =>
         [.. Entries(file).Where(entry => entry.IsTranslatable)];
 
-    public void Forget(string path) => documents.Forget(path);
+    public void Forget(string path)
+    {
+        documents.Forget(path);
+
+        lock (namesGate)
+            names.Remove(path);
+    }
 
     private static Result<ResxDocument> Parse(string path)
     {
@@ -104,4 +112,20 @@ public sealed class ResxIndex
     }
 
     private sealed record Descriptor(string Root, string Directory, string Name, ResxFile File, string Key);
+
+    public IReadOnlyList<string> TranslatableNames(ResxFile file)
+    {
+        lock (namesGate)
+        {
+            if (names.TryGetValue(file.Path, out var cached))
+                return cached;
+        }
+
+        IReadOnlyList<string> computed = [.. Translatable(file).Select(entry => entry.Name)];
+
+        lock (namesGate)
+            names[file.Path] = computed;
+
+        return computed;
+    }
 }

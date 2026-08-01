@@ -221,8 +221,8 @@ state **with an `EXACT` tag**. It now tracks the tree.
   `xaml_find` and the XAML sweep inside `find_usages` — the two that need every document rather than
   its index record — still re-parse beyond that cap.
 
-`workspace_status` reports `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0` and
-`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) documents=9/128 parses=9`.
+`workspace_status` reports `watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0` and
+`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10) documents=9/128 parses=9`.
 `load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`) turns the watcher
 off for constrained containers, and `terse doctor` reports whether this platform supports file
 watching at all.

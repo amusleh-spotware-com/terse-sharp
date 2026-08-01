@@ -2,7 +2,7 @@ using System.Xml.Linq;
 
 namespace TerseSharp.Core;
 
-public sealed record XamlHandler(string Element, string Event, string Method, int Line);
+public readonly record struct XamlHandler(string Element, string Event, string Method, int Line);
 
 public static class XamlCodeBehind
 {
@@ -22,7 +22,7 @@ public static class XamlCodeBehind
         }
     }
 
-    private static bool IsHandler(XAttribute attribute) =>
+    internal static bool IsHandler(XAttribute attribute) =>
         !attribute.IsNamespaceDeclaration
         && attribute.Name.NamespaceName.Length is 0
         && attribute.Value.Length > 0

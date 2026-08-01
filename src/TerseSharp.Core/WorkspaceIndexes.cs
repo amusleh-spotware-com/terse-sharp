@@ -7,6 +7,7 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
     private readonly IndexSlot<XamlResourceGraph> xaml = new();
     private readonly IndexSlot<ResxIndex> resx = new();
     private readonly IndexSlot<RegistrationIndex> registrations = new();
+    private readonly IndexSlot<RazorIndex> razor = new();
 
     public ParsedDocumentCache Documents { get; } = new();
 
@@ -28,15 +29,15 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
 
     public string Describe() => string.Create(
         CultureInfo.InvariantCulture,
-        $"index=xaml({Counters(xaml)} files={Size(xaml.Current?.FileCount)}) resx({Counters(resx)} families={Size(resx.Current?.Families.Count)}) code({Counters(registrations)} calls={Size(registrations.Current?.Count)}) documents={Documents.Count}/{ParsedDocumentCache.MaxDocuments} parses={Documents.Parses}");
+        $"index=xaml({Counters(xaml)} files={Size(xaml.Current?.FileCount)}) resx({Counters(resx)} families={Size(resx.Current?.Families.Count)}) code({Counters(registrations)} calls={Size(registrations.Current?.Count)}) razor({Counters(razor)} files={Size(razor.Current?.FileCount)}) documents={Documents.Count}/{ParsedDocumentCache.MaxDocuments} parses={Documents.Parses}");
 
     public void Dispose()
     {
         xaml.Dispose();
         resx.Dispose();
         registrations.Dispose();
+        razor.Dispose();
     }
-
     private IndexKey Key(ChangeKind kind) => new(sync.Generation(kind), Trusted);
 
     private bool Trusted =>
@@ -48,6 +49,9 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
 
     private static string Size(int? count) =>
         count is { } known ? known.ToString(CultureInfo.InvariantCulture) : "-";
+
+    public RazorIndex Razor() =>
+        razor.Get(Key(ChangeKind.Razor), previous => RazorIndex.Build(root, previous));
 }
 
 internal sealed class IndexSlot<TIndex> : IDisposable

@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
 
-public sealed record ResxPair(string Key, string Value);
+public readonly record struct ResxPair(string Key, string Value);
 
 public static class ResxEditService
 {

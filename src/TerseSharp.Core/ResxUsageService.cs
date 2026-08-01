@@ -5,7 +5,7 @@ using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace TerseSharp.Core;
 
-public sealed record ResxUsage(string Relative, int Line, string Form, Confidence Confidence);
+public readonly record struct ResxUsage(string Relative, int Line, string Form, Confidence Confidence);
 
 public static class ResxUsageService
 {

@@ -1,6 +1,6 @@
 namespace TerseSharp.Core;
 
-public sealed record ServiceRegistration(string File, int Line, string Method, string Text, string Container);
+public readonly record struct ServiceRegistration(string File, int Line, string Method, string Text, string Container);
 
 public static class RegistrationService
 {
@@ -55,7 +55,7 @@ public static class RegistrationService
 
     private static IReadOnlyList<string> RazorRoutes(LoadedWorkspace workspace) =>
     [
-        .. RazorIndex.Build(workspace.Root)
+        .. workspace.Indexes.Razor().Documents
             .SelectMany(document => document.Directives
                 .Where(directive => string.Equals(directive.Name, "page", StringComparison.Ordinal))
                 .Select(directive => Route(workspace, document, directive))),

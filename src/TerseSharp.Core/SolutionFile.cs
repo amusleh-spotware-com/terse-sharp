@@ -106,8 +106,19 @@ public static class SolutionFile
 
     private static string? ClassicPath(string line)
     {
-        var parts = line.Split('"');
+        var text = line.AsSpan();
+        var field = 0;
 
-        return parts.Length > 5 && parts[5].Contains('.', StringComparison.Ordinal) ? parts[5] : null;
+        foreach (var range in text.Split('"'))
+        {
+            if (field++ is not 5)
+                continue;
+
+            var candidate = text[range];
+
+            return candidate.Contains('.') ? new string(candidate) : null;
+        }
+
+        return null;
     }
 }

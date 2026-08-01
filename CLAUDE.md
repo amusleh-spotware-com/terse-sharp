@@ -278,6 +278,83 @@ byte-order-mark sniff). Anything that reads or writes *content* on the request p
 Converting a leaf to async ripples up the call chain: propagate it, do not stop the ripple with a
 blocking call.
 
+## 🚫 HARD GATE — the allocation-free path is the only path, unless none exists
+
+**The default is zero allocation. An allocation is a last resort that must be justified at the call.**
+
+STOP before every `new`, every `ToArray`/`ToList`/`ToString`/`Substring`/`Split`/`Join`/`Concat`, every
+LINQ chain and every string interpolation, and answer:
+
+> **"Is there an allocation-free way to get this exact result?"**
+
+If yes, **you must take it** — span, `stackalloc`, an existing buffer, a struct, an in-place scan, a
+`SearchValues`, a pre-sized collection, an enumerator instead of a materialized sequence. "The
+allocating version is shorter" and "it's only one small object" are not reasons; on a per-file,
+per-element, per-symbol or per-line path they are the whole cost.
+
+If genuinely no allocation-free solution exists — the value must outlive the frame, be stored, cross an
+`await`, or leave the method as a `string` — then allocate **once**, at the outermost boundary, and say
+in one clause why it was unavoidable. What is never acceptable is allocating without having looked.
+
+**Allocation-free first, in this order:** slice a span → reuse a caller's buffer → `stackalloc` a
+bounded buffer → pool/reuse an instance → pre-size the one collection you must build → allocate.
+
+**STOP before every `Split`, `Substring`, `Trim`, `IndexOf`, `StartsWith`, `EndsWith`, `Replace`,
+`Join`, `Concat`, `+` and interpolation you are about to write, and answer one question:**
+
+> **"Does this produce a value that leaves the method, or am I just looking at the text?"**
+
+If you are *looking* — comparing, scanning, slicing, splitting to inspect a part — the operation is
+**mandatory `ReadOnlySpan<char>`**. `AsSpan()` first, then slice. A `string` is allocated **only** for a
+value that leaves the method: a response line, a dictionary key, a record field, a returned name.
+There is no third case and no "it's only a small string" exemption.
+
+This server's work is string work: it walks trees, splits paths, matches names and renders responses,
+and it does it once per file, per element, per symbol, per line. An allocation on one of those paths
+is an allocation multiplied by the size of the user's solution.
+
+Before writing any of these, stop and use the span form:
+
+| Never | Use |
+|---|---|
+| `text.Split(…)` to look at parts | `text.AsSpan().Split(…)` / `EnumerateLines()` / manual `IndexOf` walk |
+| `string.Join(sep, parts.Select(…))` | write into a `Span<char>` or a pooled `StringBuilder` |
+| `text.Substring(a, b)` / `text[a..b]` to inspect | `text.AsSpan(a, b)` — slice, do not copy |
+| `left + "=" + right` in a loop | `string.Create` with the total length, or a reused builder |
+| `.ToLowerInvariant()` to compare | `Equals(other, StringComparison.OrdinalIgnoreCase)` |
+| `text.Contains(other)` with no comparison | `Contains(other, StringComparison.Ordinal)` — vectorized, and says what it means |
+| `Path.GetFileName(string)` | `Path.GetFileName(ReadOnlySpan<char>)` |
+| `new FileInfo(path).Length` per file | the `FileInfo` the directory enumeration already produced |
+
+**A `string` is only allocated for a value that leaves the method** — a response line, a dictionary key,
+a record field. Everything on the way there is a `ReadOnlySpan<char>`.
+
+**Signatures carry spans too.** A helper that only inspects its argument takes `ReadOnlySpan<char>`, not
+`string` — `IsCSharp`, `IsGenerated`, `IsMarkdown`, `Same`, `Simple` all do. A helper that returns a
+*slice of its own argument* returns `ReadOnlySpan<char>` and lets the caller decide whether to
+materialize it. The caller pays for the `new string(...)` at the one place the value is stored.
+
+**Three hard limits, because the compiler enforces them and "always" would not build:**
+1. **You cannot return a span over a `stackalloc` buffer** (CS8352) — the buffer dies with the frame.
+   A method that builds new characters returns a `string`; only a method that *slices an input* returns
+   a span.
+2. **A `ref struct` cannot be a field, a generic argument, a record member, or a collection element.**
+   Anything stored in `XamlFileRecord`, a `Dictionary`, a `List` or a response is a `string`.
+3. **A span cannot cross an `await`.** In an `async` method, slice before the first await or work on a
+   `string`/`ReadOnlyMemory<char>`.
+
+So the rule is *"span in, span through, string out at the boundary"* — not "span everywhere".
+
+`stackalloc` is the default buffer for a bounded, small result (a normalized path, a collapsed
+signature, a formatted counter). Guard it: `length <= Max ? stackalloc char[Max] : new char[length]`,
+never `stackalloc` on an unbounded input. `SearchValues<char>` for a set membership test in a loop,
+`MemoryExtensions.IndexOf` over the whole text rather than `Contains` per line, and
+`Regex.EnumerateMatches(span)` rather than `Regex.Matches`.
+
+Judgement, not ritual: a one-shot call on the startup path, or a place where the span version is
+genuinely less clear for no measured gain, stays simple — **and says so at the call**. What is banned
+is the per-file, per-element or per-line allocation nobody measured.
+
 ## 🚫 HARD GATE — success costs nothing
 
 A tool that succeeded with nothing to report must say so in **one line**. `build`, `run_tests` and

@@ -72,9 +72,14 @@ public static class RazorBindingService
     {
         ISymbol? current = type;
 
-        foreach (var segment in expression.Split('.', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var range in expression.AsSpan().Split('.'))
         {
-            current = Member(Owner(current), Trim(segment));
+            var segment = Trim(expression.AsSpan()[range]);
+
+            if (segment.IsEmpty)
+                continue;
+
+            current = Member(Owner(current), new string(segment));
 
             if (current is null)
                 return null;
@@ -83,7 +88,8 @@ public static class RazorBindingService
         return current;
     }
 
-    private static string Trim(string segment) => segment.Split('(', StringSplitOptions.RemoveEmptyEntries)[0].Trim();
+    private static ReadOnlySpan<char> Trim(ReadOnlySpan<char> segment) =>
+        (segment.IndexOf('(') is var open and >= 0 ? segment[..open] : segment).Trim();
 
     private static INamedTypeSymbol? Owner(ISymbol? symbol) => symbol switch
     {

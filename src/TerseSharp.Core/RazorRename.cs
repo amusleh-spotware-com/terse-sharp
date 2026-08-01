@@ -122,13 +122,13 @@ public static class RazorRename
         foreach (var rewrite in rewrites)
         {
             await AtomicWrite.TextAsync(rewrite.Path, rewrite.After).ConfigureAwait(false);
-            RazorIndex.Invalidate(rewrite.Path);
+            workspace.Sync.Noticed(rewrite.Path, ChangeKind.Razor);
         }
 
         foreach (var move in moves)
         {
             Relocate(move, done);
-            RazorIndex.Invalidate(move.From);
+            workspace.Sync.Noticed(move.From, ChangeKind.Razor);
         }
 
         return Render(workspace, "applied", moves, rewrites);

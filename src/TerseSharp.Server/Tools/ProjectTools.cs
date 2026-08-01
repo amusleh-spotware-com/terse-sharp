@@ -118,7 +118,15 @@ public sealed class ProjectTools(ToolContext context)
         if (context.RejectWrite() is { } rejection)
             return Task.FromResult(rejection);
 
-        return ReadingAsync(workspace, path, action);
+        return ReadingAsync(workspace, path, async loaded =>
+        {
+            var written = await action(loaded).ConfigureAwait(false);
+
+            if (written.IsOk)
+                loaded.Sync.Noticed(Resolve(loaded, path), ChangeKind.Project);
+
+            return written;
+        });
     }
 
     private Task<string> ReadingAsync(string? workspace, string path, Func<LoadedWorkspace, Task<Result<string>>> action)

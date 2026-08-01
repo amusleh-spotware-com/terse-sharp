@@ -3,13 +3,22 @@ using System.Xml.Linq;
 
 namespace TerseSharp.Core;
 
-public sealed record XamlResourceDeclaration(string File, int Line, string Key, string TypeName, string Scope);
+public readonly record struct XamlResourceDeclaration(string File, int Line, string Key, string TypeName, string Scope);
 
-public sealed record XamlElementFact(int Line, string TypeName, string? Key, string? Name);
+public readonly record struct XamlAttributeFact(string Name, string Value);
 
-public sealed record XamlResourceReference(int Line, string Key);
+public readonly record struct XamlElementFact(
+    int Line,
+    string TypeName,
+    string? Key,
+    string? Name,
+    string Path,
+    string? Uid,
+    IReadOnlyList<XamlAttributeFact> Attributes);
 
-public sealed record XamlUidSite(string File, int Line, string Uid, string TypeName);
+public readonly record struct XamlResourceReference(int Line, string Key);
+
+public readonly record struct XamlUidSite(string File, int Line, string Uid, string TypeName);
 
 public sealed record XamlFileRecord(
     string FullPath,
@@ -20,7 +29,8 @@ public sealed record XamlFileRecord(
     IReadOnlyList<XamlElementFact> Elements,
     IReadOnlyList<XamlResourceReference> References,
     IReadOnlyList<XamlStyle> Styles,
-    IReadOnlyList<XamlUidSite> Uids);
+    IReadOnlyList<XamlUidSite> Uids,
+    IReadOnlySet<string> Mentions);
 
 public sealed partial class XamlResourceGraph
 {
@@ -101,15 +111,19 @@ public sealed partial class XamlResourceGraph
 
         return loaded is { IsOk: true, Value: { } document }
             ? Facts(file, relative, stamp, document)
-            : new XamlFileRecord(file, relative, stamp, loaded.Error!.Message, "unknown", [], [], [], []);
+            : new XamlFileRecord(file, relative, stamp, loaded.Error!.Message, "unknown", [], [], [], [], new HashSet<string>(StringComparer.Ordinal));
     }
 
     private static XamlFileRecord Facts(string file, string relative, FileStamp stamp, XamlDocument document)
     {
         var found = new Collected([], [], [], []);
+        var mentions = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var element in document.Elements())
-            Collect(relative, element, found);
+            Collect(relative, element, found, mentions);
+
+        if (XamlCodeBehind.ClassOf(document) is { } declared)
+            mentions.Add(new string(Simple(declared)));
 
         return new XamlFileRecord(
             file,
@@ -120,12 +134,20 @@ public sealed partial class XamlResourceGraph
             found.Elements,
             found.References,
             found.Styles,
-            found.Uids);
+            found.Uids,
+            mentions);
     }
 
-    private static void Collect(string relative, XamlElementInfo element, Collected found)
+    private static void Collect(string relative, XamlElementInfo element, Collected found, HashSet<string> mentions)
     {
-        found.Elements.Add(new XamlElementFact(element.Line, element.TypeName, element.Key, element.Name));
+        found.Elements.Add(new XamlElementFact(
+            element.Line,
+            element.TypeName,
+            element.Key,
+            element.Name,
+            element.Path,
+            element.Uid,
+            [.. element.Element.Attributes().Select(attribute => new XamlAttributeFact(attribute.Name.LocalName, attribute.Value))]));
 
         if (element.Uid is { } uid)
             found.Uids.Add(new XamlUidSite(relative, element.Line, uid, element.TypeName));
@@ -134,7 +156,10 @@ public sealed partial class XamlResourceGraph
             found.Styles.Add(style);
 
         foreach (var attribute in element.Element.Attributes())
+        {
             Reference(attribute, found);
+            Mention(attribute, mentions);
+        }
     }
 
     private static void Reference(XAttribute attribute, Collected found)
@@ -180,4 +205,27 @@ public sealed partial class XamlResourceGraph
         List<XamlResourceReference> References,
         List<XamlStyle> Styles,
         List<XamlUidSite> Uids);
+
+    private static void Mention(XAttribute attribute, HashSet<string> mentions)
+    {
+        if (XamlCodeBehind.IsHandler(attribute))
+        {
+            mentions.Add(attribute.Value);
+
+            return;
+        }
+
+        if (!attribute.Value.StartsWith('{') || XamlBindingService.PathOf(attribute.Value) is not { } path)
+            return;
+
+        foreach (var segment in path.Split('.'))
+            mentions.Add(segment);
+    }
+
+    private static ReadOnlySpan<char> Simple(ReadOnlySpan<char> qualified)
+    {
+        var separator = qualified.LastIndexOfAny('.', ':');
+
+        return separator < 0 ? qualified : qualified[(separator + 1)..];
+    }
 }

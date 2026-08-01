@@ -79,9 +79,9 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
 | `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element, formatting preserved |
 | `Read` a `.xaml.cs` to see what the markup wires | `xaml_codebehind(path)` | `x:Class` plus every handler |
-| hunting a resource through `App.xaml` | `xaml_resolve(key)` | every declaration with its scope, one call |
+| hunting a resource through `App.xaml` | `xaml_resolve(key)` | every declaration with its scope, one call; a key with no keyed declaration lists the implicit styles targeting it, `HEURISTIC`, and names no winner |
 | eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path type-checked through Roslyn |
-| "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep |
+| "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
 | "what endpoints exist?" | `list_endpoints()` | every `Map*` with the member it sits in |
 | orienting on a symbol | `explore_symbol(symbolId)` | signature, doc, reach, implementations, XAML sites in one call |
 | judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
@@ -114,11 +114,11 @@ A silent drop is the breach, even when the reason would have been valid.
 
 **Workspace** — `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` ·
 `list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution. Its
-last line reports freshness — `watch=active gen=c12/p1/x3/r0 pending=0 lastSyncMs=8 gaps=0`: the
-watcher state, the per-kind generation counters (Code / Project / Xaml / Resx), how many paths are
+last line reports freshness — `watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0`: the
+watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor), how many paths are
 waiting to be examined, and how many watcher events were lost. `load_workspace(reload: true)` forces a
 re-read from disk; you should almost never need it. The line after it reports the workspace index —
-`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-)
+`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10)
 documents=9/128 parses=9`.
 
 **Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·
@@ -213,10 +213,11 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
     grepping the tree because you think re-asking is expensive — `find_files` on `**/*.xaml` answers
     "which files exist", which is almost never the question; `xaml_resolve`, `xaml_styles` and
     `xaml_find` answer "where is this key / style / name", from the same index, for less.
-    The exception, so you can plan around it: `xaml_find`, the XAML sweep inside `find_usages` /
-    `rename_symbol` / `explore_symbol`, and `xaml_validate includeUnused=true` need the parsed
-    document of every file, not just its index record, so beyond 128 cached documents they re-parse.
-    Those four are worth asking once and keeping; the rest are free to repeat.
+    The exception, so you can plan around it: `xaml_find` and `xaml_validate includeUnused=true` need
+    the parsed document of every file, because they answer about arbitrary attribute content — beyond
+    128 cached documents they re-parse. Those two are worth asking once and keeping; the rest are free
+    to repeat. `find_usages`, `rename_symbol` and `explore_symbol` filter by index record first and
+    parse only the files that could match, so they are cheap even on a large XAML tree.
 
 ## Localization (`.resx` / `.resw`)
 

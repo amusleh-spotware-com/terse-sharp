@@ -20,6 +20,8 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
 
     private static readonly string[] ResourceExtensions = [".resx", ".resw"];
 
+    private static readonly string[] RazorExtensions = [".razor", ".cshtml"];
+
     private readonly ConcurrentDictionary<string, byte> pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileStamp> stamps = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -65,6 +67,9 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
 
         if (WorkspaceFiles.Matches(extension, MarkupExtensions))
             return ChangeKind.Xaml;
+
+        if (WorkspaceFiles.Matches(extension, RazorExtensions))
+            return ChangeKind.Razor;
 
         return WorkspaceFiles.Matches(extension, ResourceExtensions) ? ChangeKind.Resx : null;
     }
@@ -328,11 +333,18 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
             pending[path] = 0;
     }
 
-    private bool Countable(ChangeKind kind) => kind is ChangeKind.Xaml or ChangeKind.Resx || !Reloading;
+    private bool Countable(ChangeKind kind) =>
+        kind is ChangeKind.Xaml or ChangeKind.Resx or ChangeKind.Razor || !Reloading;
 
     internal void Bumped(ChangeKind kind)
     {
         lock (generationGate)
             generations = generations.Bump(kind);
+    }
+
+    public void Noticed(string path, ChangeKind kind)
+    {
+        Notice(path);
+        Bumped(kind);
     }
 }

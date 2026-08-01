@@ -194,8 +194,7 @@ public static class ResxService
         return family.Cultures.Sum(file => neutral.Except(Names(index, file), StringComparer.Ordinal).Count());
     }
 
-    private static IEnumerable<string> Names(ResxIndex index, ResxFile file) =>
-        index.Translatable(file).Select(entry => entry.Name);
+    private static IEnumerable<string> Names(ResxIndex index, ResxFile file) => index.TranslatableNames(file);
 
     private static string Shorten(string value)
     {

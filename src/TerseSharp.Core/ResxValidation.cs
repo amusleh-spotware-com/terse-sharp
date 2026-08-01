@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
 
-public sealed record ResxFinding(string Code, string Relative, string Key, string Kind, string Detail);
+public readonly record struct ResxFinding(string Code, string Relative, string Key, string Kind, string Detail);
 
 public static class ResxValidation
 {

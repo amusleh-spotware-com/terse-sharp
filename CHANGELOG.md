@@ -8,13 +8,63 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-01
+
+Closes every remaining row in the improvements backlog.
+
+### Changed
+
+- **The watcher now covers Razor.** `ChangeKind.Razor` joins Code, Project, Xaml and Resx, and
+  `WorkspaceGenerations` gains a fifth counter, so `workspace_status` prints
+  `gen=c12/p1/x3/r0/rz2`. `.razor` and `.cshtml` were classified as `null` before, which meant no
+  watcher coverage at all and no generation to key an index on. **Status-line format change.**
+- `find_registrations` follows one level of `Add*` extension methods. A registration wrapped in
+  `services.AddTrading()` is now reported at the call site as `AddSingleton<…>  via AddTrading()`, not
+  only inside the helper. The helper's own body is still reported, and the chain is followed exactly
+  one level - following it arbitrarily is whole-program analysis.
+- `xaml_resolve` on a key that matches no keyed resource now lists the implicit styles whose
+  `TargetType` is that key, tagged `HEURISTIC`, and **explicitly declines to name a winner** because
+  the index does not model per-dialect resource lookup order. A wrong winner would be the confident
+  wrong answer the response contract forbids.
+
 ### Fixed
 
-- The E2E fixture retries the MCP handshake once when it times out. `initialize` has a fixed 60 s
-  ceiling that no client option raises, and a cold Windows CI runner can exceed it while MSBuild and
-  Roslyn warm up - one job failed that way on the 0.14.0 tag and passed unchanged on rerun. A flake
-  that only reproduces on a cold runner is indistinguishable from a regression until it is rerun, which
-  is exactly the signal CI exists to give.
+- **`replace_symbol_body` accepts the expression body its own error message advertises.** `=> 42;`
+  was wrapped as `{=> 42;}`, which parsed into an error-node block, passed the `is BlockSyntax` check
+  and produced broken code that only the compile gate caught. Expression bodies are now applied as
+  `ArrowExpressionClause`, and a block that fails to parse is refused instead of applied.
+- **`RazorIndex` is per-workspace and generation-keyed.** It was a process-wide `static
+  ConcurrentDictionary` with no bound, plus a full directory walk and one `stat` per file on every
+  call at five sites - including `workspace_status`, which paid it on every status call. It now lives
+  in `WorkspaceIndexes` beside the XAML and resx indexes, reuses unchanged documents from the previous
+  generation, and is reported in the `index=` line. Closes **I21**.
+- **`resx_files` and `resx_validate` no longer re-parse the overflow beyond the 128-document LRU.**
+  The per-file translatable key set is cached on the index itself, which is replaced wholesale when
+  the resx generation changes, so it is bounded without being unbounded. Closes **I22**.
+- **The XAML sweep in `find_usages`, `rename_symbol` and `explore_symbol` no longer parses every XAML
+  file.** Each `XamlFileRecord` now carries the identifiers its handlers, binding paths and `x:Class`
+  mention, so only files that could match are parsed. Closes the half of **I25** those three tools
+  pay; `xaml_find` and `xaml_validate includeUnused=true` still need whole documents by nature.
+- **`cleanup fix=…` drives the analyzers with the requested id set.** `ids=` narrowed only the filter,
+  so the whole analyzer set ran once per diagnostic id, up to 25 times per project. Analyzers are now
+  filtered to those whose `SupportedDiagnostics` intersect the request. Closes **I14**.
+- `unload_workspace` clears the fixer catalog, so an unloaded workspace stops pinning analyzer
+  assemblies. Closes the practical half of **I15**; the collectible load context remains the only way
+  to release the files themselves, and is now the sole content of that row.
+- `project_set_property`, `package_add`, `package_remove` and `solution_add_project` tell the workspace
+  which file they wrote, so they are correct under `--no-watch`. Closes **I19**.
+- `PathBoundary.SameFile` resolves symlinks with `File.ResolveLinkTarget`, so a symlinked worktree no
+  longer produces two registry entries for one solution. Closes **I20**.
+- **The server answers `initialize` before it touches the workspace.** The preload ran on the startup
+  path ahead of `host.RunAsync`, so MSBuild registration and the first solution load could eat into the
+  fixed 60 s handshake ceiling - the cold-runner timeout seen on the v0.14.0 tag. The host starts
+  serving first and the preload runs on the thread pool. Closes **I28**.
+- An interleaved `edit_text` and symbol edit on the same file is covered by a regression test that
+  asserts **both** changes survive. Closes **I10**, whose silent-revert form the watcher had already
+  fixed; the failure that remained was the expression-body bug above.
+- The E2E fixture retries the MCP handshake once when it times out, so a cold runner is a retry rather
+  than a false red. This is belt-and-braces beside the `initialize` fix above.
+
 
 ## [0.14.0] - 2026-08-01
 
@@ -971,7 +1021,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.0
 [0.14.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.14.0
 [0.13.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.13.0
 [0.12.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.12.0
