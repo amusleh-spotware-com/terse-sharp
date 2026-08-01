@@ -139,7 +139,8 @@ public static class RazorEditService
     private static string Add(string text, RazorElement element, string name, string value)
     {
         var point = element.Span.End - (element.SelfClosing ? 2 : 1);
-        var spaced = point > 0 && text[point - 1] is ' ' or '\t' ? Pair(name, value) : " " + Pair(name, value);
+        var separated = point > 0 && text[point - 1] is ' ' or '\t' ? Pair(name, value) : " " + Pair(name, value);
+        var spaced = element.SelfClosing ? separated + " " : separated;
 
         return text.Insert(point, spaced);
     }

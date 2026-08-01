@@ -43,7 +43,13 @@ internal sealed class RazorScanner
 
     private int index;
 
-    private RazorScanner(string text) => this.text = text;
+    private readonly int[] newlines;
+
+    private RazorScanner(string text)
+    {
+        this.text = text;
+        newlines = Newlines(text);
+    }
 
     public static RazorParse Scan(string text) => new RazorScanner(text).Run();
 
@@ -195,6 +201,9 @@ internal sealed class RazorScanner
 
         while (index < text.Length)
         {
+            if (SkipLiteral())
+                continue;
+
             depth += text[index] == open ? 1 : 0;
             depth -= text[index] == close ? 1 : 0;
             index++;
@@ -204,6 +213,46 @@ internal sealed class RazorScanner
         }
 
         return new RazorSpan(start + 1, Math.Max(index - start - 2, 0));
+    }
+
+    private bool SkipLiteral()
+    {
+        if (Starts("//"))
+        {
+            index = LineEnd(index);
+
+            return true;
+        }
+
+        if (Starts("/*"))
+        {
+            SkipPast("*/");
+
+            return true;
+        }
+
+        if (text[index] is not ('"' or '\''))
+            return false;
+
+        SkipQuotedLiteral();
+
+        return true;
+    }
+
+    private void SkipQuotedLiteral()
+    {
+        var quote = text[index];
+        var verbatim = index > 0 && text[index - 1] is '@';
+
+        index++;
+
+        while (index < text.Length && text[index] != quote)
+            index += !verbatim && text[index] is '\\' ? 2 : 1;
+
+        index = Math.Min(index + 1, text.Length);
+
+        if (verbatim && index < text.Length && text[index] == quote)
+            SkipQuotedLiteral();
     }
 
     private void Tag()
@@ -441,7 +490,22 @@ internal sealed class RazorScanner
         index = end < 0 ? text.Length : end + terminator.Length;
     }
 
-    private int LineAt(int offset) => text.AsSpan(0, Math.Min(offset, text.Length)).Count('\n') + 1;
+    private int LineAt(int offset)
+    {
+        var found = Array.BinarySearch(newlines, Math.Min(offset, text.Length));
+
+        return (found >= 0 ? found + 1 : ~found) + 1;
+    }
+
+    private static int[] Newlines(string text)
+    {
+        var offsets = new List<int>(text.Length / 32 + 1);
+
+        for (var found = text.IndexOf('\n'); found >= 0; found = text.IndexOf('\n', found + 1))
+            offsets.Add(found);
+
+        return [.. offsets];
+    }
 
     private static string Issue(int line, string message) =>
         string.Create(CultureInfo.InvariantCulture, $"{line}: {message}");

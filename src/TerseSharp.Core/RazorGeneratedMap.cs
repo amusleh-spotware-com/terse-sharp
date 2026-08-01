@@ -8,8 +8,24 @@ public sealed record RazorGenerated(string RazorPath, INamedTypeSymbol Type, Pro
 
 public static class RazorGeneratedMap
 {
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Sources =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<ProjectId, Snapshot> Cached = new();
+
+    public static void Forget() => Cached.Clear();
+
+    public static string? SourceOf(string? generatedPath) =>
+        generatedPath is { Length: > 0 } path && Sources.TryGetValue(path, out var razor) ? razor : null;
+
+    public static string Describe(string generatedPath) =>
+        SourceOf(generatedPath) ?? "(razor-generated) " + Path.GetFileName(generatedPath);
+
     public static async Task<IReadOnlyList<RazorGenerated>> InProjectAsync(Project project, CancellationToken cancellationToken)
     {
+        if (Cached.TryGetValue(project.Id, out var snapshot) && snapshot.Additional == project.AdditionalDocuments.Count())
+            return snapshot.Generated;
+
         var generated = await project.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false);
         var found = new List<RazorGenerated>();
 
@@ -18,6 +34,8 @@ public static class RazorGeneratedMap
             if (await DescribeAsync(project, document, cancellationToken).ConfigureAwait(false) is { } entry)
                 found.Add(entry);
         }
+
+        Cached[project.Id] = new Snapshot(project.AdditionalDocuments.Count(), found);
 
         return found;
     }
@@ -78,6 +96,8 @@ public static class RazorGeneratedMap
         return end < 0 ? null : generatedText[start..end];
     }
 
+    private sealed record Snapshot(int Additional, IReadOnlyList<RazorGenerated> Generated);
+
     private static async Task<RazorGenerated?> DescribeAsync(
         Project project,
         SourceGeneratedDocument document,
@@ -90,6 +110,10 @@ public static class RazorGeneratedMap
             return null;
 
         var type = await TypeOfAsync(document, cancellationToken).ConfigureAwait(false);
+
+        if (document.FilePath is { Length: > 0 } generated)
+            Sources[generated] = razorPath;
+
 
         return type is null ? null : new RazorGenerated(razorPath, type, project);
     }

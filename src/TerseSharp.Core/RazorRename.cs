@@ -21,7 +21,7 @@ public static class RazorRename
 
         var moves = Moves(path, newName).ToArray();
 
-        if (moves.FirstOrDefault(move => File.Exists(move.To)) is { } clash)
+        if (moves.FirstOrDefault(Occupied) is { } clash)
         {
             return Result.Fail<string>(Errors.EditConflict(string.Create(
                 CultureInfo.InvariantCulture,
@@ -34,6 +34,9 @@ public static class RazorRename
             ? Render(workspace, "dryRun", moves, rewrites)
             : Apply(workspace, moves, rewrites));
     }
+
+    private static bool Occupied(Move move) =>
+        File.Exists(move.To) && !PathBoundary.SameFile(move.From, move.To);
 
     private static IEnumerable<Move> Moves(string path, string newName)
     {
@@ -58,6 +61,7 @@ public static class RazorRename
     {
         var usages = await RazorUsageService.MarkupAsync(workspace, type, cancellationToken).ConfigureAwait(false);
         var files = usages
+            .Where(usage => usage.Confidence is Confidence.Exact)
             .Select(usage => Path.Combine(workspace.Root, usage.Path))
             .Concat(moves.Where(move => move.From.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).Select(move => move.From))
             .Distinct(StringComparer.OrdinalIgnoreCase);
@@ -77,7 +81,11 @@ public static class RazorRename
             .Replace("<" + oldName + ">", "<" + newName + ">", StringComparison.Ordinal)
             .Replace("<" + oldName + "/", "<" + newName + "/", StringComparison.Ordinal)
             .Replace("</" + oldName + ">", "</" + newName + ">", StringComparison.Ordinal)
-            .Replace("class " + oldName, "class " + newName, StringComparison.Ordinal);
+            .Replace("class " + oldName + "\r\n", "class " + newName + "\r\n", StringComparison.Ordinal)
+            .Replace("class " + oldName + "\n", "class " + newName + "\n", StringComparison.Ordinal)
+            .Replace("class " + oldName + " ", "class " + newName + " ", StringComparison.Ordinal)
+            .Replace("class " + oldName + "<", "class " + newName + "<", StringComparison.Ordinal)
+            .Replace("class " + oldName + ":", "class " + newName + ":", StringComparison.Ordinal);
 
         return string.Equals(text, updated, StringComparison.Ordinal) ? null : new Rewrite(file, text, updated);
     }
@@ -100,6 +108,17 @@ public static class RazorRename
 
     private static string Apply(LoadedWorkspace workspace, IReadOnlyList<Move> moves, IReadOnlyList<Rewrite> rewrites)
     {
+        var done = new List<Move>(moves.Count);
+
+        return Apply(workspace, moves, rewrites, done);
+    }
+
+    private static string Apply(
+        LoadedWorkspace workspace,
+        IReadOnlyList<Move> moves,
+        IReadOnlyList<Rewrite> rewrites,
+        List<Move> done)
+    {
         foreach (var rewrite in rewrites)
         {
             AtomicWrite.Text(rewrite.Path, rewrite.After);
@@ -108,11 +127,32 @@ public static class RazorRename
 
         foreach (var move in moves)
         {
-            File.Move(move.From, move.To);
+            Relocate(move, done);
             RazorIndex.Invalidate(move.From);
         }
 
         return Render(workspace, "applied", moves, rewrites);
+    }
+
+    private static void Relocate(Move move, List<Move> done)
+    {
+        try
+        {
+            File.Move(move.From, move.To);
+            done.Add(move);
+        }
+        catch (IOException)
+        {
+            Undo(done);
+
+            throw;
+        }
+    }
+
+    private static void Undo(List<Move> done)
+    {
+        foreach (var move in done.AsEnumerable().Reverse().Where(move => File.Exists(move.To)))
+            File.Move(move.To, move.From, overwrite: true);
     }
 
     private static string Render(

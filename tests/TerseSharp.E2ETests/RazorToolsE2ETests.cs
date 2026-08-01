@@ -388,6 +388,36 @@ public sealed class RazorToolsE2ETests : IAsyncLifetime
         CultureInfo.InvariantCulture,
         $"{tool}: {Tokens(response)} tokens vs {Tokens(baseline)} for the raw file\n{response}");
 
+    [Fact]
+    public async Task RazorSetAttribute_AppliedForReal_WritesTheFileAndCanBeReverted()
+    {
+        var path = Path.Combine(FixtureRoot, "src", "Fixture.Blazor", "Components", "Dashboard.razor");
+        var before = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var applied = await RazorAsync("razor_set_attribute", new()
+            {
+                ["path"] = "src/Fixture.Blazor/Components/Dashboard.razor",
+                ["target"] = "div/section/div/Badge",
+                ["attribute"] = "Count",
+                ["value"] = "7",
+            });
+
+            Assert.Contains("razor_set_attribute applied", applied, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+
+            var written = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.Contains("Count=\"7\"", written, StringComparison.Ordinal);
+            Assert.Equal(before.Length - "@rows.Count".Length + "7".Length, written.Length);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, before, TestContext.Current.CancellationToken);
+        }
+    }
+
     private Task<string> RazorAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
 }

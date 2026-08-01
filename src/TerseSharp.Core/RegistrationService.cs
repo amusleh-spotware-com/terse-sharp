@@ -48,7 +48,7 @@ public static class RegistrationService
             "endpoint registrations",
             "maxResults=");
 
-        foreach (var route in routes)
+        foreach (var route in routes.Take(maxResults))
             response.Line(route);
 
         foreach (var registration in found.Take(maxResults))

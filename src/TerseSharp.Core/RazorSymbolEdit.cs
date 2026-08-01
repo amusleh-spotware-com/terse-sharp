@@ -9,7 +9,7 @@ public enum RazorMemberEdit
     Body,
     Declaration,
     Delete,
-    Add,
+
 }
 
 public static class RazorSymbolEdit
@@ -33,6 +33,13 @@ public static class RazorSymbolEdit
             return Result.Fail<string>(opened.Error!);
 
         var context = opened.Value!;
+        if (!Aligned(context.Document, mapped, symbol.Name))
+        {
+            return Result.Fail<string>(Errors.EditConflict(string.Create(
+                CultureInfo.InvariantCulture,
+                $"'{context.Relative}' changed on disk since the workspace was loaded, so '{symbol.Name}' no longer sits where the compiler mapped it")));
+        }
+
         var updated = Rewrite(context.Document, syntax, mapped, edit, text);
 
         return updated.IsOk
@@ -79,6 +86,15 @@ public static class RazorSymbolEdit
         return document.Text.Insert(close, "\n    " + declaration + "\n");
     }
 
+    private static bool Aligned(RazorDocument document, FileLinePositionSpan mapped, string name)
+    {
+        var span = Span(document, mapped);
+
+        return span.Length > 0
+            && span.End <= document.Text.Length
+            && document.Text[span.Start..span.End].Contains(name, StringComparison.Ordinal);
+    }
+
     private static Result<string> Rewrite(
         RazorDocument document,
         SyntaxNode syntax,
@@ -92,7 +108,7 @@ public static class RazorSymbolEdit
         {
             RazorMemberEdit.Delete => Result.Ok(Cut(document.Text, span)),
             RazorMemberEdit.Declaration => Result.Ok(Replace(document.Text, span, text.Trim())),
-            RazorMemberEdit.Add => Append(document, span, text.Trim()),
+
             _ => Body(document, syntax, span, text.Trim()),
         };
     }
@@ -116,14 +132,6 @@ public static class RazorSymbolEdit
         return Result.Ok(Replace(document.Text, new TextSpan(member.Start + open, close + 1 - open), body.Trim()));
     }
 
-    private static Result<string> Append(RazorDocument document, TextSpan member, string declaration)
-    {
-        var end = member.End;
-        var indent = Indent(document.Text, member.Start);
-
-        return Result.Ok(document.Text.Insert(end, "\n\n" + indent + declaration));
-    }
-
     private static string Replace(string text, TextSpan span, string replacement) =>
         text.Remove(span.Start, span.Length).Insert(span.Start, replacement);
 
@@ -135,21 +143,6 @@ public static class RazorSymbolEdit
             end++;
 
         return text.Remove(span.Start, end - span.Start);
-    }
-
-    private static string Indent(string text, int start)
-    {
-        var from = start;
-
-        while (from > 0 && text[from - 1] is not '\n')
-            from--;
-
-        var to = from;
-
-        while (to < text.Length && text[to] is ' ' or '\t')
-            to++;
-
-        return text[from..to];
     }
 
     private static TextSpan Span(RazorDocument document, FileLinePositionSpan mapped)

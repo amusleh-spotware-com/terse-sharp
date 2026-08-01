@@ -140,7 +140,7 @@ public sealed class NavigationTools(ToolContext context)
 
         response.Summary(found.Count + components.Count, found.Count + components.Count, "symbols");
 
-        foreach (var component in components)
+        foreach (var component in components.Take(maxResults))
             response.Line(RazorUsageService.Describe(component));
 
         foreach (var symbol in found)

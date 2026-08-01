@@ -44,7 +44,11 @@ public static class RazorIndex
         }
     }
 
-    public static void Invalidate(string fullPath) => Parsed.TryRemove(fullPath, out _);
+    public static void Invalidate(string fullPath)
+    {
+        Parsed.TryRemove(fullPath, out _);
+        RazorGeneratedMap.Forget();
+    }
 
     private readonly record struct Cached(DateTime WriteUtc, long Length, RazorDocument Document)
     {

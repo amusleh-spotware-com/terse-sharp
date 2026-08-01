@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-01
+
 ### Added
 
 - **Ten `razor_*` tools — Razor and Blazor answered through the compiler.** The Razor compiler is a

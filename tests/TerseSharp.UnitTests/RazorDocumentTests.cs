@@ -122,6 +122,23 @@ public sealed class RazorDocumentTests
     }
 
     [Fact]
+    public void Parse_DoesNotLetABraceInsideAStringLiteralSwallowTheRestOfTheFile()
+    {
+        var document = RazorDocument.Parse("Home.razor", "@code {\n    private string Open = \"{\";\n}\n\n<Card Title=\"x\" />\n");
+
+        Assert.Equal(["Card"], document.Elements.Select(element => element.TagName));
+        Assert.Single(document.CodeBlocks);
+    }
+
+    [Fact]
+    public void Parse_DoesNotLetABraceInsideALineCommentSwallowTheRestOfTheFile()
+    {
+        var document = RazorDocument.Parse("Home.razor", "@code {\n    // }\n    private int Count;\n}\n\n<Badge Kind=\"x\" />\n");
+
+        Assert.Equal(["Badge"], document.Elements.Select(element => element.TagName));
+    }
+
+    [Fact]
     public void Parse_SkipsRazorComments()
     {
         var document = RazorDocument.Parse("Home.razor", "@* <Card /> *@\n<Badge />");

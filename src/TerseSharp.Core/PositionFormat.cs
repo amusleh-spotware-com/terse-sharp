@@ -22,10 +22,15 @@ public static class PositionFormat
     public static string Describe(string path, LinePosition position) =>
         string.Create(CultureInfo.InvariantCulture, $"{path}:{position.Line + 1}:{position.Character + 1}");
 
-    public static string Relative(string root, string? path) =>
-        path is not { Length: > 0 } file
-            ? "-"
-            : PathBoundary.Contains(root, file) ? Path.GetRelativePath(root, file) : file;
+    public static string Relative(string root, string? path)
+    {
+        if (path is not { Length: > 0 } file)
+            return "-";
+
+        var source = RazorFiles.IsGenerated(file) ? RazorGeneratedMap.Describe(file) : file;
+
+        return PathBoundary.Contains(root, source) ? Path.GetRelativePath(root, source) : source;
+    }
 
     public static FileLinePositionSpan Source(Location location)
     {
