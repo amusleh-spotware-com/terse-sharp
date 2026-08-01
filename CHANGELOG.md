@@ -10,9 +10,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [0.15.1] - 2026-08-01
 
-Six defects the 0.15.0 review found, five of them shipped in 0.15.0.
+Seven defects found after 0.15.0 shipped — six by the review, one by CI on macOS.
 
 ### Fixed
+
+- **`WorkspaceNotLoaded` on the first tool call after start.** The 0.15.0 fix for the cold-start
+  handshake (**I28**) started the stdio transport *before* calling `Preload`, which is what assigns the
+  `ready` task every tool awaits. That opened a window where a request arriving immediately found an
+  empty registry and was answered `ERROR WorkspaceNotLoaded` instead of waiting. Reproduced by CI on
+  macOS (`ReadOnlyServerE2ETests.ReadTools_StillWork`), which is the runner fast enough to hit it.
+  `Preload` is assigned on the startup path again; the heavy work stays off it via the `Task.Run`
+  introduced in 0.15.0, so the handshake is still not blocked by MSBuild registration or the first load.
 
 - **`PathBoundary.SameFile` no longer calls `File.ResolveLinkTarget` on every comparison.** Because `||`
   short-circuits the other way, the symlink clause added in 0.15.0 ran a filesystem syscall on **both**

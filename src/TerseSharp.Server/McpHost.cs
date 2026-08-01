@@ -21,11 +21,10 @@ public static class McpHost
             .WithToolsFromAssembly();
 
         var host = builder.Build();
-        var serving = host.RunAsync(cancellationToken);
 
         Preload(host.Services, workspace, cancellationToken);
 
-        await serving.ConfigureAwait(false);
+        await host.RunAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static void Preload(IServiceProvider services, string? workspace, CancellationToken cancellationToken)
