@@ -1,4 +1,3 @@
-using Microsoft.CodeAnalysis;
 using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
