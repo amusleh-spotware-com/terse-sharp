@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-08-03
+
 ### Fixed
 
 - **A loaded workspace no longer locks the analyzer and source-generator assemblies a solution builds
@@ -1358,7 +1360,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.17.1...HEAD
+[0.17.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.1
 [0.17.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.0
 [0.16.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.16.0
 [0.15.2]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.15.2
