@@ -156,8 +156,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         $"\nNOTE the workspace held MSBuild file locks; it was unloaded, the {operation} retried, and the workspace reloaded. Symbol ids are unchanged; undo_last_change history was discarded.");
 
     private static string StillLocked(string operation) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. unload_workspace cannot release it: an analyzer or source-generator assembly (a ProjectReference with OutputItemType=\"Analyzer\") is loaded into this server process and stays mapped for its lifetime. Restart the MCP server - this one is pid {Environment.ProcessId} - or stop whatever else holds the file, then try again.");
+    CultureInfo.InvariantCulture,
+    $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked, so something outside this server holds it. Analyzer and source-generator assemblies are loaded from a shadow copy under the temp directory and never map a project's own output, so this is not the workspace. Stop whatever else holds the file - this server is pid {Environment.ProcessId} - then try again.");
 
     private static string NotRecovered(string operation) => string.Create(
         CultureInfo.InvariantCulture,

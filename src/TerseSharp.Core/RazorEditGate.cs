@@ -34,16 +34,19 @@ public static class RazorEditGate
         await AtomicWrite.TextAsync(context.FullPath, updatedText, cancellationToken).ConfigureAwait(false);
         context.Workspace.Sync.Noticed(context.FullPath, ChangeKind.Razor);
 
-        return Result.Ok(Render(context, updatedText, options, "applied", report, Refresh(context, updatedText)));
+        var refreshed = await RefreshAsync(context, updatedText, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(Render(context, updatedText, options, "applied", report, refreshed));
     }
 
-    private static bool Refresh(RazorContext context, string updatedText)
+    private static async Task<bool> RefreshAsync(RazorContext context, string updatedText, CancellationToken cancellationToken)
     {
         if (AdditionalId(context) is not { } id)
             return false;
 
-        return context.Workspace.Adopt(
-            context.Workspace.Solution.WithAdditionalDocumentText(id, SourceText.From(updatedText)));
+        return await context.Workspace.AdoptAsync(
+            context.Workspace.Solution.WithAdditionalDocumentText(id, SourceText.From(updatedText)),
+            cancellationToken).ConfigureAwait(false);
     }
 
     private static DocumentId? AdditionalId(RazorContext context) => context

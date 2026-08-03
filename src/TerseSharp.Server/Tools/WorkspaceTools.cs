@@ -53,7 +53,7 @@ public sealed class WorkspaceTools(ToolContext context)
         });
 
     [McpServerTool(Name = "unload_workspace")]
-    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name; list_workspaces prints it. Analyzer and source-generator assemblies the workspace loaded stay mapped in this process and are reported, because only restarting the server releases those.")]
+    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name; list_workspaces prints it. Analyzer and source-generator assemblies are loaded from a shadow copy, so a project's own output is never mapped; any assembly that did end up mapped is still reported, because only restarting the server releases those.")]
     public Task<string> UnloadWorkspace(
         [Description("Solution or project path to unload.")] string? path = null,
         [Description("Alias for path; the solution path, not a worktree name.")] string? workspace = null) =>

@@ -241,7 +241,7 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         if (changed.Count is 0)
             return changed;
 
-        if (workspace.Adopt(updated))
+        if (await workspace.AdoptAsync(updated, cancellationToken).ConfigureAwait(false))
             kinds.Add(ChangeKind.Code);
         else
             Rebuild();

@@ -118,11 +118,15 @@ A silent drop is the breach, even when the reason would have been valid.
 prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=`.
 `unload_workspace` is the one workspace tool addressed by the solution **path** rather than a name —
 `workspace=` is accepted as an alias for `path=`, but a worktree name is not a path and will answer
-`not loaded`; `list_workspaces` prints the path to pass. **It does not release every file lock**: any
-analyzer or source-generator assembly the workspace loaded stays mapped in the server process for its
-lifetime, so it is listed in the response with a `WARNING`. An external `dotnet build` that copies over
-one of those files still fails `MSB3027` — only restarting the server releases them, and the response
-prints the pid.
+`not loaded`; `list_workspaces` prints the path to pass. **The analyzers a solution builds from source
+no longer block your own build**: every analyzer and source-generator assembly is loaded from a
+shadow copy under a user-private `terse-analyzers/` cache, so the file in the project's `bin/` is never mapped and an
+external `dotnet build` succeeds while the workspace is loaded. The response still carries a `WARNING`
+listing any assembly that *did* end up mapped — that is a regression detector, and if you ever see it,
+restarting the server is the only way to release those files. One consequence to know: an analyzer or
+generator **rebuilt while the server is running is still served from the copy loaded first**, because
+the .NET default load context cannot replace an assembly identity in place — restart the server after
+rebuilding an analyzer whose behaviour you need to see.
 Facing an unfamiliar repository, `load_workspace(path, discover: true)` lists every solution and
 project under a directory without loading one — auto-discovery only walks *up* from the working
 directory, so this is the call that replaces globbing for `*.sln`. Its

@@ -107,4 +107,27 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
             await fresh.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task ExtractInterface_WhenApplied_WritesTheNewDocumentToDisk()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: false, TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("extract_interface", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["interfaceName"] = "IExtractedOrders",
+        });
+
+        Assert.Contains("applied", text, StringComparison.Ordinal);
+
+        var created = Path.Combine(solution.ProjectDirectory, "IExtractedOrders.cs");
+
+        Assert.True(File.Exists(created), created);
+
+        var content = await File.ReadAllTextAsync(created, TestContext.Current.CancellationToken);
+
+        Assert.Contains("interface IExtractedOrders", content, StringComparison.Ordinal);
+        Assert.Contains("Submit", content, StringComparison.Ordinal);
+    }
 }

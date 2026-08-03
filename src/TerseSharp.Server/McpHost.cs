@@ -25,6 +25,7 @@ public static class McpHost
 
         Preload(host.Services, workspace, cancellationToken);
         BeginMaintenance(cancellationToken);
+        BeginSweep(cancellationToken);
 
         await host.RunAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -63,4 +64,7 @@ public static class McpHost
         if (UpdateSettings.Enabled())
             _ = Task.Run(() => MaintainAsync(cancellationToken), cancellationToken);
     }
+
+    private static void BeginSweep(CancellationToken cancellationToken) =>
+        _ = Task.Run(ShadowCopyAnalyzerLoader.Sweep, cancellationToken);
 }

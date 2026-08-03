@@ -27,6 +27,7 @@ public sealed class LoadedWorkspace : IDisposable
         Root = Path.GetDirectoryName(Path.GetFullPath(load.SolutionPath)) ?? load.SolutionPath;
         LastUsedUtc = DateTimeOffset.UtcNow;
         LoadedUtc = DateTimeOffset.UtcNow;
+        Solution = Forked();
         dropped = seed.UndoNote;
         Sync = new WorkspaceSync(Root, seed.Generations);
         Indexes = new WorkspaceIndexes(Root, Sync);
@@ -52,7 +53,7 @@ public sealed class LoadedWorkspace : IDisposable
 
     public DateTimeOffset LoadedUtc { get; }
 
-    public Solution Solution => workspace.CurrentSolution;
+    public Solution Solution { get; private set; }
 
     public void Touch() => LastUsedUtc = DateTimeOffset.UtcNow;
 
@@ -72,14 +73,10 @@ public sealed class LoadedWorkspace : IDisposable
         CancellationToken cancellationToken)
     {
         var entry = await CaptureAsync(workspace.CurrentSolution, changed, cancellationToken).ConfigureAwait(false);
+        var rebased = await RebasedAsync(solution, changed, cancellationToken).ConfigureAwait(false);
 
-        lock (historyGate)
-        {
-            if (!workspace.TryApplyChanges(solution))
-                return false;
-
-            Record(entry);
-        }
+        if (!Committed(rebased, solution, entry))
+            return false;
 
         foreach (var path in entry.Paths)
             Sync.Settled(path);
@@ -89,10 +86,19 @@ public sealed class LoadedWorkspace : IDisposable
         return true;
     }
 
-    public bool Adopt(Solution solution)
+    public async Task<bool> AdoptAsync(Solution solution, CancellationToken cancellationToken)
     {
+        var rebased = await AbsorbedAsync(solution, cancellationToken).ConfigureAwait(false);
+
         lock (historyGate)
-            return workspace.TryApplyChanges(solution);
+        {
+            if (!Applied(rebased))
+                return false;
+
+            Solution = solution;
+
+            return true;
+        }
     }
 
     public void DropSnapshots(IReadOnlyList<string> paths)
@@ -115,9 +121,7 @@ public sealed class LoadedWorkspace : IDisposable
 
             history.RemoveAt(history.Count - 1);
 
-            return workspace.TryApplyChanges(Restore(entry))
-                ? "reverted the last change"
-                : "the workspace refused the revert";
+            return Reverted(entry);
         }
     }
 
@@ -141,9 +145,114 @@ public sealed class LoadedWorkspace : IDisposable
             Shutdown();
     }
 
+    private Solution Forked() => AnalyzerRebind.Rebound(workspace.CurrentSolution, ShadowCopyAnalyzerLoader.Shared);
+
+    private bool Committed(Solution rebased, Solution forked, HistoryEntry entry)
+    {
+        lock (historyGate)
+        {
+            if (!Applied(rebased))
+                return false;
+
+            Record(entry);
+
+            Solution = forked;
+
+            return true;
+        }
+    }
+
+    private string Reverted(HistoryEntry entry)
+    {
+        var target = workspace.CurrentSolution;
+        var restored = Solution;
+
+        foreach (var revision in entry.Documents)
+        {
+            target = target.WithDocumentText(revision.Id, revision.Text);
+            restored = restored.WithDocumentText(revision.Id, revision.Text);
+        }
+
+        if (!Applied(target))
+            return "the workspace refused the revert";
+
+        Solution = restored;
+
+        return "reverted the last change";
+    }
+
+    private async Task<Solution> AbsorbedAsync(Solution solution, CancellationToken cancellationToken)
+    {
+        var target = workspace.CurrentSolution;
+
+        foreach (var change in solution.GetChanges(Solution).GetProjectChanges())
+            target = await ProjectedAsync(solution, target, change, cancellationToken).ConfigureAwait(false);
+
+        return target;
+    }
+
+    private static async Task<Solution> ProjectedAsync(
+        Solution source,
+        Solution target,
+        ProjectChanges change,
+        CancellationToken cancellationToken)
+    {
+        var projected = target.RemoveDocuments([.. change.GetRemovedDocuments()]);
+
+        foreach (var id in change.GetAddedDocuments())
+            projected = await AddedAsync(source, projected, id, cancellationToken).ConfigureAwait(false);
+
+        foreach (var id in change.GetChangedDocuments())
+            projected = await ChangedAsync(source, projected, id, cancellationToken).ConfigureAwait(false);
+
+        foreach (var id in change.GetChangedAdditionalDocuments())
+            projected = await AdditionalAsync(source, projected, id, cancellationToken).ConfigureAwait(false);
+
+        return projected;
+    }
+
+    private static async Task<Solution> AddedAsync(
+        Solution source,
+        Solution target,
+        DocumentId id,
+        CancellationToken cancellationToken)
+    {
+        if (source.GetDocument(id) is not { } document)
+            return target;
+
+        var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+
+        return target.AddDocument(id, document.Name, text, document.Folders, document.FilePath);
+    }
+
+    private static async Task<Solution> ChangedAsync(
+        Solution source,
+        Solution target,
+        DocumentId id,
+        CancellationToken cancellationToken)
+    {
+        if (source.GetDocument(id) is not { } document || target.GetDocument(id) is null)
+            return target;
+
+        return target.WithDocumentText(id, await document.GetTextAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    private static async Task<Solution> AdditionalAsync(
+        Solution source,
+        Solution target,
+        DocumentId id,
+        CancellationToken cancellationToken)
+    {
+        if (source.GetAdditionalDocument(id) is not { } document || target.GetAdditionalDocument(id) is null)
+            return target;
+
+        return target.WithAdditionalDocumentText(id, await document.GetTextAsync(cancellationToken).ConfigureAwait(false));
+    }
+
     private void Shutdown()
     {
         workspace.Dispose();
+        Solution = workspace.CurrentSolution;
         Sync.Dispose();
         Indexes.Dispose();
     }
@@ -161,16 +270,6 @@ public sealed class LoadedWorkspace : IDisposable
         {
             return Environment.NewLine;
         }
-    }
-
-    private Solution Restore(HistoryEntry entry)
-    {
-        var solution = workspace.CurrentSolution;
-
-        foreach (var revision in entry.Documents)
-            solution = solution.WithDocumentText(revision.Id, revision.Text);
-
-        return solution;
     }
 
     private static async Task<HistoryEntry> CaptureAsync(
@@ -253,4 +352,43 @@ public sealed class LoadedWorkspace : IDisposable
             .SelectMany(project => project.Documents)
             .Select(document => document.FilePath)
             .FirstOrDefault(file => file is { Length: > 0 } && SourceFile.IsCSharp(file) && !GeneratedCode.IsGenerated(Root, file));
+
+    private async Task<Solution> RebasedAsync(
+        Solution solution,
+        IReadOnlyList<DocumentId> changed,
+        CancellationToken cancellationToken)
+    {
+        var target = workspace.CurrentSolution;
+
+        foreach (var id in changed)
+            target = await ProjectedAsync(solution, target, id, cancellationToken).ConfigureAwait(false);
+
+        return target;
+    }
+
+    private static Task<Solution> ProjectedAsync(
+        Solution source,
+        Solution target,
+        DocumentId id,
+        CancellationToken cancellationToken) =>
+        target.GetDocument(id) is null
+            ? AddedAsync(source, target, id, cancellationToken)
+            : ChangedAsync(source, target, id, cancellationToken);
+
+    private bool Applied(Solution rebased)
+    {
+        var applied = false;
+
+        try
+        {
+            applied = workspace.TryApplyChanges(rebased);
+        }
+        finally
+        {
+            if (!applied)
+                Solution = Forked();
+        }
+
+        return applied;
+    }
 }

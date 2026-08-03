@@ -8,17 +8,42 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **A loaded workspace no longer locks the analyzer and source-generator assemblies a solution builds
+  from source.** Every `AnalyzerFileReference` is bound to a shadow-copying `IAnalyzerAssemblyLoader`:
+  the directory containing the analyzer is copied once to a user-private
+  `terse-analyzers/<content hash>/` cache and Roslyn maps the copy, so the file in the project's
+  `bin/` is never mapped and the user's own
+  `dotnet build` succeeds while the workspace is loaded. Previously any semantic call — a single
+  `get_symbol` was enough — mapped the assembly in place for the lifetime of the server process, so an
+  external build failed `MSB3027`, TerseSharp's own `build` and `run_tests` failed the same way, and
+  `unload_workspace` could not release it. Measured on `fixtures/GeneratorSolution`: with the analyzer
+  mapped in place and its source touched, `dotnet build` exits 1; with the shadow copy it exits 0 and
+  the assembly stays writable through `get_symbol`, `analyze`, an edit and `undo_last_change`.
+  Roslyn's own non-locking loader could not be reused — `IAnalyzerAssemblyLoaderProvider`,
+  `AbstractAnalyzerAssemblyLoaderProvider` and `AnalyzerAssemblyLoader.CreateNonLockingLoader` are all
+  internal in Roslyn 5.6 — and a collectible `AssemblyLoadContext` was refuted in 0.15.0 because MEF
+  fixer discovery stopped resolving across the context boundary, so the copies load into the default
+  context and fixer discovery is unchanged. The cache lives under the user-private local application
+  data directory (never a world-writable `/tmp`) and is created `0700` on Unix, copies are published
+  atomically through a staging directory and are content-addressed, dependency probing matches the
+  requested assembly name and version rather than the first file with the right name, and orphaned
+  copies older than seven days are swept at server start. If the copy cannot be made — read-only or
+  full disk — the loader falls back to the original path, i.e. to the previous behaviour, rather than
+  losing the analyzer. Two properties are unchanged from before and worth knowing: an analyzer
+  **rebuilt while the server runs is still served from the copy loaded first** (the default
+  `AssemblyLoadContext` cannot replace an assembly identity in place — restart the server), and the
+  loader does synchronous file I/O because `IAnalyzerAssemblyLoader` is a synchronous interface with
+  no async overload. `I52`.
+
 ### Changed
 
-- **`unload_workspace` no longer implies it released every file lock.** When the workspace had loaded
-  analyzer or source-generator assemblies, they stay mapped into the server process — Roslyn's default
-  analyzer loader does not shadow-copy in this host — so an external `dotnet build` that copies over
-  them still fails `MSB3027`. The response now names each one and says only restarting the server
-  releases them. Measured with `fixtures/GeneratorSolution`: a single `get_symbol` is enough to map
-  the assembly, and it stays mapped after `unload_workspace` until the process exits. The lock itself
-  is **not** fixed — `IAnalyzerAssemblyLoaderProvider`, `AbstractAnalyzerAssemblyLoaderProvider` and
-  `AnalyzerAssemblyLoader.CreateNonLockingLoader` are all internal to Roslyn 5.6, so a host cannot
-  supply a non-locking loader through public API. Tracked as `I52`.
+- **`unload_workspace`'s mapped-analyzer `WARNING` is now a regression detector, not the norm.** The
+  block naming every analyzer or source-generator assembly still mapped into the server process
+  remains, but with the shadow-copying loader above it no longer fires for a solution that builds its
+  own analyzer, and the tool description no longer tells the agent to expect it. If it does fire, only
+  restarting the server releases those files and the response still prints the pid.
 
 ### Added
 
