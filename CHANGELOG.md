@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **`unload_workspace` no longer implies it released every file lock.** When the workspace had loaded
+  analyzer or source-generator assemblies, they stay mapped into the server process — Roslyn's default
+  analyzer loader does not shadow-copy in this host — so an external `dotnet build` that copies over
+  them still fails `MSB3027`. The response now names each one and says only restarting the server
+  releases them. Measured with `fixtures/GeneratorSolution`: a single `get_symbol` is enough to map
+  the assembly, and it stays mapped after `unload_workspace` until the process exits. The lock itself
+  is **not** fixed — `IAnalyzerAssemblyLoaderProvider`, `AbstractAnalyzerAssemblyLoaderProvider` and
+  `AnalyzerAssemblyLoader.CreateNonLockingLoader` are all internal to Roslyn 5.6, so a host cannot
+  supply a non-locking loader through public API. Tracked as `I52`.
+
 ### Added
 
 - **`build`, `run_tests`, `list_tests` and `clean` accept a project *name* for `project=`.** The name

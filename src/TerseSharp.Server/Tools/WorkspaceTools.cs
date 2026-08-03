@@ -53,7 +53,7 @@ public sealed class WorkspaceTools(ToolContext context)
         });
 
     [McpServerTool(Name = "unload_workspace")]
-    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name; list_workspaces prints it.")]
+    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name; list_workspaces prints it. Analyzer and source-generator assemblies the workspace loaded stay mapped in this process and are reported, because only restarting the server releases those.")]
     public Task<string> UnloadWorkspace(
         [Description("Solution or project path to unload.")] string? path = null,
         [Description("Alias for path; the solution path, not a worktree name.")] string? workspace = null) =>
@@ -62,13 +62,40 @@ public sealed class WorkspaceTools(ToolContext context)
             {
                 await context.ReadyAsync().ConfigureAwait(false);
 
+                var mapped = Mapped(target);
                 var response = new ResponseBuilder("unload_workspace", target);
 
                 response.Note(context.Registry.Unload(target) ? "unloaded" : "not loaded");
 
+                AppendMapped(response, mapped);
+
                 return response.ToString();
             })
             : Task.FromResult(Errors.Blank("path").Render());
+
+    private string[] Mapped(string target)
+    {
+        foreach (var loaded in context.Registry.All())
+        {
+            if (string.Equals(Path.GetFullPath(loaded.SolutionPath), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
+                return MappedAnalyzers.Of(loaded.Solution);
+        }
+
+        return [];
+    }
+
+    private static void AppendMapped(ResponseBuilder response, string[] mapped)
+    {
+        if (mapped.Length is 0)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"WARNING {mapped.Length} analyzer or source-generator assembly(ies) this workspace loaded are still mapped into this server process (pid {Environment.ProcessId}) and an external build that copies over them will fail MSB3027; only restarting the server releases them"));
+
+        foreach (var assembly in mapped)
+            response.Line(assembly);
+    }
 
     [McpServerTool(Name = "workspace_status")]
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, and any project that failed to load.")]
