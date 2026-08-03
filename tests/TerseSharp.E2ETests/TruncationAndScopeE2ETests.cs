@@ -225,7 +225,9 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
     [Fact]
     public async Task Analyze_WithChangedAndNothingModified_ReportsAStructuredError()
     {
-        var text = await server.CallAsync("analyze", new() { ["changed"] = true, ["path"] = "src/Fixture.Trading/Awkward.cs" });
+        await using var solution = await TerseTempSolution.StartAsync(watch: false, TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("analyze", new() { ["changed"] = true, ["path"] = "src/Fixture.Trading/Awkward.cs" });
 
         Assert.StartsWith("ERROR", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);

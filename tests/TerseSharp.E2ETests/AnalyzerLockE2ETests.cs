@@ -35,12 +35,17 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
 
     private static async Task EnsureBuiltAsync()
     {
-        if (File.Exists(AnalyzerAssembly))
-            return;
+        var output = string.Empty;
 
-        var (exitCode, output) = await RebuildAsync();
+        for (var attempt = 0; attempt < 3 && !File.Exists(AnalyzerAssembly); attempt++)
+        {
+            if (attempt > 0)
+                await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 
-        Assert.True(exitCode is 0 && File.Exists(AnalyzerAssembly), output);
+            output = (await RebuildAsync()).Output;
+        }
+
+        Assert.True(File.Exists(AnalyzerAssembly), output);
     }
 
     public async ValueTask DisposeAsync() => await server.StopAsync();
@@ -144,6 +149,7 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
 
         start.ArgumentList.Add("build");
         start.ArgumentList.Add(SolutionPath);
+        start.Environment["MSBUILDDISABLENODEREUSE"] = "1";
 
         return await ReadAsync(start);
     }

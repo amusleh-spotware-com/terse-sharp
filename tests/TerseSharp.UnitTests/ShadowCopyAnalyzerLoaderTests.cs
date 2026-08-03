@@ -44,9 +44,21 @@ public sealed class ShadowCopyAnalyzerLoaderTests
 
     private static async Task EnsureBuiltAsync()
     {
-        if (File.Exists(AnalyzerAssembly))
-            return;
+        var output = string.Empty;
 
+        for (var attempt = 0; attempt < 3 && !File.Exists(AnalyzerAssembly); attempt++)
+        {
+            if (attempt > 0)
+                await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+
+            output = await BuildAsync();
+        }
+
+        Assert.True(File.Exists(AnalyzerAssembly), output);
+    }
+
+    private static async Task<string> BuildAsync()
+    {
         var start = new ProcessStartInfo("dotnet")
         {
             RedirectStandardOutput = true,
@@ -55,6 +67,7 @@ public sealed class ShadowCopyAnalyzerLoaderTests
 
         start.ArgumentList.Add("build");
         start.ArgumentList.Add(GeneratorSolutionPath);
+        start.Environment["MSBUILDDISABLENODEREUSE"] = "1";
 
         using var process = Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
 
@@ -63,7 +76,7 @@ public sealed class ShadowCopyAnalyzerLoaderTests
 
         await process.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-        Assert.True(File.Exists(AnalyzerAssembly), await output + await error);
+        return await output + await error;
     }
 
     private static Project Consumer(Solution solution) =>
