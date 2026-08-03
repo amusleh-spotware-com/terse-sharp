@@ -116,7 +116,7 @@ public sealed class CleanServiceTests
             var run = Clean(sandbox, "Nope/Nope.csproj", includeIntermediate: true, dryRun: false);
 
             Assert.False(run.IsOk);
-            Assert.Equal(TerseErrorCode.DocumentNotFound, run.Error!.Code);
+            Assert.Equal(TerseErrorCode.ProjectNotFound, run.Error!.Code);
             Assert.True(Directory.Exists(Path.Combine(sandbox, "App", "bin")));
         }
         finally

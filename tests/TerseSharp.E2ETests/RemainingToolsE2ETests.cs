@@ -143,4 +143,48 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("\n", quiet, StringComparison.Ordinal);
         Assert.True(quiet.Length < 120, quiet);
     }
+
+    [Fact]
+    public async Task FindFiles_WithPatternInsteadOfGlob_AnswersTheSameAsGlob()
+    {
+        var byGlob = await server.CallAsync("find_files", new() { ["glob"] = "*.csproj" });
+        var byPattern = await server.CallAsync("find_files", new() { ["pattern"] = "*.csproj" });
+
+        Assert.Equal(byGlob, byPattern);
+        Assert.Contains("Fixture.Trading.csproj", byPattern, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithNeitherGlobNorPattern_AnswersAStructuredError()
+    {
+        var text = await server.CallAsync("find_files", []);
+
+        Assert.StartsWith("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("An error occurred invoking", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnloadWorkspace_WithWorkspaceInsteadOfPath_UnloadsAndThenReloads()
+    {
+        var solution = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+
+        var unloaded = await server.CallAsync("unload_workspace", new() { ["workspace"] = solution });
+
+        Assert.Contains("unloaded", unloaded, StringComparison.Ordinal);
+        Assert.DoesNotContain("An error occurred invoking", unloaded, StringComparison.Ordinal);
+        Assert.Contains("projects=1", await server.CallAsync("load_workspace", new() { ["path"] = solution }), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListProjects_WithAFilter_KeepsOnlyMatchingProjects()
+    {
+        var matching = await server.CallAsync("list_projects", new() { ["filter"] = "Trading" });
+        var missing = await server.CallAsync("list_projects", new() { ["filter"] = "Hosting" });
+
+        Assert.Contains("Fixture.Trading", matching, StringComparison.Ordinal);
+        Assert.Contains("1 projects (truncated=false, total=1)", matching, StringComparison.Ordinal);
+        Assert.Contains("0 projects (truncated=false, total=0)", missing, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fixture.Trading", missing, StringComparison.Ordinal);
+    }
 }

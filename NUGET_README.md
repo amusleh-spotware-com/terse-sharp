@@ -173,7 +173,7 @@ points them elsewhere.
 | `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
 | `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew; a clean build is one line |
-| `dotnet test` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
+| `dotnet test` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame; `project=` takes a project **name** or a path, and a locked output is retried rather than reported raw |
 | `dotnet format` | `format`, `cleanup fix=all`, `cleanup verify=true` | compile-gated code fixes and a one-line verdict, never raw CLI output |
 | `dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
 
@@ -183,7 +183,7 @@ Every response is one record per line, with an explicit `truncated`/`total` and 
 (Roslyn-resolved) or `HEURISTIC` (text/index) tag. Paths are workspace-relative, and truncation names
 the parameter that narrows it.
 
-- **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace`, `list_projects`
+- **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace` (`path=`, alias `workspace=`), `list_projects` (`filter=`)
 - **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`, `explore_symbol`, `impact_of`
 - **.NET semantics grep cannot reach** — `find_registrations` (DI: open generics, factories, `Add*` extensions), `list_endpoints` (ASP.NET Core `Map*`)
 - **Analyze & clean** — `analyze`, `format`, `cleanup`, `clean`, `get_diagnostics`
@@ -193,7 +193,7 @@ the parameter that narrows it.
 - **XAML (WPF · Avalonia · WinUI · MAUI)** — `xaml_outline`, `xaml_names`, `xaml_resources`, `xaml_resolve`, `xaml_styles`, `xaml_bindings`, `xaml_validate`, `xaml_find`, `xaml_codebehind`, `xaml_localization`, `xaml_set_property`, `xaml_add_element`, `xaml_remove_element`
 - **Localization (`.resx`/`.resw`)** — `resx_files`, `resx_get`, `resx_find`, `resx_usages`, `resx_set`, `resx_remove`, `resx_rename`, `resx_validate`
 - **Razor / Blazor** — `razor_outline`, `razor_component`, `razor_find`, `razor_bindings`, `razor_codebehind`, `razor_validate`, `razor_set_attribute`, `razor_add_element`, `razor_remove_element`, `razor_set_directive`
-- **Files** — `read_text`, `write_text`, `edit_text`, `find_files`, `search_text`, `search_regex`
+- **Files** — `read_text`, `write_text`, `edit_text`, `find_files` (`glob=`, alias `pattern=`), `search_text`, `search_regex`
   (the search tools take `query` and anchor `^`/`$` per line; `bin`, `obj`, `.git`, `.claude`,
   `artifacts`, `TestResults`, `node_modules` and directory symlinks are skipped; `read_text` also
   reads an absolute path outside the workspace, tagged `outside-workspace`)

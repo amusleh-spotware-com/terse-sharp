@@ -57,7 +57,7 @@ public static partial class DotnetRunner
                 .ConfigureAwait(false);
             var report = Report(results, workspace.Root);
 
-            return new TestRunResult(RenderTest(run, report, request), report);
+            return new TestRunResult(RenderTest(run, report, request), report, Locked(run));
         }
         finally
         {
@@ -77,19 +77,6 @@ public static partial class DotnetRunner
         catch (UnauthorizedAccessException)
         {
         }
-    }
-
-    internal static async Task<string> ListTestsAsync(
-        WorkspaceTarget workspace,
-        string target,
-        string? contains,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
-    {
-        var run = await RunAsync(["test", target, "-nodeReuse:false", "--nologo", "--list-tests"], workspace.Root, timeout, cancellationToken)
-            .ConfigureAwait(false);
-
-        return RenderTestNames(target, run, contains);
     }
 
     private static TestRunReport Report(DirectoryInfo results, string workspaceRoot) =>
@@ -142,8 +129,8 @@ public static partial class DotnetRunner
         if (!Locked(run))
             return;
 
-        response.Note("WARNING a locked output file blocked the build; the loaded workspace holds MSBuild file locks");
-        response.Note("remedy: see the NOTE below; the build is retried automatically when one workspace is loaded");
+        response.Note("WARNING a locked output file blocked the operation; the loaded workspace holds MSBuild file locks");
+        response.Note("remedy: see the NOTE below; the operation is retried automatically when one workspace is loaded");
     }
 
     private static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request)
@@ -175,6 +162,8 @@ public static partial class DotnetRunner
             ? string.Create(CultureInfo.InvariantCulture, $"FAILED timed out after {run.ElapsedMilliseconds} ms, no test results were produced; last output lines:")
             : string.Create(CultureInfo.InvariantCulture, $"FAILED exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}, no test results were produced; last output lines:"));
 
+        AppendLockWarning(response, run);
+
         foreach (var line in Tail(run.Output))
             response.Line(line);
 
@@ -188,6 +177,8 @@ public static partial class DotnetRunner
         var response = new ResponseBuilder("list_tests", target);
 
         response.Summary(shown, names.Length, "tests");
+
+        AppendLockWarning(response, run);
 
         for (var index = 0; index < shown; index++)
             response.Line(names[index]);
@@ -203,6 +194,8 @@ public static partial class DotnetRunner
 
     private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter)
     {
+        AppendLockWarning(response, run);
+
         if (run.TimedOut)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING timed out after {run.ElapsedMilliseconds} ms; the results below are partial"));
 
@@ -338,10 +331,23 @@ public static partial class DotnetRunner
 
     [GeneratedRegex(@"MSB3021|MSB3027|being used by another process", RegexOptions.IgnoreCase)]
     private static partial Regex LockedOutput();
+
+    internal static async Task<BuildRun> ListTestNamesAsync(
+            WorkspaceTarget workspace,
+            string target,
+            string? contains,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
+    {
+        var run = await RunAsync(["test", target, "-nodeReuse:false", "--nologo", "--list-tests"], workspace.Root, timeout, cancellationToken)
+            .ConfigureAwait(false);
+
+        return new BuildRun(RenderTestNames(target, run, contains), Locked(run));
+    }
 }
 
 internal sealed record ProcessRun(int ExitCode, string Output, long ElapsedMilliseconds, bool TimedOut = false);
 
-internal readonly record struct TestRunResult(string Response, TestRunReport Report);
+internal readonly record struct TestRunResult(string Response, TestRunReport Report, bool Locked);
 
 public readonly record struct BuildRun(string Response, bool Locked);

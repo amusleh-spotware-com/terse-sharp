@@ -152,7 +152,7 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
             ["dryRun"] = true,
         });
 
-        Assert.StartsWith("ERROR DocumentNotFound", text, StringComparison.Ordinal);
+        Assert.StartsWith("ERROR ProjectNotFound", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
     [Fact]

@@ -270,4 +270,15 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.True(Tokens(quiet) <= 200, Report("rename_symbol", quiet));
         Assert.True(Tokens(quiet) * 3 < Tokens(loud), Report("rename_symbol", quiet, loud));
     }
+
+    [Fact]
+    public async Task ListProjects_WithAFilter_CostsLessThanTheUnfilteredListing()
+    {
+        var all = await server.CallAsync("list_projects", []);
+        var filtered = await server.CallAsync("list_projects", new() { ["filter"] = "Nope" });
+
+        Assert.True(Tokens(filtered) < Tokens(all), Report("list_projects", filtered, all));
+        Assert.True(Lines(filtered) < Lines(all), Report("list_projects", filtered, all));
+        Assert.Contains("0 projects (truncated=false, total=0)", filtered, StringComparison.Ordinal);
+    }
 }

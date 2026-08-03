@@ -8,6 +8,8 @@ public enum TerseErrorCode
     SymbolNotFound,
     AmbiguousSymbol,
     DocumentNotFound,
+    ProjectNotFound,
+    AmbiguousProject,
     EditConflict,
     CompileRegression,
     OutOfWorkspace,

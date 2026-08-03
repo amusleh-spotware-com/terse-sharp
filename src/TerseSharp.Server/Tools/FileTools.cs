@@ -79,14 +79,17 @@ public sealed class FileTools(ToolContext context)
     [McpServerTool(Name = "find_files")]
     [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded.")]
     public Task<string> FindFiles(
-        [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string glob,
+        [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (100).")] int maxResults = 0) =>
-        context.WithWorkspace(
-            workspace,
-            null,
-            loaded => TextSearchService.FindFiles(loaded, glob, NavigationTools.Cap(maxResults, 100)),
-            semantic: false);
+        [Description("Max results (100).")] int maxResults = 0,
+        [Description("Alias for glob.")] string? pattern = null) =>
+        (glob ?? pattern) is { Length: > 0 } matched
+            ? context.WithWorkspace(
+                workspace,
+                null,
+                loaded => TextSearchService.FindFiles(loaded, matched, NavigationTools.Cap(maxResults, 100)),
+                semantic: false)
+            : Task.FromResult(Errors.Blank("glob").Render());
 
     [McpServerTool(Name = "search_text")]
     [Description("Literal text search across the workspace. Also the counting tool: total= is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]

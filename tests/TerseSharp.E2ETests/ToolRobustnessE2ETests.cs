@@ -109,7 +109,7 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
         }
         catch (McpException exception)
         {
-            return "ERROR InvalidArgument\n" + exception.Message + "\nremedy: fix the arguments";
+            return "ERROR McpException\n" + exception.Message;
         }
     }
 
@@ -150,6 +150,7 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("Unhandled exception", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("   at TerseSharp.", text, StringComparison.Ordinal);
         Assert.DoesNotContain("System.NullReferenceException", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("An error occurred invoking", text, StringComparison.Ordinal);
 
         if (text.StartsWith("ERROR", StringComparison.Ordinal))
             Assert.Contains("remedy:", text, StringComparison.Ordinal);

@@ -38,7 +38,7 @@ public static class CleanService
         if (string.IsNullOrWhiteSpace(project))
             return Result.Ok(ProjectDirectories(target.Root, cancellationToken));
 
-        var resolved = PathGuard.Resolve(target.Root, project);
+        var resolved = target.ResolveProject(project);
 
         if (!resolved.IsOk)
             return Result.Fail<string[]>(resolved.Error!);
@@ -48,7 +48,7 @@ public static class CleanService
         if (Directory.Exists(full))
             return Result.Ok<string[]>([full]);
 
-        return File.Exists(full) && Path.GetDirectoryName(full) is { Length: > 0 } owner
+        return Path.GetDirectoryName(full) is { Length: > 0 } owner
             ? Result.Ok<string[]>([owner])
             : Result.Fail<string[]>(Errors.DocumentNotFound(project));
     }

@@ -83,4 +83,21 @@ public static class Errors
         TerseErrorCode.InvalidArgument,
         string.Create(CultureInfo.InvariantCulture, $"'{name}' is required and cannot be empty"),
         string.Create(CultureInfo.InvariantCulture, $"pass a non-empty {name}"));
+
+    public static TerseError ProjectNotFound(string project, IReadOnlyList<string> known) => new(
+        TerseErrorCode.ProjectNotFound,
+        string.Create(CultureInfo.InvariantCulture, $"'{project}' is neither a path under the workspace root nor a project of the solution"),
+        known.Count is 0
+            ? "pass the path to a .csproj, or call list_projects to see the solution's projects"
+            : "pass a project name or a .csproj path; closest: " + string.Join(", ", known));
+
+
+    public static TerseError AmbiguousProject(string project, IReadOnlyList<string> paths) => new(
+        TerseErrorCode.AmbiguousProject,
+        string.Create(CultureInfo.InvariantCulture, $"project name '{project}' matches {paths.Count} projects"),
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"pass the full path instead (showing {Math.Min(paths.Count, MaxListedProjects)} of {paths.Count}): {string.Join(", ", paths.Take(MaxListedProjects))}"));
+
+    private const int MaxListedProjects = 8;
 }

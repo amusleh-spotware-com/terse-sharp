@@ -18,7 +18,8 @@ public static class McpHost
         builder.Services
             .AddMcpServer()
             .WithStdioServerTransport()
-            .WithToolsFromAssembly();
+            .WithToolsFromAssembly()
+            .WithRequestFilters(filters => filters.AddCallToolFilter(ToolArgumentFilter.Structured));
 
         var host = builder.Build();
 

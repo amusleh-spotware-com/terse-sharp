@@ -317,7 +317,7 @@ If yes → you are FORBIDDEN from the built-in. No "just this once", no "Grep is
 |---|---|
 | `Read` a `.cs` / `.xaml`      | `get_file_outline` · `get_symbol_source` · `xaml_outline` |
 | `Grep` a type or member       | `search_symbols` · `find_usages` · `find_implementations` |
-| `Glob` / `ls`                 | `find_files` |
+| `Glob` / `ls`                 | `find_files` (`glob=`, alias `pattern=`) |
 | `Edit` a `.cs`                | `replace_symbol_body` · `replace_symbol` · `add_member` · `rename_symbol` |
 | create a new `.cs`            | `write_text(path, content, force: true)` — then `add_member` |
 | `Edit` a `.xaml`              | `xaml_set_property` |
@@ -368,7 +368,7 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 
 | Group | Tools |
 |---|---|
-| **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
+| **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` (`path=`, alias `workspace=`) · `list_projects` (`filter=`) |
 | **Navigation** | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
 | **.NET semantics grep cannot reach** | `find_registrations` · `list_endpoints` |
 | **Analyze & clean** | `analyze` · `format` · `cleanup` · `clean` · `get_diagnostics` |
@@ -400,7 +400,7 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 | `Read` a `.razor` / `.cshtml` file | `razor_outline` · `razor_component` | the component tree with every `<Card />` resolved to its type, and its full `[Parameter]` list |
 | `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_set_directive` | element-addressed, and the Razor generator re-runs so a broken edit is rolled back |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
-| `Bash: dotnet build` / `test` | `build` · `run_tests` · `rerun_failed` | deduplicated diagnostics, no MSBuild spew; green is one line, red carries the assertion |
+| `Bash: dotnet build` / `test` | `build` · `run_tests` · `rerun_failed` | deduplicated diagnostics, no MSBuild spew; green is one line, red carries the assertion; `project=` takes a project **name** or a path, and a locked output is retried rather than reported raw |
 | `Bash: dotnet format` / `clean` | `format` · `cleanup fix=all` · `clean` | compile-gated code fixes, a one-line verdict, freed-byte counters — never raw CLI output |
 | a per-file analyzer sweep | `analyze path=src/**/*.cs` · `analyze changed=true` | a file, a directory, a glob, or just what you touched — one call instead of one per file |
 | `Glob` for `*.sln` in an unfamiliar repo | `load_workspace discover=true` | every solution and project under a directory, shallowest first, loading none of them |

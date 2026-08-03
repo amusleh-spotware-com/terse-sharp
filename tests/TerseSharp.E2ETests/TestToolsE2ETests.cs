@@ -78,7 +78,8 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         var text = await RunAsync(new() { ["project"] = "tests/Nope/Nope.csproj" });
 
         Assert.DoesNotContain("0 failures", text, StringComparison.Ordinal);
-        Assert.Contains("FAILED", text, StringComparison.Ordinal);
+        Assert.StartsWith("ERROR ProjectNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -205,5 +206,73 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("0 failures", text, StringComparison.Ordinal);
         Assert.Contains("passed=1 failed=0 skipped=0 total=1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithAProjectName_ResolvesItToTheProjectFile()
+    {
+        var text = await RunAsync(new()
+        {
+            ["project"] = "Fixture.Trading.Tests",
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+        });
+
+        Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
+        Assert.Contains("passed=1 skipped=0 total=1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("MSB1009", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithAnUnknownProjectName_NamesTheSolutionsProjectsInsteadOfFailingInsideMSBuild()
+    {
+        var text = await RunAsync(new() { ["project"] = "Fixture.Trading.Hosting" });
+
+        Assert.StartsWith("ERROR ProjectNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("closest: Fixture.Trading", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("MSB1009", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Build_WithAProjectNameFromTheSolution_ResolvesItThroughTheSolutionsProjectList()
+    {
+        Assert.False(
+            Directory.Exists(Path.Combine(TerseServerFixture.FixtureRoot, "Fixture.Trading")),
+            "the name must not resolve as a path, or the solution lookup is not what answered");
+
+        var text = await server.CallAsync("build", new() { ["project"] = "Fixture.Trading" });
+
+        Assert.StartsWith("build ok", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("MSB1009", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListTests_WithAProjectName_ResolvesItToTheProjectFile()
+    {
+        var text = await server.CallAsync("list_tests", new() { ["project"] = "Fixture.Trading.Tests" });
+
+        Assert.Contains("7 tests (truncated=false, total=7)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WhenTheOutputIsLocked_WarnsAndReportsTheRetryInsteadOfRawMSBuildOutput()
+    {
+        var project = Path.Combine(TerseServerFixture.FixtureRoot, "tests", "Fixture.Trading.Tests");
+        var output = Path.Combine(project, "bin", "Debug", "net10.0", "Fixture.Trading.Tests.dll");
+
+        await RunAsync(new() { ["project"] = TestProject });
+
+        Assert.True(File.Exists(output), output);
+
+        File.SetLastWriteTimeUtc(Path.Combine(project, "DeliberateOutcomesTests.cs"), DateTime.UtcNow);
+
+        using (new FileStream(output, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var text = await RunAsync(new() { ["project"] = TestProject });
+
+            Assert.Contains("WARNING a locked output file blocked the operation", text, StringComparison.Ordinal);
+            Assert.Contains("NOTE the workspace was unloaded and the test run retried", text, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("passed=3 failed=3 skipped=1 total=7", await RunAsync(new() { ["project"] = TestProject }), StringComparison.Ordinal);
     }
 }

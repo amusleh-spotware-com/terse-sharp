@@ -53,18 +53,22 @@ public sealed class WorkspaceTools(ToolContext context)
         });
 
     [McpServerTool(Name = "unload_workspace")]
-    [Description("Unload a workspace and release its MSBuild file locks so an external build can run.")]
-    public Task<string> UnloadWorkspace([Description("Solution or project path to unload.")] string path) =>
-        ToolBoundary.RunAsync(async () =>
-        {
-            await context.ReadyAsync().ConfigureAwait(false);
+    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name; list_workspaces prints it.")]
+    public Task<string> UnloadWorkspace(
+        [Description("Solution or project path to unload.")] string? path = null,
+        [Description("Alias for path; the solution path, not a worktree name.")] string? workspace = null) =>
+        (path ?? workspace) is { Length: > 0 } target
+            ? ToolBoundary.RunAsync(async () =>
+            {
+                await context.ReadyAsync().ConfigureAwait(false);
 
-            var response = new ResponseBuilder("unload_workspace", path);
+                var response = new ResponseBuilder("unload_workspace", target);
 
-            response.Note(context.Registry.Unload(path) ? "unloaded" : "not loaded");
+                response.Note(context.Registry.Unload(target) ? "unloaded" : "not loaded");
 
-            return response.ToString();
-        });
+                return response.ToString();
+            })
+            : Task.FromResult(Errors.Blank("path").Render());
 
     [McpServerTool(Name = "workspace_status")]
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, and any project that failed to load.")]
@@ -79,9 +83,11 @@ public sealed class WorkspaceTools(ToolContext context)
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects")]
-    [Description("List the projects of a loaded workspace: name, target framework, document count.")]
-    public Task<string> ListProjects([Description("Workspace or worktree name.")] string? workspace = null) =>
-        context.WithWorkspace(workspace, null, RenderProjects);
+    [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=.")]
+    public Task<string> ListProjects(
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Keep only projects whose name contains this text.")] string? filter = null) =>
+        context.WithWorkspace(workspace, null, loaded => RenderProjects(loaded, filter));
 
     private static string? Discover() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
@@ -113,23 +119,6 @@ public sealed class WorkspaceTools(ToolContext context)
             : "unavailable - the Razor source generator produced nothing, so component types cannot be resolved; build the solution, or match its SDK to the terse version";
 
         return string.Create(CultureInfo.InvariantCulture, $"razor={razor} files generator={health}");
-    }
-
-    private static string RenderProjects(LoadedWorkspace workspace)
-    {
-        var projects = workspace.Solution.Projects.OrderBy(project => project.Name, StringComparer.Ordinal).ToArray();
-        var response = new ResponseBuilder("list_projects", workspace.SolutionPath);
-
-        response.Summary(projects.Length, projects.Length, "projects");
-
-        foreach (var project in projects)
-        {
-            response.Line(string.Create(
-                CultureInfo.InvariantCulture,
-                $"{project.Name}  {project.Language}  documents={project.Documents.Count()}"));
-        }
-
-        return response.ToString();
     }
 
     private static string Describe(LoadedWorkspace workspace) => string.Create(
@@ -180,4 +169,27 @@ public sealed class WorkspaceTools(ToolContext context)
         WatchState.Off => "off",
         _ => "degraded(" + (sync.StateDetail ?? "unknown") + ")",
     };
+
+    private static string RenderProjects(LoadedWorkspace workspace, string? filter)
+    {
+        var projects = workspace.Solution.Projects
+                .Where(project => Matches(project.Name, filter))
+                .OrderBy(project => project.Name, StringComparer.Ordinal)
+                .ToArray();
+        var response = new ResponseBuilder("list_projects", workspace.SolutionPath);
+
+        response.Summary(projects.Length, projects.Length, "projects");
+
+        foreach (var project in projects)
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{project.Name}  {project.Language}  documents={project.Documents.Count()}"));
+        }
+
+        return response.ToString();
+    }
+
+    private static bool Matches(string name, string? filter) =>
+        filter is not { Length: > 0 } || name.Contains(filter, StringComparison.OrdinalIgnoreCase);
 }

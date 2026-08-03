@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Server;
@@ -102,7 +103,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
 
         using var lease = resolved.Value!;
 
-        return Result.Ok(new WorkspaceTarget(lease.Workspace.SolutionPath, lease.Workspace.Root));
+        return Result.Ok(new WorkspaceTarget(
+            lease.Workspace.SolutionPath,
+            lease.Workspace.Root,
+            ProjectPaths(lease.Workspace)));
     }
 
     public void Dispose() => Registry.Dispose();
@@ -171,4 +175,17 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
     public bool OutsideEveryWorkspace(string path) =>
             Path.IsPathRooted(path)
             && Registry.All().All(loaded => !PathBoundary.Contains(loaded.Root, Path.GetFullPath(path)));
+
+    private static ImmutableArray<string> ProjectPaths(LoadedWorkspace workspace)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var project in workspace.Solution.Projects)
+        {
+            if (project.FilePath is { Length: > 0 } path)
+                paths.Add(path);
+        }
+
+        return [.. paths.Order(StringComparer.Ordinal)];
+    }
 }

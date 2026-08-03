@@ -114,6 +114,11 @@ A silent drop is the breach, even when the reason would have been valid.
 
 **Workspace** — `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` ·
 `list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution.
+`list_projects(filter: "Tests")` keeps only the projects whose name contains it, and the name it
+prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=`.
+`unload_workspace` is the one workspace tool addressed by the solution **path** rather than a name —
+`workspace=` is accepted as an alias for `path=`, but a worktree name is not a path and will answer
+`not loaded`; `list_workspaces` prints the path to pass.
 Facing an unfamiliar repository, `load_workspace(path, discover: true)` lists every solution and
 project under a directory without loading one — auto-discovery only walks *up* from the working
 directory, so this is the call that replaces globbing for `*.sln`. Its
@@ -186,7 +191,8 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
 `razor_remove_element` · `razor_set_directive`.
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
-The search tools take `query` (`pattern` still works). `find_files`, `search_text` and `search_regex`
+`search_text` and `search_regex` take `query`, `find_files` takes `glob`, and each accepts `pattern`
+as an alias, so the wrong name of the three is never a failed call. `find_files`, `search_text` and `search_regex`
 skip `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and
 directory symlinks — the same set every index uses, so a nested agent worktree never doubles a result.
 `read_text` also accepts an **absolute path outside every workspace root**, tagged
@@ -383,7 +389,7 @@ the test from that block — do not shell out to `dotnet test` for the stack tra
 | Goal | Call |
 |---|---|
 | whole solution | `run_tests` |
-| one project | `run_tests(project)` |
+| one project | `run_tests(project)` — a project **name** or a path to the `.csproj` |
 | one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
 | a raw VSTest expression | `run_tests(filter)` |
 | skip the rebuild | `run_tests(noBuild: true)` |
@@ -399,12 +405,27 @@ one.
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
 produced no results reports `FAILED …, no test results were produced` and never `0 failures`.
 
+`project=` takes the name `list_projects` prints as readily as a path — `run_tests(project: "Trading.Tests")`
+resolves against the solution's projects first and then against the `*.csproj` under the workspace
+root, so a test project outside the solution still runs. An unknown name answers `ERROR ProjectNotFound`
+naming the closest projects and a name two projects share answers `ERROR AmbiguousProject` listing
+both; neither is ever handed to MSBuild as a path.
+
+When a locked output file blocks the build that `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` runs,
+the response says so (`WARNING a locked output file blocked the operation`) and, with a single
+workspace loaded, the server unloads it, retries and reloads, then reports which of the three happened
+in a `NOTE`. You do not need to `unload_workspace` by hand first; if the note says the output is
+**still** locked, something outside this server holds it.
+
 ## When a tool refuses
 
 Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest names;
 `AmbiguousSymbol` lists the candidates and says how many of the total it shows; `SaturatedName` means
 the name matched too many symbols to resolve safely — qualify it; `OutOfWorkspace` means the path
-escaped the workspace root; `ReadOnly` means the server runs with `--read-only`.
+escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
+no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
+parameter means the argument names were wrong, and the remedy lists the ones the tool declares;
+`ReadOnly` means the server runs with `--read-only`.
 
 Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one outcome this server
 exists to prevent.

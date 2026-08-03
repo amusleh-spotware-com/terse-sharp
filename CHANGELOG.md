@@ -8,6 +8,53 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`build`, `run_tests`, `list_tests` and `clean` accept a project *name* for `project=`.** The name
+  `list_projects` prints is now addressable: it is matched against the solution's project files first
+  and, failing that, against `*.csproj`/`*.vbproj`/`*.fsproj` under the workspace root, so a test
+  project that is not in the solution still resolves. A path still wins when it exists, an unknown
+  name answers `ERROR ProjectNotFound` naming the closest projects, and a name shared by two projects
+  answers `ERROR AmbiguousProject` listing both instead of guessing. Previously a name was resolved as
+  a path, handed to MSBuild and came back as `MSBUILD : error MSB1009: Project file does not exist` —
+  an error with no remedy, from a tool the agent could not tell it had misused.
+- **`list_projects` takes `filter=`**, keeping only projects whose name contains it. On a 145-project
+  solution the unfiltered listing is ~7 000 characters, and the parameter was previously accepted by
+  the caller and silently dropped.
+- **`find_files` accepts `pattern=` as an alias for `glob=`**, matching `search_text` and
+  `search_regex`, and `glob=` is no longer a required parameter — omitting both answers
+  `ERROR InvalidArgument` with a remedy instead of the SDK's opaque message.
+- **`unload_workspace` accepts `workspace=` as an alias for `path=`**, the name every other workspace
+  tool uses. Its description now says it takes the solution path, not a worktree name.
+
+### Changed
+
+- **`clean` answers `ERROR ProjectNotFound` where it answered `ERROR DocumentNotFound`** for a
+  `project=` that names no project or directory, because all four project-taking tools now resolve
+  through the same path. The remedy is strictly more useful — it names the closest projects — and the
+  behaviour is unchanged: the call is still refused rather than cleaning the whole workspace.
+
+### Fixed
+
+- **An unbound argument no longer escapes the error contract.** A missing or misspelled parameter was
+  answered by the MCP SDK as `An error occurred invoking '<tool>'.` — no code, no remedy, nothing an
+  agent could act on. A call-tool filter now renders it as `ERROR InvalidArgument`, naming the missing
+  and the unrecognized parameters and listing the tool's required and accepted ones. Closes `I38`.
+- **`run_tests`, `rerun_failed` and `list_tests` detect and recover from a locked output file** exactly
+  as `build` and `clean` already did: the response carries `WARNING a locked output file blocked the operation`,
+  and when a single workspace is loaded the server unloads it, retries the run and reloads. Before,
+  `dotnet test` blocked by `MSB3021`/`MSB3027` returned its raw tail with no warning and no retry —
+  the reason a session fell back to `Bash dotnet test` and then fought the lock by hand.
+- **The still-locked note names the real cause and the process to restart.** A source generator
+  referenced as `OutputItemType="Analyzer"` is loaded into the server's default `AssemblyLoadContext`
+  and stays mapped for the process lifetime, so `unload_workspace` cannot release it and the user's own
+  `dotnet build` keeps failing `MSB3027`. The note now says that, and prints this server's process id.
+  The underlying lock is **not** fixed — tracked as `I52` in `IMPROVEMENTS.md`.
+- **`ToolRobustnessE2ETests` no longer fabricates the `remedy:` line it asserts.** Its `CallAsync`
+  caught the SDK's exception and synthesized `ERROR InvalidArgument … remedy: fix the arguments`, so
+  the census could not fail on the very defect above; it now asserts the server's own payload and
+  bans the opaque message outright.
+
 ## [0.17.0] - 2026-08-01
 
 **Response formats changed.** `search_symbols` now reports the real `total=` and sets `truncated=true`

@@ -85,17 +85,22 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them.")]
     public Task<string> ListTests(
         [Description("Substring filter on the name.")] string? contains = null,
-        [Description("Project path; empty lists every test project.")] string? project = null,
+        [Description("Project name or path; empty lists every test project.")] string? project = null,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
-            Contained(target, project, resolved => DotnetRunner.ListTestsAsync(
-                target,
-                resolved ?? target.SolutionPath,
-                contains,
-                Seconds(timeoutSeconds),
-                cancellationToken)));
+            Contained(target, project, resolved => RecoveredAsync(target, "test listing", async () =>
+            {
+                var run = await DotnetRunner.ListTestNamesAsync(
+                    target,
+                    resolved ?? target.SolutionPath,
+                    contains,
+                    Seconds(timeoutSeconds),
+                    cancellationToken).ConfigureAwait(false);
+
+                return new LockedRun(run.Response, run.Locked);
+            }, cancellationToken)));
 
     private Task<string> BuildWithRecoveryAsync(WorkspaceTarget target, string? project, bool verbose, CancellationToken cancellationToken) =>
         RecoveredAsync(target, "build", async () =>
@@ -152,7 +157,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 
     private static string StillLocked(string operation) => string.Create(
         CultureInfo.InvariantCulture,
-        $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. Something other than the reloaded workspace holds the file - another running process, a test host, or an analyzer assembly this server loaded - so stop it, or restart the server, and try again.");
+        $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. unload_workspace cannot release it: an analyzer or source-generator assembly (a ProjectReference with OutputItemType=\"Analyzer\") is loaded into this server process and stays mapped for its lifetime. Restart the MCP server - this one is pid {Environment.ProcessId} - or stop whatever else holds the file, then try again.");
 
     private static string NotRecovered(string operation) => string.Create(
         CultureInfo.InvariantCulture,
@@ -176,14 +181,15 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         }
     }
 
-    private async Task<string> RunAsync(WorkspaceTarget workspace, TestRunRequest request, CancellationToken cancellationToken)
-    {
-        var result = await DotnetRunner.TestAsync(workspace, request, cancellationToken).ConfigureAwait(false);
+    private Task<string> RunAsync(WorkspaceTarget workspace, TestRunRequest request, CancellationToken cancellationToken) =>
+        RecoveredAsync(workspace, "test run", async () =>
+        {
+            var result = await DotnetRunner.TestAsync(workspace, request, cancellationToken).ConfigureAwait(false);
 
-        lastRun.Remember(workspace.Root, request.Target, result.Report.Failures.Select(failure => failure.Name));
+            lastRun.Remember(workspace.Root, request.Target, result.Report.Failures.Select(failure => failure.Name));
 
-        return result.Response;
-    }
+            return new LockedRun(result.Response, result.Locked);
+        }, cancellationToken);
 
     private static Result<string?> Selection(string? test, string? filter)
     {
@@ -233,7 +239,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         if (string.IsNullOrWhiteSpace(project))
             return action(null);
 
-        var resolved = PathGuard.Resolve(workspace.Root, project);
+        var resolved = workspace.ResolveProject(project);
 
         return resolved.IsOk ? action(resolved.Value!) : Task.FromResult(resolved.Error!.Render());
     }
