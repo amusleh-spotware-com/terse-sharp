@@ -256,6 +256,8 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RunTests_WhenTheOutputIsLocked_WarnsAndReportsTheRetryInsteadOfRawMSBuildOutput()
     {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows refuses to overwrite an open file");
+
         var project = Path.Combine(TerseServerFixture.FixtureRoot, "tests", "Fixture.Trading.Tests");
         var output = Path.Combine(project, "bin", "Debug", "net10.0", "Fixture.Trading.Tests.dll");
 

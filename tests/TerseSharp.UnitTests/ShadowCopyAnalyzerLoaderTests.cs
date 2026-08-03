@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
 using TerseSharp.Core;
@@ -24,7 +25,8 @@ public sealed class ShadowCopyAnalyzerLoaderTests
     [Fact]
     public async Task ReboundSolution_AfterRunningTheAnalyzer_LeavesTheOriginalAssemblyWritable()
     {
-        Assert.True(File.Exists(AnalyzerAssembly), AnalyzerAssembly);
+        await EnsureBuiltAsync();
+
         Assert.True(Writable(), "the analyzer assembly was already locked before the test started");
 
         using var registry = new WorkspaceRegistry(watch: false);
@@ -38,6 +40,30 @@ public sealed class ShadowCopyAnalyzerLoaderTests
 
         Assert.Contains(diagnostics, diagnostic => diagnostic.Id is "FIX001");
         Assert.True(Writable(), "the rebound solution still mapped the analyzer assembly in place");
+    }
+
+    private static async Task EnsureBuiltAsync()
+    {
+        if (File.Exists(AnalyzerAssembly))
+            return;
+
+        var start = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        start.ArgumentList.Add("build");
+        start.ArgumentList.Add(GeneratorSolutionPath);
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
+
+        var output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(File.Exists(AnalyzerAssembly), await output + await error);
     }
 
     private static Project Consumer(Solution solution) =>

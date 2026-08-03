@@ -23,10 +23,25 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
     private static string ConsumerPath { get; } =
         Path.Combine(FixtureRoot, "src", "Fixture.Generated", "Consumer.cs");
 
-    public async ValueTask InitializeAsync() => server = await TerseServerProcess.StartAsync(
-        FixtureRoot,
-        [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", SolutionPath],
-        TestContext.Current.CancellationToken);
+    public async ValueTask InitializeAsync()
+    {
+        await EnsureBuiltAsync();
+
+        server = await TerseServerProcess.StartAsync(
+            FixtureRoot,
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", SolutionPath],
+            TestContext.Current.CancellationToken);
+    }
+
+    private static async Task EnsureBuiltAsync()
+    {
+        if (File.Exists(AnalyzerAssembly))
+            return;
+
+        var (exitCode, output) = await RebuildAsync();
+
+        Assert.True(exitCode is 0 && File.Exists(AnalyzerAssembly), output);
+    }
 
     public async ValueTask DisposeAsync() => await server.StopAsync();
 
