@@ -400,7 +400,7 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 | `Read` a `.razor` / `.cshtml` file | `razor_outline` · `razor_component` | the component tree with every `<Card />` resolved to its type, and its full `[Parameter]` list |
 | `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_set_directive` | element-addressed, and the Razor generator re-runs so a broken edit is rolled back |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
-| `Bash: dotnet build` / `test` | `build` · `run_tests` · `rerun_failed` | deduplicated diagnostics, no MSBuild spew; green is one line, red carries the assertion; `project=` takes a project **name** or a path, and a locked output is retried rather than reported raw |
+| `Bash: dotnet build` / `test` | `build` · `run_tests` · `rerun_failed` | deduplicated diagnostics, no MSBuild spew; green is one line **whatever it warned about** and red lists errors only (`verbose=true` for the warnings); `project=` takes a project **name** or a path, and a locked output is retried rather than reported raw |
 | `Bash: dotnet format` / `clean` | `format` · `cleanup fix=all` · `clean` | compile-gated code fixes, a one-line verdict, freed-byte counters — never raw CLI output |
 | a per-file analyzer sweep | `analyze path=src/**/*.cs` · `analyze changed=true` | a file, a directory, a glob, or just what you touched — one call instead of one per file |
 | `Glob` for `*.sln` in an unfamiliar repo | `load_workspace discover=true` | every solution and project under a directory, shallowest first, loading none of them |

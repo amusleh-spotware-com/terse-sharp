@@ -8,6 +8,52 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-04
+
+**Response formats changed.** `build`, `run_tests`, `rerun_failed` and `list_tests` no longer return
+warnings unless `verbose=true` asks for them: a successful build is one line however many warnings it
+produced, a failed one lists error-severity diagnostics only, and the output tail these tools fall
+back to is now keyed on "no error was found" rather than "no diagnostic was found". An agent that
+parsed `build ok  0 diagnostics`, `FAILED with no parsable diagnostics`, or a failed build's warning
+lines should re-read the two entries below.
+
+### Changed
+
+- **BREAKING (response format) — `build` never returns warnings unless they are asked for.** A build
+  that **succeeds** now answers in one line however many warnings it produced:
+  `build ok  errors=0 warnings=37  elapsedMs=4235  (verbose=true for the full report)`. Previously a
+  single warning tipped the response into the full report, so a solution with hundreds of warnings
+  cost thousands of tokens on every green build. A build that **fails** now lists its
+  **error-severity diagnostics only** and reports the rest as one
+  `warnings=37 hidden (verbose=true for the full report)` note, instead of listing every warning
+  beside the errors. `verbose=true` restores the previous report, every severity included.
+  The quiet line's counters changed from `0 diagnostics` to `errors=0 warnings=N`, so a client
+  matching on the old text must be updated. The failed build's summary line counts what was
+  **parsed**, not what was printed — `1 diagnostics (truncated=true, total=3)` — so the response
+  never claims the hidden warnings do not exist. Two guarantees are unchanged: a failure with no
+  error-severity line still lists what it does have rather than answering with nothing, and a locked
+  output file, a timeout and an unparsable failure are never condensed to the one-line form — a
+  locked build still hides its warnings behind `verbose=true` like any other failure. **`warnings=N`
+  counts what *this* build emitted**, so a repeat build that recompiled nothing reports `warnings=0`
+  for a solution that has warnings; touch a source file, or read the count as "warnings from work
+  this build actually did".
+- **BREAKING (response format) — `run_tests`, `rerun_failed` and `list_tests` no longer return build
+  warnings either.** When the build inside `dotnet test` fails, the run produces no results and the
+  response used to end with the last 15 lines of raw output — which on a warning-heavy solution was
+  fifteen lines of MSBuild warnings and none of the errors. That block is now the same shape as
+  `build`: **error-severity diagnostics only**, plus one `warnings=N hidden` note, with
+  `verbose=true` restoring every severity on `run_tests` and `rerun_failed`. Unlike `build`, these
+  three have **no** "list the warnings when there is no error" fallback: a failure that carries only
+  warnings answers with the raw output tail, bounded at 15 lines. That tail is now appended whenever
+  no **error-severity** diagnostic was found rather than when no diagnostic at all was found, on
+  `build` as well, so a failure whose only signal is a warning no longer loses the MSBuild or
+  test-host message underneath it — and `verbose=true` stays a strict superset. Its header changed
+  accordingly, from `FAILED with no parsable diagnostics; last output lines:` to
+  `FAILED with no error-severity diagnostic; last output lines:`. The
+  `no test results were produced` note no longer ends in `; last output lines:` because what follows
+  it is now usually the errors. `list_tests` is unchanged on success — a listing that matched no
+  name still answers in two lines.
+
 ## [0.17.1] - 2026-08-03
 
 ### Fixed
@@ -1360,7 +1406,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.18.0
 [0.17.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.1
 [0.17.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.0
 [0.16.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.16.0

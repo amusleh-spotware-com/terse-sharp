@@ -10,10 +10,10 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
     [McpServerTool(Name = "build")]
-    [Description("Build the workspace and return deduplicated diagnostics only, never raw MSBuild output. A clean build answers in one line; pass verbose=true for the full report.")]
+    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity.")]
     public Task<string> Build(
         [Description("Project path; empty builds the solution.")] string? project = null,
-        [Description("Return the full report even when the build is clean. Default false, which answers a clean build in one line.")] bool verbose = false,
+        [Description("Return every diagnostic, warnings included, and the full report even when the build succeeds. Default false, which answers a successful build in one line and hides warnings on a failed one. The warnings= count reports what this build emitted, so a build that recompiled nothing reports 0.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
@@ -38,7 +38,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; any failure returns the full report with each failure's message, expected and actual values, and one source frame. Pass verbose=true to get the full report on a green run too.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; a test failure returns each failure's message, expected and actual values, and one source frame, and a build that failed under the run returns its error-severity diagnostics only, never its warnings. Pass verbose=true to get the full report on a green run, and the hidden warnings on a failed build.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
@@ -46,7 +46,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
         [Description("List passing tests too.")] bool includePassed = false,
         [Description("List the N slowest tests.")] int slowest = 0,
-        [Description("Return the full report even when every test passed. Default false, which answers a green run in one line.")] bool verbose = false,
+        [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
@@ -63,10 +63,10 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         });
 
     [McpServerTool(Name = "rerun_failed")]
-    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target. A green re-run answers in one line.")]
+    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
     public Task<string> RerunFailed(
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
-        [Description("Return the full report even when every re-run test passed.")] bool verbose = false,
+        [Description("Return the full report even when every re-run test passed, and the warnings of a build that failed under the re-run.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
@@ -82,7 +82,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         });
 
     [McpServerTool(Name = "list_tests")]
-    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them.")]
+    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only.")]
     public Task<string> ListTests(
         [Description("Substring filter on the name.")] string? contains = null,
         [Description("Project name or path; empty lists every test project.")] string? project = null,

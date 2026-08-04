@@ -98,7 +98,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` | element-addressed, formatting preserved, compile-gated through the Razor generator |
 | "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
 | "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
-| `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a clean build is one line |
+| `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
 | `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
@@ -153,8 +153,29 @@ is regenerated, so never edit it.
 **Success is quiet.** `build`, `run_tests`, `rerun_failed`, `format`, `cleanup` and `clean` answer a
 result that has nothing to say in one line, or one line per changed file. `verbose=true` restores the
 full report on any of them. The short form is **only** emitted when there is nothing else to report —
-a failure, a diagnostic, a rolled-back edit, a timeout, a zero-result run and a locked file all keep
-the full output — so do not pass `verbose=true` defensively.
+a failure, a rolled-back edit, a timeout, a zero-result run and a locked file all keep the full
+output — so do not pass `verbose=true` defensively.
+
+**A warning is never something to report.** A build that **succeeds** answers in one line however
+many warnings it produced — `build ok  errors=0 warnings=37  elapsedMs=4235` — and a build that
+**fails** lists its error-severity diagnostics only, followed by `warnings=37 hidden`. The count is
+there so you know `verbose=true` has something to show; ask for it when you intend to act on the
+warnings, and use `analyze` when the warnings *are* the question. A failed build with no
+error-severity line falls back to listing what it does have, so a failure never answers with nothing.
+
+**`warnings=N` counts what that build emitted, not what the solution contains.** MSBuild re-reports
+nothing for a project it did not recompile, so a second `build` on an unchanged tree answers
+`warnings=0` however many the first one found. Read it as "warnings from the work this build did";
+when you need the solution-wide truth, ask `analyze`.
+
+The same holds where `run_tests`, `rerun_failed` and `list_tests` report a build that failed under
+them: `no test results were produced` is followed by the **errors**, not by fifteen lines of raw
+MSBuild output. Those three have no "list the warnings when there is no error" fallback — a failure
+carrying only warnings answers with the bounded
+`FAILED with no error-severity diagnostic; last output lines:` tail, which is where a crashed test
+host says why. That tail is appended whenever no **error** was found, in either mode, so
+`verbose=true` is always a superset: it adds the warnings, it never replaces the failure reason. A
+`list_tests` that succeeded is untouched, whether or not it matched a name.
 
 **Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `path=` takes a file, a
 directory or a glob and `changed=true` limits it to files modified since the workspace loaded, so the
@@ -387,7 +408,10 @@ server ships. Component and parameter answers are then unavailable rather than e
 
 **A green run answers in one line** —
 `run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371` — so running the suite after every
-change is nearly free, and `build` behaves the same way (`build ok  0 diagnostics  elapsedMs=4235`).
+change is nearly free, and `build` behaves the same way
+(`build ok  errors=0 warnings=0  elapsedMs=4235`), warnings included: a build that succeeds is one
+line however many warnings it produced, and a build that fails lists errors only. `warnings=` counts
+what that build emitted, so a build that recompiled nothing reports `0`.
 The short form is only ever emitted when there is nothing else to report, so do not pass
 `verbose=true` "to be sure". Anything that is not a clean pass returns the full report:
 `run_tests` reports `passed= failed= skipped= total= durationMs=`, then one block per

@@ -246,7 +246,9 @@ beat the one it splits, not merely be useful.
    two tests fail if the advertised list and that set diverge in either direction.
 5. One E2E test that asserts response **values** (never "did not throw") against
    `fixtures/FixtureSolution`; `fixtures/BrokenSolution` exists for load-failure and diagnostics
-   paths. Fixtures are intentionally outside `TerseSharp.slnx`.
+   paths, `fixtures/WarningSolution` for a build that succeeds with warnings, `fixtures/RazorSolution`
+   and `fixtures/GeneratorSolution` for Razor and analyzer/generator paths. Fixtures are intentionally
+   outside `TerseSharp.slnx`.
    `ToolRobustnessE2ETests` then covers the new tool automatically: it reads `tools/list` and calls
    every tool with garbage, empty and missing arguments, asserting a structured answer with a
    `remedy:` line and that nothing is written outside the workspace. A listing tool also belongs in
@@ -440,11 +442,22 @@ Whatever is not in that answer does not go in the response. It goes behind `verb
    (`bool verbose = false`), or the MCP SDK marks it required.
 3. **`dryRun=true` is never condensed.** There the diff *is* the answer — the whole reason the call
    was made.
-4. **The short form is only ever emitted for a result that has nothing else to say.** Any failure, any
-   new diagnostic, any warning, a rollback, a timeout, a zero-result run, a locked file, a
-   `NOT rewritten` list, a stale-workspace note, **a "0 files changed" that means nothing landed** —
-   all keep the full response. Condensing a result that carried a caveat is the same defect as a
-   confident wrong answer, because the agent cannot see what was dropped.
+4. **The short form is only ever emitted for a result that has nothing else to say.** Any failure, a
+   rollback, a timeout, a zero-result run, a locked file, a `NOT rewritten` list, a stale-workspace
+   note, **a "0 files changed" that means nothing landed** — all keep the full response. Condensing a
+   result that carried a caveat is the same defect as a confident wrong answer, because the agent
+   cannot see what was dropped.
+   **A warning is not a caveat — it is a payload, and it is opt-in.** A successful build answers in
+   one line however many warnings it produced, and a failed one lists **error-severity diagnostics
+   only**; the rest is a single `warnings=N hidden` count. A count is what proves `verbose=true` has
+   something to show, so it is never dropped — but the lines themselves are returned only when the
+   agent asks. The tools whose payload *is* the diagnostics — `analyze`, `get_diagnostics`,
+   `xaml_validate`, `razor_validate`, `resx_validate` — are exempt under rule 5: there the warnings
+   are the answer, not ceremony around it. `build` carries one carve-out the test tools do **not**:
+   a failed build with no error-severity line lists what it does have, because answering a failure
+   with nothing is the confident wrong answer this whole section exists to prevent. On `run_tests`,
+   `rerun_failed` and `list_tests` the same case falls through to the bounded output tail instead —
+   two different rules, so they get two differently-named helpers, never one shared `Shown`.
 5. **A read tool is not exempt, but its answer is not a "success report".** `get_file_outline`,
    `find_usages`, `search_symbols` and friends exist to return that payload — it is the answer, not
    ceremony, and it is not condensed away. What *is* banned there is the ceremony around it: echoed
@@ -533,9 +546,11 @@ and being absent from it is the point:**
 | every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus the `ProcessSpawning` / `WorkspaceMutating` / `Destructive` arrays — an exclusion set that carries no written reason per entry and no ratchet, so it does not yet meet the rule above it |
 | **every mutating tool takes `verbose`** | **none — 7 hand-written spot checks** | — |
 | **every listing tool has a token budget** | **none — `TokenBudgetE2ETests` is 20 per-tool `[Fact]`s, and its `EveryReadToolStaysWithinTheGlobalCap` names four tools by hand** | — |
+| **no build/test tool returns a warning unless `verbose=true`** (rule 4 above) | **none — 8 hand-written `DotnetRunnerTests` render cases plus `BuildWarningsE2ETests`; nothing discovers the family from `tools/list`** | — |
 
-The last two rows are the ones to close first: they are stated in this file as if enforced, and they
-are not.
+The last three rows are the ones to close first: they are stated in this file as if enforced, and they
+are not. Closing the third needs a warning-emitting **test** project in `fixtures/WarningSolution` —
+today it has none, so `run_tests` and `list_tests` are covered only at the render-function level.
 
 **Never delete, skip, `[Fact(Skip=…)]` or weaken a test — or its assertions — to make a suite go
 green.** A red test is resolved by fixing the code, by fixing an expectation that was itself wrong, or

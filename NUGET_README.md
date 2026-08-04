@@ -172,7 +172,7 @@ points them elsewhere.
 | `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
 | `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
-| `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew; a clean build is one line |
+| `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
 | `dotnet test` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame; `project=` takes a project **name** or a path, and a locked output is retried rather than reported raw |
 | `dotnet format` | `format`, `cleanup fix=all`, `cleanup verify=true` | compile-gated code fixes and a one-line verdict, never raw CLI output |
 | `dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |

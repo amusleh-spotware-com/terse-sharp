@@ -139,7 +139,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         var quiet = await server.CallAsync("build", []);
 
         Assert.StartsWith("build ok", quiet, StringComparison.Ordinal);
-        Assert.Contains("0 diagnostics", quiet, StringComparison.Ordinal);
+        Assert.Contains("errors=0 warnings=0", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("\n", quiet, StringComparison.Ordinal);
         Assert.True(quiet.Length < 120, quiet);
     }
