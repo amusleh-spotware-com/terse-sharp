@@ -69,4 +69,16 @@ public sealed class LoadFailureSummaryTests
     [Fact]
     public void ProjectOf_WithNoQuotes_ReturnsNothing() =>
         Assert.True(LoadFailureSummary.ProjectOf("the solution file could not be read").IsEmpty);
+
+    [Fact]
+    public void ProjectOf_WithAUnixProjectPath_ReturnsTheFileName() =>
+        Assert.Equal(
+            "Core.Mapper.csproj",
+            LoadFailureSummary.ProjectOf(
+                "Msbuild failed when processing the file '/home/build/repo/Core/Core.Mapper.csproj' with message: boom").ToString());
+
+
+    [Fact]
+    public void ProjectOf_WithAProjectNameCarryingNoDirectory_ReturnsItUnchanged() =>
+        Assert.Equal("Core.Mapper.csproj", LoadFailureSummary.ProjectOf("failed on 'Core.Mapper.csproj'").ToString());
 }

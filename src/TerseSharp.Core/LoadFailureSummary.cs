@@ -32,13 +32,16 @@ public static class LoadFailureSummary
                 return [];
 
             if (rest[..close] is var quoted && quoted.EndsWith("proj", StringComparison.OrdinalIgnoreCase))
-                return Path.GetFileName(quoted);
+                return FileName(quoted);
 
             remaining = rest[(close + 1)..];
         }
 
         return [];
     }
+
+    private static ReadOnlySpan<char> FileName(ReadOnlySpan<char> path) =>
+        path.LastIndexOfAny('/', '\\') is var separator and >= 0 ? path[(separator + 1)..] : path;
 
     private static string Name(string failure) =>
         ProjectOf(failure) is { IsEmpty: false } project
