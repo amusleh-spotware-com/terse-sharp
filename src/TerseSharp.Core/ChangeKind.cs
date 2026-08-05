@@ -7,4 +7,5 @@ public enum ChangeKind
     Xaml,
     Resx,
     Razor,
+    Files,
 }

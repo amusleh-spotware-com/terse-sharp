@@ -459,19 +459,23 @@ the tree.
 - **Doubt is a rebuild.** A changed `.csproj`/`.props`/`.targets`/`.sln`/`global.json`/`.editorconfig`,
   a `.cs` added or removed under a project's directory, a watcher overflow or an over-cap pending set
   all reload rather than guess. A call already in flight keeps its snapshot — correct for its request.
-- **Four generation counters** — `Code`, `Project`, `Xaml`, `Resx` (plus `rz` for Razor) — so a `.cs`
-  edit does not invalidate the XAML graph. Compare them for **inequality, never ordering**.
+- **Six generation counters** — `Code`, `Project`, `Xaml`, `Resx` (plus `rz` for Razor and `f` for the
+  file tree) — so a `.cs` edit does not invalidate the XAML graph. Compare them for **inequality,
+  never ordering**.
 - **Repeat questions read no file at all.** The `xaml_*` and `resx_*` tools, `find_registrations` and
   `list_endpoints` share one index per workspace, built once per generation. When a generation moves,
   only the files whose stamp changed are re-parsed — a one-file edit in a 200-file tree costs one
   parse, not 200.
+- **`find_files`, `search_text` and `search_regex` no longer walk the tree.** They answer from a path
+  index rebuilt only when the watcher sees a file appear, disappear or get renamed, so a repeat call
+  on a 31 000-file solution is a glob match over memory instead of a full directory enumeration.
 - **Undo knows it was overtaken.** An external change to a file an undo snapshot covers drops that
   snapshot and every one above it, and `undo_last_change` *says so* rather than silently reverting
   someone else's work.
 
 ```
-watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0
-index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10) documents=9/128 parses=9
+watch=active gen=c12/p1/x3/r0/rz2/f4 pending=0 lastSyncMs=8 gaps=0
+index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10) paths(hit=7 miss=1 files=31324) documents=9/128 parses=9
 ```
 
 `load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`) turns the watcher

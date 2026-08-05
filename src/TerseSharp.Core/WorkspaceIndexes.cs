@@ -29,7 +29,7 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
 
     public string Describe() => string.Create(
         CultureInfo.InvariantCulture,
-        $"index=xaml({Counters(xaml)} files={Size(xaml.Current?.FileCount)}) resx({Counters(resx)} families={Size(resx.Current?.Families.Count)}) code({Counters(registrations)} calls={Size(registrations.Current?.Count)}) razor({Counters(razor)} files={Size(razor.Current?.FileCount)}) documents={Documents.Count}/{ParsedDocumentCache.MaxDocuments} parses={Documents.Parses}");
+        $"index=xaml({Counters(xaml)} files={Size(xaml.Current?.FileCount)}) resx({Counters(resx)} families={Size(resx.Current?.Families.Count)}) code({Counters(registrations)} calls={Size(registrations.Current?.Count)}) razor({Counters(razor)} files={Size(razor.Current?.FileCount)}) paths({Counters(paths)} files={Size(paths.Current?.Count)}) documents={Documents.Count}/{ParsedDocumentCache.MaxDocuments} parses={Documents.Parses}");
 
     public void Dispose()
     {
@@ -37,11 +37,13 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
         resx.Dispose();
         registrations.Dispose();
         razor.Dispose();
+        paths.Dispose();
     }
     private IndexKey Key(ChangeKind kind) => new(sync.Generation(kind), Trusted);
 
-    private bool Trusted =>
-        sync.State is WatchState.Active && !sync.Reloading && sync.PendingCount is 0;
+    private bool Trusted => Watching && sync.PendingCount is 0;
+
+    private bool Watching => sync.State is WatchState.Active && !sync.Reloading;
 
     private static string Counters<TIndex>(IndexSlot<TIndex> slot)
         where TIndex : class =>
@@ -52,6 +54,22 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
 
     public RazorIndex Razor() =>
         razor.Get(Key(ChangeKind.Razor), previous => RazorIndex.Build(root, previous));
+
+    private readonly IndexSlot<PathIndex> paths = new();
+
+    public PathIndex Paths() =>
+        paths.Get(new IndexKey(sync.Generation(ChangeKind.Files), Watching), _ => PathIndex.Build(root));
+
+    public void Noticed(string fullPath)
+    {
+        if (WorkspaceFiles.IsTemporary(fullPath) || WorkspaceFiles.IsExcluded(fullPath, root))
+            return;
+
+        if (paths.Current is { } index && index.Contains(fullPath) == File.Exists(fullPath))
+            return;
+
+        sync.Bumped(ChangeKind.Files);
+    }
 }
 
 internal sealed class IndexSlot<TIndex> : IDisposable

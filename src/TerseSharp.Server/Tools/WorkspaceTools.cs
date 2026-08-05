@@ -167,22 +167,65 @@ public sealed class WorkspaceTools(ToolContext context)
 
     private static void AppendLoadDiagnostics(ResponseBuilder response, WorkspaceLoadResult result, bool verbose)
     {
-        foreach (var failure in result.Failures)
-            response.Line("FAILED " + failure);
+        AppendFailures(response, result.Failures, verbose);
+        AppendWarnings(response, result.Warnings, verbose);
+    }
 
-        if (result.Warnings.Count is 0)
+    private static void AppendFailures(ResponseBuilder response, IReadOnlyList<string> failures, bool verbose)
+    {
+        if (failures.Count is 0)
+            return;
+
+        if (!verbose)
+        {
+            AppendFailedProjects(response, failures);
+
+            return;
+        }
+
+        foreach (var failure in failures)
+            response.Line("FAILED " + failure);
+    }
+
+    private static void AppendFailedProjects(ResponseBuilder response, IReadOnlyList<string> failures)
+    {
+        var groups = LoadFailureSummary.Group(failures);
+        var shown = Math.Min(groups.Length, MaxFailureGroups);
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{failures.Count} load failure(s) in {groups.Length} project(s); verbose=true lists the messages"));
+
+        for (var index = 0; index < shown; index++)
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"FAILED {groups[index].Project}  messages={groups[index].Count}"));
+        }
+
+        if (groups.Length > shown)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{groups.Length - shown} more project(s) not listed; verbose=true lists them"));
+        }
+    }
+
+    private static void AppendWarnings(ResponseBuilder response, IReadOnlyList<string> warnings, bool verbose)
+    {
+        if (warnings.Count is 0)
             return;
 
         if (!verbose)
         {
             response.Note(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{result.Warnings.Count} MSBuild warning(s), not load failures; verbose=true lists them"));
+                $"{warnings.Count} MSBuild warning(s), not load failures; verbose=true lists them"));
 
             return;
         }
 
-        foreach (var warning in result.Warnings)
+        foreach (var warning in warnings)
             response.Line("WARNING " + warning);
     }
 
@@ -219,4 +262,6 @@ public sealed class WorkspaceTools(ToolContext context)
 
     private static bool Matches(string name, string? filter) =>
         filter is not { Length: > 0 } || name.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
+    private const int MaxFailureGroups = 20;
 }

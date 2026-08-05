@@ -56,18 +56,24 @@ internal sealed class WorkspaceWatcher(FileSystemWatcher? watcher) : IDisposable
 
     private static void Subscribe(FileSystemWatcher started, WorkspaceSync sync)
     {
-        started.Created += (_, args) => sync.Notice(args.FullPath);
+        started.Created += (_, args) => Appeared(sync, args.FullPath);
         started.Changed += (_, args) => sync.Notice(args.FullPath);
-        started.Deleted += (_, args) => sync.Notice(args.FullPath);
+        started.Deleted += (_, args) => Appeared(sync, args.FullPath);
         started.Renamed += (_, args) => Renamed(sync, args);
         started.Error += (_, _) => sync.Gap();
         started.EnableRaisingEvents = true;
     }
 
+    private static void Appeared(WorkspaceSync sync, string path)
+    {
+        sync.Notice(path);
+        sync.Touched(path);
+    }
+
     private static void Renamed(WorkspaceSync sync, RenamedEventArgs args)
     {
-        sync.Notice(args.OldFullPath);
-        sync.Notice(args.FullPath);
+        Appeared(sync, args.OldFullPath);
+        Appeared(sync, args.FullPath);
     }
 
     private static bool IsUnavailable(Exception exception) => exception

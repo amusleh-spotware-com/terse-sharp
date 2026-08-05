@@ -157,6 +157,7 @@ public static class FileService
     {
         await AtomicWrite.TextAsync(full, content, cancellationToken).ConfigureAwait(false);
         workspace.Sync.Notice(full);
+        workspace.Indexes.Noticed(full);
     }
 
     private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose)

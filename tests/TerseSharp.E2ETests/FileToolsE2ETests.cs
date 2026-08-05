@@ -102,4 +102,27 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR DocumentNotFound", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindFiles_AskedTwice_AnswersTheSecondCallFromThePathIndex()
+    {
+        await server.CallAsync("find_files", new() { ["glob"] = "*.csproj" });
+
+        var before = PathIndexHits(await server.CallAsync("workspace_status", []));
+
+        await server.CallAsync("find_files", new() { ["glob"] = "*.json" });
+
+        Assert.Equal(before + 1, PathIndexHits(await server.CallAsync("workspace_status", [])));
+    }
+
+    private static int PathIndexHits(string status)
+    {
+        const string Marker = "paths(hit=";
+
+        Assert.Contains(Marker, status, StringComparison.Ordinal);
+
+        var counter = status.AsSpan(status.IndexOf(Marker, StringComparison.Ordinal) + Marker.Length);
+
+        return int.Parse(counter[..counter.IndexOf(' ')], CultureInfo.InvariantCulture);
+    }
 }

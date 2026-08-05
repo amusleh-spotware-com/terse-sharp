@@ -131,7 +131,7 @@ public sealed class WorkspaceIndexesTests : IDisposable
     [Fact]
     public void Describe_BeforeAnythingIsBuilt_ReportsNoSizes() =>
         Assert.Contains(
-            "index=xaml(hit=0 miss=0 files=-) resx(hit=0 miss=0 families=-) code(hit=0 miss=0 calls=-) razor(hit=0 miss=0 files=-) documents=0/128 parses=0",
+            "index=xaml(hit=0 miss=0 files=-) resx(hit=0 miss=0 families=-) code(hit=0 miss=0 calls=-) razor(hit=0 miss=0 files=-) paths(hit=0 miss=0 files=-) documents=0/128 parses=0",
             Open().Indexes.Describe(),
             StringComparison.Ordinal);
 
@@ -232,4 +232,112 @@ public sealed class WorkspaceIndexesTests : IDisposable
         graph.Files.Single(file => string.Equals(file.Relative, name + ".xaml", StringComparison.Ordinal));
 
     private sealed record Harness(WorkspaceSync Sync, WorkspaceIndexes Indexes);
+
+    [Fact]
+    public void Paths_TwiceAtTheSameGeneration_ReturnsTheSameIndex()
+    {
+        WriteMarkup("Shell", "Accent");
+
+        var harness = Open();
+
+        Assert.Same(harness.Indexes.Paths(), harness.Indexes.Paths());
+        Assert.Contains("paths(hit=1 miss=1 files=1)", harness.Indexes.Describe(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Noticed_ForAFileThatAppeared_RebuildsThePathIndex()
+    {
+        var harness = Open();
+        var before = harness.Indexes.Paths();
+        var added = Path.Combine(directory.FullName, "Added.txt");
+
+        File.WriteAllText(added, "x");
+        harness.Indexes.Noticed(added);
+
+        var after = harness.Indexes.Paths();
+
+        Assert.NotSame(before, after);
+        Assert.True(after.Contains(added));
+    }
+
+    [Fact]
+    public void Noticed_ForAFileThatDisappeared_RebuildsThePathIndex()
+    {
+        var removed = Path.Combine(directory.FullName, "Removed.txt");
+
+        File.WriteAllText(removed, "x");
+
+        var harness = Open();
+
+        Assert.True(harness.Indexes.Paths().Contains(removed));
+
+        File.Delete(removed);
+        harness.Indexes.Noticed(removed);
+
+        Assert.False(harness.Indexes.Paths().Contains(removed));
+    }
+
+    [Fact]
+    public void Noticed_ForAnEditToAKnownFile_KeepsThePathIndex()
+    {
+        var edited = Path.Combine(directory.FullName, "Edited.txt");
+
+        File.WriteAllText(edited, "x");
+
+        var harness = Open();
+        var before = harness.Indexes.Paths();
+
+        File.WriteAllText(edited, "y");
+        harness.Indexes.Noticed(edited);
+
+        Assert.Same(before, harness.Indexes.Paths());
+    }
+
+    [Fact]
+    public void Touched_ForAWorkspaceFile_BumpsTheFileGeneration()
+    {
+        var harness = Open();
+        var before = harness.Sync.Generations.Files;
+
+        harness.Sync.Touched(Path.Combine(directory.FullName, "Added.cs"));
+
+        Assert.Equal(before + 1, harness.Sync.Generations.Files);
+    }
+
+    [Fact]
+    public void Touched_ForAnExcludedPath_LeavesTheFileGenerationAlone()
+    {
+        var harness = Open();
+        var before = harness.Sync.Generations.Files;
+
+        harness.Sync.Touched(Path.Combine(directory.FullName, "obj", "Generated.cs"));
+
+        Assert.Equal(before, harness.Sync.Generations.Files);
+    }
+
+    [Fact]
+    public void Noticed_ForAWriteInsideAnExcludedDirectory_KeepsThePathIndex()
+    {
+        var harness = Open();
+        var before = harness.Indexes.Paths();
+        var generated = Path.Combine(directory.FullName, "obj", "Generated.cs");
+
+        Directory.CreateDirectory(Path.GetDirectoryName(generated)!);
+        File.WriteAllText(generated, "x");
+        harness.Indexes.Noticed(generated);
+
+        Assert.Same(before, harness.Indexes.Paths());
+    }
+
+    [Fact]
+    public void Paths_WhileACodeChangeIsPending_IsStillServedFromTheIndex()
+    {
+        var harness = Open();
+        var before = harness.Indexes.Paths();
+
+        harness.Sync.Notice(Path.Combine(directory.FullName, "Pending.cs"));
+
+        Assert.Equal(1, harness.Sync.PendingCount);
+        Assert.Same(before, harness.Indexes.Paths());
+    }
 }

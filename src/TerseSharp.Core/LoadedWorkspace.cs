@@ -72,7 +72,8 @@ public sealed class LoadedWorkspace : IDisposable
         IReadOnlyList<DocumentId> changed,
         CancellationToken cancellationToken)
     {
-        var entry = await CaptureAsync(workspace.CurrentSolution, changed, cancellationToken).ConfigureAwait(false);
+        var before = workspace.CurrentSolution;
+        var entry = await CaptureAsync(before, changed, cancellationToken).ConfigureAwait(false);
         var rebased = await RebasedAsync(solution, changed, cancellationToken).ConfigureAwait(false);
 
         if (!Committed(rebased, solution, entry))
@@ -83,7 +84,21 @@ public sealed class LoadedWorkspace : IDisposable
 
         Sync.Bumped(ChangeKind.Code);
 
+        if (Moved(before, Solution, changed))
+            Sync.Bumped(ChangeKind.Files);
+
         return true;
+    }
+
+    private static bool Moved(Solution before, Solution after, IReadOnlyList<DocumentId> changed)
+    {
+        foreach (var document in changed)
+        {
+            if (before.GetDocument(document) is null || after.GetDocument(document) is null)
+                return true;
+        }
+
+        return false;
     }
 
     public async Task<bool> AdoptAsync(Solution solution, CancellationToken cancellationToken)

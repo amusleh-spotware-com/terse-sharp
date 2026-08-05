@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Collections.Frozen;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
@@ -29,7 +31,7 @@ public static class TextSearchService
         CancellationToken cancellationToken)
     {
         var matcher = TextMatcher.Create(pattern, regex);
-        var candidates = Files(workspace.Root, glob).Where(IsSearchable).ToArray();
+        var candidates = Matched(workspace, glob).Where(IsSearchableFile).ToArray();
         var perFile = new FileHits[candidates.Length];
 
         await Parallel.ForEachAsync(
@@ -43,32 +45,15 @@ public static class TextSearchService
 
     public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults)
     {
-        var files = Files(workspace.Root, glob).ToArray();
+        var files = Matched(workspace, glob);
         var response = new ResponseBuilder("find_files", glob);
 
-        response.Summary(Math.Min(files.Length, maxResults), files.Length, "files", "a narrower glob= or maxResults=");
+        response.Summary(Math.Min(files.Count, maxResults), files.Count, "files", "a narrower glob= or maxResults=");
 
         foreach (var file in files.Take(maxResults))
             response.Line(file.RelativePath);
 
         return response.ToString();
-    }
-
-    private static bool IsSearchable(SourceCandidate file) =>
-        !BinaryExtensions.Contains(Path.GetExtension(file.FullPath));
-
-    private static async Task<FileHits> ScanAsync(
-        SourceCandidate file,
-        TextMatcher matcher,
-        int maxResults,
-        CancellationToken cancellationToken)
-    {
-        if (file.Length > MaxSearchableBytes)
-            return FileHits.Oversized;
-
-        var text = await ReadAsync(file.FullPath, cancellationToken).ConfigureAwait(false);
-
-        return text is null || IsBinary(text) ? FileHits.None : Collect(file.RelativePath, text, matcher, maxResults);
     }
 
     private static bool IsBinary(string text) =>
@@ -142,29 +127,6 @@ public static class TextSearchService
         return response.ToString();
     }
 
-    private static async Task<string?> ReadAsync(string file, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var stream = new FileStream(file, Options());
-
-            await using (stream.ConfigureAwait(false))
-            {
-                using var reader = new StreamReader(stream);
-
-                return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
     private static FileStreamOptions Options() => new()
     {
         Mode = FileMode.Open,
@@ -172,68 +134,6 @@ public static class TextSearchService
         Share = FileShare.ReadWrite | FileShare.Delete,
         Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
     };
-
-    private static IEnumerable<SourceCandidate> Files(string root, string glob)
-    {
-        var matcher = FileGlob.Compile(string.IsNullOrWhiteSpace(glob) ? "*" : glob);
-
-        return Walk(root).Where(file => matcher.MatchesRelative(file.RelativePath));
-    }
-
-    private static IEnumerable<SourceCandidate> Walk(string root)
-    {
-        var pending = new Stack<string>();
-
-        pending.Push(root);
-
-        while (pending.Count > 0)
-        {
-            var directory = pending.Pop();
-
-            foreach (var child in Subdirectories(directory))
-                pending.Push(child);
-
-            foreach (var file in Entries(directory))
-                yield return new SourceCandidate(file.FullName, Path.GetRelativePath(root, file.FullName), file.Length);
-        }
-    }
-
-    private static IEnumerable<string> Subdirectories(string directory) =>
-        Directories(directory).Where(WorkspaceFiles.Traversable);
-
-    private static FileInfo[] Entries(string directory)
-    {
-        try
-        {
-            return new DirectoryInfo(directory).GetFiles();
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-
-    private static string[] Directories(string directory)
-    {
-        try
-        {
-            return [.. Directory.EnumerateDirectories(directory)];
-        }
-        catch (IOException)
-        {
-            return [];
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return [];
-        }
-    }
-
-    private readonly record struct SourceCandidate(string FullPath, string RelativePath, long Length);
 
     private readonly record struct FileHits(IReadOnlyList<string> Hits, int Total, int Skipped)
     {
@@ -265,9 +165,13 @@ public static class TextSearchService
         }
     }
 
-    private readonly record struct TextMatcher(string Pattern, Regex? Expression)
+    private readonly record struct TextMatcher(string Pattern, Regex? Expression, byte[]? Needle)
     {
-        public static TextMatcher Create(string pattern, bool regex) => new(pattern, regex ? Compile(pattern) : null);
+        public static TextMatcher Create(string pattern, bool regex) => regex
+            ? new(pattern, Compile(pattern), null)
+            : new(pattern, null, Encoding.UTF8.GetBytes(pattern));
+
+        public bool MayContain(ReadOnlySpan<byte> content) => Needle is null || content.IndexOf(Needle) >= 0;
 
         public int Next(ReadOnlySpan<char> text, int from)
         {
@@ -291,5 +195,146 @@ public static class TextSearchService
                 return new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.Multiline, TimeSpan.FromSeconds(2));
             }
         }
+    }
+
+    private static List<WorkspacePath> Matched(LoadedWorkspace workspace, string glob)
+    {
+        var matcher = FileGlob.Compile(string.IsNullOrWhiteSpace(glob) ? "*" : glob);
+        var index = workspace.Indexes.Paths();
+        var matched = new List<WorkspacePath>(Math.Min(index.Count, 1024));
+
+        foreach (var path in index.Paths)
+        {
+            if (matcher.MatchesRelative(path.RelativePath))
+                matched.Add(path);
+        }
+
+        return matched;
+    }
+
+    private static bool IsSearchableFile(WorkspacePath file) =>
+        !BinaryExtensions.Contains(Path.GetExtension(file.FullPath));
+
+    private static readonly byte[] Utf8Bom = [0xEF, 0xBB, 0xBF];
+    private static readonly byte[] Utf16LittleEndianBom = [0xFF, 0xFE];
+    private static readonly byte[] Utf16BigEndianBom = [0xFE, 0xFF];
+
+    private static async Task<FileHits> ScanAsync(
+        WorkspacePath file,
+        TextMatcher matcher,
+        int maxResults,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await ProbeAsync(file, matcher, maxResults, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            return FileHits.None;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return FileHits.None;
+        }
+    }
+
+    private static async Task<FileHits> ProbeAsync(
+        WorkspacePath file,
+        TextMatcher matcher,
+        int maxResults,
+        CancellationToken cancellationToken)
+    {
+        var stream = new FileStream(file.FullPath, Options());
+
+        await using (stream.ConfigureAwait(false))
+        {
+            if (!stream.CanSeek)
+                return Text(file.RelativePath, await StreamedAsync(stream, cancellationToken).ConfigureAwait(false), matcher, maxResults);
+
+            return stream.Length > MaxSearchableBytes
+                ? FileHits.Oversized
+                : await BufferedAsync(stream, file.RelativePath, matcher, maxResults, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<string> StreamedAsync(Stream stream, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(stream);
+
+        return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static FileHits Text(string relativePath, string text, TextMatcher matcher, int maxResults) =>
+        IsBinary(text) ? FileHits.None : Collect(relativePath, text, matcher, maxResults);
+
+    private static async Task<FileHits> BufferedAsync(
+        FileStream stream,
+        string relativePath,
+        TextMatcher matcher,
+        int maxResults,
+        CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(Math.Max((int)stream.Length, 1));
+
+        try
+        {
+            var probe = Math.Min(buffer.Length, BinaryProbe);
+            var probed = await FillAsync(stream, buffer.AsMemory(0, probe), cancellationToken).ConfigureAwait(false);
+
+            if (LooksBinary(buffer.AsSpan(0, probed)))
+                return FileHits.None;
+
+            var filled = probed + await FillAsync(stream, buffer.AsMemory(probed), cancellationToken).ConfigureAwait(false);
+
+            return Scan(relativePath, buffer, filled, matcher, maxResults);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static async Task<int> FillAsync(FileStream stream, Memory<byte> destination, CancellationToken cancellationToken)
+    {
+        var filled = 0;
+
+        while (filled < destination.Length)
+        {
+            var read = await stream.ReadAsync(destination[filled..], cancellationToken).ConfigureAwait(false);
+
+            if (read is 0)
+                break;
+
+            filled += read;
+        }
+
+        return filled;
+    }
+
+    private static bool LooksBinary(ReadOnlySpan<byte> prefix) =>
+        !IsWideText(prefix) && prefix.IndexOf((byte)0) >= 0;
+
+    private static FileHits Scan(string relativePath, byte[] buffer, int length, TextMatcher matcher, int maxResults)
+    {
+        var content = buffer.AsSpan(0, length);
+
+        return !IsWideText(content) && !matcher.MayContain(content)
+            ? FileHits.None
+            : Text(relativePath, Decode(content), matcher, maxResults);
+    }
+
+    private static bool IsWideText(ReadOnlySpan<byte> content) =>
+        content.StartsWith(Utf16LittleEndianBom) || content.StartsWith(Utf16BigEndianBom);
+
+    private static string Decode(ReadOnlySpan<byte> content)
+    {
+        if (content.StartsWith(Utf16LittleEndianBom))
+            return Encoding.Unicode.GetString(content[Utf16LittleEndianBom.Length..]);
+
+        if (content.StartsWith(Utf16BigEndianBom))
+            return Encoding.BigEndianUnicode.GetString(content[Utf16BigEndianBom.Length..]);
+
+        return Encoding.UTF8.GetString(content.StartsWith(Utf8Bom) ? content[Utf8Bom.Length..] : content);
     }
 }

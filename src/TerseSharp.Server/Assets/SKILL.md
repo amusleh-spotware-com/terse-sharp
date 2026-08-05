@@ -130,17 +130,27 @@ rebuilding an analyzer whose behaviour you need to see.
 Facing an unfamiliar repository, `load_workspace(path, discover: true)` lists every solution and
 project under a directory without loading one — auto-discovery only walks *up* from the working
 directory, so this is the call that replaces globbing for `*.sln`. Its
-last line reports freshness — `watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0`: the
-watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor), how many paths are
+last line reports freshness — `watch=active gen=c12/p1/x3/r0/rz2/f4 pending=0 lastSyncMs=8 gaps=0`: the
+watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor / Files), how many paths are
 waiting to be examined, and how many watcher events were lost. `load_workspace(reload: true)` forces a
 re-read from disk; you should almost never need it. The line after it reports the workspace index —
 `index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10)
-documents=9/128 parses=9`.
+paths(hit=7 miss=1 files=31324) documents=9/128 parses=9`.
+
+**`find_files`, `search_text` and `search_regex` answer from that `paths` index, not from a fresh
+walk.** The tree is enumerated once and re-enumerated only when the watcher sees a file appear,
+disappear or get renamed, so a repeat `find_files` on a 31 000-file solution costs a glob match over
+an in-memory list rather than a full directory walk. Ask them as often as you like; a file you or the
+user just created, deleted or renamed is in the answer without a reload — the writers say so directly,
+so it does not wait on a watcher event. When the watcher is off or degraded the index is not trusted
+and the tree is walked again — correct, just slower.
 
 **`failures=` and `warnings=` are different things.** `failures=` counts projects that did not load;
 `warnings=` counts MSBuild diagnostics that did not stop a load — NuGet advisories (NU1903), target
 framework notes (NU1701) and the like. A big solution routinely reports `failures=0 warnings=20` and
-is fully usable. The warnings are listed only with `verbose=true`, so do not read a warning count as a
+is fully usable. **Neither is listed by default**: the warnings are a count, and the failures are
+folded to one `FAILED <project>  messages=N` line per project under a `N load failure(s) in M
+project(s)` header. `verbose=true` prints every message of both. So do not read a warning count as a
 broken workspace, and do not fall back to the built-ins over one.
 
 **Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·

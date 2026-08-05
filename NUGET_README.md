@@ -274,11 +274,14 @@ state **with an `EXACT` tag**. It now tracks the tree.
   share one index per workspace, built once per generation and reused until that counter moves. When
   it does, only the files whose stamp changed are re-parsed — a one-file edit in a 200-file tree costs
   one parse, not 200.
+- **`find_files`, `search_text` and `search_regex` no longer walk the tree** — they answer from a path
+  index rebuilt only when the watcher sees a file appear, disappear or get renamed, so a repeat call on
+  a 31 000-file solution is a glob match over memory instead of a full directory enumeration.
 - **Undo knows it was overtaken** — an external change to a file an undo snapshot covers drops that
   snapshot and every one above it, and `undo_last_change` says so instead of silently reverting
   someone else's work.
 
-`workspace_status` reports `watch=active gen=c12/p1/x3/r0/rz2 pending=0 lastSyncMs=8 gaps=0` and the
+`workspace_status` reports `watch=active gen=c12/p1/x3/r0/rz2/f4 pending=0 lastSyncMs=8 gaps=0` and the
 index hit rates. `load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`)
 turns the watcher off for constrained containers, and `terse doctor` reports whether this platform
 supports file watching at all.

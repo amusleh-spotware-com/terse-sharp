@@ -1,6 +1,6 @@
 ﻿namespace TerseSharp.Core;
 
-public readonly record struct WorkspaceGenerations(int Code, int Project, int Xaml, int Resx, int Razor = 0)
+public readonly record struct WorkspaceGenerations(int Code, int Project, int Xaml, int Resx, int Razor = 0, int Files = 0)
 {
     public int Of(ChangeKind kind) => kind switch
     {
@@ -9,6 +9,7 @@ public readonly record struct WorkspaceGenerations(int Code, int Project, int Xa
         ChangeKind.Xaml => Xaml,
         ChangeKind.Resx => Resx,
         ChangeKind.Razor => Razor,
+        ChangeKind.Files => Files,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -19,6 +20,7 @@ public readonly record struct WorkspaceGenerations(int Code, int Project, int Xa
         ChangeKind.Xaml => this with { Xaml = Xaml + 1 },
         ChangeKind.Resx => this with { Resx = Resx + 1 },
         ChangeKind.Razor => this with { Razor = Razor + 1 },
+        ChangeKind.Files => this with { Files = Files + 1 },
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
@@ -26,5 +28,5 @@ public readonly record struct WorkspaceGenerations(int Code, int Project, int Xa
 
     public override string ToString() => string.Create(
         CultureInfo.InvariantCulture,
-        $"c{Code}/p{Project}/x{Xaml}/r{Resx}/rz{Razor}");
+        $"c{Code}/p{Project}/x{Xaml}/r{Resx}/rz{Razor}/f{Files}");
 }

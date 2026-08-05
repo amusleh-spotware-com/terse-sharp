@@ -8,6 +8,49 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+**Response format changed — this release is a MAJOR bump under the tool-surface contract in
+`RELEASING.md`.** `load_workspace` and `workspace_status` no longer list the MSBuild load failure
+messages; they report one line per failed project and keep the messages behind `verbose=true`. The
+generation counter and index lines both gained a field.
+
+### Changed
+
+- **BREAKING (response format) — load failures are grouped per project.** `load_workspace` and
+  `workspace_status` used to print one `FAILED <full MSBuild message>` line per diagnostic, up to
+  twenty. On a solution whose NuGet audit is escalated to errors that is a wall of near-identical
+  advisory text — measured at **6712 characters** of `workspace_status` on a 148-project solution,
+  most of it the same `SharpZipLib` advisory repeated. The default response is now a
+  `20 load failure(s) in 9 project(s); verbose=true lists the messages` header followed by one
+  `FAILED <project>.csproj  messages=N` line per project, capped at twenty projects with a note when
+  more were folded. Same response, **1211 characters**. `verbose=true` restores every message
+  verbatim, exactly as before, and the `failures=` / `warnings=` counters are unchanged.
+- **`workspace_status` reports a sixth generation counter and a fifth index.** The freshness line is
+  now `gen=c12/p1/x3/r0/rz2/f4` — `f` counts file-tree changes — and the index line carries
+  `paths(hit=7 miss=1 files=31324)`.
+
+### Performance
+
+- **`find_files`, `search_text` and `search_regex` no longer walk the directory tree on every call.**
+  Each call used to enumerate every directory under the workspace root and allocate a `FileInfo` per
+  file before it could match a single glob. They now answer from a path index that is built once and
+  rebuilt only when the file watcher sees a file appear, disappear or get renamed — the same
+  generation-keyed slot the XAML, resx, registration and Razor indexes use, so it is not trusted (and
+  the walk happens anyway) when the watcher is off, degraded or behind. Measured on a 148-project /
+  31 325-document / 45 941-file solution, warm median: `find_files **/*Service.cs`
+  **2305 ms → 19.7 ms**, `search_text` **5547 ms → 685 ms**. The JetBrains Rider MCP answers the same
+  two questions on the same solution in 30.5 ms and 386.5 ms.
+- **`search_text` stopped decoding files that cannot match.** A literal search now scans the raw
+  UTF-8 bytes of each file — vectorized, from a pooled buffer — and only decodes to a `string` when
+  the needle is present or the file carries a UTF-16 byte-order mark. Previously every candidate file
+  was decoded in full before the first comparison. `search_regex` still decodes every candidate: a
+  regular expression has no single byte sequence to pre-scan for.
+- **`search_text` and `search_regex` stopped reading binary files in full.** The 4096-byte NUL probe
+  used to run on the decoded text, so a file was read and decoded before it could be rejected. It now
+  runs on the first 4 KB of **bytes** and the rest is never read. On the solution above that is
+  **2523 MB → 226 MB** of file content per search: 528 MB of `.ldb`, 338 MB of `.db-wal` and 192 MB
+  of `.ctr201` were being read and thrown away on every call, none of which any extension allowlist
+  named. A UTF-16 byte-order mark suppresses the probe, so wide text is not mistaken for binary.
+
 ## [0.18.0] - 2026-08-04
 
 **Response formats changed.** `build`, `run_tests`, `rerun_failed` and `list_tests` no longer return

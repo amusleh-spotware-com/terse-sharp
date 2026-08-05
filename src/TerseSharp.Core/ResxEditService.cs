@@ -666,8 +666,11 @@ public static class ResxEditService
 
     private static Result<string> Settled(LoadedWorkspace workspace, Result<string> written, bool dryRun)
     {
-        if (written.IsOk && !dryRun)
-            workspace.Sync.Bumped(ChangeKind.Resx);
+        if (!written.IsOk || dryRun)
+            return written;
+
+        workspace.Sync.Bumped(ChangeKind.Resx);
+        workspace.Sync.Bumped(ChangeKind.Files);
 
         return written;
     }

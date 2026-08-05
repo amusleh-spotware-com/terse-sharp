@@ -345,9 +345,18 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     public void Noticed(string path, ChangeKind kind)
     {
         Notice(path);
+        Touched(path);
         Bumped(kind);
 
         if (kind is ChangeKind.Razor)
             RazorGeneratedMap.Forget();
+    }
+
+    public void Touched(string path)
+    {
+        if (WorkspaceFiles.IsTemporary(path) || WorkspaceFiles.IsExcluded(path, root))
+            return;
+
+        Bumped(ChangeKind.Files);
     }
 }

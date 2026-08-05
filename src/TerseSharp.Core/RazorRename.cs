@@ -132,6 +132,7 @@ public static class RazorRename
         {
             Relocate(move, done);
             workspace.Sync.Noticed(move.From, ChangeKind.Razor);
+            workspace.Sync.Noticed(move.To, ChangeKind.Razor);
         }
 
         return Render(workspace, "applied", moves, rewrites);

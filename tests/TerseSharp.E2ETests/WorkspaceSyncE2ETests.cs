@@ -312,4 +312,56 @@ public sealed class WorkspaceSyncE2ETests
         Assert.Contains("// marker", after, StringComparison.Ordinal);
         Assert.Contains("Value() => 42;", after, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ExternalCreate_OfANonCodeFile_IsListedByFindFilesWithoutAReload()
+    {
+        await using var solution = await StartAsync(watch: true);
+
+        await solution.CallAsync("find_files", new() { ["glob"] = "**/*.md" });
+
+        await File.WriteAllTextAsync(
+            Path.Combine(solution.ProjectDirectory, "SyncedNote.md"),
+            "# synced\n",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(await PollAsync(
+            () => solution.CallAsync("find_files", new() { ["glob"] = "**/*.md" }),
+            "SyncedNote.md"));
+    }
+
+    [Fact]
+    public async Task SearchText_InAUtf16EncodedFile_StillFindsTheToken()
+    {
+        await using var solution = await StartAsync(watch: true);
+
+        await File.WriteAllTextAsync(
+            Path.Combine(solution.ProjectDirectory, "Utf16Note.txt"),
+            "WideEncodedMarker\n",
+            new System.Text.UnicodeEncoding(false, true),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(await PollAsync(
+            () => solution.CallAsync("search_text", new() { ["query"] = "WideEncodedMarker" }),
+            "Utf16Note.txt"));
+    }
+
+    [Fact]
+    public async Task ExternalDelete_OfANonCodeFile_DropsItFromFindFiles()
+    {
+        await using var solution = await StartAsync(watch: true);
+        var path = Path.Combine(solution.ProjectDirectory, "DoomedNote.md");
+
+        await File.WriteAllTextAsync(path, "# doomed\n", TestContext.Current.CancellationToken);
+
+        Assert.True(await PollAsync(
+            () => solution.CallAsync("find_files", new() { ["glob"] = "**/*.md" }),
+            "DoomedNote.md"));
+
+        File.Delete(path);
+
+        Assert.True(await PollAsync(
+            () => solution.CallAsync("find_files", new() { ["glob"] = "**/*.md" }),
+            "0 files"));
+    }
 }
