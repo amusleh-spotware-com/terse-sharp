@@ -44,6 +44,13 @@ generation counter and index lines both gained a field.
   the needle is present or the file carries a UTF-16 byte-order mark. Previously every candidate file
   was decoded in full before the first comparison. `search_regex` still decodes every candidate: a
   regular expression has no single byte sequence to pre-scan for.
+- **`search_text` and `search_regex` stopped renting a whole-file buffer for a file they are about
+  to reject.** The binary probe now reads 4 KB into a small pooled buffer, and the full-size buffer
+  is rented only once the file is known to be text. Previously every candidate — including a 8.7 MB
+  workspace file or a 5 MB database segment — was rented at full size and released after the probe,
+  and `ArrayPool<byte>.Shared` does not pool above 1 MB, so each of those was a fresh large-object
+  allocation per file per search. Measured on a 148-project solution: eight identical `search_text`
+  calls grew the working set by **491 MB before, 293 MB after**.
 - **`search_text` and `search_regex` stopped reading binary files in full.** The 4096-byte NUL probe
   used to run on the decoded text, so a file was read and decoded before it could be rejected. It now
   runs on the first 4 KB of **bytes** and the rest is never read. On the solution above that is

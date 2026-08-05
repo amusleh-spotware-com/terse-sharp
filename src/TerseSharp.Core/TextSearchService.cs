@@ -275,23 +275,39 @@ public static class TextSearchService
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var buffer = ArrayPool<byte>.Shared.Rent(Math.Max((int)stream.Length, 1));
+        if (await LooksBinaryAsync(stream, cancellationToken).ConfigureAwait(false))
+            return FileHits.None;
+
+        stream.Position = 0;
+
+        var length = Math.Max((int)stream.Length, 1);
+        var buffer = ArrayPool<byte>.Shared.Rent(length);
 
         try
         {
-            var probe = Math.Min(buffer.Length, BinaryProbe);
-            var probed = await FillAsync(stream, buffer.AsMemory(0, probe), cancellationToken).ConfigureAwait(false);
-
-            if (LooksBinary(buffer.AsSpan(0, probed)))
-                return FileHits.None;
-
-            var filled = probed + await FillAsync(stream, buffer.AsMemory(probed), cancellationToken).ConfigureAwait(false);
+            var filled = await FillAsync(stream, buffer.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
 
             return Scan(relativePath, buffer, filled, matcher, maxResults);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static async Task<bool> LooksBinaryAsync(FileStream stream, CancellationToken cancellationToken)
+    {
+        var probe = ArrayPool<byte>.Shared.Rent(BinaryProbe);
+
+        try
+        {
+            var read = await FillAsync(stream, probe.AsMemory(0, BinaryProbe), cancellationToken).ConfigureAwait(false);
+
+            return LooksBinary(probe.AsSpan(0, read));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(probe);
         }
     }
 
