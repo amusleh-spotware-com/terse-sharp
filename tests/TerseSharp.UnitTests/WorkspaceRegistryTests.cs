@@ -1,5 +1,4 @@
 using TerseSharp.Core;
-using Xunit;
 
 namespace TerseSharp.UnitTests;
 
@@ -98,5 +97,47 @@ public sealed class WorkspaceRegistryTests
         resolved.Value!.Dispose();
 
         Assert.Empty(workspace.Solution.Projects);
+    }
+
+    [Fact]
+    public async Task LoadAsync_BeyondTheLimit_UnloadsTheLeastRecentlyUsed()
+    {
+        using var registry = new WorkspaceRegistry(maxWorkspaces: 1);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        var loaded = registry.All();
+
+        Assert.Single(loaded);
+        Assert.Equal(Path.GetFullPath(Fixtures.RazorSolutionPath), loaded[0].SolutionPath);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WithinTheLimit_KeepsBothWorkspaces()
+    {
+        using var registry = new WorkspaceRegistry(maxWorkspaces: 2);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, registry.All().Count);
+    }
+
+    [Fact]
+    public async Task Unload_AfterLoad_ForgetsTheRazorGeneratedCacheForItsProjects()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        var loaded = registry.All()[0];
+        var projects = loaded.Solution.ProjectIds;
+
+        await RazorGeneratedMap.InProjectAsync(loaded.Solution.Projects.First(), TestContext.Current.CancellationToken);
+
+        Assert.True(RazorGeneratedMap.Knows(projects[0]));
+        Assert.True(registry.Unload(Fixtures.RazorSolutionPath));
+        Assert.False(RazorGeneratedMap.Knows(projects[0]));
     }
 }

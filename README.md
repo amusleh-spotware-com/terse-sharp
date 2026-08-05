@@ -480,6 +480,19 @@ index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=
 
 `load_workspace(reload: true)` forces a reload; `--no-watch` (or `TERSE_WATCH=0`) turns the watcher
 off for constrained containers, and `terse doctor` reports whether this platform supports watching.
+
+**Four solutions stay loaded at once; `--max-workspaces` (or `TERSE_MAX_WORKSPACES`) changes that.**
+A loaded workspace costs what Roslyn costs — measured at roughly 3 GB of resident memory for a
+148-project, 31 000-document solution once its compilations exist — so the default of four is a
+memory budget, not a free cache. Set `terse serve --max-workspaces 1` when you only ever work in one
+solution; the least recently used one is unloaded beyond the limit and reloads on the next call that
+needs it. Unloading — by eviction or by `unload_workspace` — ends with a compacting gen 2 collection,
+because dropping the last reference is not the same as giving the pages back: on the solution above,
+eviction alone moved the working set by 57 MB, and eviction plus the collection took it from 3418 MB
+to 652 MB. It runs when a workspace is actually unloaded or evicted — never merely because a tool was
+called — so on a capped server it lands inside whichever call did the evicting. The unload-and-retry
+that `build` and `run_tests` perform on a locked output skips it: they reload the same workspace
+immediately.
 </details>
 
 ---

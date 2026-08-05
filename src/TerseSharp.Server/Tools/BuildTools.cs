@@ -140,7 +140,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         if (context.Registry.All().Count is not 1)
             return first.Response + NotRecovered(operation);
 
-        if (!context.Registry.Unload(target.SolutionPath))
+        if (!context.Registry.Unload(target.SolutionPath, reclaim: false))
             return first.Response;
 
         var second = await run().ConfigureAwait(false);

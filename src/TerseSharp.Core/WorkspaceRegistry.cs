@@ -28,12 +28,13 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         finally
         {
             gate.Release();
+            ReclaimIfRequested();
         }
     }
 
     public IReadOnlyList<LoadedWorkspace> All() => Snapshot();
 
-    public bool Unload(string path)
+    public bool Unload(string path, bool reclaim = true)
     {
         var full = Path.GetFullPath(path);
         LoadedWorkspace? workspace;
@@ -44,8 +45,11 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
                 return false;
         }
 
-        workspace.Dispose();
         FixerCatalog.Clear();
+        workspace.Dispose();
+
+        if (reclaim)
+            Reclaim();
 
         return true;
     }
@@ -95,11 +99,25 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     private async Task<LoadedWorkspace> AddAsync(string full, WorkspaceSeed seed, CancellationToken cancellationToken)
     {
         var loaded = await WorkspaceLoader.LoadAsync(full, seed, cancellationToken).ConfigureAwait(false);
+        var evicted = Store(full, loaded);
 
-        foreach (var evicted in Store(full, loaded))
-            evicted.Dispose();
+        if (evicted.Length > 0)
+        {
+            FixerCatalog.Clear();
+            Interlocked.Exchange(ref reclaimRequested, 1);
+        }
+
+        foreach (var workspace in evicted)
+            workspace.Dispose();
 
         return loaded;
+    }
+
+    private static void Reclaim()
+    {
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
     }
 
     private LoadedWorkspace[] Store(string full, LoadedWorkspace loaded)
@@ -219,6 +237,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         finally
         {
             gate.Release();
+            ReclaimIfRequested();
         }
     }
 
@@ -239,4 +258,12 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
     private static string Key(LoadedWorkspace? previous, string full) =>
         previous is null ? full : Path.GetFullPath(previous.SolutionPath);
+
+    private int reclaimRequested;
+
+    private void ReclaimIfRequested()
+    {
+        if (Interlocked.Exchange(ref reclaimRequested, 0) is not 0)
+            Reclaim();
+    }
 }

@@ -13,6 +13,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 messages; they report one line per failed project and keep the messages behind `verbose=true`. The
 generation counter and index lines both gained a field.
 
+### Added
+
+- **`terse serve --max-workspaces N`, and `TERSE_MAX_WORKSPACES`.** The registry has always kept the
+  four most recently used solutions loaded and unloaded the rest; nothing could change that number.
+  A loaded workspace costs what Roslyn costs — measured at ~3 GB resident for a 148-project /
+  31 325-document solution once its compilations exist — so four is a multi-gigabyte budget that a
+  user working in one solution never asked for. The option takes precedence over the environment
+  variable, an unusable value in either falls back to the shipped default of 4, and the default
+  behaviour is unchanged.
+
 ### Changed
 
 - **BREAKING (response format) — load failures are grouped per project.** `load_workspace` and
@@ -27,6 +37,26 @@ generation counter and index lines both gained a field.
 - **`workspace_status` reports a sixth generation counter and a fifth index.** The freshness line is
   now `gen=c12/p1/x3/r0/rz2/f4` — `f` counts file-tree changes — and the index line carries
   `paths(hit=7 miss=1 files=31324)`.
+
+### Fixed
+
+- **An unloaded workspace kept its compilations alive.** `RazorGeneratedMap` caches generated-document
+  descriptions in a `static` dictionary keyed by `ProjectId`, and each entry holds an
+  `INamedTypeSymbol` and a `Project` — both of which root the whole `Solution`, and therefore every
+  compilation in it. Nothing cleared those entries, so `unload_workspace` and LRU eviction dropped the
+  workspace without releasing its memory. A disposed workspace now forgets its own projects' entries.
+- **Unloading a workspace now actually returns the memory.** Dropping the last reference is not the
+  same as giving the pages back: with Server GC on a machine with free RAM there is no pressure to
+  collect gen 2, so an evicted 3 GB solution stayed resident indefinitely. Measured on a 148-project
+  solution, evicting it moved the working set by **57 MB**. `unload_workspace` and LRU eviction now
+  end with a compacting gen 2 collection, which takes the same measurement from **3418 MB to
+  652 MB**. It runs when a workspace is **actually** unloaded or evicted, never merely because a tool
+  was called, and always after the gate that serialises loading has been released. On a capped server
+  that means it can land inside a `load_workspace`, or inside the automatic reload a tool call
+  triggers when the watcher saw the solution change — those are the calls that did the evicting. It
+  costs about 1.3 s. The unload-and-retry that `build`, `run_tests`, `list_tests` and `clean` perform
+  when a locked output blocks them passes `reclaim: false`, because it reloads the same workspace
+  immediately; that recovery path is unchanged.
 
 ### Performance
 

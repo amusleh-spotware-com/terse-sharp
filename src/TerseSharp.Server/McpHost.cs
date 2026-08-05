@@ -6,14 +6,19 @@ namespace TerseSharp.Server;
 
 public static class McpHost
 {
-    public static async Task RunAsync(string? workspace, bool readOnly, bool watch, CancellationToken cancellationToken)
+    public static async Task RunAsync(
+        string? workspace,
+        bool readOnly,
+        bool watch,
+        int maxWorkspaces,
+        CancellationToken cancellationToken)
     {
         var builder = Host.CreateApplicationBuilder();
 
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
-        builder.Services.AddSingleton(_ => new ToolContext(new WorkspaceRegistry(watch: watch), readOnly));
+        builder.Services.AddSingleton(_ => new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch), readOnly));
         builder.Services.AddSingleton<LastTestRun>();
         builder.Services
             .AddMcpServer()

@@ -286,6 +286,16 @@ index hit rates. `load_workspace(reload: true)` forces a reload; `--no-watch` (o
 turns the watcher off for constrained containers, and `terse doctor` reports whether this platform
 supports file watching at all.
 
+**Four solutions stay loaded at once; `--max-workspaces` (or `TERSE_MAX_WORKSPACES`) changes that.**
+A loaded workspace costs what Roslyn costs — roughly 3 GB resident for a 148-project,
+31 000-document solution once its compilations exist — so the default of four is a memory budget.
+Run `terse serve --max-workspaces 1` when you only ever work in one solution; beyond the limit the
+least recently used workspace is unloaded and reloads on the next call that needs it. Unloading ends
+with a compacting gen 2 collection so the pages actually come back — measured 3418 MB → 652 MB on
+that solution, where dropping the reference alone moved 57 MB. It runs when a workspace is actually
+unloaded or evicted, never merely because a tool was called; the unload-and-retry `build` and
+`run_tests` do on a locked output skips it.
+
 ## Safety
 
 - **Symbol-addressed edits** — no `old_string` echo, no line numbers to drift.

@@ -10,7 +10,9 @@ var skillOption = new Option<bool>("--skill") { Description = "Also install the 
 
 var guardOption = new Option<bool>("--guard") { Description = "Also install a Claude Code PreToolUse hook that blocks Read/Grep/Edit on C#/.NET and XAML files." };
 
-var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption };
+var maxWorkspacesOption = new Option<int?>("--max-workspaces") { Description = "How many solutions stay loaded at once; the least recently used is unloaded beyond that. Default 4. TERSE_MAX_WORKSPACES does the same. A large solution costs gigabytes, so set 1 when you only ever work in one." };
+
+var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption, maxWorkspacesOption };
 var guard = new Command("guard", "Hook entry point: reads a Claude Code PreToolUse payload on stdin and denies built-in tools on C#/.NET source.");
 var install = new Command("install", "Register TerseSharp with your MCP clients.") { clientOption, workspaceOption, skillOption, guardOption };
 var uninstall = new Command("uninstall", "Remove TerseSharp from your MCP clients.") { clientOption };
@@ -21,6 +23,7 @@ serve.SetAction((result, cancellationToken) =>
         result.GetValue(workspaceOption),
         result.GetValue(readOnlyOption),
         Watching(result.GetValue(noWatchOption)),
+        WorkspaceLimit.Resolve(result.GetValue(maxWorkspacesOption)),
         cancellationToken));
 
 static bool Watching(bool disabled) =>

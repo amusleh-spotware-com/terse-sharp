@@ -118,7 +118,17 @@ A silent drop is the breach, even when the reason would have been valid.
 prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=`.
 `unload_workspace` is the one workspace tool addressed by the solution **path** rather than a name —
 `workspace=` is accepted as an alias for `path=`, but a worktree name is not a path and will answer
-`not loaded`; `list_workspaces` prints the path to pass. **The analyzers a solution builds from source
+`not loaded`; `list_workspaces` prints the path to pass. **Four solutions stay loaded at once**, the
+least recently used being unloaded beyond that; a workspace that vanished from `list_workspaces`
+was evicted, not lost, and the next call naming it reloads it. The user can change the limit with
+`terse serve --max-workspaces N` or `TERSE_MAX_WORKSPACES` — worth telling them when a big solution
+is making the server heavy, because a loaded workspace costs roughly 3 GB on a 148-project tree.
+Unloading a workspace — by `unload_workspace` or by eviction — ends with a compacting collection, so
+the memory really does come back; that costs about a second, which is why it happens only when a
+workspace is genuinely dropped and why the unload-and-retry that `build`/`run_tests` perform on a
+locked output skips it.
+
+**The analyzers a solution builds from source
 no longer block your own build**: every analyzer and source-generator assembly is loaded from a
 shadow copy under a user-private `terse-analyzers/` cache, so the file in the project's `bin/` is never mapped and an
 external `dotnet build` succeeds while the workspace is loaded. The response still carries a `WARNING`

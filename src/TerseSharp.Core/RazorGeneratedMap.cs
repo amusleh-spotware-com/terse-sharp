@@ -15,6 +15,12 @@ public static class RazorGeneratedMap
 
     public static void Forget() => Cached.Clear();
 
+    public static void Forget(IReadOnlyList<ProjectId> projects)
+    {
+        for (var index = 0; index < projects.Count; index++)
+            Cached.TryRemove(projects[index], out _);
+    }
+
     public static string? SourceOf(string? generatedPath) =>
         generatedPath is { Length: > 0 } path && Sources.TryGetValue(path, out var razor) ? razor : null;
 
@@ -130,4 +136,6 @@ public static class RazorGeneratedMap
             ? null
             : model.GetDeclaredSymbol(declaration, cancellationToken);
     }
+
+    internal static bool Knows(ProjectId project) => Cached.ContainsKey(project);
 }

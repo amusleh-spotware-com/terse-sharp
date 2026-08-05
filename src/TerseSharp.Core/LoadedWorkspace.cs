@@ -266,6 +266,7 @@ public sealed class LoadedWorkspace : IDisposable
 
     private void Shutdown()
     {
+        RazorGeneratedMap.Forget(Solution.ProjectIds);
         workspace.Dispose();
         Solution = workspace.CurrentSolution;
         Sync.Dispose();

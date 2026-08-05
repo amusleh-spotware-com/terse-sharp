@@ -26,4 +26,7 @@ public static class Fixtures
 
         return directory?.FullName ?? throw new InvalidOperationException("TerseSharp.slnx not found above the test binaries");
     }
+
+    public static string RazorSolutionPath { get; } =
+        Path.Combine(RepositoryRoot, "fixtures", "RazorSolution", "RazorSolution.slnx");
 }
