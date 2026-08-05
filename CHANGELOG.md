@@ -8,10 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
-**Response format changed — this release is a MAJOR bump under the tool-surface contract in
-`RELEASING.md`.** `load_workspace` and `workspace_status` no longer list the MSBuild load failure
-messages; they report one line per failed project and keep the messages behind `verbose=true`. The
-generation counter and index lines both gained a field.
+## [0.19.0] - 2026-08-05
+
+**Response format changed.** `load_workspace` and `workspace_status` no longer list the MSBuild load
+failure messages; they report one line per failed project and keep the messages behind `verbose=true`.
+The generation counter and index lines both gained a field. An agent that parsed `FAILED <message>`,
+`gen=c…/rz…` or the `index=` line should re-read the two entries under **Changed**.
+
+**Large solutions got faster and much lighter.** On a 148-project, 31 000-document solution:
+`find_files` **2305 ms → 20 ms**, `search_text` **5547 ms → 685 ms**, and with
+`--max-workspaces 1` the resident set after switching solutions is **3347 MB → 963 MB**.
 
 ### Added
 
@@ -1486,7 +1492,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.19.0
 [0.18.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.18.0
 [0.17.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.1
 [0.17.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.0
