@@ -228,4 +228,31 @@ public sealed class WorkspaceRegistryTests
         Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
         Assert.False(registry.All()[0].CompilationsDropped);
     }
+
+    [Fact]
+    public async Task TakeDroppedNotice_ReportsTheDropExactlyOnce()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1));
+
+        var workspace = registry.All()[0];
+
+        Assert.True(workspace.TakeDroppedNotice());
+        Assert.False(workspace.TakeDroppedNotice());
+    }
+
+    [Fact]
+    public async Task TakeDroppedNotice_SurvivesTheTouchThatResolvingTheWorkspacePerforms()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1));
+
+        using var lease = registry.Resolve(null, null).Value!;
+
+        Assert.True(lease.Workspace.TakeDroppedNotice());
+    }
 }

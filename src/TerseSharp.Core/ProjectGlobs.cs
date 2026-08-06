@@ -24,13 +24,16 @@ public static class ProjectGlobs
 
         try
         {
-            return Enabled(project, "EnableDefaultItems") && Enabled(project, "EnableDefaultCompileItems");
+            return Sdk(project) && Enabled(project, "EnableDefaultItems") && Enabled(project, "EnableDefaultCompileItems");
         }
         finally
         {
             collection.UnloadProject(project);
         }
     }
+
+    private static bool Sdk(Project project) =>
+        string.Equals(project.GetPropertyValue("UsingMicrosoftNETSdk"), "true", StringComparison.OrdinalIgnoreCase);
 
     private static bool Enabled(Project project, string property) =>
         !string.Equals(project.GetPropertyValue(property), "false", StringComparison.OrdinalIgnoreCase);

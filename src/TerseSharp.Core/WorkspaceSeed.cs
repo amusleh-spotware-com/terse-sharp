@@ -1,4 +1,4 @@
-﻿namespace TerseSharp.Core;
+namespace TerseSharp.Core;
 
 internal readonly record struct WorkspaceSeed(
     WorkspaceGenerations Generations,

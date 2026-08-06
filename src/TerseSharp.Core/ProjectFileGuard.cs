@@ -6,15 +6,38 @@ public readonly record struct ProjectSnapshot(string ProjectPath, byte[] Bytes, 
 
 public static class ProjectFileGuard
 {
-    public static ProjectSnapshot? Capture(string? projectPath, IReadOnlyList<string> addedFiles)
+    public static async Task<ProjectSnapshot?> CaptureAsync(
+        string? projectPath,
+        IReadOnlyList<string> addedFiles,
+        CancellationToken cancellationToken)
     {
         if (projectPath is not { Length: > 0 } path || addedFiles.Count is 0 || !File.Exists(path))
             return null;
 
-        return ProjectGlobs.CompilesByGlob(path) is true
-            ? new ProjectSnapshot(path, File.ReadAllBytes(path), addedFiles)
-            : null;
+        if (!Globs(path))
+            return null;
+
+        return new ProjectSnapshot(path, await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false), addedFiles);
     }
+
+    private static bool Globs(string path)
+    {
+        var stamp = new FileInfo(path);
+        var key = new GlobKey(path, stamp.LastWriteTimeUtc, stamp.Length);
+
+        if (Verdicts.TryGetValue(key, out var known))
+            return known;
+
+        var verdict = ProjectGlobs.CompilesByGlob(path) is true;
+
+        Verdicts[key] = verdict;
+
+        return verdict;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<GlobKey, bool> Verdicts = new();
+
+    private readonly record struct GlobKey(string Path, DateTime LastWriteUtc, long Length);
 
     public static async Task<bool> RestoreAsync(ProjectSnapshot snapshot, CancellationToken cancellationToken)
     {
@@ -52,16 +75,32 @@ public static class ProjectFileGuard
 
     private static bool IsAddedItem(string line, IReadOnlyList<string> addedFiles)
     {
-        if (!line.StartsWith("<Compile ", StringComparison.Ordinal))
+        if (!line.StartsWith("<Compile ", StringComparison.Ordinal) || Included(line) is not { } include)
             return false;
+
+        var name = Path.GetFileName(include.AsSpan());
 
         foreach (var file in addedFiles)
         {
-            if (line.Contains(Path.GetFileName(file), StringComparison.OrdinalIgnoreCase))
+            if (name.Equals(Path.GetFileName(file.AsSpan()), StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 
         return false;
+    }
+
+    private static string? Included(string line)
+    {
+        const string Marker = "Include=\"";
+        var start = line.IndexOf(Marker, StringComparison.Ordinal);
+
+        if (start < 0)
+            return null;
+
+        var from = start + Marker.Length;
+        var end = line.IndexOf('"', from);
+
+        return end < 0 ? null : line[from..end];
     }
 
     private static bool IsItemGroupTag(string line) =>

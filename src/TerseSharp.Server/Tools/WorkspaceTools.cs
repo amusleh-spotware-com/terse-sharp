@@ -145,10 +145,10 @@ public sealed class WorkspaceTools(ToolContext context)
                 $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} failures={workspace.Load.Failures.Count} warnings={workspace.Load.Warnings.Count}")
             : string.Create(CultureInfo.InvariantCulture, $"documents={workspace.Load.DocumentCount}");
 
-        return workspace.CompilationsDropped
+        return workspace.TakeDroppedNotice()
             ? counts + string.Create(
                 CultureInfo.InvariantCulture,
-                $"  idle={(int)workspace.Idle.TotalMinutes}m compilations=dropped (the next semantic call re-realizes them)")
+                $"  idle={(int)workspace.DroppedAfter.TotalMinutes}m compilations=dropped (this call re-realizes what it needs)")
             : counts;
     }
 

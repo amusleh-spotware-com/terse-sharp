@@ -19,14 +19,23 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
         try
         {
-            if (Existing(full) is { } existing && SameFramework(existing.Load.TargetFramework, targetFramework))
+            var existing = Existing(full);
+
+            if (existing is not null && SameFramework(existing.Load.TargetFramework, targetFramework))
             {
                 existing.Touch();
 
                 return existing.Load;
             }
 
-            return (await AddAsync(full, WorkspaceSeed.Fresh(watch, targetFramework), cancellationToken).ConfigureAwait(false)).Load;
+            var loaded = await AddAsync(
+                Key(existing, full),
+                WorkspaceSeed.Fresh(watch, targetFramework),
+                cancellationToken).ConfigureAwait(false);
+
+            existing?.Dispose();
+
+            return loaded.Load;
         }
         finally
         {
@@ -221,7 +230,11 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
     private WorkspaceSeed Seed(LoadedWorkspace? previous) => previous is null
         ? WorkspaceSeed.Fresh(watch)
-        : new WorkspaceSeed(previous.Sync.Generations.Reloaded(), watch, previous.UndoNote());
+        : new WorkspaceSeed(
+            previous.Sync.Generations.Reloaded(),
+            watch,
+            previous.UndoNote(),
+            previous.Load.TargetFramework);
     public async Task<WorkspaceLoadResult> RefreshAsync(LoadedWorkspace stale, CancellationToken cancellationToken) =>
         (await SwapAsync(Path.GetFullPath(stale.SolutionPath), stale, cancellationToken).ConfigureAwait(false)).Load; private async Task<LoadedWorkspace> SwapAsync(string full, LoadedWorkspace? stale, CancellationToken cancellationToken)
     {

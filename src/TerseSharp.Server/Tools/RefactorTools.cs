@@ -60,16 +60,22 @@ public sealed class RefactorTools(ToolContext context)
 
     [McpServerTool(Name = "undo_last_change")]
     [Description("Revert the most recent mutation applied by this server. Keeps the last 10 snapshots.")]
-    public Task<string> UndoLastChange([Description("Workspace or worktree name.")] string? workspace = null) =>
+    public Task<string> UndoLastChange(
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default) =>
         context.RejectWrite() is { } rejection
             ? Task.FromResult(rejection)
-            : context.WithWorkspace(workspace, null, Undone);
+            : context.WithWorkspaceAsync(
+                workspace,
+                null,
+                loaded => UndoneAsync(loaded, cancellationToken),
+                cancellationToken: cancellationToken);
 
-    private static string Undone(LoadedWorkspace workspace)
+    private static async Task<string> UndoneAsync(LoadedWorkspace workspace, CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("undo_last_change", workspace.Git.WorktreeName);
 
-        response.Note(workspace.Undo());
+        response.Note(await workspace.UndoAsync(cancellationToken).ConfigureAwait(false));
 
         return response.ToString();
     }

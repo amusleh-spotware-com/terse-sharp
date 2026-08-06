@@ -51,18 +51,33 @@ public static class McpHost
     {
         using var timer = new PeriodicTimer(Sweep(idleFor));
 
+        while (await Ticked(timer, cancellationToken).ConfigureAwait(false))
+        {
+            try
+            {
+                context.Registry.DropIdleCompilations(idleFor);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                await Console.Error.WriteLineAsync("terse idle release failed: " + exception.Message).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static async Task<bool> Ticked(PeriodicTimer timer, CancellationToken cancellationToken)
+    {
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
-                context.Registry.DropIdleCompilations(idleFor);
+            return await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
+            return false;
         }
     }
 
     private static TimeSpan Sweep(TimeSpan idleFor) =>
-        TimeSpan.FromTicks(Math.Max(idleFor.Ticks / 3, TimeSpan.TicksPerMinute));
+        TimeSpan.FromTicks(Math.Clamp(idleFor.Ticks / 3, TimeSpan.TicksPerMinute, TimeSpan.TicksPerMinute * 5));
 
     private static void Preload(IServiceProvider services, string? workspace, CancellationToken cancellationToken)
     {

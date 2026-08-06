@@ -9,7 +9,7 @@ public sealed class LoadedWorkspaceUndoTests
     {
         using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
 
-        Assert.Equal("nothing to undo", loaded.Workspace.Undo());
+        Assert.Equal("nothing to undo", await loaded.Workspace.UndoAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -20,7 +20,7 @@ public sealed class LoadedWorkspaceUndoTests
 
         await EditAsync(loaded, "// Edited\n");
 
-        Assert.Equal("reverted the last change", loaded.Workspace.Undo());
+        Assert.Equal("reverted the last change", await loaded.Workspace.UndoAsync(TestContext.Current.CancellationToken));
         Assert.Equal(before, await TextOfAsync(loaded));
     }
 
@@ -32,7 +32,7 @@ public sealed class LoadedWorkspaceUndoTests
 
         loaded.Workspace.DropSnapshots([path]);
 
-        var message = loaded.Workspace.Undo();
+        var message = await loaded.Workspace.UndoAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("nothing to undo", message, StringComparison.Ordinal);
         Assert.Contains("1 snapshot(s)", message, StringComparison.Ordinal);
@@ -47,7 +47,7 @@ public sealed class LoadedWorkspaceUndoTests
         await EditAsync(loaded, "// Edited\n");
         loaded.Workspace.DropSnapshots([Path.Combine(loaded.Files.ProjectDirectory, "Awkward.cs")]);
 
-        Assert.Equal("reverted the last change", loaded.Workspace.Undo());
+        Assert.Equal("reverted the last change", await loaded.Workspace.UndoAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class LoadedWorkspaceUndoTests
         await EditAsync(loaded, "// Second\n");
         loaded.Workspace.DropSnapshots([path]);
 
-        Assert.Contains("2 snapshot(s)", loaded.Workspace.Undo(), StringComparison.Ordinal);
+        Assert.Contains("2 snapshot(s)", await loaded.Workspace.UndoAsync(TestContext.Current.CancellationToken), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class LoadedWorkspaceUndoTests
         await EditAsync(loaded, "// Edited\n");
         await loaded.ReloadAsync(TestContext.Current.CancellationToken);
 
-        var message = loaded.Workspace.Undo();
+        var message = await loaded.Workspace.UndoAsync(TestContext.Current.CancellationToken);
 
         Assert.Contains("nothing to undo", message, StringComparison.Ordinal);
         Assert.Contains("the workspace reloaded", message, StringComparison.Ordinal);

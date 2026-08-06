@@ -85,10 +85,10 @@ public sealed class ProjectFileGuardTests
         Assert.True(ProjectFileGuard.OnlyRedundantCompileItems(Original, Original, ["src/IOrderService.cs"]));
 
     [Fact]
-    public void Capture_WithNoAddedFiles_TakesNoSnapshot() =>
-        Assert.Null(ProjectFileGuard.Capture("any.csproj", []));
+    public async Task CaptureAsync_WithNoAddedFiles_TakesNoSnapshot() =>
+        Assert.Null(await ProjectFileGuard.CaptureAsync("any.csproj", [], TestContext.Current.CancellationToken));
 
     [Fact]
-    public void Capture_ForAProjectThatDoesNotExist_TakesNoSnapshot() =>
-        Assert.Null(ProjectFileGuard.Capture("terse-no-such-project.csproj", ["a.cs"]));
+    public async Task CaptureAsync_ForAProjectThatDoesNotExist_TakesNoSnapshot() =>
+        Assert.Null(await ProjectFileGuard.CaptureAsync("terse-no-such-project.csproj", ["a.cs"], TestContext.Current.CancellationToken));
 }

@@ -61,6 +61,20 @@ public sealed class LoadedWorkspace : IDisposable
         CompilationsDropped = false;
     }
 
+    public bool TakeDroppedNotice()
+    {
+        lock (leaseGate)
+        {
+            var notice = droppedNotice;
+
+            droppedNotice = false;
+
+            return notice;
+        }
+    }
+
+    private bool droppedNotice;
+
     public bool Contains(string path) => PathBoundary.Contains(Root, path);
 
     public WorkspaceLease Lease()
@@ -79,26 +93,35 @@ public sealed class LoadedWorkspace : IDisposable
         var before = workspace.CurrentSolution;
         var entry = await CaptureAsync(before, changed, cancellationToken).ConfigureAwait(false);
         var rebased = await RebasedAsync(solution, changed, cancellationToken).ConfigureAwait(false);
-        var snapshots = ProjectSnapshots(before, solution, changed);
+        var snapshots = await ProjectSnapshotsAsync(before, solution, changed, cancellationToken).ConfigureAwait(false);
 
-        if (!Committed(rebased, solution, entry))
-            return false;
+        try
+        {
+            if (!Committed(rebased, solution, entry))
+                return false;
 
-        foreach (var snapshot in snapshots)
-            await ProjectFileGuard.RestoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            foreach (var path in entry.Paths)
+                Sync.Settled(path);
 
-        foreach (var path in entry.Paths)
-            Sync.Settled(path);
+            Sync.Bumped(ChangeKind.Code);
 
-        Sync.Bumped(ChangeKind.Code);
+            if (Moved(before, Solution, changed))
+                Sync.Bumped(ChangeKind.Files);
 
-        if (Moved(before, Solution, changed))
-            Sync.Bumped(ChangeKind.Files);
-
-        return true;
+            return true;
+        }
+        finally
+        {
+            foreach (var snapshot in snapshots)
+                await ProjectFileGuard.RestoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    private static List<ProjectSnapshot> ProjectSnapshots(Solution before, Solution after, IReadOnlyList<DocumentId> changed)
+    private static async Task<List<ProjectSnapshot>> ProjectSnapshotsAsync(
+        Solution before,
+        Solution after,
+        IReadOnlyList<DocumentId> changed,
+        CancellationToken cancellationToken)
     {
         var byProject = new Dictionary<ProjectId, List<string>>();
 
@@ -117,7 +140,7 @@ public sealed class LoadedWorkspace : IDisposable
 
         foreach (var (projectId, files) in byProject)
         {
-            if (ProjectFileGuard.Capture(after.GetProject(projectId)?.FilePath, files) is { } snapshot)
+            if (await ProjectFileGuard.CaptureAsync(after.GetProject(projectId)?.FilePath, files, cancellationToken).ConfigureAwait(false) is { } snapshot)
                 snapshots.Add(snapshot);
         }
 
@@ -159,19 +182,21 @@ public sealed class LoadedWorkspace : IDisposable
             Discard(paths);
     }
 
-    public string Undo()
+    public async Task<string> UndoAsync(CancellationToken cancellationToken)
     {
+        HistoryEntry entry;
+
         lock (historyGate)
         {
             if (history.Count is 0)
                 return dropped is null ? "nothing to undo" : "nothing to undo - " + dropped;
 
-            var entry = history[^1];
+            entry = history[^1];
 
             history.RemoveAt(history.Count - 1);
-
-            return Reverted(entry);
         }
+
+        return await RevertedAsync(entry, cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose()
@@ -211,23 +236,62 @@ public sealed class LoadedWorkspace : IDisposable
         }
     }
 
-    private string Reverted(HistoryEntry entry)
+    private async Task<string> RevertedAsync(HistoryEntry entry, CancellationToken cancellationToken)
     {
         var target = workspace.CurrentSolution;
         var restored = Solution;
+        var readded = new List<string>();
 
         foreach (var revision in entry.Documents)
         {
+            if (!target.ContainsDocument(revision.Id))
+                readded.Add(revision.FilePath);
+
             target = Restored(target, revision);
             restored = Restored(restored, revision);
         }
 
-        if (!Applied(target))
-            return "the workspace refused the revert";
+        var snapshots = await ProjectBytesAsync(target, entry, readded, cancellationToken).ConfigureAwait(false);
 
-        Solution = restored;
+        try
+        {
+            if (!Applied(target))
+                return "the workspace refused the revert";
 
-        return "reverted the last change";
+            Solution = restored;
+
+            return "reverted the last change";
+        }
+        finally
+        {
+            foreach (var snapshot in snapshots)
+                await ProjectFileGuard.RestoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<List<ProjectSnapshot>> ProjectBytesAsync(
+        Solution target,
+        HistoryEntry entry,
+        List<string> readded,
+        CancellationToken cancellationToken)
+    {
+        if (readded.Count is 0)
+            return [];
+
+        var snapshots = new List<ProjectSnapshot>(1);
+
+        foreach (var revision in entry.Documents)
+        {
+            if (target.GetDocument(revision.Id)?.Project.FilePath is not { } project)
+                continue;
+
+            if (await ProjectFileGuard.CaptureAsync(project, readded, cancellationToken).ConfigureAwait(false) is { } snapshot)
+                snapshots.Add(snapshot);
+
+            break;
+        }
+
+        return snapshots;
     }
 
     private static Solution Restored(Solution solution, DocumentRevision revision) =>
@@ -472,14 +536,19 @@ public sealed class LoadedWorkspace : IDisposable
         {
             if (leases is not 0 || retired)
                 return false;
-        }
 
-        lock (historyGate)
-        {
-            Solution = Forked();
+            lock (historyGate)
+            {
+                Solution = Forked();
+            }
+
             CompilationsDropped = true;
-        }
+            DroppedAfter = Idle;
+            droppedNotice = true;
 
-        return true;
+            return true;
+        }
     }
+
+    public TimeSpan DroppedAfter { get; private set; }
 }

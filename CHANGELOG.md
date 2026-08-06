@@ -92,7 +92,14 @@ measured fallback, dead call or unprovable answer from a real session.
   the apply and restored through the new `AtomicWrite.BytesAsync`, but **only when the change is
   provably MSBuild's**: every added line must be an `<ItemGroup>` tag or a `<Compile>` item naming a
   file the edit just added, and nothing may be removed or modified — so a concurrent external edit is
-  left alone rather than destroyed, which is what killed the second attempt.
+  left alone rather than destroyed, which is what killed the second attempt. The discriminator
+  requires `UsingMicrosoftNETSdk` before it trusts the two properties, because they are undefined in a
+  legacy non-SDK project — where the `<Compile>` item is **required** and removing it would be
+  strictly worse than the duplicate this fixes. All four project shapes are pinned by tests.
+- **`undo_last_change` can revert a deleted document.** Reverting a `write_text delete=true` used to
+  throw, because the restore replayed `WithDocumentText` for a `DocumentId` the solution no longer
+  held; the snapshot was popped first, so the file stayed deleted and the undo was lost. The revert
+  now re-adds a missing document, and it runs the same `.csproj` guard as any other added document.
 - **Every child process the server spawned inherited the server's own stdin — the MCP protocol pipe**
   (I95). `DotnetRunner` redirected stdout and stderr but never stdin, so `dotnet build`, `dotnet test`
   and every `git` call was handed the live channel the client speaks on. Beyond the protocol hazard it
