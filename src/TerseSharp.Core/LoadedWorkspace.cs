@@ -79,9 +79,13 @@ public sealed class LoadedWorkspace : IDisposable
         var before = workspace.CurrentSolution;
         var entry = await CaptureAsync(before, changed, cancellationToken).ConfigureAwait(false);
         var rebased = await RebasedAsync(solution, changed, cancellationToken).ConfigureAwait(false);
+        var snapshots = ProjectSnapshots(before, solution, changed);
 
         if (!Committed(rebased, solution, entry))
             return false;
+
+        foreach (var snapshot in snapshots)
+            await ProjectFileGuard.RestoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
 
         foreach (var path in entry.Paths)
             Sync.Settled(path);
@@ -92,6 +96,32 @@ public sealed class LoadedWorkspace : IDisposable
             Sync.Bumped(ChangeKind.Files);
 
         return true;
+    }
+
+    private static List<ProjectSnapshot> ProjectSnapshots(Solution before, Solution after, IReadOnlyList<DocumentId> changed)
+    {
+        var byProject = new Dictionary<ProjectId, List<string>>();
+
+        foreach (var id in changed)
+        {
+            if (before.GetDocument(id) is not null || after.GetDocument(id) is not { FilePath: { } path })
+                continue;
+
+            if (!byProject.TryGetValue(id.ProjectId, out var files))
+                byProject[id.ProjectId] = files = [];
+
+            files.Add(path);
+        }
+
+        var snapshots = new List<ProjectSnapshot>(byProject.Count);
+
+        foreach (var (projectId, files) in byProject)
+        {
+            if (ProjectFileGuard.Capture(after.GetProject(projectId)?.FilePath, files) is { } snapshot)
+                snapshots.Add(snapshot);
+        }
+
+        return snapshots;
     }
 
     private static bool Moved(Solution before, Solution after, IReadOnlyList<DocumentId> changed)

@@ -79,6 +79,20 @@ measured fallback, dead call or unprovable answer from a real session.
 
 ### Fixed
 
+- **An applied `extract_interface` or `move_type_to_file` rewrote the user's `.csproj` and broke their
+  next build** (I55). `MSBuildWorkspace.ApplyDocumentAdded` writes a redundant `<Compile Include="…" />`
+  item plus a UTF-8 BOM, and repeating the refactor appended a duplicate until `dotnet build` failed
+  `error NETSDK1022: Duplicate 'Compile' items were included` — so the tool answered `applied` and
+  broke the build. Four earlier fixes were attempted and reverted; the prerequisite each of them
+  lacked was a sound answer to "does this project glob this file", which now comes from MSBuild's
+  **evaluated** properties (`ProjectGlobs`, on the newly referenced `Microsoft.Build` with
+  `ExcludeAssets=runtime`) rather than a substring test on the one `.csproj` — correct for
+  `Directory.Build.props`-hosted values, for `EnableDefaultItems=false`, and for the `<Sdk Name=…/>`
+  element form, all of which the text-based guesses got wrong. The project file is snapshotted before
+  the apply and restored through the new `AtomicWrite.BytesAsync`, but **only when the change is
+  provably MSBuild's**: every added line must be an `<ItemGroup>` tag or a `<Compile>` item naming a
+  file the edit just added, and nothing may be removed or modified — so a concurrent external edit is
+  left alone rather than destroyed, which is what killed the second attempt.
 - **Every child process the server spawned inherited the server's own stdin — the MCP protocol pipe**
   (I95). `DotnetRunner` redirected stdout and stderr but never stdin, so `dotnet build`, `dotnet test`
   and every `git` call was handed the live channel the client speaks on. Beyond the protocol hazard it

@@ -199,6 +199,13 @@ folded across records; only a file outside the workspace root is printed in full
 
 ### Edits
 
+An **added** document is the one case where Roslyn's own apply path writes to the user's `.csproj`.
+`LoadedWorkspace.TryApplyAsync` snapshots that project's bytes first — but only when
+`ProjectGlobs.CompilesByGlob` says the SDK already globs the file, read from MSBuild's *evaluated*
+`EnableDefaultItems`/`EnableDefaultCompileItems`, never from text — and restores them afterwards
+through `AtomicWrite.BytesAsync`, and only when `ProjectFileGuard` can attribute every added line to
+MSBuild's redundant `<Compile>` item. A concurrent external edit is left alone.
+
 All mutations funnel through `EditGate.ApplyAsync`, which diffs only the changed documents, compares
 error counts before/after, **rolls back any edit that introduces a new compile error** (unless
 `allowErrors: true`) in the changed projects **and every project that transitively depends on them**,

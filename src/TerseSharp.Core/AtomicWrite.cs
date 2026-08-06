@@ -70,4 +70,22 @@ public static class AtomicWrite
             }
         }
     }
+
+    public static async Task BytesAsync(string path, byte[] content, CancellationToken cancellationToken = default)
+    {
+        var temporary = path + ".terse-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ".bytes.tmp";
+
+        EnsureDirectory(path);
+
+        try
+        {
+            await File.WriteAllBytesAsync(temporary, content, cancellationToken).ConfigureAwait(false);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+                File.Delete(temporary);
+        }
+    }
 }
