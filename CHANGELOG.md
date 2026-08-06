@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-08-06
+
 **Response format changed, on every tool.** Measured over 1 050 real `terse` calls in one project's
 session logs (2 127 134 response characters), roughly 19 % of every byte the server returned was
 framing an agent cannot act on. This release removes it. `verbose=true` restores the previous shape
@@ -1552,7 +1554,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.20.0
 [0.19.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.19.0
 [0.18.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.18.0
 [0.17.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.17.1
