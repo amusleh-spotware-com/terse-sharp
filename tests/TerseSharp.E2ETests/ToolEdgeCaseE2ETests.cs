@@ -13,7 +13,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
             ["endLine"] = 3,
         });
 
-        Assert.Contains("0 lines", text, StringComparison.Ordinal);
+        Assert.StartsWith("0/5 lines", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
@@ -27,7 +27,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
             ["endLine"] = 9100,
         });
 
-        Assert.Contains("0 lines", text, StringComparison.Ordinal);
+        Assert.StartsWith("0/5 lines", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
@@ -50,7 +50,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["maxLines"] = 1 });
 
-        Assert.Contains("1 lines (truncated=true", text, StringComparison.Ordinal);
+        Assert.StartsWith("1/", text, StringComparison.Ordinal);
         Assert.DoesNotContain("2: ", text, StringComparison.Ordinal);
     }
 
@@ -76,7 +76,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("find_files", new() { ["glob"] = "*.cs", ["maxResults"] = 1 });
 
-        Assert.Contains("1 files (truncated=true", text, StringComparison.Ordinal);
+        Assert.StartsWith("1/", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         });
 
         Assert.True(lean.Length < full.Length, $"lean={lean.Length} full={full.Length}");
-        Assert.Contains("OrderBook.TotalVolume(string)", lean, StringComparison.Ordinal);
+        Assert.Contains("  OrderBook.TotalVolume  ", lean, StringComparison.Ordinal);
         Assert.DoesNotContain("decimal TotalVolume(string symbol)", lean, StringComparison.Ordinal);
     }
 
@@ -164,7 +164,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
             ["maxResults"] = 1,
         });
 
-        Assert.Contains("truncated=true, total=4", text, StringComparison.Ordinal);
+        Assert.StartsWith("1/4 usages in ", text, StringComparison.Ordinal);
     }
 
     [Fact]

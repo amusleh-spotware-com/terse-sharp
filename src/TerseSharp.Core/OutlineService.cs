@@ -108,11 +108,15 @@ public static class OutlineService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"{Reference(symbol, format.Ids)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
+            $"{Reference(symbol, format.Ids, Never)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
+
+        var overloaded = Overloaded(declaration, model);
 
         foreach (var member in Members(declaration))
-            AppendMember(response, member, model, format);
+            AppendMember(response, member, model, format, overloaded);
     }
+
+    private static readonly IReadOnlySet<string> Never = new HashSet<string>(StringComparer.Ordinal);
 
     private static IEnumerable<MemberDeclarationSyntax> Members(MemberDeclarationSyntax declaration) => declaration switch
     {
@@ -125,7 +129,8 @@ public static class OutlineService
         ResponseBuilder response,
         MemberDeclarationSyntax member,
         SemanticModel model,
-        OutlineFormat format)
+        OutlineFormat format,
+        IReadOnlySet<string> overloaded)
     {
         var symbol = model.GetDeclaredSymbol(member);
 
@@ -134,13 +139,32 @@ public static class OutlineService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"  {Reference(symbol, format.Ids)}  {Signature(symbol, format.Signatures)} :{PositionFormat.LineRange(member)}"));
+            $"  {Reference(symbol, format.Ids, overloaded)}  {Signature(symbol, format.Signatures)} :{PositionFormat.LineRange(member)}"));
     }
 
-    private static string Reference(ISymbol symbol, string ids) =>
-        string.Equals(ids, "full", StringComparison.OrdinalIgnoreCase) || !SymbolReference.RoundTrips(symbol)
-            ? SymbolId.From(symbol).Value
-            : SymbolReference.Brief(symbol);
+    private static string Reference(ISymbol symbol, string ids, IReadOnlySet<string> overloaded)
+    {
+        if (string.Equals(ids, "full", StringComparison.OrdinalIgnoreCase) || !SymbolReference.RoundTrips(symbol))
+            return SymbolId.From(symbol).Value;
+
+        return overloaded.Contains(symbol.Name) ? SymbolReference.Brief(symbol) : SymbolReference.Simple(symbol);
+    }
+
+    private static HashSet<string> Overloaded(MemberDeclarationSyntax declaration, SemanticModel model)
+    {
+        var repeated = new HashSet<string>(StringComparer.Ordinal);
+
+        if (model.GetDeclaredSymbol(declaration) is not INamedTypeSymbol type)
+            return repeated;
+
+        foreach (var member in type.GetMembers())
+        {
+            if (type.GetMembers(member.Name).Length > 1)
+                repeated.Add(member.Name);
+        }
+
+        return repeated;
+    }
 
     private static string Signature(ISymbol symbol, bool signatures) => signatures
         ? string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)} ")

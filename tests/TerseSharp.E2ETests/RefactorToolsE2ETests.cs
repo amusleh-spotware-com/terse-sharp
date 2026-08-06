@@ -119,7 +119,7 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
             ["interfaceName"] = "IExtractedOrders",
         });
 
-        Assert.Contains("applied", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", text, StringComparison.Ordinal);
 
         var created = Path.Combine(solution.ProjectDirectory, "IExtractedOrders.cs");
 
@@ -156,7 +156,7 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
             ["declaration"] = "int Probe();",
         });
 
-        Assert.Contains("applied", added, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", added, StringComparison.Ordinal);
         Assert.Contains("int Probe();", await File.ReadAllTextAsync(created, TestContext.Current.CancellationToken), StringComparison.Ordinal);
 
         Assert.Contains("reverted", await solution.CallAsync("undo_last_change", []), StringComparison.Ordinal);
@@ -171,7 +171,7 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
         var origin = Path.Combine(solution.ProjectDirectory, "Awkward.cs");
         var text = await solution.CallAsync("move_type_to_file", new() { ["typeSymbolId"] = "T:Fixture.Trading.IHandler" });
 
-        Assert.Contains("applied", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", text, StringComparison.Ordinal);
 
         var created = Path.Combine(solution.ProjectDirectory, "IHandler.cs");
 

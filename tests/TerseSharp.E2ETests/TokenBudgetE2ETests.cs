@@ -21,7 +21,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         var full = await server.CallAsync("search_symbols", new() { ["query"] = "Order", ["maxResults"] = 200 });
 
         Assert.True(Tokens(capped) < Tokens(full), Report("search_symbols", capped, full));
-        Assert.Contains("truncated=true", capped, StringComparison.Ordinal);
+        Assert.Contains(" truncated", capped, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -225,9 +225,67 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.Contains("projects=", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ReadText_OnTheWidestFile_NumbersOnlyTheLinesThatBreakTheSequence()
+    {
+        var quiet = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+        var loud = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["verbose"] = true,
+        });
+
+        Assert.True(Gutters(quiet) * 2 < Gutters(loud), Report("read_text", quiet));
+        Assert.True(Tokens(quiet) * 10 < Tokens(loud) * 9, Report("read_text", quiet, loud));
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_OnTheWidestMember_IsDedentedAndBlankFree()
+    {
+        var quiet = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderBook.TotalVolume" });
+        var loud = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "OrderBook.TotalVolume",
+            ["verbose"] = true,
+        });
+
+        Assert.DoesNotContain("\n\n", quiet, StringComparison.Ordinal);
+        Assert.Contains("\n{", quiet, StringComparison.Ordinal);
+        Assert.Contains("\n    {", loud, StringComparison.Ordinal);
+        Assert.True(Tokens(quiet) < Tokens(loud), Report("get_symbol_source", quiet, loud));
+    }
+
+    [Fact]
+    public async Task EditText_OnSuccess_NamesTheFileWithoutItsDirectory()
+    {
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "budget-probe.json");
+
+        await File.WriteAllTextAsync(path, "{ \"probe\": 1 }", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = "src/Fixture.Trading/budget-probe.json",
+                ["oldText"] = "1",
+                ["newText"] = "2",
+            });
+
+            Assert.Equal("budget-probe.json  changedLines=1", text);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static int Tokens(string text) => (text.Length + 3) / 4;
 
     private static int Lines(string text) => text.Split('\n').Length;
+
+    private static int Gutters(string text) => text
+        .Split('\n')
+        .Count(line => line.Length > 0 && char.IsAsciiDigit(line[0]) && line.Contains(": ", StringComparison.Ordinal));
 
     private static string Report(string tool, string response) =>
         string.Create(CultureInfo.InvariantCulture, $"{tool}: {Tokens(response)} tokens\n{response}");
@@ -237,16 +295,20 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         $"{tool}: {Tokens(response)} tokens vs {Tokens(baseline)} for the raw file");
 
     [Fact]
-    public async Task WorkspaceStatus_WithTheFreshnessAndIndexLines_StaysWithinItsBudget()
+    public async Task WorkspaceStatus_KeepsItsTelemetryBehindVerbose()
     {
-        var text = await server.CallAsync("workspace_status", []);
+        var quiet = await server.CallAsync("workspace_status", []);
+        var loud = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
 
-        Assert.Contains("watch=", text, StringComparison.Ordinal);
-        Assert.Contains("gen=c", text, StringComparison.Ordinal);
-        Assert.Contains("index=xaml(", text, StringComparison.Ordinal);
-        Assert.Contains("documents=", text, StringComparison.Ordinal);
-        Assert.Equal(6, text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.True(Tokens(text) <= 260, Report("workspace_status", text));
+        Assert.Contains("documents=", quiet, StringComparison.Ordinal);
+        Assert.DoesNotContain("gen=c", quiet, StringComparison.Ordinal);
+        Assert.DoesNotContain("index=xaml(", quiet, StringComparison.Ordinal);
+        Assert.DoesNotContain("lastUsedUtc=", quiet, StringComparison.Ordinal);
+        Assert.Equal(3, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.True(Tokens(quiet) * 2 < Tokens(loud), Report("workspace_status", quiet, loud));
+        Assert.Contains("watch=", loud, StringComparison.Ordinal);
+        Assert.Contains("gen=c", loud, StringComparison.Ordinal);
+        Assert.Contains("index=xaml(", loud, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -279,6 +341,6 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
 
         Assert.True(Tokens(filtered) < Tokens(all), Report("list_projects", filtered, all));
         Assert.True(Lines(filtered) < Lines(all), Report("list_projects", filtered, all));
-        Assert.Contains("0 projects (truncated=false, total=0)", filtered, StringComparison.Ordinal);
+        Assert.Equal("0 projects", filtered);
     }
 }

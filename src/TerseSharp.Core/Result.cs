@@ -32,7 +32,11 @@ public static class Errors
     public static TerseError SymbolNotFound(string symbolId, IReadOnlyList<string> nearest) => new(
         TerseErrorCode.SymbolNotFound,
         string.Create(CultureInfo.InvariantCulture, $"symbol '{symbolId}' did not resolve"),
-        nearest.Count is 0 ? "use search_symbols to find the id" : "nearest: " + string.Join(", ", nearest));
+        nearest.Count is 0
+            ? "use search_symbols to find the id"
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"nearest (showing {Math.Min(nearest.Count, MaxListedCandidates)} of {nearest.Count}): {string.Join(", ", nearest.Take(MaxListedCandidates))}"));
 
     public static TerseError AmbiguousSymbol(string symbolId, IReadOnlyList<string> candidates) => new(
         TerseErrorCode.AmbiguousSymbol,
@@ -100,4 +104,5 @@ public static class Errors
             $"pass the full path instead (showing {Math.Min(paths.Count, MaxListedProjects)} of {paths.Count}): {string.Join(", ", paths.Take(MaxListedProjects))}"));
 
     private const int MaxListedProjects = 8;
+    private const int MaxListedCandidates = 5;
 }

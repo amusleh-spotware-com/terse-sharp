@@ -7,6 +7,7 @@ public static class SourceService
     public static async Task<Result<string>> OfSymbolAsync(
         string root,
         ISymbol symbol,
+        bool verbose,
         CancellationToken cancellationToken)
     {
         var references = symbol.DeclaringSyntaxReferences;
@@ -14,10 +15,10 @@ public static class SourceService
         if (references.Length is 0)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
-        var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value);
+        var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value).Verbose(verbose);
 
         foreach (var reference in references)
-            await AppendAsync(root, response, reference, cancellationToken).ConfigureAwait(false);
+            await AppendAsync(root, response, reference, verbose, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(response.ToString());
     }
@@ -26,20 +27,26 @@ public static class SourceService
         string root,
         ResponseBuilder response,
         SyntaxReference reference,
+        bool verbose,
         CancellationToken cancellationToken)
     {
         var node = await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
         var span = node.GetLocation().GetLineSpan();
+        var source = node.ToFullString();
 
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"{PositionFormat.Relative(root, span.Path)}:{span.StartLinePosition.Line + 1}-{span.EndLinePosition.Line + 1}"));
-        response.Line(node.ToFullString().Trim());
+        response.Line(verbose ? source.Trim() : TextCompressor.Source(source));
     }
 
-    public static string Describe(string root, ISymbol symbol)
+    public static string Describe(string root, ISymbol symbol, bool verbose)
     {
-        var response = new ResponseBuilder("get_symbol", SymbolId.From(symbol).Value);
+        var id = SymbolId.From(symbol).Value;
+        var response = new ResponseBuilder("get_symbol", id).Verbose(verbose);
+
+        if (!verbose)
+            response.Note(id);
 
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
@@ -50,6 +57,8 @@ public static class SourceService
 
         var documentation = symbol.GetDocumentationCommentXml(CultureInfo.InvariantCulture);
 
-        return string.IsNullOrWhiteSpace(documentation) ? response.ToString() : response.Line(documentation.Trim()).ToString();
+        return string.IsNullOrWhiteSpace(documentation)
+            ? response.ToString()
+            : response.Line(verbose ? documentation.Trim() : TextCompressor.Source(documentation)).ToString();
     }
 }

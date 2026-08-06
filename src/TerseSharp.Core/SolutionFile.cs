@@ -75,25 +75,21 @@ public static class SolutionFile
         if (!dryRun)
             await AtomicWrite.TextAsync(solutionPath, after).ConfigureAwait(false);
 
-        var response = new ResponseBuilder(tool, relative);
-
-        response.Summary(1, 1, "files changed");
-        response.Note(dryRun ? "dryRun" : "applied");
+        var response = new ResponseBuilder(tool, relative).Verbose(verbose);
 
         if (!dryRun && !verbose)
         {
-            response.Line(string.Create(
+            return Result.Ok(response.Line(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{Path.GetFileName(solutionPath.AsSpan())}  changedLines={UnifiedDiff.ChangedLines(before, after)}"));
-
-            return Result.Ok(response.Note("(verbose=true for the diff)").ToString());
+                $"{Path.GetFileName(solutionPath.AsSpan())}  changedLines={UnifiedDiff.ChangedLines(before, after)}")).ToString());
         }
 
+        response.Summary(1, 1, "files changed");
+        response.Note(dryRun ? "dryRun" : "applied");
         response.Line(UnifiedDiff.Between(solutionPath, before, after));
 
         return Result.Ok(response.ToString());
     }
-
     private static TerseError Unsupported(string solutionPath, string operation) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"cannot {operation} a project in '{Path.GetExtension(solutionPath)}' solutions"),
         "TerseSharp edits .slnx solutions; convert with: dotnet sln migrate");

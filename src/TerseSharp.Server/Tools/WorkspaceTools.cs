@@ -121,31 +121,58 @@ public sealed class WorkspaceTools(ToolContext context)
 
     private static async Task<string> RenderStatusAsync(LoadedWorkspace workspace, bool verbose, CancellationToken cancellationToken)
     {
-        var response = new ResponseBuilder("workspace_status", workspace.SolutionPath);
+        var response = new ResponseBuilder("workspace_status", workspace.SolutionPath).Verbose(verbose);
 
         response.Note(Describe(workspace));
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} failures={workspace.Load.Failures.Count} warnings={workspace.Load.Warnings.Count} lastUsedUtc={workspace.LastUsedUtc:O}"));
-        response.Note(DescribeSync(workspace.Sync));
-        response.Note(workspace.Indexes.Describe());
+        response.Note(Counts(workspace, verbose));
 
-        if (workspace.Indexes.Razor().FileCount is var razor and > 0)
-            response.Note(await RazorHealthAsync(workspace, razor, cancellationToken).ConfigureAwait(false));
+        AppendSync(response, workspace.Sync, verbose);
+        await AppendRazorAsync(response, workspace, verbose, cancellationToken).ConfigureAwait(false);
+
+        if (verbose)
+            response.Note(workspace.Indexes.Describe());
 
         AppendLoadDiagnostics(response, workspace.Load, verbose);
 
         return response.ToString();
     }
 
-    private static async Task<string> RazorHealthAsync(LoadedWorkspace workspace, int razor, CancellationToken cancellationToken)
-    {
-        var ran = await RazorGeneratedMap.GeneratorRanAsync(workspace, cancellationToken).ConfigureAwait(false);
-        var health = ran
-            ? "ok"
-            : "unavailable - the Razor source generator produced nothing, so component types cannot be resolved; build the solution, or match its SDK to the terse version";
+    private static string Counts(LoadedWorkspace workspace, bool verbose) => verbose
+        ? string.Create(
+            CultureInfo.InvariantCulture,
+            $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} failures={workspace.Load.Failures.Count} warnings={workspace.Load.Warnings.Count} lastUsedUtc={workspace.LastUsedUtc:O}")
+        : string.Create(CultureInfo.InvariantCulture, $"documents={workspace.Load.DocumentCount}");
 
-        return string.Create(CultureInfo.InvariantCulture, $"razor={razor} files generator={health}");
+    private static void AppendSync(ResponseBuilder response, WorkspaceSync sync, bool verbose)
+    {
+        if (verbose || sync.State is not WatchState.Active || sync.Gaps > 0)
+            response.Note(DescribeSync(sync));
+    }
+
+    private static async Task AppendRazorAsync(
+        ResponseBuilder response,
+        LoadedWorkspace workspace,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var razor = workspace.Indexes.Razor().FileCount;
+
+        if (razor is 0)
+            return;
+
+        var ran = await RazorGeneratedMap.GeneratorRanAsync(workspace, cancellationToken).ConfigureAwait(false);
+
+        if (!ran)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"razor={razor} files generator=unavailable - the Razor source generator produced nothing, so component types cannot be resolved; build the solution, or match its SDK to the terse version"));
+
+            return;
+        }
+
+        if (verbose)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"razor={razor} files generator=ok"));
     }
 
     private static string Describe(LoadedWorkspace workspace) => string.Create(
@@ -154,16 +181,25 @@ public sealed class WorkspaceTools(ToolContext context)
 
     private static string Render(WorkspaceLoadResult result, bool verbose)
     {
-        var response = new ResponseBuilder("load_workspace", result.SolutionPath);
+        var response = new ResponseBuilder("load_workspace", result.SolutionPath).Verbose(verbose);
 
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"projects={result.ProjectCount} documents={result.DocumentCount} elapsedMs={result.ElapsedMilliseconds} failures={result.Failures.Count} warnings={result.Warnings.Count}"));
+        if (!verbose)
+            response.Note(result.SolutionPath);
+
+        response.Note(Loaded(result, verbose));
 
         AppendLoadDiagnostics(response, result, verbose);
 
         return response.ToString();
     }
+
+    private static string Loaded(WorkspaceLoadResult result, bool verbose) => verbose
+        ? string.Create(
+            CultureInfo.InvariantCulture,
+            $"projects={result.ProjectCount} documents={result.DocumentCount} elapsedMs={result.ElapsedMilliseconds} failures={result.Failures.Count} warnings={result.Warnings.Count}")
+        : string.Create(
+            CultureInfo.InvariantCulture,
+            $"projects={result.ProjectCount} documents={result.DocumentCount} failures={result.Failures.Count}");
 
     private static void AppendLoadDiagnostics(ResponseBuilder response, WorkspaceLoadResult result, bool verbose)
     {
@@ -194,7 +230,7 @@ public sealed class WorkspaceTools(ToolContext context)
 
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
-            $"{failures.Count} load failure(s) in {groups.Length} project(s); verbose=true lists the messages"));
+            $"{failures.Count} load failure(s) in {groups.Length} project(s)"));
 
         for (var index = 0; index < shown; index++)
         {
@@ -204,11 +240,7 @@ public sealed class WorkspaceTools(ToolContext context)
         }
 
         if (groups.Length > shown)
-        {
-            response.Note(string.Create(
-                CultureInfo.InvariantCulture,
-                $"{groups.Length - shown} more project(s) not listed; verbose=true lists them"));
-        }
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{groups.Length - shown} more project(s) not listed"));
     }
 
     private static void AppendWarnings(ResponseBuilder response, IReadOnlyList<string> warnings, bool verbose)
@@ -218,9 +250,7 @@ public sealed class WorkspaceTools(ToolContext context)
 
         if (!verbose)
         {
-            response.Note(string.Create(
-                CultureInfo.InvariantCulture,
-                $"{warnings.Count} MSBuild warning(s), not load failures; verbose=true lists them"));
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{warnings.Count} MSBuild warning(s), not load failures"));
 
             return;
         }

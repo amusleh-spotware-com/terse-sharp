@@ -132,11 +132,21 @@ your **C# code**, not the editor.
 **✂️ Success costs nothing.** All 30 mutating tools — `replace_symbol*`, `add_member`,
 `delete_symbol`, `rename_symbol`, the refactors, `write_text`, `edit_text`, `xaml_*`, `razor_*`,
 `resx_*`, `project_*`, `package_*`, `solution_*` — answer a successful edit in **one line per changed
-file** (workspace-relative `path  changedLines=N`, plus the compile gate's `errors=`/`warnings=`
-counters), not a diff of text the agent just wrote. `verbose=true` restores it; `dryRun=true` is never
-condensed, because there the diff *is* the answer; and **every caveat prints in full regardless** — a
-rollback, a new compile error, `0 files changed`, `compileGate=unavailable`, `workspace=stale`,
-`UNFIXED`, `designerStale`, or the `NOT rewritten` list a XAML-aware rename leaves.
+file** (workspace-relative `path  changedLines=N`, and the compile gate's `errors=`/`warnings=`
+counters only when there is a non-zero count or delta), not a diff of text the agent just wrote.
+`edit_text` and `write_text` print the **file name alone**, because the caller supplied the path.
+`verbose=true` restores it; `dryRun=true` is never condensed, because there the diff *is* the answer;
+and **every caveat prints in full regardless** — a rollback, a new compile error, `0 files changed`,
+`compileGate=unavailable`, `workspace=stale`, `UNFIXED`, `designerStale`, or the `NOT rewritten` list
+a XAML-aware rename leaves.
+
+**✂️ No response carries ceremony.** There is no header echoing the tool name and the arguments the
+agent just sent. The first line is the count, and it names the truncation only when there was one
+(`4/17 usages truncated - narrow with maxResults=`, otherwise just `4 usages in 2 files`). An
+outline drops the parameter list from a member id unless the type overloads that name; `read_text`
+prints a line number only where the numbering jumps; `get_symbol_source` is dedented and blank-free;
+`workspace_status` keeps its load timings and index counters behind `verbose=true`. Every one of
+those is reversible with `verbose=true`.
 
 **🔔 Staying current.** A new release is announced to your agent for the cost of **one `HEAD` request
 to GitHub's `releases/latest` — empty body, no token, no rate limit — at most once every 24 hours**,

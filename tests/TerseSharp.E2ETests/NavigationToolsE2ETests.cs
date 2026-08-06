@@ -40,7 +40,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
 
         Assert.Contains("OrderService  class", text, StringComparison.Ordinal);
-        Assert.Contains("OrderService.Submit(Order)", text, StringComparison.Ordinal);
+        Assert.Contains("  OrderService.Submit  ", text, StringComparison.Ordinal);
         Assert.Contains("OrderService.PendingCount", text, StringComparison.Ordinal);
         Assert.DoesNotContain("M:Fixture.Trading.OrderService.Submit", text, StringComparison.Ordinal);
         Assert.DoesNotContain("repository.Submit(order)", text, StringComparison.Ordinal);
@@ -54,7 +54,30 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("M:Fixture.Trading.Awkward.#ctor(System.Int32)", text, StringComparison.Ordinal);
         Assert.Contains("M:Fixture.Trading.Awkward.Echo", text, StringComparison.Ordinal);
         Assert.Contains("M:Fixture.Trading.Awkward.op_Addition", text, StringComparison.Ordinal);
-        Assert.Contains("Awkward.Ordinary(int)", text, StringComparison.Ordinal);
+        Assert.Contains("  Awkward.Ordinary  ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_KeepsTheParameterListWhenTheOtherPartOfThePartialTypeOverloadsTheName()
+    {
+        var first = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/SplitHandler.cs" });
+        var second = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/SplitHandler.Part.cs" });
+
+        Assert.Contains("  SplitHandler.Route(int)  ", first, StringComparison.Ordinal);
+        Assert.Contains("  SplitHandler.Dispatch  ", first, StringComparison.Ordinal);
+        Assert.Contains("  SplitHandler.Route(string)  ", second, StringComparison.Ordinal);
+
+        var resolved = await server.CallAsync("get_symbol", new() { ["symbolId"] = "SplitHandler.Route(string)" });
+
+        Assert.Contains("M:Fixture.Trading.SplitHandler.Route(System.String)", resolved, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_OnAMemberWhosePayloadLooksLikeAConfidenceTag_ReturnsItByteForByte()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "SplitHandler.SampleTag" });
+
+        Assert.Contains("SampleTag = \"  EXACT  \"", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -84,7 +107,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("OrderRouter.cs", text, StringComparison.Ordinal);
         Assert.Contains("OrderService.cs", text, StringComparison.Ordinal);
-        Assert.Contains("truncated=false, total=4", text, StringComparison.Ordinal);
+        Assert.StartsWith("4 usages in ", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -109,7 +132,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         });
 
         Assert.DoesNotContain("  in ", text, StringComparison.Ordinal);
-        Assert.Equal(2, text.Split('\n').Count(line => line.Contains("EXACT", StringComparison.Ordinal)));
+        Assert.Equal(2, text.Split('\n').Skip(1).Count(line => line.Contains(".cs  ", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -145,7 +168,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
     private static IEnumerable<string> References(string outline) => outline
         .Split('\n')
-        .Skip(2)
+        .Skip(1)
         .Where(line => line.Trim().Length > 0)
         .Select(line => line.Trim().Split("  ", StringSplitOptions.RemoveEmptyEntries)[0]);
 
@@ -159,7 +182,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         var reference = outline
             .Split('\n')
-            .First(line => line.Contains("OrderService.Submit(", StringComparison.Ordinal))
+            .First(line => line.Contains("OrderService.Submit  ", StringComparison.Ordinal))
             .Trim()
             .Split("  ", StringSplitOptions.RemoveEmptyEntries)[0];
 
@@ -265,7 +288,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("InMemoryOrderRepository", text, StringComparison.Ordinal);
         Assert.Contains("NullOrderRepository", text, StringComparison.Ordinal);
-        Assert.Contains("truncated=false, total=2", text, StringComparison.Ordinal);
+        Assert.StartsWith("2 implementations", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -277,7 +300,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
             ["maxResults"] = 1,
         });
 
-        Assert.Contains("1 implementations (truncated=true, total=2)", text, StringComparison.Ordinal);
+        Assert.StartsWith("1/2 implementations truncated", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -321,7 +344,8 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("projects=1", text, StringComparison.Ordinal);
         Assert.Contains("branch=", text, StringComparison.Ordinal);
-        Assert.Contains("loadMs=", text, StringComparison.Ordinal);
+        Assert.Contains("documents=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("loadMs=", text, StringComparison.Ordinal);
         Assert.DoesNotContain("FAILED", text, StringComparison.Ordinal);
     }
 

@@ -24,12 +24,12 @@ public sealed class WorkspaceSyncE2ETests
             ["force"] = true,
         });
 
-        Assert.Contains("write_text applied", written, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", written, StringComparison.Ordinal);
 
         var outline = await solution.CallAsync("get_file_outline", new() { ["path"] = AddedRelativePath });
 
         Assert.Contains("SyncedType", outline, StringComparison.Ordinal);
-        Assert.Contains("SyncedType.Value()", outline, StringComparison.Ordinal);
+        Assert.Contains("  SyncedType.Value  ", outline, StringComparison.Ordinal);
 
         var replaced = await solution.CallAsync("replace_symbol", new()
         {
@@ -38,7 +38,7 @@ public sealed class WorkspaceSyncE2ETests
             ["verbose"] = true,
         });
 
-        Assert.Contains("replace_symbol applied", replaced, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", replaced, StringComparison.Ordinal);
         Assert.Contains("42", replaced, StringComparison.Ordinal);
     }
 
@@ -119,7 +119,7 @@ public sealed class WorkspaceSyncE2ETests
         });
 
         Assert.Contains("Reloaded", properties, StringComparison.Ordinal);
-        Assert.Contains("gen=c1/p1/x0/r0", await solution.CallAsync("workspace_status", []), StringComparison.Ordinal);
+        Assert.Contains("gen=c1/p1/x0/r0", await Status(solution), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -132,7 +132,7 @@ public sealed class WorkspaceSyncE2ETests
 
         Assert.True(
             await SettlesAsync(solution, "gen=c1/p1/x0/r0"),
-            "100 external creates did not settle at one reload: " + await solution.CallAsync("workspace_status", []));
+            "100 external creates did not settle at one reload: " + await Status(solution));
     }
 
     [Fact]
@@ -178,7 +178,7 @@ public sealed class WorkspaceSyncE2ETests
             ["body"] = "return repository.Submit(order);",
         });
 
-        Assert.Contains("applied", replaced, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", replaced, StringComparison.Ordinal);
 
         await AppendAsync(solution.OrderServicePath, "\n// ChangedBehindTheServersBack\n");
         await solution.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
@@ -200,9 +200,8 @@ public sealed class WorkspaceSyncE2ETests
             ["reload"] = true,
         });
 
-        Assert.Contains("load_workspace", reloaded, StringComparison.Ordinal);
         Assert.Contains("failures=0", reloaded, StringComparison.Ordinal);
-        Assert.Contains("gen=c1/p1/x0/r0", await solution.CallAsync("workspace_status", []), StringComparison.Ordinal);
+        Assert.Contains("gen=c1/p1/x0/r0", await Status(solution), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -210,7 +209,7 @@ public sealed class WorkspaceSyncE2ETests
     {
         await using var solution = await StartAsync(watch: true);
 
-        var status = await solution.CallAsync("workspace_status", []);
+        var status = await Status(solution);
 
         Assert.Contains("watch=active", status, StringComparison.Ordinal);
         Assert.Contains("gen=c0/p0/x0/r0", status, StringComparison.Ordinal);
@@ -222,7 +221,10 @@ public sealed class WorkspaceSyncE2ETests
         solution.CallAsync("search_symbols", new() { ["query"] = "OrderService" });
 
     private static Task<bool> SettlesAsync(TerseTempSolution solution, string expected) =>
-        PollAsync(() => solution.CallAsync("workspace_status", []), expected);
+        PollAsync(() => Status(solution), expected);
+
+    private static Task<string> Status(TerseTempSolution solution) =>
+        solution.CallAsync("workspace_status", new() { ["verbose"] = true });
 
     private static Task<bool> FindsAsync(TerseTempSolution solution, string name) =>
         PollAsync(() => solution.CallAsync("search_symbols", new() { ["query"] = name }), name);
@@ -297,7 +299,7 @@ public sealed class WorkspaceSyncE2ETests
             ["force"] = true,
         });
 
-        Assert.Contains("edit_text applied", edited, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", edited, StringComparison.Ordinal);
 
         var replaced = await solution.CallAsync("replace_symbol_body", new()
         {

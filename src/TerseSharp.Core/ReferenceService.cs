@@ -55,9 +55,15 @@ public static class ReferenceService
         RazorFiles.IsGenerated(location.Document.FilePath ?? location.Document.Name)
         && !location.Location.GetMappedLineSpan().HasMappedPath;
 
-    private static string Describe(string root, ISymbol symbol) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"{SymbolFormat.Location(root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Describe(symbol)}");
+    private static string Describe(string root, ISymbol symbol)
+    {
+        var described = SymbolFormat.Describe(symbol);
+        var detail = string.Equals(described, symbol.Name, StringComparison.Ordinal) ? SymbolFormat.Kind(symbol) : described;
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{SymbolFormat.Location(root, symbol)}  EXACT  {SymbolId.From(symbol)}  {detail}");
+    }
 
     private static async Task<string> RenderAsync(
         LoadedWorkspace workspace,

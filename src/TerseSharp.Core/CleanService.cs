@@ -130,13 +130,13 @@ public static class CleanService
     private static string Render(string root, string? project, int projects, Removal[] removals, bool dryRun, bool verbose)
     {
         var locked = removals.Count(removal => removal.Locked);
-        var response = new ResponseBuilder("clean", project ?? PositionFormat.Relative(root, root));
+        var response = new ResponseBuilder("clean", project ?? PositionFormat.Relative(root, root)).Verbose(verbose);
 
         response.Summary(Math.Min(removals.Length, MaxListedDirectories), removals.Length, "directories", "project=");
         response.Note(Counters(projects, removals, locked, dryRun));
 
         if (locked is 0 && !verbose && !dryRun)
-            return response.Note("(verbose=true for the per-directory list)").ToString();
+            return response.ToString();
 
         if (locked > 0)
         {
@@ -149,7 +149,6 @@ public static class CleanService
 
         return response.ToString();
     }
-
     private static string Counters(int projects, Removal[] removals, int locked, bool dryRun)
     {
         var freed = removals.Where(removal => !removal.Locked).ToArray();

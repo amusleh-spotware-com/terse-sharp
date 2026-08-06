@@ -61,7 +61,7 @@ public sealed class NewToolEdgeCaseE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("find_registrations", new() { ["query"] = "", ["maxResults"] = 1 });
 
-        Assert.Contains("truncated=true", text, StringComparison.Ordinal);
+        Assert.Contains(" truncated", text, StringComparison.Ordinal);
         Assert.Contains("narrow with", text, StringComparison.Ordinal);
     }
 
@@ -70,7 +70,7 @@ public sealed class NewToolEdgeCaseE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("list_endpoints", new() { ["maxResults"] = 1 });
 
-        Assert.Contains("truncated=true", text, StringComparison.Ordinal);
+        Assert.Contains(" truncated", text, StringComparison.Ordinal);
     }
 
     [Fact]

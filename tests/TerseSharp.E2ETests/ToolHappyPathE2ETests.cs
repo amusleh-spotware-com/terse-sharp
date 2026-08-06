@@ -34,8 +34,8 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         var (_, arguments, expect) = Cases.Single(entry => entry.Tool == tool);
         var text = await server.CallAsync(tool, arguments);
 
-        Assert.StartsWith(tool, text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(tool + " ", text.Split('\n')[0], StringComparison.Ordinal);
         Assert.Contains(expect, text, StringComparison.Ordinal);
     }
 
@@ -98,7 +98,7 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("list_projects", [], "Fixture.Trading"),
         ("search_symbols", new() { ["query"] = "OrderService" }, "T:Fixture.Trading.OrderService"),
         ("get_symbol", new() { ["symbolId"] = ServiceType }, "class public"),
-        ("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" }, "OrderService.Submit(Order)"),
+        ("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" }, "  OrderService.Submit  "),
         ("get_type_outline", new() { ["symbolId"] = ServiceType }, "PendingCount"),
         ("get_symbol_source", new() { ["symbolId"] = SubmitMethod }, "repository.Submit(order)"),
         ("find_usages", new() { ["symbolId"] = SubmitMethod }, "OrderRouter.cs"),
@@ -141,7 +141,7 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("xaml_names", new() { ["path"] = View }, "VolumeText"),
         ("xaml_resources", new() { ["path"] = View }, "resources"),
         ("xaml_bindings", new() { ["path"] = View }, "bindings"),
-        ("xaml_validate", new() { ["path"] = View }, "xaml_validate"),
+        ("xaml_validate", new() { ["path"] = View }, "dialect=wpf"),
         ("xaml_find", new() { ["query"] = "Button" }, "OrderView.xaml"),
         ("xaml_resolve", new() { ["key"] = "AccentBrush" }, "scope="),
         ("explore_symbol", new() { ["symbolId"] = SubmitMethod }, "usages="),

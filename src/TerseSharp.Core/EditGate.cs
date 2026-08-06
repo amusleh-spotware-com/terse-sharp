@@ -32,12 +32,15 @@ public static class EditGate
 
     private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root)
     {
-        var response = new ResponseBuilder(options.Tool, state);
+        var response = new ResponseBuilder(options.Tool, state).Verbose(options.Verbose);
 
         response.Summary(diffs.Length, diffs.Length, "files changed");
 
+        if (options.DryRun && !options.Verbose)
+            response.Note("dryRun");
+
         if (report is not null)
-            Announce(response, report);
+            Announce(response, report, options.Verbose || options.DryRun);
 
         if (Condensed(options, diffs, report))
             return Compact(response, diffs, root);
@@ -47,10 +50,10 @@ public static class EditGate
 
         return response.ToString();
     }
-
-    private static void Announce(ResponseBuilder response, GateReport report)
+    private static void Announce(ResponseBuilder response, GateReport report, bool verbose)
     {
-        response.Note(Describe(report));
+        if (Describe(report, verbose) is { Length: > 0 } counters)
+            response.Note(counters);
 
         if (report.NewErrors.Length is 0)
             return;
@@ -63,12 +66,9 @@ public static class EditGate
             response.Note(error);
     }
 
-    private static string Describe(GateReport report) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"errors={report.Errors} ({Signed(report.ErrorDelta)}) warnings={report.Warnings} ({Signed(report.WarningDelta)})");
-
-    private static string Signed(int delta) =>
-        delta >= 0 ? "+" + delta.ToString(CultureInfo.InvariantCulture) : delta.ToString(CultureInfo.InvariantCulture);
+    private static string Describe(GateReport report, bool verbose) => verbose
+        ? ResponseCompression.VerboseCounters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta)
+        : ResponseCompression.Counters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta);
 
     private static async Task<DocumentDiff[]> DiffAsync(
         Solution before,
@@ -185,7 +185,7 @@ public static class EditGate
                 $"{PositionFormat.Relative(root, diff.Path)}  changedLines={diff.ChangedLines}"));
         }
 
-        return response.Note("(verbose=true for the diff)").ToString();
+        return response.ToString();
     }
 
     private static bool Condensed(EditOptions options, DocumentDiff[] diffs, GateReport? report) =>

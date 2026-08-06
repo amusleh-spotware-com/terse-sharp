@@ -38,9 +38,13 @@ a moment you reached for `Read`/`Grep` instead — belongs in that file as a row
 
 ## Response style
 
-Responses are data, not prose. One header line, one record per line, an explicit
-`truncated=…, total=…`, and nothing the caller did not ask for. No preamble, no explanation, no
-closing summary. Every record carries `EXACT` or `HEURISTIC`.
+Responses are data, not prose. One count line, one record per line, and nothing the caller did not
+ask for - no header echoing the request, no preamble, no explanation, no closing summary, and no
+"pass `verbose=true`" hint. The count line names the truncation only when there was one
+(`4/17 usages truncated - narrow with maxResults=`). Every record carries `EXACT` or `HEURISTIC`.
+`verbose=true` restores the verbatim shape - header and `(truncated=…, total=…)` - on every tool
+that takes it. A record's own text is never rewritten to save characters: compression drops framing,
+never payload.
 
 ## Code style
 

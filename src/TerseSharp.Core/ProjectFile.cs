@@ -366,24 +366,21 @@ public static class ProjectFile
         bool dryRun,
         bool verbose)
     {
-        var response = new ResponseBuilder(tool, argument);
-
-        response.Summary(1, 1, "files changed");
-        response.Note(dryRun ? "dryRun" : "applied");
+        var response = new ResponseBuilder(tool, argument).Verbose(verbose);
 
         if (!dryRun && !verbose)
         {
-            response.Line(string.Create(CultureInfo.InvariantCulture, $"{file}  changedLines={UnifiedDiff.ChangedLines(before, after)}"));
-            response.Note("(verbose=true for the diff)");
-
-            return Result.Ok(response.ToString());
+            return Result.Ok(response
+                .Line(string.Create(CultureInfo.InvariantCulture, $"{file}  changedLines={UnifiedDiff.ChangedLines(before, after)}"))
+                .ToString());
         }
 
+        response.Summary(1, 1, "files changed");
+        response.Note(dryRun ? "dryRun" : "applied");
         response.Line(UnifiedDiff.Between(file, before, after));
 
         return Result.Ok(response.ToString());
     }
-
     private static string Relative(string projectPath, string target)
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(projectPath))!;

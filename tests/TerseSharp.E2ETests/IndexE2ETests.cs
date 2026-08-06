@@ -81,7 +81,7 @@ public sealed class IndexE2ETests
         await AppendAsync(solution.OrderServicePath, "\npublic sealed class IndexUntouched\n{\n}\n");
 
         Assert.True(
-            await PollAsync(() => Symbols(solution, "IndexUntouched"), "class IndexUntouched"),
+            await PollAsync(() => Symbols(solution, "IndexUntouched"), "IndexUntouched  class"),
             "the watcher never delivered the external code edit");
 
         await Resolve(solution, "AccentBrush");
@@ -124,7 +124,7 @@ public sealed class IndexE2ETests
         solution.CallAsync("search_symbols", new() { ["query"] = query });
 
     private static Task<string> Status(TerseTempSolution solution) =>
-        solution.CallAsync("workspace_status", []);
+        solution.CallAsync("workspace_status", new() { ["verbose"] = true });
 
     private static Task WriteMarkupAsync(TerseTempSolution solution) => File.WriteAllTextAsync(
         Path.Combine(solution.ProjectDirectory, "Views", "Indexed.xaml"),
@@ -168,7 +168,7 @@ public sealed class IndexE2ETests
             ["declaration"] = "    private void AddSingleton(string name) => _ = name;",
         });
 
-        Assert.Contains("add_member applied", container, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", container, StringComparison.Ordinal);
 
         var registration = await solution.CallAsync("add_member", new()
         {
@@ -177,7 +177,7 @@ public sealed class IndexE2ETests
                 "    public void RegisterIndexProbe()\n    {\n        var services = this;\n\n        services.AddSingleton(\"IndexProbeService\");\n    }",
         });
 
-        Assert.Contains("add_member applied", registration, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", registration, StringComparison.Ordinal);
 
         var found = await Registrations(solution);
 

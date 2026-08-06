@@ -4,6 +4,27 @@ namespace TerseSharp.UnitTests;
 
 public sealed class DotnetRunnerTests
 {
+    [Fact]
+    public void RenderBuild_WithAWorkspaceRoot_StripsItFromEveryDiagnosticAndFromTheOutputTail()
+    {
+        var root = Path.Combine("C:", "repo");
+        var absolute = Path.Combine(root, "src", "A.cs") + "(7,9): error CS0029: cannot convert [" + Path.Combine(root, "src", "A.csproj") + "]";
+
+        var text = DotnetRunner.RenderBuild("A.slnx", root, Failed(absolute), verbose: false);
+
+        Assert.Contains(Path.Combine("src", "A.cs") + "(7,9): error CS0029", text, StringComparison.Ordinal);
+        Assert.Contains("[" + Path.Combine("src", "A.csproj") + "]", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(root, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderBuild_WithoutAWorkspaceRoot_LeavesTheDiagnosticUntouched()
+    {
+        var text = DotnetRunner.RenderBuild("A.slnx", string.Empty, Failed(ErrorLine), verbose: false);
+
+        Assert.Contains(ErrorLine, text, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("error MSB3021: Unable to copy file")]
     [InlineData("warning MSB3027: Could not copy")]
@@ -62,15 +83,15 @@ public sealed class DotnetRunnerTests
     [Fact]
     public void RenderBuild_WhenTheBuildSucceedsWithWarnings_StillAnswersInOneLine()
     {
-        var text = DotnetRunner.RenderBuild("A.slnx", Succeeded(WarningLine, SecondWarningLine), verbose: false);
+        var text = DotnetRunner.RenderBuild("A.slnx", string.Empty, Succeeded(WarningLine, SecondWarningLine), verbose: false);
 
-        Assert.Equal("build ok  errors=0 warnings=2  elapsedMs=120  (verbose=true for the full report)", text);
+        Assert.Equal("build ok  errors=0 warnings=2  elapsedMs=120", text);
     }
 
     [Fact]
     public void RenderBuild_WhenTheBuildSucceedsWithWarningsAndVerboseIsAsked_ListsThem()
     {
-        var text = DotnetRunner.RenderBuild("A.slnx", Succeeded(WarningLine, SecondWarningLine), verbose: true);
+        var text = DotnetRunner.RenderBuild("A.slnx", string.Empty, Succeeded(WarningLine, SecondWarningLine), verbose: true);
 
         Assert.Contains("2 diagnostics (truncated=false, total=2)", text, StringComparison.Ordinal);
         Assert.Contains(WarningLine, text, StringComparison.Ordinal);
@@ -80,19 +101,19 @@ public sealed class DotnetRunnerTests
     [Fact]
     public void RenderBuild_WhenTheBuildFails_ListsTheErrorsAndCountsTheHiddenWarnings()
     {
-        var text = DotnetRunner.RenderBuild("A.slnx", Failed(WarningLine, ErrorLine, SecondWarningLine), verbose: false);
+        var text = DotnetRunner.RenderBuild("A.slnx", string.Empty, Failed(WarningLine, ErrorLine, SecondWarningLine), verbose: false);
 
         Assert.Contains(ErrorLine, text, StringComparison.Ordinal);
         Assert.DoesNotContain("CS0169", text, StringComparison.Ordinal);
         Assert.DoesNotContain("CA1822", text, StringComparison.Ordinal);
-        Assert.Contains("warnings=2 hidden (verbose=true for the full report)", text, StringComparison.Ordinal);
-        Assert.Contains("1 diagnostics (truncated=true, total=3)", text, StringComparison.Ordinal);
+        Assert.Contains("warnings=2 hidden", text, StringComparison.Ordinal);
+        Assert.Contains("1/3 diagnostics truncated", text, StringComparison.Ordinal);
     }
 
     [Fact]
     public void RenderBuild_WhenTheBuildFailsAndVerboseIsAsked_ListsTheWarningsToo()
     {
-        var text = DotnetRunner.RenderBuild("A.slnx", Failed(WarningLine, ErrorLine, SecondWarningLine), verbose: true);
+        var text = DotnetRunner.RenderBuild("A.slnx", string.Empty, Failed(WarningLine, ErrorLine, SecondWarningLine), verbose: true);
 
         Assert.Contains(ErrorLine, text, StringComparison.Ordinal);
         Assert.Contains(WarningLine, text, StringComparison.Ordinal);
@@ -105,6 +126,7 @@ public sealed class DotnetRunnerTests
     {
         var text = DotnetRunner.RenderBuild(
             "A.slnx",
+            string.Empty,
             Failed(WarningLine, SecondWarningLine, "MSBUILD : Build FAILED for an unstated reason"),
             verbose: false);
 
@@ -119,12 +141,12 @@ public sealed class DotnetRunnerTests
     {
         const string lockLine = "A.csproj(0,0): error MSB3021: Unable to copy file, it is being used by another process";
 
-        var text = DotnetRunner.RenderBuild("A.slnx", Failed(lockLine, WarningLine), verbose: false);
+        var text = DotnetRunner.RenderBuild("A.slnx", string.Empty, Failed(lockLine, WarningLine), verbose: false);
 
         Assert.Contains("WARNING a locked output file blocked the operation", text, StringComparison.Ordinal);
         Assert.Contains(lockLine, text, StringComparison.Ordinal);
         Assert.DoesNotContain("CS0169", text, StringComparison.Ordinal);
-        Assert.Contains("warnings=1 hidden (verbose=true for the full report)", text, StringComparison.Ordinal);
+        Assert.Contains("warnings=1 hidden", text, StringComparison.Ordinal);
     }
 
     private static ProcessRun Succeeded(params string[] lines) => new(0, string.Join('\n', lines), 120);
@@ -140,7 +162,7 @@ public sealed class DotnetRunnerTests
         Assert.Contains(ErrorLine, text, StringComparison.Ordinal);
         Assert.DoesNotContain("CS0169", text, StringComparison.Ordinal);
         Assert.DoesNotContain("CA1822", text, StringComparison.Ordinal);
-        Assert.Contains("warnings=2 hidden (verbose=true for the full report)", text, StringComparison.Ordinal);
+        Assert.Contains("warnings=2 hidden", text, StringComparison.Ordinal);
         Assert.DoesNotContain("last output lines", text, StringComparison.Ordinal);
     }
 
@@ -196,7 +218,7 @@ public sealed class DotnetRunnerTests
     {
         var text = DotnetRunner.RenderTestNames("A.slnx", Succeeded(WarningLine, SecondWarningLine), contains: "NoSuchTest");
 
-        Assert.Equal("list_tests A.slnx\n0 tests (truncated=false, total=0)", text);
+        Assert.Equal("0 tests", text);
     }
 
     [Fact]
@@ -206,6 +228,6 @@ public sealed class DotnetRunnerTests
 
         Assert.Contains(ErrorLine, text, StringComparison.Ordinal);
         Assert.DoesNotContain("CS0169", text, StringComparison.Ordinal);
-        Assert.Contains("warnings=1 hidden (verbose=true for the full report)", text, StringComparison.Ordinal);
+        Assert.Contains("warnings=1 hidden", text, StringComparison.Ordinal);
     }
 }

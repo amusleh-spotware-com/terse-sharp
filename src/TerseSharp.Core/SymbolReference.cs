@@ -134,4 +134,13 @@ public static class SymbolReference
         '>' or ')' or ']' => -1,
         _ => 0,
     };
+
+    private static readonly SymbolDisplayFormat Named = new(
+        globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypes,
+        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+        memberOptions: SymbolDisplayMemberOptions.IncludeContainingType,
+        miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
+
+    public static string Simple(ISymbol symbol) => symbol.ToDisplayString(Named);
 }

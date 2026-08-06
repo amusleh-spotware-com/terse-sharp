@@ -198,7 +198,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
                 ["dryRun"] = false,
             });
 
-            Assert.Contains("applied", written, StringComparison.Ordinal);
+            Assert.Equal("scratch.json  changedLines=1", written);
             Assert.Equal("{ \"written\": true }", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
 
             var read = await server.CallAsync("read_text", new() { ["path"] = "scratch.json" });
@@ -245,7 +245,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             });
 
             Assert.DoesNotContain("@@", quiet, StringComparison.Ordinal);
-            Assert.Contains("(verbose=true for the diff)", quiet, StringComparison.Ordinal);
+            Assert.DoesNotContain("verbose=true", quiet, StringComparison.Ordinal);
             Assert.Contains("changedLines=", quiet, StringComparison.Ordinal);
             Assert.Contains("@@", loud, StringComparison.Ordinal);
             Assert.True(quiet.Length < loud.Length, quiet);

@@ -114,11 +114,16 @@ public static class RazorEditGate
         RazorGateReport? report,
         bool refreshed)
     {
-        var response = new ResponseBuilder(options.Tool, state);
+        var response = new ResponseBuilder(options.Tool, state).Verbose(options.Verbose);
         var changed = UnifiedDiff.ChangedLines(context.Document.Text, updatedText);
 
         response.Summary(1, 1, "files changed");
-        response.Note(Announce(report));
+
+        if (options.DryRun && !options.Verbose)
+            response.Note("dryRun");
+
+        if (Announce(report, options.Verbose || options.DryRun) is { Length: > 0 } counters)
+            response.Note(counters);
 
         if (!refreshed)
             response.Note("workspace=stale - the file changed on disk; call load_workspace again before asking for its symbols");
@@ -127,14 +132,13 @@ public static class RazorEditGate
             Warn(response, report);
 
         if (Condensed(options, refreshed, report))
-            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{context.Relative}  changedLines={changed}")).Note("(verbose=true for the diff)").ToString();
+            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{context.Relative}  changedLines={changed}")).ToString();
 
         response.Line(UnifiedDiff.Between(context.Relative, context.Document.Text, updatedText));
         response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
 
         return response.ToString();
     }
-
     private static void Warn(ResponseBuilder response, RazorGateReport report)
     {
         response.Note(string.Create(
@@ -145,14 +149,17 @@ public static class RazorEditGate
             response.Note(error);
     }
 
-    private static string Announce(RazorGateReport? report) => report is null
-        ? "compileGate=unavailable - the file is not an additional document of a loaded project, so the Razor generator could not re-run"
-        : string.Create(
-            CultureInfo.InvariantCulture,
-            $"errors={report.Errors} ({Signed(report.ErrorDelta)}) warnings={report.Warnings} ({Signed(report.WarningDelta)})  regenMs={report.RegenerationMs}");
+    private static string Announce(RazorGateReport? report, bool verbose)
+    {
+        if (report is null)
+            return "compileGate=unavailable - the file is not an additional document of a loaded project, so the Razor generator could not re-run";
 
-    private static string Signed(int delta) =>
-        delta >= 0 ? "+" + delta.ToString(CultureInfo.InvariantCulture) : delta.ToString(CultureInfo.InvariantCulture);
+        return verbose
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"{ResponseCompression.VerboseCounters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta)}  regenMs={report.RegenerationMs}")
+            : ResponseCompression.Counters(report.Errors, report.ErrorDelta, report.Warnings, report.WarningDelta);
+    }
 
     private sealed record RazorGateReport(
         IReadOnlyList<string> NewErrors,

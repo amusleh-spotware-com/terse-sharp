@@ -112,7 +112,7 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
                 ["body"] = "=> Greeting.Text + \"!\"",
             });
 
-            Assert.Contains("applied", applied, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", applied, StringComparison.Ordinal);
             Assert.Contains("Greeting.Text + \"!\"", await CurrentConsumerAsync(), StringComparison.Ordinal);
             Assert.True(Writable(), "the edit mapped the analyzer assembly in place");
 

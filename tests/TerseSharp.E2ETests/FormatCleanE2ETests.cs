@@ -14,7 +14,7 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
             ["verify"] = true,
         });
 
-        Assert.Contains("0 files would change", text, StringComparison.Ordinal);
+        Assert.Equal("clean", text);
         Assert.DoesNotContain("VERIFY_FAILED", text, StringComparison.Ordinal);
         Assert.DoesNotContain("changedLines=", text, StringComparison.Ordinal);
         Assert.DoesNotContain("@@", text, StringComparison.Ordinal);

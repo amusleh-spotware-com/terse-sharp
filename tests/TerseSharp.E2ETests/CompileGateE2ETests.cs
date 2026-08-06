@@ -37,7 +37,7 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
             ["dryRun"] = true,
         });
 
-        Assert.Contains("errors=1 (+0) warnings=", text, StringComparison.Ordinal);
+        Assert.Contains("errors=1 (+0)", text, StringComparison.Ordinal);
         Assert.DoesNotContain("would be rolled back", text, StringComparison.Ordinal);
     }
 
@@ -66,7 +66,7 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         });
 
         Assert.DoesNotContain("CompileRegression", text, StringComparison.Ordinal);
-        Assert.Contains("applied", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", text, StringComparison.Ordinal);
 
         var onDisk = await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken);
 

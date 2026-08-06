@@ -55,7 +55,7 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             ["maxResults"] = 1,
         });
 
-        Assert.StartsWith("xaml_styles", text, StringComparison.Ordinal);
+        Assert.StartsWith("1/3 styles truncated", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 

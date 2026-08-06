@@ -162,13 +162,20 @@ public static class FileService
 
     private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose)
     {
-        var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied");
+        var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
         var changed = UnifiedDiff.ChangedLines(before, after);
+
+        if (!dryRun && !verbose && changed > 0)
+        {
+            return response
+                .Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={changed}"))
+                .ToString();
+        }
 
         response.Summary(1, 1, "files changed");
 
-        if (!dryRun && !verbose)
-            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{path}  changedLines={changed}")).Note("(verbose=true for the diff)").ToString();
+        if (dryRun && !verbose)
+            response.Note("dryRun");
 
         response.Line(UnifiedDiff.Between(path, before, after));
         response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
@@ -179,14 +186,14 @@ public static class FileService
     private static Result<string> Present(string path, string label, string text, ReadRequest request)
     {
         if (request.Headings)
-            return Outline(path, label, text);
+            return Outline(path, label, text, request.Verbose);
 
         return request.Section is { Length: > 0 } heading
             ? Slice(label, text, heading, request)
-            : Result.Ok(Render(label, text, request.Range));
+            : Result.Ok(Render(label, text, request.Range, request));
     }
 
-    private static Result<string> Outline(string path, string label, string text)
+    private static Result<string> Outline(string path, string label, string text, bool verbose)
     {
         if (!DocumentOutline.IsMarkdown(path))
         {
@@ -196,7 +203,7 @@ public static class FileService
         }
 
         var sections = DocumentOutline.Headings(text);
-        var response = new ResponseBuilder("read_text", label + " headings");
+        var response = new ResponseBuilder("read_text", label + " headings").Verbose(verbose);
         var seen = new Dictionary<string, int>(StringComparer.Ordinal);
 
         response.Summary(sections.Count, sections.Count, "sections");
@@ -216,29 +223,42 @@ public static class FileService
         var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading);
 
         return located.IsOk
-            ? Result.Ok(Render(path, text, new LineRange(located.Value!.StartLine, located.Value!.EndLine, request.Range.MaxLines)))
+            ? Result.Ok(Render(path, text, new LineRange(located.Value!.StartLine, located.Value!.EndLine, request.Range.MaxLines), request))
             : Result.Fail<string>(located.Error!);
     }
 
-    private static string Render(string path, string text, LineRange range)
+    private static string Render(string path, string text, LineRange range, ReadRequest request)
     {
-        var selection = Collect(text, range);
-        var response = new ResponseBuilder("read_text", path);
+        var keepsBlanks = TextCompressor.KeepsBlankLines(Located(path)) || TextCompressor.HasMultilineLiteral(text);
+        var selection = Collect(text, range, new ReadFormat(request.Verbose, keepsBlanks));
+        var response = new ResponseBuilder("read_text", path).Verbose(request.Verbose);
 
-        response.Summary(selection.Lines.Count, selection.TotalLines, "lines");
+        response.Summary(selection.CoveredLines, selection.TotalLines, "lines");
+
+        if (!request.Verbose && IsOutside(path))
+            response.Note(OutsideMarker);
 
         foreach (var line in selection.Lines)
             response.Line(line);
 
         return response.ToString();
     }
+    private static ReadOnlySpan<char> Located(string label) => IsOutside(label)
+        ? label.AsSpan(0, label.Length - OutsideSuffix.Length)
+        : label;
 
-    private static LineSelection Collect(string text, LineRange range)
+    private static bool IsOutside(string label) => label.EndsWith(OutsideSuffix, StringComparison.Ordinal);
+
+    private const string OutsideMarker = "outside-workspace";
+
+    private static LineSelection Collect(string text, LineRange range, ReadFormat format)
     {
         var total = CountLines(text);
         var lines = new List<string>(Math.Min(range.MaxLines, 512));
         var budget = MaxResponseCharacters;
         var number = 0;
+        var previous = -1;
+        var covered = 0;
 
         foreach (var line in text.AsSpan().EnumerateLines())
         {
@@ -250,18 +270,34 @@ public static class FileService
             if (!range.Covers(number) || lines.Count >= range.MaxLines || budget <= 0)
                 continue;
 
-            lines.Add(Numbered(number, line, budget));
+            covered++;
+
+            if (Dropped(line, format))
+                continue;
+
+            lines.Add(Emit(number, format.Verbose ? line : line.TrimEnd(), budget, format.Verbose || number != previous + 1));
             budget -= Math.Min(line.Length, budget);
+            previous = number;
         }
 
-        return new LineSelection(lines, total);
+        return new LineSelection(lines, total, covered);
     }
+
+    private static bool Dropped(ReadOnlySpan<char> line, ReadFormat format) =>
+        !format.Verbose && !format.KeepsBlankLines && line.TrimEnd().IsEmpty;
+
+
+    private static string Emit(int number, ReadOnlySpan<char> line, int budget, bool numbered) => line.Length > budget || numbered
+        ? Numbered(number, line, budget)
+        : new string(line);
+
+    private readonly record struct ReadFormat(bool Verbose, bool KeepsBlankLines);
 
     private static string Numbered(int number, ReadOnlySpan<char> line, int budget) => line.Length <= budget
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false);
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose);
 
@@ -270,7 +306,7 @@ public static class FileService
         public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
     }
 
-    private readonly record struct LineSelection(IReadOnlyList<string> Lines, int TotalLines);
+    private readonly record struct LineSelection(IReadOnlyList<string> Lines, int TotalLines, int CoveredLines);
     private static int CountLines(ReadOnlySpan<char> text)
     {
         if (text.Length is 0)
@@ -335,7 +371,7 @@ public static class FileService
         return PresentFileAsync(full, Outside(full), request, cancellationToken);
     }
 
-    private static string Outside(string full) => full + "  outside-workspace";
+    private static string Outside(string full) => full + OutsideSuffix;
 
     private static async Task<Result<string>> PresentFileAsync(
             string full,
@@ -353,4 +389,6 @@ public static class FileService
 
         return Present(full, label, text, request);
     }
+
+    private const string OutsideSuffix = "  " + OutsideMarker;
 }

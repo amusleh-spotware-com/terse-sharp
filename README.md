@@ -262,12 +262,21 @@ code**; pair it with a Unity-specific MCP for the editor.
 ### ✂️ Success costs nothing
 
 Every mutating tool answers a successful edit in **one line per changed file** —
-`replace_symbol applied` · `src/App/OrderService.cs  changedLines=3` · `errors=0 (+0) warnings=0 (+0)` —
-instead of echoing a diff of text the agent just wrote. All 30 of them take `verbose=true` to restore
-it in full. The short form is only ever emitted when there is nothing else to say: `dryRun=true` is
-never condensed — there the diff *is* the answer — and **every caveat prints in full regardless**, from
-a rollback or a new compile error to `0 files changed`, `compileGate=unavailable`, `workspace=stale`,
-`UNFIXED`, `designerStale` and the `NOT rewritten` list a XAML-aware rename leaves.
+`src/App/OrderService.cs  changedLines=3` — instead of echoing a diff of text the agent just wrote,
+and `edit_text` / `write_text` print the **file name alone**, because the caller supplied the path.
+All 30 of them take `verbose=true` to restore it in full. The short form is only ever emitted when
+there is nothing else to say: `dryRun=true` is never condensed — there the diff *is* the answer — and
+**every caveat prints in full regardless**, from a rollback or a new compile error to
+`0 files changed`, `compileGate=unavailable`, `workspace=stale`, `UNFIXED`, `designerStale` and the
+`NOT rewritten` list a XAML-aware rename leaves.
+
+**No response carries ceremony.** There is no header echoing the tool name and the arguments the
+agent just sent; the first line is the count, and it names the truncation only when there was one
+(`4/17 usages truncated - narrow with maxResults=`, otherwise just `4 usages in 2 files`). An
+outline drops the parameter list from a member id unless the type overloads that name, `read_text`
+prints a line number only where the numbering jumps, `get_symbol_source` is dedented and blank-free,
+and `workspace_status` keeps its load timings and index counters behind `verbose=true`. Every one of
+those is reversible with `verbose=true`, and nothing an agent cannot re-derive is ever dropped.
 
 <details>
 <summary><b>🔔 Staying current — one cached <code>HEAD</code> a day</b></summary>
@@ -404,7 +413,7 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 | `Bash: dotnet format` / `clean` | `format` · `cleanup fix=all` · `clean` | compile-gated code fixes, a one-line verdict, freed-byte counters — never raw CLI output |
 | a per-file analyzer sweep | `analyze path=src/**/*.cs` · `analyze changed=true` | a file, a directory, a glob, or just what you touched — one call instead of one per file |
 | `Glob` for `*.sln` in an unfamiliar repo | `load_workspace discover=true` | every solution and project under a directory, shallowest first, loading none of them |
-| `Grep` in non-code files | `search_text(query)` · `search_regex(query)` | `total=` counts matching lines; `bin`, `obj`, `.git`, `.claude`, `artifacts`, `TestResults` and symlinks are skipped |
+| `Grep` in non-code files | `search_text(query)` · `search_regex(query)` | the count line counts matching lines; `bin`, `obj`, `.git`, `.claude`, `artifacts`, `TestResults` and symlinks are skipped |
 
 </details>
 
@@ -427,8 +436,7 @@ directory literally named `bin` or `obj` inside the workspace root (`dryRun=true
 ### 🧪 Tests an agent can act on
 
 ```
-2 failures (truncated=false, total=2)
-
+2 failures
 passed=3 failed=2 skipped=1 total=6 durationMs=229 exitCode=1 elapsedMs=9533
 
 FAIL Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion (2 ms)
@@ -542,9 +550,7 @@ the generated file under `obj/`.
 throws `InvalidOperationException` the first time the component renders:
 
 ```
-razor_validate solution
-6 findings (truncated=false, total=6) - narrow with rules=
-
+6 findings
 RZR002  src/App/Components/Home.razor:6   Card.Bogus     UNKNOWN_PARAMETER  Card has no [Parameter] with that name - InvalidOperationException at render
 RZR001  src/App/Components/Home.razor:8   MudButton      UNKNOWN_COMPONENT  resolves to no component - it renders as a plain HTML tag
 RZR006  src/App/Components/Legacy.razor:1 /order/{Id:int} DUPLICATE_ROUTE   also declared by Components/Detail.razor - AmbiguousMatchException on navigation
