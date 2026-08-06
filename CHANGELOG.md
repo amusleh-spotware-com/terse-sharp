@@ -13,7 +13,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 - **`read_text` takes `maxChars`** (I94). `maxLines` cannot bound a file whose lines are very long —
   a 155-line range of this repo's own backlog file answered **50.5 KB** and was persisted to disk by
   the client instead of read. `maxChars` clamps to the same 128 000-character budget the reader
-  already applied internally, and a clipped read still names the line to continue from.
+  already applied internally, and a clipped read still names the line to continue from. It bounds the
+  file **text**; the gutter, the notes and the count line are not charged to it, and `headings=true`
+  is not bounded by it — the description says both. When the budget runs out **inside** a line,
+  the response says so explicitly (`line N was cut mid-way …`), because a line range cannot resume at
+  a character offset and a bare `next: startLine=N` there would be a steer that never advances.
 
 ### Changed
 

@@ -266,4 +266,21 @@ public sealed class FileServiceTests
             await File.WriteAllTextAsync(document.FilePath!, before, TestContext.Current.CancellationToken);
         }
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MinValue)]
+    public void LineRange_WithANonPositiveCharacterBudget_FallsBackToTheDefault(int requested) =>
+            Assert.Equal(FileService.MaxResponseCharacters, new FileService.LineRange(0, 0, 100, requested).Budget);
+
+
+    [Fact]
+    public void LineRange_WithADefaultInstance_StillCarriesTheFullBudget() =>
+        Assert.Equal(FileService.MaxResponseCharacters, default(FileService.LineRange).Budget);
+
+
+    [Fact]
+    public void LineRange_WithACallerBudget_KeepsIt() =>
+        Assert.Equal(4096, new FileService.LineRange(0, 0, 100, 4096).Budget);
 }

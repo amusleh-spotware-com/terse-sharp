@@ -6,13 +6,13 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text")]
-    [Description("Read any file, line-ranged. Use for non-C# files; for a .cs file prefer get_file_outline or get_symbol_source. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the answer on a file whose lines are very long. A clipped read names the line to continue from. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
+    [Description("Read any file, line-ranged. Use for non-C# files; for a .cs file prefer get_file_outline or get_symbol_source. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
         [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
         [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
-        [Description("Maximum characters returned, default 128000. Lower it on a file whose lines are very long - maxLines cannot bound those.")] int maxChars = 0,
+        [Description("Maximum characters of file text returned, default 128000, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. Lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
         [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
         [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
         [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,

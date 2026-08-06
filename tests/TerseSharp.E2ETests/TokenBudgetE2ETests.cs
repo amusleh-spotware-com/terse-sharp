@@ -394,4 +394,17 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.Equal(2, Lines(clipped) - 3 - 1);
         Assert.DoesNotContain("next: startLine=", whole, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithMaxChars_StaysWithinTheBudgetItWasGiven()
+    {
+        var bounded = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "wide-lines.json",
+            ["maxChars"] = 500,
+        });
+
+        Assert.True(Tokens(bounded) < 300, Report("read_text maxChars", bounded, bounded));
+        Assert.True(bounded.Length < 1200, $"{bounded.Length} characters for a 500-character budget");
+    }
 }

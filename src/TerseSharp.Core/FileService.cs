@@ -233,7 +233,11 @@ public static class FileService
         var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading);
 
         return located.IsOk
-            ? Result.Ok(Render(path, text, new LineRange(located.Value!.StartLine, located.Value!.EndLine, request.Range.MaxLines), request))
+            ? Result.Ok(Render(
+                path,
+                text,
+                request.Range with { Start = located.Value!.StartLine, End = located.Value!.EndLine },
+                request))
             : Result.Fail<string>(located.Error!);
     }
 
@@ -258,6 +262,13 @@ public static class FileService
 
     private static void AppendContinuation(ResponseBuilder response, string path, LineSelection selection)
     {
+        if (selection.CutLine is not 0)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"line {selection.CutLine} was cut mid-way to fit maxChars; raise maxChars to see the rest of it, because a line range cannot resume inside a line"));
+        }
+
         if (selection.NextLine is 0)
             return;
 
@@ -281,7 +292,7 @@ public static class FileService
     {
         var total = CountLines(text);
         var lines = new List<string>(Math.Min(range.MaxLines, 512));
-        var budget = range.MaxChars;
+        var budget = range.Budget;
         var number = 0;
         var previous = -1;
         var covered = 0;
@@ -309,25 +320,27 @@ public static class FileService
             covered++;
             last = number;
 
-            if (line.Length > budget)
+            var emitted = format.Verbose ? line : line.TrimEnd();
+
+            if (emitted.Length > budget)
                 shortened = number;
 
             if (Dropped(line, format))
                 continue;
 
-            lines.Add(Emit(number, format.Verbose ? line : line.TrimEnd(), budget, format.Verbose || number != previous + 1));
-            budget -= Math.Min(line.Length, budget);
+            lines.Add(Emit(number, emitted, budget, format.Verbose || number != previous + 1));
+            budget -= Math.Min(emitted.Length, budget);
             previous = number;
         }
 
-        return new LineSelection(lines, total, covered, Continuation(clipped, last, total, shortened));
+        return new LineSelection(lines, total, covered, Continuation(clipped, last, total, shortened), shortened);
     }
 
     private static int Continuation(bool clipped, int last, int total, int shortened) => (clipped, last) switch
     {
         (false, _) or (_, 0) => 0,
         _ when last >= total => 0,
-        _ when shortened == last => last,
+        _ when shortened == last => last + 1,
         _ => last + 1,
     };
 
@@ -351,10 +364,17 @@ public static class FileService
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = MaxResponseCharacters)
     {
+        public int Budget => MaxChars > 0 ? MaxChars : MaxResponseCharacters;
+
         public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
     }
 
-    private readonly record struct LineSelection(IReadOnlyList<string> Lines, int TotalLines, int CoveredLines, int NextLine);
+    private readonly record struct LineSelection(
+        IReadOnlyList<string> Lines,
+        int TotalLines,
+        int CoveredLines,
+        int NextLine,
+        int CutLine = 0);
     private static int CountLines(ReadOnlySpan<char> text)
     {
         if (text.Length is 0)

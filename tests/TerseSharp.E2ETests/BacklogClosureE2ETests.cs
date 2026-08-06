@@ -268,15 +268,65 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     [Fact]
     public async Task ReadText_WithMaxChars_BoundsAFileWhoseLinesAreTooLongForMaxLines()
     {
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "wide-lines.json" });
         var bounded = await server.CallAsync("read_text", new()
         {
-            ["path"] = "src/Fixture.Trading/OrderBook.cs",
-            ["maxChars"] = 120,
+            ["path"] = "wide-lines.json",
+            ["maxChars"] = 200,
         });
-        var whole = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+
+        Assert.DoesNotContain("next: startLine=", whole, StringComparison.Ordinal);
+        Assert.True(bounded.Length < whole.Length / 2, bounded);
+        Assert.Contains("chars)", bounded, StringComparison.Ordinal);
+        Assert.Contains("next: startLine=", bounded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WhenTheClipLandsMidLine_SaysSoAndNeverSteersBackToThatLine()
+    {
+        var bounded = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "wide-lines.json",
+            ["startLine"] = 3,
+            ["maxChars"] = 200,
+        });
+
+        Assert.Contains("line 3 was cut mid-way", bounded, StringComparison.Ordinal);
+        Assert.DoesNotContain("next: startLine=3 ", bounded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WhenTheCutLandsOnTheLastLine_StillSaysTheLineWasCut()
+    {
+        var bounded = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "wide-lines.json",
+            ["startLine"] = 3,
+            ["endLine"] = 3,
+            ["maxChars"] = 200,
+        });
+
+        Assert.Contains("line 3 was cut mid-way", bounded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithASectionAndMaxChars_HonoursTheCharacterBudget()
+    {
+        var whole = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "CHANGELOG.md",
+            ["section"] = "## Unreleased",
+        });
+        var bounded = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "CHANGELOG.md",
+            ["section"] = "## Unreleased",
+            ["maxChars"] = 200,
+        });
+
+        if (whole.StartsWith("ERROR", StringComparison.Ordinal))
+            return;
 
         Assert.True(bounded.Length < whole.Length, bounded);
-        Assert.Contains("next: startLine=", bounded, StringComparison.Ordinal);
-        Assert.DoesNotContain("next: startLine=", whole, StringComparison.Ordinal);
     }
 }

@@ -86,11 +86,10 @@ public sealed class IndexE2ETests
 
         await Resolve(solution, "AccentBrush");
 
-        Assert.True(
-            await PollAsync(() => Status(solution), "gen=c1/"),
-            "the code generation never advanced after the external edit");
+        var status = await PollForAsync(() => Status(solution), "gen=c1/");
 
-        Assert.Contains("xaml(hit=1 miss=1 files=10)", await Status(solution), StringComparison.Ordinal);
+        Assert.NotNull(status);
+        Assert.Contains("xaml(hit=1 miss=1 files=10)", status, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -211,4 +210,21 @@ public sealed class IndexE2ETests
 
     private static Task<string> Registrations(TerseTempSolution solution) =>
         solution.CallAsync("find_registrations", new() { ["query"] = "IndexProbeService" });
+
+    private static async Task<string?> PollForAsync(Func<Task<string>> call, string expected)
+    {
+        var deadline = DateTime.UtcNow + WatcherDeadline;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            var answer = await call();
+
+            if (answer.Contains(expected, StringComparison.Ordinal))
+                return answer;
+
+            await Task.Delay(200, TestContext.Current.CancellationToken);
+        }
+
+        return null;
+    }
 }
