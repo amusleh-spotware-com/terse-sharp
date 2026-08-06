@@ -69,7 +69,10 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         return true;
     }
 
-    public Result<WorkspaceLease> Resolve(string? workspaceHint, string? pathHint)
+    public Result<WorkspaceLease> Resolve(string? workspaceHint, string? pathHint) =>
+        Resolve(workspaceHint, pathHint, semantic: true);
+
+    public Result<WorkspaceLease> Resolve(string? workspaceHint, string? pathHint, bool semantic)
     {
         lock (map)
         {
@@ -79,9 +82,9 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
                 return Result.Fail<WorkspaceLease>(Errors.NotLoaded());
 
             if (!string.IsNullOrWhiteSpace(workspaceHint))
-                return ByHint(loaded, workspaceHint);
+                return ByHint(loaded, workspaceHint, semantic);
 
-            return ByPath(loaded, pathHint) ?? Single(loaded);
+            return ByPath(loaded, pathHint, semantic) ?? Single(loaded, semantic);
         }
     }
 
@@ -155,31 +158,31 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         }
     }
 
-    private static Result<WorkspaceLease> ByHint(LoadedWorkspace[] loaded, string hint)
+    private static Result<WorkspaceLease> ByHint(LoadedWorkspace[] loaded, string hint, bool semantic)
     {
         var best = Best(loaded, hint);
 
         return best switch
         {
-            [var only] => Ok(only),
+            [var only] => Ok(only, semantic),
             [] => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Names(loaded))),
             _ => Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(best))),
         };
     }
 
-    private static Result<WorkspaceLease>? ByPath(LoadedWorkspace[] loaded, string? pathHint)
+    private static Result<WorkspaceLease>? ByPath(LoadedWorkspace[] loaded, string? pathHint, bool semantic)
     {
         if (string.IsNullOrWhiteSpace(pathHint))
             return null;
 
         var matches = loaded.Where(workspace => workspace.Contains(pathHint)).ToArray();
 
-        return matches.Length is 0 ? null : Ok(matches.MaxBy(workspace => workspace.Root.Length)!);
+        return matches.Length is 0 ? null : Ok(matches.MaxBy(workspace => workspace.Root.Length)!, semantic);
     }
 
-    private static Result<WorkspaceLease> Single(LoadedWorkspace[] loaded) =>
+    private static Result<WorkspaceLease> Single(LoadedWorkspace[] loaded, bool semantic) =>
         loaded.Length is 1
-            ? Ok(loaded[0])
+            ? Ok(loaded[0], semantic)
             : Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(loaded)));
 
     private static int Tier(LoadedWorkspace workspace, string hint)
@@ -202,9 +205,9 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         return workspace.SolutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase) ? 5 : int.MaxValue;
     }
 
-    private static Result<WorkspaceLease> Ok(LoadedWorkspace workspace)
+    private static Result<WorkspaceLease> Ok(LoadedWorkspace workspace, bool semantic)
     {
-        workspace.Touch();
+        workspace.Touch(semantic);
 
         return Result.Ok(workspace.Lease());
     }

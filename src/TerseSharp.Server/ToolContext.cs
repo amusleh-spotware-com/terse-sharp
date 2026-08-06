@@ -135,7 +135,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         bool semantic,
         CancellationToken cancellationToken)
     {
-        var resolved = Registry.Resolve(workspace, pathHint);
+        var resolved = Registry.Resolve(workspace, pathHint, semantic);
 
         if (!semantic || !resolved.IsOk)
             return resolved;

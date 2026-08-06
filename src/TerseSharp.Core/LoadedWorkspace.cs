@@ -55,12 +55,15 @@ public sealed class LoadedWorkspace : IDisposable
 
     public Solution Solution { get; private set; }
 
-    public void Touch()
+    public void Touch(bool semantic = true)
     {
         LastUsedUtc = DateTimeOffset.UtcNow;
 
         lock (leaseGate)
         {
+            if (!semantic)
+                return;
+
             noticeForThisCall = droppedNotice;
             droppedNotice = false;
             CompilationsDropped = false;
@@ -200,8 +203,6 @@ public sealed class LoadedWorkspace : IDisposable
                 return dropped is null ? "nothing to undo" : "nothing to undo - " + dropped;
 
             entry = history[^1];
-
-            history.RemoveAt(history.Count - 1);
         }
 
         return await RevertedAsync(entry, cancellationToken).ConfigureAwait(false);
@@ -263,7 +264,7 @@ public sealed class LoadedWorkspace : IDisposable
 
         try
         {
-            return Adopted(target, restored);
+            return Adopted(target, restored, entry);
         }
         finally
         {
@@ -272,7 +273,7 @@ public sealed class LoadedWorkspace : IDisposable
         }
     }
 
-    private string Adopted(Solution target, Solution restored)
+    private string Adopted(Solution target, Solution restored, HistoryEntry entry)
     {
         lock (historyGate)
         {
@@ -280,6 +281,9 @@ public sealed class LoadedWorkspace : IDisposable
                 return "the workspace refused the revert";
 
             Solution = restored;
+
+            if (history.Count > 0 && ReferenceEquals(history[^1], entry))
+                history.RemoveAt(history.Count - 1);
 
             return "reverted the last change";
         }

@@ -292,6 +292,7 @@ public sealed class WorkspaceRegistryTests
         Assert.Single(registry.All());
         Assert.Null(second.TargetFramework);
         Assert.NotSame(first, registry.All()[0]);
+        Assert.False(first.DropCompilations());
     }
 
     [Fact]
@@ -322,5 +323,21 @@ public sealed class WorkspaceRegistryTests
         using var second = registry.Resolve(null, null).Value!;
 
         Assert.False(second.Workspace.TakeDroppedNotice());
+    }
+
+    [Fact]
+    public async Task TakeDroppedNotice_IsNotConsumedByAResolveThatCannotReRealizeCompilations()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1));
+
+        using (var reader = registry.Resolve(null, null, semantic: false).Value!)
+            Assert.True(reader.Workspace.CompilationsDropped);
+
+        using var semantic = registry.Resolve(null, null, semantic: true).Value!;
+
+        Assert.True(semantic.Workspace.TakeDroppedNotice());
     }
 }
