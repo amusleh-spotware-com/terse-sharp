@@ -8,6 +8,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`read_text` takes `maxChars`** (I94). `maxLines` cannot bound a file whose lines are very long —
+  a 155-line range of this repo's own backlog file answered **50.5 KB** and was persisted to disk by
+  the client instead of read. `maxChars` clamps to the same 128 000-character budget the reader
+  already applied internally, and a clipped read still names the line to continue from.
+
+### Changed
+
+- **`IndexE2ETests.ExternalCodeChange_LeavesTheXamlIndexIntact` polls for the generation it asserts**
+  instead of relying on the incidental latency of the Razor generator scan. No assertion weakened;
+  the test now fails deterministically rather than by timing, which is what the open **I67** row
+  needs from it.
+
 ## [0.21.0] - 2026-08-06
 
 **Backlog closure.** This release closes every open row in `IMPROVEMENTS.md` that had a fix — 24 of

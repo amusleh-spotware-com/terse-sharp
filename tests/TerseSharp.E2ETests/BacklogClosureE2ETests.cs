@@ -264,4 +264,19 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR DocumentNotFound", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithMaxChars_BoundsAFileWhoseLinesAreTooLongForMaxLines()
+    {
+        var bounded = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["maxChars"] = 120,
+        });
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+
+        Assert.True(bounded.Length < whole.Length, bounded);
+        Assert.Contains("next: startLine=", bounded, StringComparison.Ordinal);
+        Assert.DoesNotContain("next: startLine=", whole, StringComparison.Ordinal);
+    }
 }

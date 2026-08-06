@@ -86,10 +86,11 @@ public sealed class IndexE2ETests
 
         await Resolve(solution, "AccentBrush");
 
-        var status = await Status(solution);
+        Assert.True(
+            await PollAsync(() => Status(solution), "gen=c1/"),
+            "the code generation never advanced after the external edit");
 
-        Assert.Contains("gen=c1/", status, StringComparison.Ordinal);
-        Assert.Contains("xaml(hit=1 miss=1 files=10)", status, StringComparison.Ordinal);
+        Assert.Contains("xaml(hit=1 miss=1 files=10)", await Status(solution), StringComparison.Ordinal);
     }
 
     [Fact]

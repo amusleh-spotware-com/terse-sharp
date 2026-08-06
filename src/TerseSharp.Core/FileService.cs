@@ -5,7 +5,7 @@ namespace TerseSharp.Core;
 
 public static class FileService
 {
-    private const int MaxResponseCharacters = 128 * 1024;
+    public const int MaxResponseCharacters = 128 * 1024;
 
     private const int MaxNearMisses = 3;
 
@@ -281,7 +281,7 @@ public static class FileService
     {
         var total = CountLines(text);
         var lines = new List<string>(Math.Min(range.MaxLines, 512));
-        var budget = MaxResponseCharacters;
+        var budget = range.MaxChars;
         var number = 0;
         var previous = -1;
         var covered = 0;
@@ -349,7 +349,7 @@ public static class FileService
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose);
 
-    public readonly record struct LineRange(int Start, int End, int MaxLines)
+    public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = MaxResponseCharacters)
     {
         public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
     }
