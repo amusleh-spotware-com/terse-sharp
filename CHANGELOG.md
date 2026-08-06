@@ -8,6 +8,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-06
+
+**The improvements backlog is empty of fixable rows.** One row remains open —
+**I67** — and it is now pinned to a single sentence with six falsified hypotheses and a named next
+step, rather than a mystery. Everything else is either shipped or recorded in *Known limitations*
+with the measurement that closed it.
+
 ### Added
 
 - **`read_text` takes `maxChars`** (I94). `maxLines` cannot bound a file whose lines are very long —
@@ -1709,7 +1716,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.22.0
 [0.21.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.21.0
 [0.20.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.20.0
 [0.19.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.19.0
