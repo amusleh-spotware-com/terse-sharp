@@ -54,4 +54,12 @@ public sealed class ProjectGlobsTests
 
         Assert.Null(ProjectGlobs.CompilesByGlob("terse-no-such-project.csproj"));
     }
+
+    [Fact]
+    public void CompilesByGlob_WithTheSdkElementFormAndNoOptOut_IsTrue()
+    {
+        MsBuildBootstrap.Ensure();
+
+        Assert.True(ProjectGlobs.CompilesByGlob(Shape("SdkElementGlobbing")));
+    }
 }

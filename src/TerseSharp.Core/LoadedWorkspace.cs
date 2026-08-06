@@ -58,21 +58,29 @@ public sealed class LoadedWorkspace : IDisposable
     public void Touch()
     {
         LastUsedUtc = DateTimeOffset.UtcNow;
-        CompilationsDropped = false;
+
+        lock (leaseGate)
+        {
+            noticeForThisCall = droppedNotice;
+            droppedNotice = false;
+            CompilationsDropped = false;
+        }
     }
 
     public bool TakeDroppedNotice()
     {
         lock (leaseGate)
         {
-            var notice = droppedNotice;
+            var notice = noticeForThisCall || droppedNotice;
 
+            noticeForThisCall = false;
             droppedNotice = false;
 
             return notice;
         }
     }
 
+    private bool noticeForThisCall;
     private bool droppedNotice;
 
     public bool Contains(string path) => PathBoundary.Contains(Root, path);
@@ -240,27 +248,22 @@ public sealed class LoadedWorkspace : IDisposable
     {
         var target = workspace.CurrentSolution;
         var restored = Solution;
-        var readded = new List<string>();
+        var readded = new List<DocumentRevision>();
 
         foreach (var revision in entry.Documents)
         {
             if (!target.ContainsDocument(revision.Id))
-                readded.Add(revision.FilePath);
+                readded.Add(revision);
 
             target = Restored(target, revision);
             restored = Restored(restored, revision);
         }
 
-        var snapshots = await ProjectBytesAsync(target, entry, readded, cancellationToken).ConfigureAwait(false);
+        var snapshots = await ProjectBytesAsync(target, readded, cancellationToken).ConfigureAwait(false);
 
         try
         {
-            if (!Applied(target))
-                return "the workspace refused the revert";
-
-            Solution = restored;
-
-            return "reverted the last change";
+            return Adopted(target, restored);
         }
         finally
         {
@@ -269,26 +272,43 @@ public sealed class LoadedWorkspace : IDisposable
         }
     }
 
+    private string Adopted(Solution target, Solution restored)
+    {
+        lock (historyGate)
+        {
+            if (!Applied(target))
+                return "the workspace refused the revert";
+
+            Solution = restored;
+
+            return "reverted the last change";
+        }
+    }
+
     private static async Task<List<ProjectSnapshot>> ProjectBytesAsync(
         Solution target,
-        HistoryEntry entry,
-        List<string> readded,
+        List<DocumentRevision> readded,
         CancellationToken cancellationToken)
     {
         if (readded.Count is 0)
             return [];
 
-        var snapshots = new List<ProjectSnapshot>(1);
+        var byProject = new Dictionary<ProjectId, List<string>>();
 
-        foreach (var revision in entry.Documents)
+        foreach (var revision in readded)
         {
-            if (target.GetDocument(revision.Id)?.Project.FilePath is not { } project)
-                continue;
+            if (!byProject.TryGetValue(revision.Id.ProjectId, out var files))
+                byProject[revision.Id.ProjectId] = files = [];
 
-            if (await ProjectFileGuard.CaptureAsync(project, readded, cancellationToken).ConfigureAwait(false) is { } snapshot)
+            files.Add(revision.FilePath);
+        }
+
+        var snapshots = new List<ProjectSnapshot>(byProject.Count);
+
+        foreach (var (projectId, files) in byProject)
+        {
+            if (await ProjectFileGuard.CaptureAsync(target.GetProject(projectId)?.FilePath, files, cancellationToken).ConfigureAwait(false) is { } snapshot)
                 snapshots.Add(snapshot);
-
-            break;
         }
 
         return snapshots;

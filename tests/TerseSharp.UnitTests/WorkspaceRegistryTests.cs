@@ -255,4 +255,72 @@ public sealed class WorkspaceRegistryTests
 
         Assert.True(lease.Workspace.TakeDroppedNotice());
     }
+
+    [Fact]
+    public async Task LoadAsync_WithATargetFramework_RecordsItOnTheLoadResult()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        var result = await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+
+        Assert.Equal("net10.0", result.TargetFramework);
+    }
+
+    [Fact]
+    public async Task ReloadAsync_KeepsTheTargetFrameworkTheWorkspaceWasLoadedUnder()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+
+        var reloaded = await registry.ReloadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        Assert.Equal("net10.0", reloaded.TargetFramework);
+        Assert.Equal("net10.0", registry.All()[0].Load.TargetFramework);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WithADifferentTargetFramework_ReplacesTheWorkspaceInsteadOfLeakingIt()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+
+        var first = registry.All()[0];
+        var second = await registry.LoadAsync(Fixtures.SolutionPath, null, TestContext.Current.CancellationToken);
+
+        Assert.Single(registry.All());
+        Assert.Null(second.TargetFramework);
+        Assert.NotSame(first, registry.All()[0]);
+    }
+
+    [Fact]
+    public async Task LoadAsync_WithTheSameTargetFramework_ReusesTheLoadedWorkspace()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+
+        var first = registry.All()[0];
+
+        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+
+        Assert.Same(first, registry.All()[0]);
+    }
+
+    [Fact]
+    public async Task TakeDroppedNotice_IsNotCarriedPastTheCallThatFollowsTheDrop()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1));
+
+        using (var first = registry.Resolve(null, null).Value!)
+            Assert.True(first.Workspace.TakeDroppedNotice());
+
+        using var second = registry.Resolve(null, null).Value!;
+
+        Assert.False(second.Workspace.TakeDroppedNotice());
+    }
 }
