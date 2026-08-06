@@ -21,5 +21,5 @@ public enum TerseErrorCode
 public sealed record TerseError(TerseErrorCode Code, string Message, string Remedy)
 {
     public string Render() =>
-        string.Create(CultureInfo.InvariantCulture, $"ERROR {Code}\n{Message}\nremedy: {Remedy}");
+        string.Create(CultureInfo.InvariantCulture, $"ERROR {Code}: {Message}\nremedy: {Remedy}");
 }

@@ -27,9 +27,8 @@ public static partial class DotnetRunner
         var run = await RunAsync(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"], workspace.Root, DefaultTimeout, cancellationToken)
             .ConfigureAwait(false);
 
-        return new BuildRun(RenderBuild(target, run, verbose), Locked(run));
+        return new BuildRun(RenderBuild(target, workspace.Root, run, verbose), Locked(run));
     }
-
     private static bool Locked(ProcessRun run) => IsLockedOutput(run.ExitCode, run.Output);
 
     private static bool IsGreen(ProcessRun run, TestRunReport report) =>
@@ -37,7 +36,7 @@ public static partial class DotnetRunner
 
     private static string QuietTest(TestRunReport report) => string.Create(
         CultureInfo.InvariantCulture,
-        $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs}  (verbose=true for the full report)");
+        $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs}");
 
     internal static bool IsLockedOutput(int exitCode, string output) =>
         exitCode is not 0 && LockedOutput().IsMatch(output);
@@ -96,7 +95,7 @@ public static partial class DotnetRunner
         return [.. arguments];
     }
 
-    internal static string RenderBuild(string target, ProcessRun run, bool verbose)
+    internal static string RenderBuild(string target, string root, ProcessRun run, bool verbose)
     {
         var diagnostics = Diagnostics(run.Output);
 
@@ -104,7 +103,7 @@ public static partial class DotnetRunner
             return QuietBuild(run, diagnostics.Warnings.Length);
 
         var shown = Shown(diagnostics, verbose);
-        var response = new ResponseBuilder("build", target);
+        var response = new ResponseBuilder("build", target).Verbose(verbose);
 
         response.Summary(shown.Length, Parsed(diagnostics), "diagnostics");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}"));
@@ -113,12 +112,16 @@ public static partial class DotnetRunner
         AppendHiddenWarnings(response, diagnostics, shown.Length);
 
         foreach (var diagnostic in shown)
-            response.Line(diagnostic);
+            response.Line(Relative(diagnostic, root));
 
-        AppendTail(response, run, diagnostics.Errors.Length);
+        AppendTail(response, run, diagnostics.Errors.Length, root);
 
         return response.ToString();
     }
+
+    internal static string Relative(string line, string root) => root is { Length: > 0 }
+        ? line.Replace(root + Path.DirectorySeparatorChar, string.Empty, StringComparison.OrdinalIgnoreCase)
+        : line;
 
     private static void AppendLockWarning(ResponseBuilder response, ProcessRun run)
     {
@@ -138,7 +141,7 @@ public static partial class DotnetRunner
             return QuietTest(report);
 
         var shown = Math.Min(report.Failures.Length, MaxFailures);
-        var response = new ResponseBuilder("run_tests", request.Target);
+        var response = new ResponseBuilder("run_tests", request.Target).Verbose(request.Verbose);
 
         response.Summary(shown, report.Failures.Length, "failures");
         response.Note(Counters(report, run));
@@ -149,10 +152,9 @@ public static partial class DotnetRunner
 
         return response.ToString();
     }
-
     internal static string RenderNoResults(string target, ProcessRun run, bool verbose)
     {
-        var response = new ResponseBuilder("run_tests", target);
+        var response = new ResponseBuilder("run_tests", target).Verbose(verbose);
 
         response.Note(run.TimedOut
             ? string.Create(CultureInfo.InvariantCulture, $"FAILED timed out after {run.ElapsedMilliseconds} ms, no test results were produced")
@@ -163,7 +165,6 @@ public static partial class DotnetRunner
 
         return response.ToString();
     }
-
     internal static string RenderTestNames(string target, ProcessRun run, string? contains)
     {
         var names = TestNameList.Parse(run.Output, contains);
@@ -247,7 +248,7 @@ public static partial class DotnetRunner
     private static IEnumerable<string> MessageLines(string message) =>
         message.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(MaxMessageLines);
 
-    private static void AppendTail(ResponseBuilder response, ProcessRun run, int errors)
+    private static void AppendTail(ResponseBuilder response, ProcessRun run, int errors, string root)
     {
         if (run.ExitCode is 0 || errors > 0)
             return;
@@ -255,7 +256,7 @@ public static partial class DotnetRunner
         response.Note("FAILED with no error-severity diagnostic; last output lines:");
 
         foreach (var line in Tail(run.Output))
-            response.Line(line);
+            response.Line(Relative(line, root));
     }
 
     private static IEnumerable<string> Tail(string output) =>
@@ -341,7 +342,7 @@ public static partial class DotnetRunner
 
     private static string QuietBuild(ProcessRun run, int warnings) => string.Create(
         CultureInfo.InvariantCulture,
-        $"build ok  errors=0 warnings={warnings}  elapsedMs={run.ElapsedMilliseconds}  (verbose=true for the full report)");
+        $"build ok  errors=0 warnings={warnings}  elapsedMs={run.ElapsedMilliseconds}");
 
     internal static BuildDiagnostics Diagnostics(string output)
     {
@@ -384,11 +385,8 @@ public static partial class DotnetRunner
         if (shown is 0 || shown >= Parsed(diagnostics))
             return;
 
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"warnings={diagnostics.Warnings.Length} hidden (verbose=true for the full report)"));
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"warnings={diagnostics.Warnings.Length} hidden"));
     }
-
     private static void AppendFailureOutput(ResponseBuilder response, ProcessRun run, int reported, bool verbose)
     {
         if (reported > 0 || run.ExitCode is 0)
@@ -402,9 +400,8 @@ public static partial class DotnetRunner
         foreach (var line in shown)
             response.Line(line);
 
-        AppendTail(response, run, diagnostics.Errors.Length);
+        AppendTail(response, run, diagnostics.Errors.Length, string.Empty);
     }
-
     private static int Parsed(BuildDiagnostics diagnostics) => diagnostics.Errors.Length + diagnostics.Warnings.Length;
 
     private static string[] ErrorsUnlessVerbose(BuildDiagnostics diagnostics, bool verbose) =>

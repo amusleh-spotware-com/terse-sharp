@@ -152,7 +152,7 @@ public sealed class RazorToolsE2ETests : IAsyncLifetime
             ["dryRun"] = true,
         });
 
-        Assert.Contains("razor_set_attribute dryRun", text, StringComparison.Ordinal);
+        Assert.Contains("dryRun", text, StringComparison.Ordinal);
         Assert.Contains("+    <Badge Kind=\"warning\" Count=\"0\" />", text, StringComparison.Ordinal);
         Assert.Contains("changedLines=1", text, StringComparison.Ordinal);
         Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
@@ -280,8 +280,10 @@ public sealed class RazorToolsE2ETests : IAsyncLifetime
     [Fact]
     public async Task WorkspaceStatus_ReportsTheRazorGeneratorHealth()
     {
-        var text = await RazorAsync("workspace_status", []);
+        var quiet = await RazorAsync("workspace_status", []);
+        var text = await RazorAsync("workspace_status", new() { ["verbose"] = true });
 
+        Assert.DoesNotContain("generator=", quiet, StringComparison.Ordinal);
         Assert.Contains("razor=", text, StringComparison.Ordinal);
         Assert.Contains("generator=ok", text, StringComparison.Ordinal);
     }
@@ -404,7 +406,7 @@ public sealed class RazorToolsE2ETests : IAsyncLifetime
                 ["value"] = "7",
             });
 
-            Assert.Contains("razor_set_attribute applied", applied, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", applied, StringComparison.Ordinal);
             Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
 
             var written = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);

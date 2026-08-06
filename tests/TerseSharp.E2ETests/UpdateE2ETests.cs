@@ -45,7 +45,7 @@ public sealed class UpdateE2ETests : IAsyncLifetime
         var announced = await AnnouncedAsync(server);
         var lines = announced.Split('\n');
 
-        Assert.StartsWith("list_workspaces", announced, StringComparison.Ordinal);
+        Assert.StartsWith("0 workspaces", announced, StringComparison.Ordinal);
         Assert.Equal(1, lines.Count(line => line.StartsWith(Marker, StringComparison.Ordinal)));
         Assert.Equal(lines[^1], lines.Single(line => line.StartsWith(Marker, StringComparison.Ordinal)));
         Assert.True(lines[^1].Length < 120, lines[^1]);

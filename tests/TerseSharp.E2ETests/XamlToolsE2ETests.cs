@@ -119,7 +119,7 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("#SymbolText", text, StringComparison.Ordinal);
         Assert.DoesNotContain("SolidColorBrush", text, StringComparison.Ordinal);
-        Assert.Contains("total=9", text, StringComparison.Ordinal);
+        Assert.StartsWith("4/9 elements truncated", text, StringComparison.Ordinal);
     }
 
     [Fact]

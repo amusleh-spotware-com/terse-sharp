@@ -15,7 +15,7 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
     {
         var text = Slashes(await server.CallAsync("resx_files", []));
 
-        Assert.Contains("6 families (truncated=false, total=6)", text, StringComparison.Ordinal);
+        Assert.StartsWith("6 families", text, StringComparison.Ordinal);
         Assert.Contains("src/Fixture.Trading/Strings.resx  localization  neutral=7  de=2 fr=5  missing=8", text, StringComparison.Ordinal);
         Assert.Contains("designer=src/Fixture.Trading/Strings.Designer.cs", text, StringComparison.Ordinal);
     }
@@ -73,7 +73,7 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("resx_get", new() { ["path"] = Strings, ["maxResults"] = 2 });
 
-        Assert.Contains("truncated=true", text, StringComparison.Ordinal);
+        Assert.Contains(" truncated", text, StringComparison.Ordinal);
         Assert.Contains("narrow with prefix=", text, StringComparison.Ordinal);
     }
 
@@ -91,7 +91,7 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
     {
         var text = Slashes(await server.CallAsync("resx_find", new() { ["query"] = "Caption_Count" }));
 
-        Assert.Contains("3 entries (truncated=false, total=3)", text, StringComparison.Ordinal);
+        Assert.StartsWith("3 entries", text, StringComparison.Ordinal);
         Assert.Contains("src/Fixture.Trading/Strings.fr.resx#Caption_Count", text, StringComparison.Ordinal);
     }
 
@@ -117,7 +117,7 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
             ["culture"] = "de",
         }));
 
-        Assert.Contains("1 entries (truncated=false, total=1)", text, StringComparison.Ordinal);
+        Assert.StartsWith("1 entries", text, StringComparison.Ordinal);
         Assert.Contains("src/Fixture.Trading/Strings.de.resx#Caption_Total", text, StringComparison.Ordinal);
     }
 
@@ -135,7 +135,7 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("resx_usages", new() { ["key"] = "Unused_Key" });
 
-        Assert.Contains("0 usages (truncated=false, total=0)", text, StringComparison.Ordinal);
+        Assert.StartsWith("0 usages", text, StringComparison.Ordinal);
         Assert.Contains("composedLookups=1", text, StringComparison.Ordinal);
         Assert.Contains("advisory", text, StringComparison.Ordinal);
     }
@@ -153,7 +153,7 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
             ["dryRun"] = true,
         });
 
-        Assert.Contains("resx_set dryRun", text, StringComparison.Ordinal);
+        Assert.Contains("dryRun", text, StringComparison.Ordinal);
         Assert.Contains("+  <data name=\"Scratch_Two\" xml:space=\"preserve\">", text, StringComparison.Ordinal);
         Assert.Contains("changedLines=3", text, StringComparison.Ordinal);
         Assert.Equal(before, await File.ReadAllTextAsync(ScratchPath, TestContext.Current.CancellationToken));
@@ -510,7 +510,7 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
         var without = await server.CallAsync("resx_validate", new() { ["path"] = Scratch });
         var with = await server.CallAsync("resx_validate", new() { ["path"] = Scratch, ["includeUnused"] = true });
 
-        Assert.Contains("0 findings (truncated=false, total=0)", without, StringComparison.Ordinal);
+        Assert.StartsWith("0 findings", without, StringComparison.Ordinal);
         Assert.Contains("RESX003", with, StringComparison.Ordinal);
         Assert.Contains("Scratch_One  UNUSED", with, StringComparison.Ordinal);
     }
@@ -570,11 +570,12 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ResxValidate_ScopedToOneFamily_NamesThatFamilyInTheHeader()
+    public async Task ResxValidate_ScopedToOneFamily_ChecksThatFamilyAlone()
     {
         var text = Slashes(await server.CallAsync("resx_validate", new() { ["path"] = Scratch }));
 
-        Assert.StartsWith("resx_validate src/Fixture.Trading/Scratch.resx", text, StringComparison.Ordinal);
+        Assert.Contains("checked=1 family(ies)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Strings.resx", text, StringComparison.Ordinal);
     }
 
     private static string Slashes(string text) => text.Replace(Path.DirectorySeparatorChar, '/');

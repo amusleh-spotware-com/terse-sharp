@@ -538,16 +538,17 @@ public static class ResxEditService
 
     private static string Render(string tool, IReadOnlyList<Pending> writes, IReadOnlyList<string> notes, bool dryRun, bool verbose)
     {
-        var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied");
+        var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
 
         response.Summary(writes.Count, writes.Count, "files changed");
+
+        if (dryRun && !verbose)
+            response.Note("dryRun");
 
         if (!dryRun && !verbose)
         {
             foreach (var write in writes)
                 response.Line(string.Create(CultureInfo.InvariantCulture, $"{write.Relative}  changedLines={UnifiedDiff.ChangedLines(write.Before, write.After)}"));
-
-            response.Note("(verbose=true for the diff)");
         }
         else
         {
@@ -560,11 +561,10 @@ public static class ResxEditService
         }
 
         foreach (var note in notes.Where(note => note.Length > 0))
-            response.Line(note);
+            response.Note(note);
 
         return response.ToString();
     }
-
     private static IReadOnlyList<string> Notes(ResxFamily family, int references) => references is 0
         ? [Designer(family)]
         : [Designer(family), string.Create(CultureInfo.InvariantCulture, $"references={references}")];

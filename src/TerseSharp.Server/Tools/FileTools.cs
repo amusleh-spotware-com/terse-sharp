@@ -6,7 +6,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text")]
-    [Description("Read any file, line-ranged. Use for non-C# files; for a .cs file prefer get_file_outline or get_symbol_source. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
+    [Description("Read any file, line-ranged. Use for non-C# files; for a .cs file prefer get_file_outline or get_symbol_source. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
@@ -14,11 +14,12 @@ public sealed class FileTools(ToolContext context)
         [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
         [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
         [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
+        [Description("Return the file verbatim - every line numbered, blank lines and trailing whitespace kept. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         Read(
             path,
-            new FileService.ReadRequest(new FileService.LineRange(startLine, endLine, Lines(maxLines)), headings, section),
+            new FileService.ReadRequest(new FileService.LineRange(startLine, endLine, Lines(maxLines)), headings, section, verbose),
             workspace,
             cancellationToken);
 
@@ -39,7 +40,7 @@ public sealed class FileTools(ToolContext context)
                 cancellationToken);
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically. A successful write answers in one line - path and changedLines; pass verbose=true for the diff. A .cs file needs force=true, and when it is already a document in the workspace the write is compile-gated exactly like replace_symbol - rolled back if it introduces an error, unless allowErrors=true. Missing directories are created, the file's existing line endings are kept, and the new or changed file is visible to every semantic tool on the next call, with no reload.")]
+    [Description("Create or overwrite a file atomically. A successful write answers in one line - the file name and changedLines; pass verbose=true for the diff. A .cs file needs force=true, and when it is already a document in the workspace the write is compile-gated exactly like replace_symbol - rolled back if it introduces an error, unless allowErrors=true. Missing directories are created, the file's existing line endings are kept, and the new or changed file is visible to every semantic tool on the next call, with no reload.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("Full new content.")] string content,
@@ -56,7 +57,7 @@ public sealed class FileTools(ToolContext context)
                 await FileService.WriteTextAsync(loaded, path, content, dryRun, force, allowErrors, verbose, cancellationToken).ConfigureAwait(false)));
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\". Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines. A successful edit answers in one line - path and changedLines; pass verbose=true for the diff.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\". Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines. A successful edit answers in one line - the file name and changedLines; pass verbose=true for the diff.")]
     public Task<string> EditText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("Replacement text. With section=, this is the whole new section including its heading line.")] string newText,
@@ -92,7 +93,7 @@ public sealed class FileTools(ToolContext context)
             : Task.FromResult(Errors.Blank("glob").Render());
 
     [McpServerTool(Name = "search_text")]
-    [Description("Literal text search across the workspace. Also the counting tool: total= is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
+    [Description("Literal text search across the workspace. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
     public Task<string> SearchText(
         [Description("Literal text to find.")] string? query = null,
         [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -103,7 +104,7 @@ public sealed class FileTools(ToolContext context)
         Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false), cancellationToken);
 
     [McpServerTool(Name = "search_regex")]
-    [Description("Regular-expression search across the workspace. total= is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line. Results are tagged HEURISTIC.")]
+    [Description("Regular-expression search across the workspace. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
         [Description(".NET regular expression.")] string? query = null,
         [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,

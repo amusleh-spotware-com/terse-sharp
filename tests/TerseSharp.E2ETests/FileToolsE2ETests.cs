@@ -13,9 +13,23 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             ["endLine"] = 3,
         });
 
-        Assert.Contains("2: ", text, StringComparison.Ordinal);
-        Assert.Contains("3: ", text, StringComparison.Ordinal);
+        var lines = text.Split('\n');
+
+        Assert.Equal("2/5 lines truncated", lines[0]);
+        Assert.StartsWith("2: ", lines[1], StringComparison.Ordinal);
+        Assert.Equal(3, lines.Length);
+        Assert.DoesNotContain("3: ", text, StringComparison.Ordinal);
         Assert.DoesNotContain("1: {", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_OnAWholeFileWithBlankLines_NeverClaimsItTruncated()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
+        Assert.Contains("namespace Fixture.Trading;", text, StringComparison.Ordinal);
+        Assert.Contains("TotalVolume", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -108,11 +122,11 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     {
         await server.CallAsync("find_files", new() { ["glob"] = "*.csproj" });
 
-        var before = PathIndexHits(await server.CallAsync("workspace_status", []));
+        var before = PathIndexHits(await server.CallAsync("workspace_status", new() { ["verbose"] = true }));
 
         await server.CallAsync("find_files", new() { ["glob"] = "*.json" });
 
-        Assert.Equal(before + 1, PathIndexHits(await server.CallAsync("workspace_status", [])));
+        Assert.Equal(before + 1, PathIndexHits(await server.CallAsync("workspace_status", new() { ["verbose"] = true })));
     }
 
     private static int PathIndexHits(string status)

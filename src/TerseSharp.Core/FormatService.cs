@@ -64,12 +64,16 @@ public static class FormatService
         CancellationToken cancellationToken)
     {
         var changed = await ChangedAsync(workspace, updated, documents, cancellationToken).ConfigureAwait(false);
+
+        if (changed.Length is 0 && outcome.Unfixed.Count is 0)
+            return "clean";
+
         var response = new ResponseBuilder(tool, "verify");
 
         response.Summary(changed.Length, changed.Length, "files would change");
-        response.Note(changed.Length is 0
-            ? "clean"
-            : string.Create(CultureInfo.InvariantCulture, $"VERIFY_FAILED {changed.Length} file(s) would change"));
+
+        if (changed.Length > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"VERIFY_FAILED {changed.Length} file(s) would change"));
 
         foreach (var file in changed)
             response.Line(file);
@@ -79,7 +83,6 @@ public static class FormatService
 
         return response.ToString();
     }
-
     private static async Task<string[]> ChangedAsync(
         LoadedWorkspace workspace,
         Solution updated,

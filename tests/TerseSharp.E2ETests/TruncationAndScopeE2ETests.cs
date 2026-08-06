@@ -18,10 +18,10 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
             ["maxResults"] = 200,
         });
 
-        Assert.Contains("truncated=true", capped, StringComparison.Ordinal);
+        Assert.Contains(" truncated", capped, StringComparison.Ordinal);
         Assert.Contains("narrow with", capped, StringComparison.Ordinal);
         Assert.Equal(Total(full), Total(capped));
-        Assert.Contains("\n1 symbols", capped, StringComparison.Ordinal);
+        Assert.StartsWith("1/", capped, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -33,7 +33,8 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
             ["maxResults"] = 200,
         });
 
-        Assert.Contains("truncated=false", text, StringComparison.Ordinal);
+        Assert.StartsWith("1 symbols", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -70,7 +71,7 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
             ["glob"] = "**/*.cs",
         });
 
-        Assert.StartsWith("search_text", byQuery, StringComparison.Ordinal);
+        Assert.Contains("  HEURISTIC  namespace Fixture.Trading;", byQuery, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", byQuery, StringComparison.Ordinal);
     }
 
@@ -139,7 +140,7 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
             ["includeDeadCode"] = false,
         });
 
-        Assert.StartsWith("analyze", text, StringComparison.Ordinal);
+        Assert.Contains("engines=compiler", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
@@ -292,17 +293,18 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
     [Fact]
     public async Task LoadWorkspace_ReportsWarningsSeparatelyFromFailures()
     {
-        var text = await server.CallAsync("workspace_status", []);
+        var text = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
 
         Assert.Contains("warnings=", text, StringComparison.Ordinal);
     }
 
     private static string Total(string response)
     {
-        var marker = response.IndexOf("total=", StringComparison.Ordinal);
-        var tail = response[(marker + 6)..];
-        var end = tail.IndexOf(')', StringComparison.Ordinal);
+        var newline = response.IndexOf('\n');
+        var summary = response[..(newline < 0 ? response.Length : newline)];
+        var slash = summary.IndexOf('/', StringComparison.Ordinal);
+        var counted = slash < 0 ? summary : summary[(slash + 1)..];
 
-        return tail[..end];
+        return counted[..counted.IndexOf(' ', StringComparison.Ordinal)];
     }
 }

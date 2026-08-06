@@ -11,7 +11,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         var text = await RunAsync(new() { ["project"] = TestProject });
 
         Assert.True(Tokens(text) <= 500, text);
-        Assert.Contains("3 failures (truncated=false, total=3)", text, StringComparison.Ordinal);
+        Assert.StartsWith("3 failures", text, StringComparison.Ordinal);
         Assert.Contains("passed=3 failed=3 skipped=1 total=7", text, StringComparison.Ordinal);
         Assert.Contains("FAIL Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion", text, StringComparison.Ordinal);
         Assert.Contains("Expected: 4", text, StringComparison.Ordinal);
@@ -143,7 +143,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("list_tests", new() { ["project"] = TestProject });
 
-        Assert.Contains("7 tests (truncated=false, total=7)", text, StringComparison.Ordinal);
+        Assert.StartsWith("7 tests", text, StringComparison.Ordinal);
         Assert.Contains("Fixture.Trading.Tests.DeliberateOutcomesTests.SkippedByDesign", text, StringComparison.Ordinal);
         Assert.Contains("Fixture.Trading.Tests.DeliberateOutcomesTests.PassesWithData(volume: 1)", text, StringComparison.Ordinal);
         Assert.DoesNotContain("FAIL", text, StringComparison.Ordinal);
@@ -171,7 +171,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
             ["contains"] = "FailsAssertion",
         });
 
-        Assert.Contains("1 tests (truncated=false, total=1)", text, StringComparison.Ordinal);
+        Assert.StartsWith("1 tests", text, StringComparison.Ordinal);
         Assert.Contains("DeliberateOutcomesTests.FailsAssertion", text, StringComparison.Ordinal);
         Assert.DoesNotContain("DeliberateOutcomesTests.Throws", text, StringComparison.Ordinal);
     }
@@ -250,7 +250,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("list_tests", new() { ["project"] = "Fixture.Trading.Tests" });
 
-        Assert.Contains("7 tests (truncated=false, total=7)", text, StringComparison.Ordinal);
+        Assert.StartsWith("7 tests", text, StringComparison.Ordinal);
     }
 
     [Fact]

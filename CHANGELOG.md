@@ -8,6 +8,66 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+**Response format changed, on every tool.** Measured over 1 050 real `terse` calls in one project's
+session logs (2 127 134 response characters), roughly 19 % of every byte the server returned was
+framing an agent cannot act on. This release removes it. `verbose=true` restores the previous shape
+verbatim on every tool that takes the parameter, so nothing is lost — but an agent or script that
+parsed a header line, `(truncated=…, total=…)` or the `(verbose=true …)` footer must be updated.
+**A record's own text is never rewritten**: every compression here removes framing the server added,
+never a character the payload owned.
+
+### Changed
+
+- **No response echoes the request.** The `<tool> <argument>` header line is gone from every tool;
+  it is emitted only under `verbose=true`. Where the header carried something the caller could not
+  derive — `get_symbol`'s resolved documentation id, `load_workspace`'s discovered solution path,
+  `read_text`'s `outside-workspace` marker — that value moved into the body instead. Measured at
+  2.70 % of all response bytes, 950 of 1 050 calls.
+- **The summary line states the truncation only when there was one.** `4 usages in 2 files` instead
+  of `4 usages in 2 files (truncated=false, total=4)`, and `1/17 matches truncated - narrow with
+  glob= or maxResults=` when it was clipped. 87 % of the old counters reported a non-event.
+- **`read_text` prints the `N: ` gutter only where the numbering jumps**, strips trailing whitespace,
+  and drops blank lines in whitespace-insignificant files. A contiguous read now carries one line
+  number. The gutter was 7.6 % of that tool's output, and `read_text` alone was 39 % of all bytes.
+  The count line reports every line the range **covered**, so a dropped blank never makes a complete
+  read report itself truncated. `verbose=true` numbers every line and keeps every blank.
+- **`get_symbol_source` and `get_symbol` are dedented**, blank-line-free and trailing-space-free;
+  `verbose=true` returns the member verbatim. A payload holding a `"""` or `@"` literal keeps its
+  blank lines and trailing spaces, because there they are values rather than layout.
+- **Outlines drop the parameter list from a member's short id** unless the type overloads that name,
+  so `get_file_outline` prints `OrderService.Submit` and keeps `Reconciler.Reconcile(Order, decimal)`.
+  Both still round-trip into every tool that takes a `symbolId`.
+- **`search_symbols` and `find_implementations` no longer repeat the symbol name** in the description
+  when the documentation id beside it already ends with it: `T:App.IExecutor  interface` rather than
+  `T:App.IExecutor  interface IExecutor`.
+- **`edit_text` and `write_text` report the file name alone** on a successful write —
+  `OrderService.cs  changedLines=3` — because the caller supplied the path. Other edit tools keep the
+  workspace-relative path, which they derived.
+- **The `(verbose=true for the diff)` / `(verbose=true for the full report)` / `verbose=true lists
+  them` footers are gone** from every response. The tool descriptions already say it.
+- **The compile gate's counters are omitted when there is nothing to report.** `errors=N (+D)` and
+  `warnings=N (+D)` print only when the count or the delta is non-zero; a `dryRun` always prints both,
+  because there the counters are the answer.
+- **`workspace_status` and `load_workspace` keep their telemetry behind `verbose=true`** — `loadMs=`,
+  `elapsedMs=`, `lastUsedUtc=`, the `watch=`/`gen=`/`pending=`/`lastSyncMs=`/`gaps=` line and the
+  `index=` hit/miss line. The sync line still prints unprompted when the watcher is off or degraded or
+  a gap was seen, and the Razor generator line still prints unprompted when the generator is
+  unavailable.
+- **`format verify=true` / `cleanup verify=true` answer a clean scope with `clean`** and nothing else.
+- **`build` renders its diagnostics workspace-relative**, so a failed build no longer repeats the
+  absolute repository path on every line.
+- **`TerseError` renders on two lines**: `ERROR <Code>: <message>` then `remedy: <remedy>`. A
+  `SymbolNotFound` remedy lists at most 5 nearest ids, where the longest observed was 679 characters.
+
+### Added
+
+- `verbose` on `read_text`, `get_symbol_source` and `get_symbol`.
+- `TextCompressor` and `ResponseCompression` in `TerseSharp.Core`, with unit coverage of the summary,
+  header and payload-preservation contracts, plus `TokenBudgetE2ETests` assertions for `read_text`,
+  `get_symbol_source`, `edit_text` and `workspace_status` against the widest fixture case.
+- A `SplitHandler` partial type in `fixtures/FixtureSolution`, so the outline's short-id rule is
+  proven against a name overloaded across two files rather than within one declaration.
+
 ## [0.19.0] - 2026-08-05
 
 **Response format changed.** `load_workspace` and `workspace_status` no longer list the MSBuild load

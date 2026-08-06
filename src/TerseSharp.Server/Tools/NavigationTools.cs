@@ -49,18 +49,20 @@ public sealed class NavigationTools(ToolContext context)
     public Task<string> GetSymbol(
         [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string symbolId,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Return the XML documentation verbatim and echo the request. Default false.")] bool verbose = false,
         CancellationToken cancellationToken = default) =>
         context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            Task.FromResult(SourceService.Describe(loaded.Root, symbol)), cancellationToken);
+            Task.FromResult(SourceService.Describe(loaded.Root, symbol, verbose)), cancellationToken);
 
     [McpServerTool(Name = "get_symbol_source")]
-    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method.")]
+    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. The source is dedented and stripped of blank lines and trailing whitespace; pass verbose=true for it verbatim.")]
     public Task<string> GetSymbolSource(
         [Description("Symbol id of the member.")] string symbolId,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
         CancellationToken cancellationToken = default) =>
         context.WithSymbolAsync(workspace, symbolId, async (loaded, symbol) =>
-            Unwrap(await SourceService.OfSymbolAsync(loaded.Root, symbol, cancellationToken).ConfigureAwait(false)), cancellationToken);
+            Unwrap(await SourceService.OfSymbolAsync(loaded.Root, symbol, verbose, cancellationToken).ConfigureAwait(false)), cancellationToken);
 
     [McpServerTool(Name = "find_usages")]
     [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded.")]
@@ -174,8 +176,15 @@ public sealed class NavigationTools(ToolContext context)
 
     internal static string Unwrap(Result<string> result) => result.IsOk ? result.Value! : result.Error!.Render();
 
-    private static string Describe(LoadedWorkspace workspace, ISymbol symbol) =>
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"{SymbolFormat.Location(workspace.Root, symbol)}  EXACT  {SymbolId.From(symbol)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Describe(symbol)}");
+    private static string Describe(LoadedWorkspace workspace, ISymbol symbol)
+    {
+        var described = SymbolFormat.Describe(symbol);
+        var detail = string.Equals(described, symbol.Name, StringComparison.Ordinal)
+            ? SymbolFormat.Kind(symbol)
+            : string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Kind(symbol)} {described}");
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{SymbolFormat.Location(workspace.Root, symbol)}  EXACT  {SymbolId.From(symbol)}  {detail}");
+    }
 }

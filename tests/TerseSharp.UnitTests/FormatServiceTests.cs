@@ -48,8 +48,7 @@ public sealed class FormatServiceTests
     {
         var text = await RunAsync("src/Fixture.Trading/Views", FixMode.None);
 
-        Assert.Contains("format verify", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Equal("clean", text);
     }
 
     private static async Task<string> RunAsync(string? path, FixMode mode)

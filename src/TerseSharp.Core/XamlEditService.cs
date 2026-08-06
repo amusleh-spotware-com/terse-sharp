@@ -273,20 +273,22 @@ public static class XamlEditService
 
     private static string Describe(string tool, string relative, string before, string after, bool dryRun, bool verbose)
     {
-        var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied");
+        var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
         var changed = UnifiedDiff.ChangedLines(before, after);
+
+        if (!dryRun && !verbose && changed > 0)
+            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={changed}")).ToString();
 
         response.Summary(1, 1, "files changed");
 
-        if (!dryRun && !verbose)
-            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={changed}")).Note("(verbose=true for the diff)").ToString();
+        if (dryRun && !verbose)
+            response.Note("dryRun");
 
         response.Line(UnifiedDiff.Between(relative, before, after));
         response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
 
         return response.ToString();
     }
-
     private readonly record struct TagSpan(int Start, int Length)
     {
         public int End => Start + Length;

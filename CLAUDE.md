@@ -169,11 +169,28 @@ answer from the wrong worktree is undetectable by the agent. `LoadedWorkspace` c
 ### Errors and responses
 
 Never throw a bare message and never return prose. Failures go through `Errors.*` →
-`TerseError(Code, Message, Remedy)` → `ERROR <Code>\n<message>\nremedy: <remedy>`; add new codes to
-`TerseErrorCode`. Success goes through `ResponseBuilder`: header line, then
-`N unit (truncated=…, total=…)`, then one record per line, each tagged `EXACT` (Roslyn-resolved) or
-`HEURISTIC` (`ConfidenceTag.Of`). **Every path in a response is workspace-relative**
-(`PositionFormat.Relative`); only a file outside the workspace root is printed in full.
+`TerseError(Code, Message, Remedy)` → `ERROR <Code>: <message>\nremedy: <remedy>`; add new codes to
+`TerseErrorCode`. Success goes through `ResponseBuilder`, which renders **compressed by default and
+verbatim only when the tool passes `Verbose(true)`**:
+
+- **No header.** The `tool argument` echo is emitted only in verbose mode. A value the caller cannot
+  derive from its own request — a resolved symbol id, a discovered solution path — is a body line, not
+  a header.
+- **Summary.** `N unit` when nothing was clipped, `N/T unit truncated - narrow with X` when it was.
+  `(truncated=…, total=…)` and the blank line after it are the verbose form.
+- **Confidence.** Records are tagged `EXACT` (Roslyn-resolved) or `HEURISTIC` (`ConfidenceTag.Of`),
+  once per record. Hoisting a shared tag onto the summary was implemented and **reverted**: it is
+  inferred from record *content*, so a payload that happens to contain the literal `  EXACT  ` — a
+  `get_symbol_source` of the constant that defines it — was silently rewritten. **A record's own text
+  is never edited to save characters.**
+
+`TextCompressor.Source` dedents a source payload, drops its blank lines and strips trailing
+whitespace — but only when the payload holds no `"""` or `@"` literal, whose blank lines and trailing
+spaces are values, not layout. `read_text` prints the `N: ` gutter only where the numbering jumps, and
+its summary counts every line the range **covered**, so a blank line dropped for compression never
+makes a complete read report itself `truncated`. **Every path in a response is workspace-relative**
+(`PositionFormat.Relative`), whole and directly re-usable as an argument — path prefixes are never
+folded across records; only a file outside the workspace root is printed in full.
 
 ### Edits
 

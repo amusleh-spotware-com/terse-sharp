@@ -61,14 +61,14 @@ A silent drop is the breach, even when the reason would have been valid.
 | Instead of | Use | Why |
 |---|---|---|
 | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives |
-| `Read` to see one method | `get_symbol_source(symbolId)` | that member only |
+| `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented and stripped of blank lines; `verbose: true` for it verbatim |
 | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies |
 | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
 | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
 | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
-| `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC`; `total=` counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
-| `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response |
+| `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC`; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
+| `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line |
 | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
 | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
@@ -253,21 +253,30 @@ directory symlinks — the same set every index uses, so a nested agent worktree
 
 ## Working rules
 
-1. **Address a symbol by the name a response printed.** An outline prints
-   `OrderService.Submit(Order)`; every tool taking a `symbolId` accepts that, the full documentation
-   id (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
+0. **A response carries no ceremony.** There is **no header echoing the tool name or your arguments**
+   — you know what you called. The first line is the count (`4 usages in 2 files`), and when a result
+   was clipped it reads `4/17 usages truncated - narrow with <parameter>`. Nothing else is added:
+   no "pass verbose=true" hint, no counter that reports a non-event. `verbose=true` restores the old
+   shape verbatim — header and `(truncated=…, total=…)` — on every tool that takes it.
+1. **Address a symbol by the name a response printed.** An outline prints `OrderService.Submit`, and
+   adds the parameter list (`Reconcile(Order, decimal)`) only where the type overloads that name;
+   every tool taking a `symbolId` accepts that, the full documentation id
+   (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
    A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
    guess**. Constructors, operators, indexers, generics and explicit interface implementations keep
    their documentation id in outlines, because a name cannot address them.
 2. **Read the confidence tag.** `EXACT` came from the Roslyn semantic model. `HEURISTIC` came from a
    text or index match — verify before acting on it.
 3. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff, the diagnostic
-   counts, and nothing is written.
-4. **A successful edit answers in one line per changed file, not a diff.** `<tool> applied`, then
+   counts, and nothing is written; the response says `dryRun` so it can never be mistaken for a write.
+4. **A successful edit answers in one line per changed file, not a diff.**
    `<workspace-relative path>  changedLines=N` — you already know what you wrote, so the diff is not
-   repeated back to you. Pass `verbose=true` on any edit, refactor, `write_text`, `edit_text`,
-   `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*` write to get the full
-   unified diff. **`dryRun: true` is never condensed** — there the diff *is* the answer.
+   repeated back to you. `edit_text` and `write_text` print the **file name alone**, because you
+   passed the path in. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
+   there is a non-zero count or delta to report. Pass `verbose=true` on any edit, refactor,
+   `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*`
+   write to get the full unified diff. **`dryRun: true` is never condensed** — there the diff *is* the
+   answer.
    **Every caveat still prints in full**, condensed or not: the `errors=/warnings=` deltas, a rollback,
    a new compile error, `0 files changed`, `compileGate=unavailable`, `workspace=stale`, `UNFIXED`,
    `designerStale`, and the `NOT rewritten` list a XAML-aware rename leaves — so a short answer never
@@ -282,7 +291,7 @@ directory symlinks — the same set every index uses, so a nested agent worktree
    edit is safe.
 5. **Edits are compile-gated.** An edit introducing a new compile error is rolled back and the error
    returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
-6. **Truncation tells you what to do.** `truncated=true, total=N` is followed by
+6. **Truncation tells you what to do.** `<shown>/<total> <unit> truncated` is followed by
    `- narrow with <parameter>`. Follow that, rather than re-running with a bigger `maxResults` and
    paying for the whole list.
 7. **Several worktrees or repos open?** Pass `workspace:`. An ambiguous request returns

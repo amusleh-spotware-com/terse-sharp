@@ -73,7 +73,8 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("project_properties", new() { ["project"] = Project });
 
-        Assert.Contains("project_properties", text, StringComparison.Ordinal);
+        Assert.Contains(" properties", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -23,7 +23,7 @@ public sealed class FileServiceTests
 
             Assert.True(result.IsOk, result.Error?.Message);
             Assert.Contains("4000: line 4000 ", result.Value!, StringComparison.Ordinal);
-            Assert.Contains("total=5000", result.Value!, StringComparison.Ordinal);
+            Assert.Contains("3/5000 lines truncated", result.Value!, StringComparison.Ordinal);
             Assert.DoesNotContain("3999: ", result.Value!, StringComparison.Ordinal);
         }
         finally
@@ -47,7 +47,7 @@ public sealed class FileServiceTests
             var result = await Read(lease.Workspace, name, 0, 0, 10);
 
             Assert.True(result.IsOk, result.Error?.Message);
-            Assert.Contains("10 lines (truncated=true, total=5000)", result.Value!, StringComparison.Ordinal);
+            Assert.Contains("10/5000 lines truncated", result.Value!, StringComparison.Ordinal);
             Assert.DoesNotContain("11: ", result.Value!, StringComparison.Ordinal);
         }
         finally

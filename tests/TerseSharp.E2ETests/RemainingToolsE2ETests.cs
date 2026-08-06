@@ -8,7 +8,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:Fixture.Trading.OrderService" });
 
-        Assert.Contains("OrderService.Submit(Order)", text, StringComparison.Ordinal);
+        Assert.Contains("  OrderService.Submit  ", text, StringComparison.Ordinal);
         Assert.DoesNotContain("repository.Submit(order)", text, StringComparison.Ordinal);
     }
 
@@ -71,7 +71,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("run_tests", []);
 
         Assert.Contains("exitCode=", text, StringComparison.Ordinal);
-        Assert.Contains("run_tests", text, StringComparison.Ordinal);
+        Assert.Contains("total=0", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         var total = Total(capped);
 
         Assert.Equal(Total(all), total);
-        Assert.Contains("truncated=true", capped, StringComparison.Ordinal);
+        Assert.Contains(" truncated", capped, StringComparison.Ordinal);
         Assert.True(total > 3, capped);
     }
 
@@ -127,11 +127,12 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
 
     private static int Total(string response)
     {
-        var digits = response[(response.IndexOf("total=", StringComparison.Ordinal) + "total=".Length)..]
-            .TakeWhile(char.IsAsciiDigit)
-            .ToArray();
+        var newline = response.IndexOf('\n');
+        var summary = response.AsSpan(0, newline < 0 ? response.Length : newline);
+        var slash = summary.IndexOf('/');
+        var counted = slash < 0 ? summary : summary[(slash + 1)..];
 
-        return int.Parse(digits, CultureInfo.InvariantCulture);
+        return int.Parse(counted[..counted.IndexOf(' ')], CultureInfo.InvariantCulture);
     }
     [Fact]
     public async Task Build_WhenClean_AnswersInOneLineUnlessVerboseIsAsked()
@@ -183,8 +184,8 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         var missing = await server.CallAsync("list_projects", new() { ["filter"] = "Hosting" });
 
         Assert.Contains("Fixture.Trading", matching, StringComparison.Ordinal);
-        Assert.Contains("1 projects (truncated=false, total=1)", matching, StringComparison.Ordinal);
-        Assert.Contains("0 projects (truncated=false, total=0)", missing, StringComparison.Ordinal);
+        Assert.StartsWith("1 projects", matching, StringComparison.Ordinal);
+        Assert.Equal("0 projects", missing);
         Assert.DoesNotContain("Fixture.Trading", missing, StringComparison.Ordinal);
     }
 }

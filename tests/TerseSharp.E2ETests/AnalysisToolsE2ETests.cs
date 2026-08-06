@@ -121,10 +121,11 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
 
     private static int Total(string response)
     {
-        var digits = response[(response.IndexOf("total=", StringComparison.Ordinal) + "total=".Length)..]
-            .TakeWhile(char.IsAsciiDigit)
-            .ToArray();
+        var newline = response.IndexOf('\n');
+        var summary = response.AsSpan(0, newline < 0 ? response.Length : newline);
+        var slash = summary.IndexOf('/');
+        var counted = slash < 0 ? summary : summary[(slash + 1)..];
 
-        return int.Parse(digits, CultureInfo.InvariantCulture);
+        return int.Parse(counted[..counted.IndexOf(' ')], CultureInfo.InvariantCulture);
     }
 }
