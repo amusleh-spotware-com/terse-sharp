@@ -314,19 +314,20 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     {
         var whole = await server.CallAsync("read_text", new()
         {
-            ["path"] = "CHANGELOG.md",
-            ["section"] = "## Unreleased",
+            ["path"] = "wide-sections.txt",
+            ["section"] = "## Wide",
         });
         var bounded = await server.CallAsync("read_text", new()
         {
-            ["path"] = "CHANGELOG.md",
-            ["section"] = "## Unreleased",
+            ["path"] = "wide-sections.txt",
+            ["section"] = "## Wide",
             ["maxChars"] = 200,
         });
 
-        if (whole.StartsWith("ERROR", StringComparison.Ordinal))
-            return;
-
-        Assert.True(bounded.Length < whole.Length, bounded);
+        Assert.DoesNotContain("ERROR", whole, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", bounded, StringComparison.Ordinal);
+        Assert.True(whole.Length > 3000, whole.Length.ToString(CultureInfo.InvariantCulture));
+        Assert.True(bounded.Length < 600, bounded);
+        Assert.Contains("was cut mid-way", bounded, StringComparison.Ordinal);
     }
 }

@@ -170,7 +170,7 @@ points them elsewhere.
 | `Read` to see one method | `get_symbol_source` | that member only |
 | `Read` to see several methods | `get_symbol_source(symbolIds=[…])` | all of them in one response; an unresolvable id is `NOT_RESOLVED <id>`, not a failed call |
 | `Grep -C3`, then read around the hit | `search_text(query, context=3)` | the surrounding lines arrive on the hit's own record; `unique=true` collapses repeats to `x<count>`; `root=` searches outside the workspace |
-| `tail -n 200` on a log | `read_text(path, tail=200)` | the last N lines; a clipped read ends with `next: startLine=…`, and `maxChars=` bounds very long lines |
+| `tail -n 200` on a log | `read_text(path, tail=200)` | the last N lines; a clipped read ends with `next: startLine=…`, and `maxChars=` bounds very long lines, saying `line N was cut mid-way` when the budget runs out inside one |
 | `rm` a file | `write_text(path, delete=true)` | containment-checked; a `.cs` document is compile-gated and undoable |
 | `edit_text force=true` for an enum case or a sibling type | `add_member` | an enum symbol id takes enum members; `path=` appends a namespace-level type to an existing file |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |

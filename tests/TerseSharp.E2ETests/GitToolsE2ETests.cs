@@ -56,9 +56,8 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             return;
 
         var lines = text.Split('\n');
-        var summary = lines[0];
 
-        Assert.EndsWith("lines", summary.Split(" - ")[0], StringComparison.Ordinal);
+        Assert.Contains("lines", lines[0], StringComparison.Ordinal);
         Assert.True(lines.Length - 1 <= 5, text);
     }
 

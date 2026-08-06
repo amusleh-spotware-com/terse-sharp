@@ -88,7 +88,7 @@ public sealed class IndexE2ETests
 
         var status = await PollForAsync(() => Status(solution), "gen=c1/");
 
-        Assert.NotNull(status);
+        Assert.True(status is not null, "the code generation never advanced after the external edit");
         Assert.Contains("xaml(hit=1 miss=1 files=10)", status, StringComparison.Ordinal);
     }
 

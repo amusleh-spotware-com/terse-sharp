@@ -74,7 +74,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` | identical matching lines collapse to the first record plus `x<count>` |
 | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
 | `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
-| a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from |
+| a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from, and says `line N was cut mid-way` when the budget ran out **inside** a line — raise `maxChars` for that line, because a line range cannot resume at a character offset |
 | `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
 | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
@@ -334,7 +334,9 @@ directory symlinks — the same set every index uses, so a nested agent worktree
    truncation. `read_text` is the line-ranged equivalent: a read clipped by the tool's own cap ends
    with `next: startLine=<first line not returned> (total=<lines>)`, and on a `.cs` file an
    `outline: get_file_outline path=…` steer. A read your own `startLine`/`endLine` ended says nothing —
-   you already know where it stopped.
+   you already know where it stopped. When a **character** budget runs out inside a line you also get
+   `line N was cut mid-way`; that is not a `startLine` you can follow, because a line range cannot
+   resume at a character offset — raise `maxChars` and re-read that line.
    `list_projects` prints each project's workspace-relative path, so the name it lists and the
    `project=` argument you feed to `build`/`run_tests` come from the same line.
    `workspace_status` prints `mapped=N` **only** when this process is holding analyzer or

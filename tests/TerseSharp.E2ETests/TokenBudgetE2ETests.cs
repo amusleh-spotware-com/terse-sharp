@@ -404,7 +404,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             ["maxChars"] = 500,
         });
 
-        Assert.True(Tokens(bounded) < 300, Report("read_text maxChars", bounded, bounded));
+        Assert.True(Tokens(bounded) < 300, Report("read_text maxChars", bounded));
         Assert.True(bounded.Length < 1200, $"{bounded.Length} characters for a 500-character budget");
     }
 }

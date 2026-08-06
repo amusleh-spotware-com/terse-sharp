@@ -333,14 +333,13 @@ public static class FileService
             previous = number;
         }
 
-        return new LineSelection(lines, total, covered, Continuation(clipped, last, total, shortened), shortened);
+        return new LineSelection(lines, total, covered, Continuation(clipped, last, total), shortened);
     }
 
-    private static int Continuation(bool clipped, int last, int total, int shortened) => (clipped, last) switch
+    private static int Continuation(bool clipped, int last, int total) => (clipped, last) switch
     {
         (false, _) or (_, 0) => 0,
         _ when last >= total => 0,
-        _ when shortened == last => last + 1,
         _ => last + 1,
     };
 
