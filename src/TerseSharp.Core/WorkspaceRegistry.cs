@@ -8,7 +8,10 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     private readonly int maxWorkspaces = maxWorkspaces;
     private readonly bool watch = watch;
 
-    public async Task<WorkspaceLoadResult> LoadAsync(string path, CancellationToken cancellationToken)
+    public Task<WorkspaceLoadResult> LoadAsync(string path, CancellationToken cancellationToken) =>
+        LoadAsync(path, null, cancellationToken);
+
+    public async Task<WorkspaceLoadResult> LoadAsync(string path, string? targetFramework, CancellationToken cancellationToken)
     {
         var full = Path.GetFullPath(path);
 
@@ -16,14 +19,14 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
         try
         {
-            if (Existing(full) is { } existing)
+            if (Existing(full) is { } existing && SameFramework(existing.Load.TargetFramework, targetFramework))
             {
                 existing.Touch();
 
                 return existing.Load;
             }
 
-            return (await AddAsync(full, WorkspaceSeed.Fresh(watch), cancellationToken).ConfigureAwait(false)).Load;
+            return (await AddAsync(full, WorkspaceSeed.Fresh(watch, targetFramework), cancellationToken).ConfigureAwait(false)).Load;
         }
         finally
         {
@@ -31,6 +34,9 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
             ReclaimIfRequested();
         }
     }
+
+    private static bool SameFramework(string? left, string? right) =>
+        string.Equals(left ?? string.Empty, right ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<LoadedWorkspace> All() => Snapshot();
 
@@ -266,4 +272,34 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         if (Interlocked.Exchange(ref reclaimRequested, 0) is not 0)
             Reclaim();
     }
+
+    public int DropIdleCompilations(TimeSpan idleFor) =>
+        DropIdleCompilations(idleFor, GC.GetTotalMemory(forceFullCollection: false));
+
+    internal int DropIdleCompilations(TimeSpan idleFor, long managedBytes)
+    {
+        if (idleFor <= TimeSpan.Zero)
+            return 0;
+
+        var pressured = managedBytes >= PressureBytes;
+        var dropped = 0;
+
+        foreach (var workspace in Snapshot())
+        {
+            if (Releasable(workspace, idleFor, pressured) && workspace.DropCompilations())
+                dropped++;
+        }
+
+        if (dropped > 0)
+            Reclaim();
+
+        return dropped;
+    }
+
+    private static bool Releasable(LoadedWorkspace workspace, TimeSpan idleFor, bool pressured) =>
+        !workspace.CompilationsDropped
+        && workspace.Idle >= (pressured ? MinimumIdle : idleFor);
+
+    private const long PressureBytes = 2L * 1024 * 1024 * 1024;
+    private static readonly TimeSpan MinimumIdle = TimeSpan.FromMinutes(1);
 }

@@ -140,4 +140,92 @@ public sealed class WorkspaceRegistryTests
         Assert.True(registry.Unload(Fixtures.RazorSolutionPath));
         Assert.False(RazorGeneratedMap.Knows(projects[0]));
     }
+
+    [Fact]
+    public async Task DropIdleCompilations_WithTheSweepOff_DropsNothing()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.Zero));
+        Assert.False(registry.All()[0].CompilationsDropped);
+    }
+
+    [Fact]
+    public async Task DropIdleCompilations_WithAWorkspaceYoungerThanTheWindow_DropsNothing()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromHours(1)));
+    }
+
+    [Fact]
+    public async Task DropIdleCompilations_OnAnIdleWorkspace_ReForksTheSolutionAndSaysSo()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        var workspace = registry.All()[0];
+        var before = workspace.Solution;
+
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.Zero.Add(TimeSpan.FromTicks(1))));
+        Assert.True(workspace.CompilationsDropped);
+        Assert.NotSame(before, workspace.Solution);
+    }
+
+    [Fact]
+    public async Task DropIdleCompilations_LeavesTheWorkspaceUsable()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1));
+
+        var documents = registry.All()[0].Solution.Projects.Single().Documents;
+
+        Assert.NotEmpty(documents);
+        Assert.DoesNotContain(documents, document => document.FilePath is null);
+    }
+
+    [Fact]
+    public async Task DropIdleCompilations_IsNotRepeatedUntilTheWorkspaceIsUsedAgain()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
+
+        registry.All()[0].Touch();
+
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
+    }
+
+    [Fact]
+    public async Task DropIdleCompilations_UnderMemoryPressure_DropsOnlyOnceTheMinimumIdleHasPassed()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromHours(1), long.MaxValue));
+    }
+
+    [Fact]
+    public async Task DropIdleCompilations_WhileALeaseIsOutstanding_DropsNothing()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
+        Assert.False(registry.All()[0].CompilationsDropped);
+    }
 }

@@ -135,6 +135,14 @@ least recently used being unloaded beyond that; a workspace that vanished from `
 was evicted, not lost, and the next call naming it reloads it. The user can change the limit with
 `terse serve --max-workspaces N` or `TERSE_MAX_WORKSPACES` — worth telling them when a big solution
 is making the server heavy, because a loaded workspace costs roughly 3 GB on a 148-project tree.
+**A workspace nobody has used for 15 minutes gives its compilations back** (`--idle-minutes`,
+`TERSE_IDLE_MINUTES`, `0` to disable), and so does any idle workspace once the heap passes 2 GB.
+`workspace_status` then says `idle=<n>m compilations=dropped`; the next semantic call re-realizes
+what it needs, which costs a second or two once — that is the trade, and it is why the line is
+printed rather than left silent. On a **multi-targeted** solution pass
+`load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
+be invisible to `find_usages` with every gate green. Whatever was chosen is printed as
+`targetFramework=` by both `load_workspace` and `workspace_status`.
 Unloading a workspace — by `unload_workspace` or by eviction — ends with a compacting collection, so
 the memory really does come back; that costs about a second, which is why it happens only when a
 workspace is genuinely dropped and why the unload-and-retry that `build`/`run_tests` perform on a

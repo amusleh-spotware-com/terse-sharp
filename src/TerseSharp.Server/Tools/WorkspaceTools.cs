@@ -6,10 +6,11 @@ namespace TerseSharp.Server.Tools;
 public sealed class WorkspaceTools(ToolContext context)
 {
     [McpServerTool(Name = "load_workspace")]
-    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see.")]
+    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first.")]
     public Task<string> LoadWorkspace(
         [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
         [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared.")] bool reload = false,
+        [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
         [Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
         [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
         [Description("Max candidates when discover=true (100).")] int maxResults = 0,
@@ -26,7 +27,7 @@ public sealed class WorkspaceTools(ToolContext context)
 
             var result = reload
                 ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
-                : await context.Registry.LoadAsync(target, cancellationToken).ConfigureAwait(false);
+                : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
 
             return Render(result, verbose);
         });
@@ -136,11 +137,20 @@ public sealed class WorkspaceTools(ToolContext context)
 
         return response.ToString();
     }
-    private static string Counts(LoadedWorkspace workspace, bool verbose) => verbose
-        ? string.Create(
-            CultureInfo.InvariantCulture,
-            $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} failures={workspace.Load.Failures.Count} warnings={workspace.Load.Warnings.Count} lastUsedUtc={workspace.LastUsedUtc:O}")
-        : string.Create(CultureInfo.InvariantCulture, $"documents={workspace.Load.DocumentCount}");
+    private static string Counts(LoadedWorkspace workspace, bool verbose)
+    {
+        var counts = verbose
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"documents={workspace.Load.DocumentCount} loadMs={workspace.Load.ElapsedMilliseconds} failures={workspace.Load.Failures.Count} warnings={workspace.Load.Warnings.Count}")
+            : string.Create(CultureInfo.InvariantCulture, $"documents={workspace.Load.DocumentCount}");
+
+        return workspace.CompilationsDropped
+            ? counts + string.Create(
+                CultureInfo.InvariantCulture,
+                $"  idle={(int)workspace.Idle.TotalMinutes}m compilations=dropped (the next semantic call re-realizes them)")
+            : counts;
+    }
 
     private static void AppendSync(ResponseBuilder response, WorkspaceSync sync, bool verbose)
     {
@@ -176,7 +186,10 @@ public sealed class WorkspaceTools(ToolContext context)
 
     private static string Describe(LoadedWorkspace workspace) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{workspace.SolutionPath}  worktree={workspace.Git.WorktreeName} branch={workspace.Git.Branch}  projects={workspace.Load.ProjectCount}");
+        $"{workspace.SolutionPath}  worktree={workspace.Git.WorktreeName} branch={workspace.Git.Branch}  projects={workspace.Load.ProjectCount}{Framework(workspace.Load.TargetFramework)}");
+
+    private static string Framework(string? targetFramework) =>
+        targetFramework is { Length: > 0 } chosen ? "  targetFramework=" + chosen : string.Empty;
 
     private static string Render(WorkspaceLoadResult result, bool verbose)
     {
@@ -186,7 +199,6 @@ public sealed class WorkspaceTools(ToolContext context)
             response.Note(result.SolutionPath);
 
         response.Note(Loaded(result, verbose));
-
         AppendLoadDiagnostics(response, result, verbose);
 
         return response.ToString();
@@ -195,10 +207,10 @@ public sealed class WorkspaceTools(ToolContext context)
     private static string Loaded(WorkspaceLoadResult result, bool verbose) => verbose
         ? string.Create(
             CultureInfo.InvariantCulture,
-            $"projects={result.ProjectCount} documents={result.DocumentCount} elapsedMs={result.ElapsedMilliseconds} failures={result.Failures.Count} warnings={result.Warnings.Count}")
+            $"projects={result.ProjectCount} documents={result.DocumentCount} elapsedMs={result.ElapsedMilliseconds} failures={result.Failures.Count} warnings={result.Warnings.Count}{Framework(result.TargetFramework)}")
         : string.Create(
             CultureInfo.InvariantCulture,
-            $"projects={result.ProjectCount} documents={result.DocumentCount} failures={result.Failures.Count}");
+            $"projects={result.ProjectCount} documents={result.DocumentCount} failures={result.Failures.Count}{Framework(result.TargetFramework)}");
 
     private static void AppendLoadDiagnostics(ResponseBuilder response, WorkspaceLoadResult result, bool verbose)
     {

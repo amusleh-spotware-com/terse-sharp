@@ -55,7 +55,11 @@ public sealed class LoadedWorkspace : IDisposable
 
     public Solution Solution { get; private set; }
 
-    public void Touch() => LastUsedUtc = DateTimeOffset.UtcNow;
+    public void Touch()
+    {
+        LastUsedUtc = DateTimeOffset.UtcNow;
+        CompilationsDropped = false;
+    }
 
     public bool Contains(string path) => PathBoundary.Contains(Root, path);
 
@@ -426,5 +430,26 @@ public sealed class LoadedWorkspace : IDisposable
         }
 
         return applied;
+    }
+
+    public bool CompilationsDropped { get; private set; }
+
+    public TimeSpan Idle => DateTimeOffset.UtcNow - LastUsedUtc;
+
+    public bool DropCompilations()
+    {
+        lock (leaseGate)
+        {
+            if (leases is not 0 || retired)
+                return false;
+        }
+
+        lock (historyGate)
+        {
+            Solution = Forked();
+            CompilationsDropped = true;
+        }
+
+        return true;
     }
 }

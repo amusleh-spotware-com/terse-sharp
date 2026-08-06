@@ -508,6 +508,23 @@ to 652 MB. It runs when a workspace is actually unloaded or evicted — never me
 called — so on a capped server it lands inside whichever call did the evicting. The unload-and-retry
 that `build` and `run_tests` perform on a locked output skips it: they reload the same workspace
 immediately.
+
+**A workspace nobody has used for 15 minutes gives its compilations back.** One solution-wide
+`analyze` or `get_diagnostics` realizes every project's compilation, and until now nothing ever
+dropped them — measured at 5.8 GB still held 38 minutes after the last call, on a server burning
+0.00 s of CPU. The registry now re-forks an idle workspace's solution, which discards the compilation
+cache, and runs the same compacting collection; `--idle-minutes` (or `TERSE_IDLE_MINUTES`) changes
+the window and `0` restores the old behaviour. It also fires for any idle workspace once the managed
+heap passes 2 GB, so the ceiling follows active work rather than the largest sweep the session ever
+ran. `workspace_status` says `idle=<n>m compilations=dropped` when it has happened, because the next
+semantic call pays a second or two to re-realize what it needs and a silent pause is worse than a
+named one.
+
+**Multi-targeted solution?** `load_workspace(targetFramework: "net10.0")` passes it to MSBuild as the
+`TargetFramework` global property, so the semantic tools stop answering from whichever framework
+MSBuild happened to evaluate first — an `#if NET6_0` branch that is invisible to `find_usages` is an
+unprovable answer, not a fast one. Both `load_workspace` and `workspace_status` print
+`targetFramework=` whenever one was chosen.
 </details>
 
 ---

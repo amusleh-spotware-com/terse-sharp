@@ -13,7 +13,7 @@ internal static class WorkspaceLoader
 
         var full = Path.GetFullPath(path);
         var reported = new ConcurrentQueue<WorkspaceDiagnostic>();
-        var workspace = MSBuildWorkspace.Create();
+        var workspace = Created(seed.TargetFramework);
 
         workspace.SkipUnrecognizedProjects = true;
         workspace.RegisterWorkspaceFailedHandler(args => reported.Enqueue(args.Diagnostic));
@@ -23,10 +23,14 @@ internal static class WorkspaceLoader
 
         stopwatch.Stop();
 
-        var result = Describe(full, solution, stopwatch.ElapsedMilliseconds, reported);
+        var result = Describe(full, solution, stopwatch.ElapsedMilliseconds, reported, seed.TargetFramework);
 
         return new LoadedWorkspace(workspace, result, GitContext.Detect(full), seed);
     }
+
+    private static MSBuildWorkspace Created(string? targetFramework) => targetFramework is { Length: > 0 } framework
+        ? MSBuildWorkspace.Create(new Dictionary<string, string>(StringComparer.Ordinal) { ["TargetFramework"] = framework })
+        : MSBuildWorkspace.Create();
 
     private static async Task<Solution> OpenAsync(
         MSBuildWorkspace workspace,
@@ -45,14 +49,16 @@ internal static class WorkspaceLoader
         string path,
         Solution solution,
         long elapsedMilliseconds,
-        IReadOnlyCollection<WorkspaceDiagnostic> reported) =>
+        IReadOnlyCollection<WorkspaceDiagnostic> reported,
+        string? targetFramework) =>
         new(
             path,
             solution.Projects.Count(),
             solution.Projects.Sum(project => project.Documents.Count()),
             elapsedMilliseconds,
             Messages(reported, WorkspaceDiagnosticKind.Failure),
-            Messages(reported, WorkspaceDiagnosticKind.Warning));
+            Messages(reported, WorkspaceDiagnosticKind.Warning),
+            targetFramework);
 
     private static string[] Messages(IReadOnlyCollection<WorkspaceDiagnostic> reported, WorkspaceDiagnosticKind kind) =>
         [.. reported

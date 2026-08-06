@@ -303,6 +303,12 @@ index hit rates. `load_workspace(reload: true)` forces a reload; `--no-watch` (o
 turns the watcher off for constrained containers, and `terse doctor` reports whether this platform
 supports file watching at all.
 
+**A workspace idle for 15 minutes gives its Roslyn compilations back** — `--idle-minutes`, or
+`TERSE_IDLE_MINUTES`, `0` to disable; it also fires for any idle workspace once the managed heap
+passes 2 GB. `workspace_status` reports `idle=<n>m compilations=dropped`, and the next semantic call
+re-realizes what it needs. On a multi-targeted solution, `load_workspace(targetFramework: "net10.0")`
+picks the framework every semantic tool answers from, and it is printed rather than left implicit.
+
 **Four solutions stay loaded at once; `--max-workspaces` (or `TERSE_MAX_WORKSPACES`) changes that.**
 A loaded workspace costs what Roslyn costs — roughly 3 GB resident for a 148-project,
 31 000-document solution once its compilations exist — so the default of four is a memory budget.

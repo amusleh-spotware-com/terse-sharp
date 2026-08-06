@@ -6,4 +6,5 @@ public sealed record WorkspaceLoadResult(
     int DocumentCount,
     long ElapsedMilliseconds,
     IReadOnlyList<string> Failures,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    string? TargetFramework = null);

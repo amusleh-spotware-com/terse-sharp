@@ -12,7 +12,9 @@ var guardOption = new Option<bool>("--guard") { Description = "Also install a Cl
 
 var maxWorkspacesOption = new Option<int?>("--max-workspaces") { Description = "How many solutions stay loaded at once; the least recently used is unloaded beyond that. Default 4. TERSE_MAX_WORKSPACES does the same. A large solution costs gigabytes, so set 1 when you only ever work in one." };
 
-var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption, maxWorkspacesOption };
+var idleMinutesOption = new Option<int?>("--idle-minutes") { Description = "Drop a workspace's Roslyn compilations after it has been idle this long, and return the memory. Default 15; 0 keeps them for the life of the process. TERSE_IDLE_MINUTES does the same. The next semantic call re-realizes what it needs." };
+
+var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption, maxWorkspacesOption, idleMinutesOption };
 var guard = new Command("guard", "Hook entry point: reads a Claude Code PreToolUse payload on stdin and denies built-in tools on C#/.NET source.");
 var install = new Command("install", "Register TerseSharp with your MCP clients.") { clientOption, workspaceOption, skillOption, guardOption };
 var uninstall = new Command("uninstall", "Remove TerseSharp from your MCP clients.") { clientOption };
@@ -24,6 +26,7 @@ serve.SetAction((result, cancellationToken) =>
         result.GetValue(readOnlyOption),
         Watching(result.GetValue(noWatchOption)),
         WorkspaceLimit.Resolve(result.GetValue(maxWorkspacesOption)),
+        IdleLimit.Resolve(result.GetValue(idleMinutesOption)),
         cancellationToken));
 
 static bool Watching(bool disabled) =>

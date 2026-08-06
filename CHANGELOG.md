@@ -61,6 +61,21 @@ measured fallback, dead call or unprovable answer from a real session.
 - **`SchemaCensusE2ETests`** (I93, I77): census gates discovered from `tools/list` asserting that
   every mutating tool takes `verbose`, every `symbolId` tool has a `symbol` sibling, and no tool
   declares `symbolId` required.
+- **A workspace's Roslyn compilations are released once it goes idle** (I81, I82). One solution-wide
+  `analyze` or `get_diagnostics` used to pin every project's compilation for the life of the process
+  — measured at **5.8 GB still held 38 minutes after the last call, on a server using 0.00 s of CPU**.
+  `LoadedWorkspace.DropCompilations` now re-forks the solution from `MSBuildWorkspace.CurrentSolution`,
+  which discards the compilation cache, and refuses while any lease is outstanding. A timer sweeps
+  after `--idle-minutes` (or `TERSE_IDLE_MINUTES`, default **15**, `0` restores the old behaviour),
+  and **also** releases any workspace idle over a minute once the managed heap passes 2 GB, so the
+  ceiling follows active work rather than the largest sweep the session ever ran. `workspace_status`
+  prints `idle=<n>m compilations=dropped`, because a silent multi-second re-realization on a call the
+  agent thought was cheap is exactly the confident-wrong-answer shape the response rules forbid.
+- **`load_workspace` takes `targetFramework`** (I70), passed to MSBuild as the `TargetFramework`
+  global property, so a multi-targeted solution no longer answers from whichever framework MSBuild
+  happened to evaluate first. The framework is part of the load identity — loading the same solution
+  under a different one replaces it — and `load_workspace` and `workspace_status` both print
+  `targetFramework=` whenever one was chosen, so the answering framework is never implicit.
 
 ### Fixed
 

@@ -11,6 +11,7 @@ public static class McpHost
         bool readOnly,
         bool watch,
         int maxWorkspaces,
+        TimeSpan idleFor,
         CancellationToken cancellationToken)
     {
         var builder = Host.CreateApplicationBuilder();
@@ -31,9 +32,37 @@ public static class McpHost
         Preload(host.Services, workspace, cancellationToken);
         BeginMaintenance(cancellationToken);
         BeginSweep(cancellationToken);
+        BeginIdleRelease(host.Services, idleFor, cancellationToken);
 
         await host.RunAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    private static void BeginIdleRelease(IServiceProvider services, TimeSpan idleFor, CancellationToken cancellationToken)
+    {
+        if (idleFor <= TimeSpan.Zero)
+            return;
+
+        var context = services.GetRequiredService<ToolContext>();
+
+        _ = Task.Run(() => ReleaseIdleAsync(context, idleFor, cancellationToken), cancellationToken);
+    }
+
+    private static async Task ReleaseIdleAsync(ToolContext context, TimeSpan idleFor, CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(Sweep(idleFor));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+                context.Registry.DropIdleCompilations(idleFor);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private static TimeSpan Sweep(TimeSpan idleFor) =>
+        TimeSpan.FromTicks(Math.Max(idleFor.Ticks / 3, TimeSpan.TicksPerMinute));
 
     private static void Preload(IServiceProvider services, string? workspace, CancellationToken cancellationToken)
     {
