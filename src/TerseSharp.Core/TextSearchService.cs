@@ -24,23 +24,66 @@ public static class TextSearchService
 
     public static async Task<string> SearchAsync(
         LoadedWorkspace workspace,
-        string pattern,
-        string glob,
-        bool regex,
-        int maxResults,
+        TextSearchRequest request,
         CancellationToken cancellationToken)
     {
-        var matcher = TextMatcher.Create(pattern, regex);
-        var candidates = Matched(workspace, glob).Where(IsSearchableFile).ToArray();
-        var perFile = new FileHits[candidates.Length];
+        var files = Matched(workspace, request.Glob).Where(IsSearchableFile).ToList();
+
+        return await ScannedAsync(files, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task<string> SearchOutsideAsync(TextSearchRequest request, CancellationToken cancellationToken)
+    {
+        var candidates = Outside(request.Root ?? string.Empty, request.Glob);
+
+        return candidates.IsOk
+            ? await ScannedAsync(candidates.Value!, request, cancellationToken).ConfigureAwait(false)
+            : candidates.Error!.Render();
+    }
+
+    private static async Task<string> ScannedAsync(
+        List<WorkspacePath> files,
+        TextSearchRequest request,
+        CancellationToken cancellationToken)
+    {
+        var matcher = TextMatcher.Create(request.Pattern, request.Regex);
+        var perFile = new FileHits[files.Count];
 
         await Parallel.ForEachAsync(
-            Enumerable.Range(0, candidates.Length),
+            Enumerable.Range(0, files.Count),
             ParallelWork.Options(cancellationToken),
-            async (index, token) => perFile[index] = await ScanAsync(candidates[index], matcher, maxResults, token).ConfigureAwait(false))
+            async (index, token) => perFile[index] = await ScanAsync(files[index], matcher, request, token).ConfigureAwait(false))
             .ConfigureAwait(false);
 
-        return Render(regex ? "search_regex" : "search_text", pattern, perFile, maxResults);
+        return Render(request, perFile);
+    }
+
+    private static Result<List<WorkspacePath>> Outside(string root, string glob)
+    {
+        if (!Path.IsPathFullyQualified(root))
+        {
+            return Result.Fail<List<WorkspacePath>>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"root '{root}' is not an absolute path"),
+                "pass an absolute directory, or drop root= to search the workspace"));
+        }
+
+        var full = Path.GetFullPath(root);
+
+        if (!Directory.Exists(full))
+            return Result.Fail<List<WorkspacePath>>(Errors.DocumentNotFound(root));
+
+        var matcher = FileGlob.Compile(string.IsNullOrWhiteSpace(glob) ? "*" : glob);
+        var matched = new List<WorkspacePath>(1024);
+
+        foreach (var file in WorkspaceFiles.Enumerate(full, _ => true))
+        {
+            var relative = Path.GetRelativePath(full, file);
+
+            if (matcher.MatchesRelative(relative) && IsSearchableFile(new WorkspacePath(file, relative)))
+                matched.Add(new WorkspacePath(file, relative));
+        }
+
+        return Result.Ok(matched);
     }
 
     public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults)
@@ -59,7 +102,7 @@ public static class TextSearchService
     private static bool IsBinary(string text) =>
         text.AsSpan(0, Math.Min(text.Length, BinaryProbe)).Contains('\0');
 
-    private static FileHits Collect(string relativePath, string text, TextMatcher matcher, int maxResults)
+    private static FileHits Collect(string relativePath, string text, TextMatcher matcher, TextSearchRequest request)
     {
         var span = text.AsSpan();
         var hits = new List<string>();
@@ -71,8 +114,8 @@ public static class TextSearchService
         {
             total++;
 
-            if (hits.Count < maxResults)
-                hits.Add(Format(relativePath, span, at, ref tracker));
+            if (hits.Count < request.MaxResults)
+                hits.Add(Format(relativePath, span, at, ref tracker, request.Around));
 
             index = EndOfLine(span, at) + 1;
         }
@@ -80,15 +123,71 @@ public static class TextSearchService
         return new FileHits(hits, total, 0);
     }
 
-    private static string Format(string relativePath, ReadOnlySpan<char> text, int at, ref LineTracker tracker)
+    private static string Format(string relativePath, ReadOnlySpan<char> text, int at, ref LineTracker tracker, int context)
     {
         tracker.Advance(text, at);
 
         var start = text[..at].LastIndexOf('\n') + 1;
-        var line = text[start..EndOfLine(text, at)].Trim();
+        var end = EndOfLine(text, at);
+        var hit = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{relativePath}:{tracker.Line}  HEURISTIC  {Shorten(text[start..end].Trim())}");
 
-        return string.Create(CultureInfo.InvariantCulture, $"{relativePath}:{tracker.Line}  HEURISTIC  {Shorten(line)}");
+        return context is 0 ? hit : hit + Around(text, new LineWindow(start, end, tracker.Line), context);
     }
+
+    private static string Around(ReadOnlySpan<char> text, LineWindow window, int context)
+    {
+        var from = window.Start;
+        var above = 0;
+
+        while (above < context && from > 0)
+        {
+            from = text[..(from - 1)].LastIndexOf('\n') + 1;
+            above++;
+        }
+
+        var to = window.End;
+        var below = 0;
+
+        while (below < context && to < text.Length)
+        {
+            to = EndOfLine(text, to + 1);
+            below++;
+        }
+
+        var builder = new StringBuilder((above + below) * 64);
+
+        Continued(builder, text[from..window.Start], window.Line - above);
+        Continued(builder, text[Math.Min(window.End + 1, to)..to], window.Line + 1);
+
+        return builder.ToString();
+    }
+
+    private static void Continued(StringBuilder builder, ReadOnlySpan<char> block, int firstLine)
+    {
+        var lines = WithoutFinalBreak(block);
+        var number = firstLine;
+
+        while (!lines.IsEmpty)
+        {
+            var end = lines.IndexOf('\n');
+            var line = end >= 0 ? lines[..end] : lines;
+
+            builder.Append('\n').Append(CultureInfo.InvariantCulture, $"    {number}: {Shorten(line.TrimEnd())}");
+            number++;
+            lines = end >= 0 ? lines[(end + 1)..] : default;
+        }
+    }
+
+    private static ReadOnlySpan<char> WithoutFinalBreak(ReadOnlySpan<char> block) => block switch
+    {
+        [.., '\r', '\n'] => block[..^2],
+        [.., '\n'] => block[..^1],
+        _ => block,
+    };
+
+    private readonly record struct LineWindow(int Start, int End, int Line);
 
     private static int EndOfLine(ReadOnlySpan<char> text, int at) =>
         text[at..].IndexOf('\n') is var offset and >= 0 ? at + offset : text.Length;
@@ -97,10 +196,10 @@ public static class TextSearchService
         ? new string(line)
         : string.Create(CultureInfo.InvariantCulture, $"{line[..MaxLineLength]}... (+{line.Length - MaxLineLength} chars)");
 
-    private static string Render(string tool, string pattern, FileHits[] perFile, int maxResults)
+    private static string Render(TextSearchRequest request, FileHits[] perFile)
     {
-        var response = new ResponseBuilder(tool, pattern);
-        var shown = new List<string>(Math.Min(maxResults, 512));
+        var response = new ResponseBuilder(request.Tool, request.Pattern);
+        var shown = new List<string>(Math.Min(request.MaxResults, 512));
         var total = 0;
         var skipped = 0;
 
@@ -108,21 +207,62 @@ public static class TextSearchService
         {
             total += file.Total;
             skipped += file.Skipped;
-            shown.AddRange(file.Hits.Take(Math.Max(0, maxResults - shown.Count)));
+            shown.AddRange(file.Hits.Take(Math.Max(0, request.MaxResults - shown.Count)));
         }
 
-        return Write(response, shown, total, skipped);
+        var tally = new SearchTally(shown.Count, total, skipped);
+
+        return request.Unique
+            ? Write(response, Collapsed(shown), request, tally)
+            : Write(response, shown, request, tally);
     }
 
-    private static string Write(ResponseBuilder response, List<string> shown, int total, int skipped)
-    {
-        response.Summary(shown.Count, total, "matches", "glob= or maxResults=");
+    private readonly record struct SearchTally(int Shown, int Total, int Skipped);
 
-        if (skipped > 0)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));
+    private static List<string> Collapsed(List<string> shown)
+    {
+        var counts = new Dictionary<string, int>(shown.Count, StringComparer.Ordinal);
+        var first = new List<(string Hit, string Key)>(shown.Count);
 
         foreach (var hit in shown)
-            response.Line(hit);
+        {
+            var key = Payload(hit);
+
+            if (counts.TryAdd(key, 1))
+                first.Add((hit, key));
+            else
+                counts[key]++;
+        }
+
+        return [.. first.Select(entry => counts[entry.Key] is var count && count > 1
+            ? string.Create(CultureInfo.InvariantCulture, $"{entry.Hit}  x{count}")
+            : entry.Hit)];
+    }
+
+    private static string Payload(string hit) =>
+        hit.IndexOf(HeuristicTag, StringComparison.Ordinal) is var at and >= 0 ? hit[(at + HeuristicTag.Length)..] : hit;
+
+    private const string HeuristicTag = "  HEURISTIC  ";
+
+    private static string Write(ResponseBuilder response, List<string> records, TextSearchRequest request, SearchTally tally)
+    {
+        response.Summary(tally.Shown, tally.Total, "matches", "glob= or maxResults=");
+
+        if (request.Root is { Length: > 0 } root)
+            response.Note("outside-workspace  " + root);
+
+        if (records.Count < tally.Shown)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"unique: {records.Count} distinct line(s) collapsed from the {tally.Shown} shown; the x<count> on a record counts only what was shown"));
+        }
+
+        if (tally.Skipped > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {tally.Skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));
+
+        foreach (var record in records)
+            response.Line(record);
 
         return response.ToString();
     }
@@ -222,12 +362,12 @@ public static class TextSearchService
     private static async Task<FileHits> ScanAsync(
         WorkspacePath file,
         TextMatcher matcher,
-        int maxResults,
+        TextSearchRequest request,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await ProbeAsync(file, matcher, maxResults, cancellationToken).ConfigureAwait(false);
+            return await ProbeAsync(file, matcher, request, cancellationToken).ConfigureAwait(false);
         }
         catch (IOException)
         {
@@ -242,7 +382,7 @@ public static class TextSearchService
     private static async Task<FileHits> ProbeAsync(
         WorkspacePath file,
         TextMatcher matcher,
-        int maxResults,
+        TextSearchRequest request,
         CancellationToken cancellationToken)
     {
         var stream = new FileStream(file.FullPath, Options());
@@ -250,11 +390,11 @@ public static class TextSearchService
         await using (stream.ConfigureAwait(false))
         {
             if (!stream.CanSeek)
-                return Text(file.RelativePath, await StreamedAsync(stream, cancellationToken).ConfigureAwait(false), matcher, maxResults);
+                return Text(file.RelativePath, await StreamedAsync(stream, cancellationToken).ConfigureAwait(false), matcher, request);
 
             return stream.Length > MaxSearchableBytes
                 ? FileHits.Oversized
-                : await BufferedAsync(stream, file.RelativePath, matcher, maxResults, cancellationToken).ConfigureAwait(false);
+                : await BufferedAsync(stream, file.RelativePath, matcher, request, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -265,14 +405,14 @@ public static class TextSearchService
         return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static FileHits Text(string relativePath, string text, TextMatcher matcher, int maxResults) =>
-        IsBinary(text) ? FileHits.None : Collect(relativePath, text, matcher, maxResults);
+    private static FileHits Text(string relativePath, string text, TextMatcher matcher, TextSearchRequest request) =>
+        IsBinary(text) ? FileHits.None : Collect(relativePath, text, matcher, request);
 
     private static async Task<FileHits> BufferedAsync(
         FileStream stream,
         string relativePath,
         TextMatcher matcher,
-        int maxResults,
+        TextSearchRequest request,
         CancellationToken cancellationToken)
     {
         if (await LooksBinaryAsync(stream, cancellationToken).ConfigureAwait(false))
@@ -287,7 +427,7 @@ public static class TextSearchService
         {
             var filled = await FillAsync(stream, buffer.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
 
-            return Scan(relativePath, buffer, filled, matcher, maxResults);
+            return Scan(relativePath, buffer, filled, matcher, request);
         }
         finally
         {
@@ -331,13 +471,13 @@ public static class TextSearchService
     private static bool LooksBinary(ReadOnlySpan<byte> prefix) =>
         !IsWideText(prefix) && prefix.IndexOf((byte)0) >= 0;
 
-    private static FileHits Scan(string relativePath, byte[] buffer, int length, TextMatcher matcher, int maxResults)
+    private static FileHits Scan(string relativePath, byte[] buffer, int length, TextMatcher matcher, TextSearchRequest request)
     {
         var content = buffer.AsSpan(0, length);
 
         return !IsWideText(content) && !matcher.MayContain(content)
             ? FileHits.None
-            : Text(relativePath, Decode(content), matcher, maxResults);
+            : Text(relativePath, Decode(content), matcher, request);
     }
 
     private static bool IsWideText(ReadOnlySpan<byte> content) =>

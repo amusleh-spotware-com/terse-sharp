@@ -16,7 +16,29 @@ internal static class ToolArgumentFilter
         {
             return Failed(Rejected(request, exception));
         }
+        catch (OperationCanceledException)
+        {
+            return Failed(Errors.Cancelled());
+        }
+        catch (Exception exception)
+        {
+            return Failed(Uncoercible(request, exception));
+        }
     };
+
+    private static TerseError Uncoercible(RequestContext<CallToolRequestParams> request, Exception exception)
+    {
+        if (exception is not (JsonException or InvalidCastException or FormatException or NotSupportedException))
+            return Errors.Internal(exception);
+
+        var schema = Schema(request);
+
+        return Errors.Invalid(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{request.Params?.Name} rejected the call: {exception.GetType().Name}: {exception.Message}"),
+            Remedy(Required(schema), Accepted(schema)));
+    }
 
     private static TerseError Rejected(RequestContext<CallToolRequestParams> request, ArgumentException exception)
     {

@@ -85,7 +85,7 @@ public sealed class DotnetRunnerTests
     {
         var text = DotnetRunner.RenderBuild("A.slnx", string.Empty, Succeeded(WarningLine, SecondWarningLine), verbose: false);
 
-        Assert.Equal("build ok  errors=0 warnings=2  elapsedMs=120", text);
+        Assert.Equal("build ok  errors=0 warnings=2 emitted  elapsedMs=120", text);
     }
 
     [Fact]

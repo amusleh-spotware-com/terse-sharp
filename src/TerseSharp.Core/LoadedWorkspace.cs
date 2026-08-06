@@ -184,8 +184,8 @@ public sealed class LoadedWorkspace : IDisposable
 
         foreach (var revision in entry.Documents)
         {
-            target = target.WithDocumentText(revision.Id, revision.Text);
-            restored = restored.WithDocumentText(revision.Id, revision.Text);
+            target = Restored(target, revision);
+            restored = Restored(restored, revision);
         }
 
         if (!Applied(target))
@@ -195,6 +195,16 @@ public sealed class LoadedWorkspace : IDisposable
 
         return "reverted the last change";
     }
+
+    private static Solution Restored(Solution solution, DocumentRevision revision) =>
+        solution.ContainsDocument(revision.Id)
+            ? solution.WithDocumentText(revision.Id, revision.Text)
+            : solution.AddDocument(
+                revision.Id,
+                revision.Name,
+                revision.Text,
+                revision.Folders,
+                revision.FilePath);
 
     private async Task<Solution> AbsorbedAsync(Solution solution, CancellationToken cancellationToken)
     {
@@ -301,7 +311,12 @@ public sealed class LoadedWorkspace : IDisposable
             if (solution.GetDocument(id) is not { FilePath: { } path } document)
                 continue;
 
-            revisions.Add(new DocumentRevision(id, await document.GetTextAsync(cancellationToken).ConfigureAwait(false)));
+            revisions.Add(new DocumentRevision(
+                id,
+                await document.GetTextAsync(cancellationToken).ConfigureAwait(false),
+                document.Name,
+                [.. document.Folders],
+                path));
             paths.Add(path);
         }
 
@@ -355,7 +370,12 @@ public sealed class LoadedWorkspace : IDisposable
         }
     }
 
-    private readonly record struct DocumentRevision(DocumentId Id, SourceText Text);
+    private readonly record struct DocumentRevision(
+        DocumentId Id,
+        SourceText Text,
+        string Name,
+        IReadOnlyList<string> Folders,
+        string FilePath);
 
     private sealed record HistoryEntry(IReadOnlyList<DocumentRevision> Documents, string[] Paths)
     {

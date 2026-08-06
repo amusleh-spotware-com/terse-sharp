@@ -61,4 +61,49 @@ public static class SourceService
             ? response.ToString()
             : response.Line(verbose ? documentation.Trim() : TextCompressor.Source(documentation)).ToString();
     }
+
+    public static async Task<string> OfSymbolsAsync(
+            LoadedWorkspace workspace,
+            IReadOnlyList<string> symbolIds,
+            bool verbose,
+            CancellationToken cancellationToken)
+    {
+        var response = new ResponseBuilder("get_symbol_source", string.Join(", ", symbolIds)).Verbose(verbose);
+
+        response.Summary(symbolIds.Count, symbolIds.Count, "symbols");
+
+        foreach (var symbolId in symbolIds)
+            await AppendResolvedAsync(workspace, response, symbolId, verbose, cancellationToken).ConfigureAwait(false);
+
+        return response.ToString();
+    }
+
+    private static async Task AppendResolvedAsync(
+        LoadedWorkspace workspace,
+        ResponseBuilder response,
+        string symbolId,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+
+        if (!resolved.IsOk)
+        {
+            response.Note("NOT_RESOLVED " + symbolId + "  " + resolved.Error!.Message);
+
+            return;
+        }
+
+        var references = resolved.Value!.DeclaringSyntaxReferences;
+
+        if (references.Length is 0)
+        {
+            response.Note("NO_SOURCE " + symbolId + "  it resolves to metadata, so this workspace holds no source for it");
+
+            return;
+        }
+
+        foreach (var reference in references)
+            await AppendAsync(workspace.Root, response, reference, verbose, cancellationToken).ConfigureAwait(false);
+    }
 }

@@ -36,44 +36,68 @@ public sealed class NavigationTools(ToolContext context)
     [McpServerTool(Name = "get_type_outline")]
     [Description("List a type's members with signatures and line ranges, without the bodies. The cheapest way to learn what a class offers.")]
     public Task<string> GetTypeOutline(
-        [Description("Type id, e.g. T:Trading.OrderService.")] string symbolId,
+        [Description("Type id, e.g. T:Trading.OrderService.")] string? symbolId = null,
         [Description("Include member signatures. false gives ids and line ranges only, ~40% cheaper.")] bool signatures = true,
         [Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, async (loaded, symbol) =>
-            Unwrap(await OutlineService.TypeAsync(loaded, symbol, signatures, ids ?? "short", cancellationToken).ConfigureAwait(false)), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) =>
+            Unwrap(await OutlineService.TypeAsync(loaded, resolved, signatures, ids ?? "short", cancellationToken).ConfigureAwait(false)), cancellationToken);
 
     [McpServerTool(Name = "get_symbol")]
     [Description("Signature, kind, accessibility, location and XML doc of one symbol.")]
     public Task<string> GetSymbol(
-        [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string symbolId,
+        [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Return the XML documentation verbatim and echo the request. Default false.")] bool verbose = false,
+        [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            Task.FromResult(SourceService.Describe(loaded.Root, symbol, verbose)), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+            Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken);
 
     [McpServerTool(Name = "get_symbol_source")]
-    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. The source is dedented and stripped of blank lines and trailing whitespace; pass verbose=true for it verbatim.")]
+    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. Pass symbolIds to get several members in one response, each id that does not resolve reported inline as NOT_RESOLVED rather than failing the call. The source is dedented and stripped of blank lines and trailing whitespace; pass verbose=true for it verbatim.")]
     public Task<string> GetSymbolSource(
-        [Description("Symbol id of the member.")] string symbolId,
+        [Description("Symbol id of the member.")] string? symbolId = null,
+        [Description("Several symbol ids returned in one response. Replaces one call per member.")] string[]? symbolIds = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
+        [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, async (loaded, symbol) =>
-            Unwrap(await SourceService.OfSymbolAsync(loaded.Root, symbol, verbose, cancellationToken).ConfigureAwait(false)), cancellationToken);
+        SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, verbose, cancellationToken);
+
+    private Task<string> SourceOf(string[] requested, string? workspace, bool verbose, CancellationToken cancellationToken) => requested switch
+    {
+        [] => Task.FromResult(Errors.Blank("symbolId").Render()),
+        [var only] => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
+            Unwrap(await SourceService.OfSymbolAsync(loaded.Root, resolved, verbose, cancellationToken).ConfigureAwait(false)), cancellationToken),
+        _ => context.WithWorkspaceAsync(
+            workspace,
+            null,
+            loaded => SourceService.OfSymbolsAsync(loaded, requested[..Math.Min(requested.Length, MaxBatchedSymbols)], verbose, cancellationToken),
+            cancellationToken: cancellationToken),
+    };
+
+    private const int MaxBatchedSymbols = 20;
+
+    private static string[] Requested(string? single, string[]? many) =>
+    [
+        .. single is { Length: > 0 } ? new[] { single } : [],
+        .. (many ?? []).Where(id => id is { Length: > 0 }),
+    ];
 
     [McpServerTool(Name = "find_usages")]
     [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded.")]
     public Task<string> FindUsages(
-        [Description("Symbol id to find references for.")] string symbolId,
+        [Description("Symbol id to find references for.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
         [Description("Also name the member each usage sits in, one line per member instead of per file (default false).")] bool containers = false,
+        [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            ReferenceService.FindUsagesAsync(loaded, symbol, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+            ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_registrations")]
     [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered.")]
@@ -99,31 +123,34 @@ public sealed class NavigationTools(ToolContext context)
     [McpServerTool(Name = "explore_symbol")]
     [Description("One call to orient on a symbol: signature, XML doc, location, how many usages it has in src and in tests, how many implementations, how many XAML sites, and the files it is used in. Replaces get_symbol + find_usages + find_implementations when you are learning what something is.")]
     public Task<string> ExploreSymbol(
-        [Description("Symbol id or name.")] string symbolId,
+        [Description("Symbol id or name.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            ExploreService.ExploreAsync(loaded, symbol, cancellationToken), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+            ExploreService.ExploreAsync(loaded, resolved, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "impact_of")]
     [Description("The blast radius of changing a symbol: every file that references it with a src/test marker, every XAML site, and every project that would recompile. Use before a rename or a signature change.")]
     public Task<string> ImpactOf(
-        [Description("Symbol id or name.")] string symbolId,
+        [Description("Symbol id or name.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max records (200).")] int maxResults = 0,
+        [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            ExploreService.ImpactAsync(loaded, symbol, Cap(maxResults, 200), cancellationToken), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+            ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_implementations")]
     [Description("Implementations of an interface or abstract member, and derived types of a base type.")]
     public Task<string> FindImplementations(
-        [Description("Symbol id of the interface, abstract member or base type.")] string symbolId,
+        [Description("Symbol id of the interface, abstract member or base type.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
+        [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId, (loaded, symbol) =>
-            ReferenceService.FindImplementationsAsync(loaded, symbol, Cap(maxResults, 100), cancellationToken), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+            ReferenceService.FindImplementationsAsync(loaded, resolved, Cap(maxResults, 100), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "get_diagnostics")]
     [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those.")]

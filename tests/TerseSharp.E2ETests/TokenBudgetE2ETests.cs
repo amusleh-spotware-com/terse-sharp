@@ -343,4 +343,55 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.True(Lines(filtered) < Lines(all), Report("list_projects", filtered, all));
         Assert.Equal("0 projects", filtered);
     }
+
+    [Fact]
+    public async Task SearchText_WithoutContext_CostsNothingExtraAndWithContextStaysProportional()
+    {
+        var bare = await server.CallAsync("search_text", new() { ["query"] = "namespace Fixture", ["glob"] = "**/*.cs" });
+        var withContext = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "namespace Fixture",
+            ["glob"] = "**/*.cs",
+            ["context"] = 3,
+        });
+
+        Assert.True(Tokens(withContext) > Tokens(bare), Report("search_text context", withContext, bare));
+        Assert.True(Tokens(withContext) < Tokens(bare) * 8, Report("search_text context", withContext, bare));
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithABatch_CostsLessThanTheSameMembersOneCallAtATime()
+    {
+        var ids = new[] { "OrderBook.Add", "OrderBook.Remove", "OrderBook.Total" };
+        var batched = await server.CallAsync("get_symbol_source", new() { ["symbolIds"] = ids });
+        var separate = 0;
+
+        foreach (var id in ids)
+            separate += Tokens(await server.CallAsync("get_symbol_source", new() { ["symbolId"] = id }));
+
+        Assert.True(Tokens(batched) <= separate, $"batched={Tokens(batched)} separate={separate}\n{batched}");
+    }
+
+    [Fact]
+    public async Task WorkspaceStatus_WithNoMappedAnalyzers_GainsNothingFromTheMappedCounter()
+    {
+        var status = await server.CallAsync("workspace_status", []);
+
+        Assert.DoesNotContain("mapped=", status, StringComparison.Ordinal);
+        Assert.True(Tokens(status) < 120, Report("workspace_status", status, status));
+    }
+
+    [Fact]
+    public async Task AClippedRead_PaysAtMostTwoExtraLinesForTheContinuationSteer()
+    {
+        var clipped = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["maxLines"] = 3,
+        });
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+
+        Assert.Equal(2, Lines(clipped) - 3 - 1);
+        Assert.DoesNotContain("next: startLine=", whole, StringComparison.Ordinal);
+    }
 }

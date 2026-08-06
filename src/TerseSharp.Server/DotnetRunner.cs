@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Server;
@@ -17,14 +16,18 @@ public static partial class DotnetRunner
 
     private const int MaxTailLines = 15;
 
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(30);
+
     public static async Task<BuildRun> BuildAsync(
         WorkspaceTarget workspace,
         string? project,
+        BuildScope scope,
         bool verbose,
         CancellationToken cancellationToken)
     {
         var target = project ?? workspace.SolutionPath;
-        var run = await RunAsync(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"], workspace.Root, DefaultTimeout, cancellationToken)
+        var arguments = scope.Applied(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"]);
+        var run = await RunAsync(arguments, workspace.Root, DefaultTimeout, cancellationToken)
             .ConfigureAwait(false);
 
         return new BuildRun(RenderBuild(target, workspace.Root, run, verbose), Locked(run));
@@ -92,7 +95,7 @@ public static partial class DotnetRunner
         if (request.NoBuild)
             arguments.Add("--no-build");
 
-        return [.. arguments];
+        return request.Scope.Applied(arguments);
     }
 
     internal static string RenderBuild(string target, string root, ProcessRun run, bool verbose)
@@ -262,64 +265,8 @@ public static partial class DotnetRunner
     private static IEnumerable<string> Tail(string output) =>
         output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(MaxTailLines);
 
-    private static async Task<ProcessRun> RunAsync(string[] arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        var start = new ProcessStartInfo("dotnet")
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        foreach (var argument in arguments)
-            start.ArgumentList.Add(argument);
-
-        var stopwatch = Stopwatch.StartNew();
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        deadline.CancelAfter(timeout);
-
-        var run = await DrainAsync(process, stopwatch, deadline.Token).ConfigureAwait(false);
-
-        return run ?? Abandon(process, stopwatch);
-    }
-
-    private static async Task<ProcessRun?> DrainAsync(Process process, Stopwatch stopwatch, CancellationToken cancellationToken)
-    {
-        var pending = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errors = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        try
-        {
-            var output = await pending.ConfigureAwait(false);
-            var error = await errors.ConfigureAwait(false);
-
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            stopwatch.Stop();
-
-            return new ProcessRun(process.ExitCode, output + error, stopwatch.ElapsedMilliseconds);
-        }
-        catch (OperationCanceledException)
-        {
-            return null;
-        }
-    }
-
-    private static ProcessRun Abandon(Process process, Stopwatch stopwatch)
-    {
-        stopwatch.Stop();
-
-        if (!process.HasExited)
-            process.Kill(entireProcessTree: true);
-
-        return new ProcessRun(
-            -1,
-            string.Create(CultureInfo.InvariantCulture, $"TIMED_OUT after {stopwatch.ElapsedMilliseconds} ms; the process tree was killed"),
-            stopwatch.ElapsedMilliseconds,
-            TimedOut: true);
-    }
+    private static Task<ProcessRun> RunAsync(string[] arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>
+        ChildProcess.RunAsync("dotnet", arguments, workingDirectory, timeout, cancellationToken);
 
     [GeneratedRegex(@"^.*?: (error|warning) [A-Z]+\d+:.*$", RegexOptions.Multiline)]
     private static partial Regex DiagnosticLine();
@@ -328,13 +275,15 @@ public static partial class DotnetRunner
     private static partial Regex LockedOutput();
 
     internal static async Task<BuildRun> ListTestNamesAsync(
-            WorkspaceTarget workspace,
-            string target,
-            string? contains,
-            TimeSpan timeout,
-            CancellationToken cancellationToken)
+        WorkspaceTarget workspace,
+        string target,
+        string? contains,
+        BuildScope scope,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
-        var run = await RunAsync(["test", target, "-nodeReuse:false", "--nologo", "--list-tests"], workspace.Root, timeout, cancellationToken)
+        var arguments = scope.Applied(["test", target, "-nodeReuse:false", "--nologo", "--list-tests"]);
+        var run = await RunAsync(arguments, workspace.Root, timeout, cancellationToken)
             .ConfigureAwait(false);
 
         return new BuildRun(RenderTestNames(target, run, contains), Locked(run));
@@ -342,7 +291,7 @@ public static partial class DotnetRunner
 
     private static string QuietBuild(ProcessRun run, int warnings) => string.Create(
         CultureInfo.InvariantCulture,
-        $"build ok  errors=0 warnings={warnings}  elapsedMs={run.ElapsedMilliseconds}");
+        $"build ok  errors=0 warnings={warnings} emitted  elapsedMs={run.ElapsedMilliseconds}");
 
     internal static BuildDiagnostics Diagnostics(string output)
     {
@@ -406,12 +355,47 @@ public static partial class DotnetRunner
 
     private static string[] ErrorsUnlessVerbose(BuildDiagnostics diagnostics, bool verbose) =>
         verbose ? [.. diagnostics.Errors, .. diagnostics.Warnings] : diagnostics.Errors;
+
+    internal static async Task<DotnetInstallation> InstalledAsync(string workingDirectory, CancellationToken cancellationToken)
+    {
+        var selected = await RunAsync(["--version"], workingDirectory, ProbeTimeout, cancellationToken).ConfigureAwait(false);
+        var sdks = await RunAsync(["--list-sdks"], workingDirectory, ProbeTimeout, cancellationToken).ConfigureAwait(false);
+        var runtimes = await RunAsync(["--list-runtimes"], workingDirectory, ProbeTimeout, cancellationToken).ConfigureAwait(false);
+
+        return new DotnetInstallation(
+            selected.ExitCode is 0 ? selected.Output.Trim() : string.Empty,
+            sdks.ExitCode is 0 ? Leading(sdks.Output, ' ') : [],
+            runtimes.ExitCode is 0 ? Leading(runtimes.Output, '[') : []);
+    }
+
+    private static string[] Leading(string output, char terminator)
+    {
+        var values = new List<string>(16);
+
+        foreach (var line in output.AsSpan().EnumerateLines())
+        {
+            var end = line.IndexOf(terminator);
+
+            if (end > 0)
+                values.Add(new string(line[..end].TrimEnd()));
+        }
+
+        return [.. values];
+    }
 }
 
-internal sealed record ProcessRun(int ExitCode, string Output, long ElapsedMilliseconds, bool TimedOut = false);
+internal sealed record ProcessRun(
+    int ExitCode,
+    string Output,
+    long ElapsedMilliseconds,
+    bool TimedOut = false,
+    string StandardOutput = "",
+    string StandardError = "");
 
 internal readonly record struct TestRunResult(string Response, TestRunReport Report, bool Locked);
 
 public readonly record struct BuildRun(string Response, bool Locked);
 
 internal readonly record struct BuildDiagnostics(string[] Errors, string[] Warnings);
+
+internal readonly record struct DotnetInstallation(string Selected, string[] Sdks, string[] Runtimes);

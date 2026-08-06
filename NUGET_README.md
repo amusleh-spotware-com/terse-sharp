@@ -4,7 +4,7 @@
 
 A Roslyn-powered [MCP](https://modelcontextprotocol.io) server that lets an agent navigate, read,
 edit, refactor, build and test a .NET solution **semantically** — no `Read`, no `Grep`, no
-line-number `Edit`, no shelling out. **83 tools. One install. No IDE, no licence, no network.**
+line-number `Edit`, no shelling out. **86 tools. One install. No IDE, no licence, no network.**
 
 **Fewer tokens → lower bill. Fewer round trips → less waiting. Exact answers → fewer wrong edits.**
 Your agent spends the context window **doing the work** instead of **finding the code**.
@@ -168,6 +168,11 @@ points them elsewhere.
 | --- | --- | --- |
 | `Read` a `.cs` file | `get_file_outline` | types + members + line ranges, no bodies; `usings=true` adds the using directives |
 | `Read` to see one method | `get_symbol_source` | that member only |
+| `Read` to see several methods | `get_symbol_source(symbolIds=[…])` | all of them in one response; an unresolvable id is `NOT_RESOLVED <id>`, not a failed call |
+| `Grep -C3`, then read around the hit | `search_text(query, context=3)` | the surrounding lines arrive on the hit's own record; `unique=true` collapses repeats to `x<count>`; `root=` searches outside the workspace |
+| `tail -n 200` on a log | `read_text(path, tail=200)` | the last N lines; a clipped read ends with `next: startLine=…` |
+| `rm` a file | `write_text(path, delete=true)` | containment-checked; a `.cs` document is compile-gated and undoable |
+| `edit_text force=true` for an enum case or a sibling type | `add_member` | an enum symbol id takes enum members; `path=` appends a namespace-level type to an existing file |
 | `Grep` a type or member name | `search_symbols` | declarations only; CamelHump (`OSvc` → `OrderService`) |
 | `Grep` to find callers | `find_usages` | real references, each marked `src` or `test` |
 | three calls to learn a symbol | `explore_symbol` | signature, docs, usage counts, implementations, XAML sites — one call |
@@ -182,18 +187,19 @@ points them elsewhere.
 | `Grep` a resource key | `resx_find` · `resx_usages` | across every family, or every C#/XAML/Razor site that names it |
 | `Edit` a `.resx` file | `resx_set` · `resx_remove` · `resx_rename` | schema header, ordering, indentation, line endings and BOM preserved |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
-| `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
-| `dotnet test` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame; `project=` takes a project **name** or a path, and a locked output is retried rather than reported raw |
+| `git status` / `git diff` to review your own change | `changed_files` · `diff_symbols` · `diff_text` | one line per file, then every hunk mapped onto the declaration containing it as a symbol id; the raw hunks only when you ask |
+| `dotnet build` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only; `configuration=` and `targetFramework=` map to `-c` and `-f` |
+| `dotnet test` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame; `project=` takes a project **name** or a path, `configuration=`/`targetFramework=` scope it, and a locked output is retried rather than reported raw |
 | `dotnet format` | `format`, `cleanup fix=all`, `cleanup verify=true` | compile-gated code fixes and a one-line verdict, never raw CLI output |
 | `dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
 
-## The 83 tools
+## The 86 tools
 
 Every response is one record per line, with an explicit `truncated`/`total` and an `EXACT`
 (Roslyn-resolved) or `HEURISTIC` (text/index) tag. Paths are workspace-relative, and truncation names
 the parameter that narrows it.
 
-- **Workspace** — `load_workspace`, `workspace_status`, `list_workspaces`, `unload_workspace` (`path=`, alias `workspace=`), `list_projects` (`filter=`)
+- **Workspace** — `load_workspace`, `workspace_status` (`mapped=` when analyzer assemblies are held), `list_workspaces`, `unload_workspace` (`path=`, alias `workspace=`), `list_projects` (name, language, document count and path; `filter=`)
 - **Navigation** — `search_symbols`, `get_symbol`, `get_file_outline`, `get_type_outline`, `get_symbol_source`, `find_usages`, `find_implementations`, `explore_symbol`, `impact_of`
 - **.NET semantics grep cannot reach** — `find_registrations` (DI: open generics, factories, `Add*` extensions), `list_endpoints` (ASP.NET Core `Map*`)
 - **Analyze & clean** — `analyze`, `format`, `cleanup`, `clean`, `get_diagnostics`
@@ -207,6 +213,7 @@ the parameter that narrows it.
   (the search tools take `query` and anchor `^`/`$` per line; `bin`, `obj`, `.git`, `.claude`,
   `artifacts`, `TestResults`, `node_modules` and directory symlinks are skipped; `read_text` also
   reads an absolute path outside the workspace, tagged `outside-workspace`)
+- **Git** — `changed_files`, `diff_symbols`, `diff_text` (`baseRef=` compares against a commit or branch; empty compares the working tree against `HEAD`; scoped to the workspace root, so a workspace nested in a larger repository never reports a file outside it)
 - **Build & test** — `build`, `run_tests`, `rerun_failed`, `list_tests`
 
 ## ⚔️ Vs the alternatives

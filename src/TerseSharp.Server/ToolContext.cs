@@ -22,10 +22,13 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
 
     public async Task<string> WithSymbolAsync(
         string? workspace,
-        string symbolId,
+        string? symbolId,
         Func<LoadedWorkspace, ISymbol, Task<string>> action,
         CancellationToken cancellationToken)
     {
+        if (symbolId is not { Length: > 0 } requested)
+            return Errors.Blank("symbolId").Render();
+
         await ready.ConfigureAwait(false);
 
         return await ToolBoundary.RunAsync(async () =>
@@ -36,8 +39,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
                 return resolved.Error!.Render();
 
             using var lease = resolved.Value!;
-
-            var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, symbolId, cancellationToken).ConfigureAwait(false);
+            var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, cancellationToken).ConfigureAwait(false);
 
             return symbol.IsOk
                 ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)

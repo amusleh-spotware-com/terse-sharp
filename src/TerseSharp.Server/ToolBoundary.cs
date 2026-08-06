@@ -10,7 +10,7 @@ public static class ToolBoundary
         {
             return Announced(action());
         }
-        catch (Exception exception) when (IsExpected(exception))
+        catch (Exception exception)
         {
             return Announced(Render(exception));
         }
@@ -22,7 +22,7 @@ public static class ToolBoundary
         {
             return Announced(await action().ConfigureAwait(false));
         }
-        catch (Exception exception) when (IsExpected(exception))
+        catch (Exception exception)
         {
             return Announced(Render(exception));
         }
@@ -42,7 +42,12 @@ public static class ToolBoundary
     {
         var first = First(exception);
 
-        return first is OperationCanceledException ? Errors.Cancelled().Render() : Describe(first);
+        return first switch
+        {
+            OperationCanceledException => Errors.Cancelled().Render(),
+            _ when IsExpected(first) => Describe(first),
+            _ => Errors.Internal(first).Render(),
+        };
     }
 
     private static Exception First(Exception exception) =>

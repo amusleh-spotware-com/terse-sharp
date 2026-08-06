@@ -8,6 +8,95 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+**Backlog closure.** This release closes a block of open rows in `IMPROVEMENTS.md` — every one a
+measured fallback, dead call or unprovable answer from a real session.
+
+### Added
+
+- **Three git tools — `changed_files`, `diff_symbols`, `diff_text`** (I73). Git was the largest
+  fallback class measured in a week of real agent sessions: 575 `Bash` calls / 235 738 tokens, of
+  which `git diff`/`git show` alone were 220 calls / 130 458 tokens. `changed_files` answers one line
+  per file (`path  +added -deleted  status`, untracked included); **`diff_symbols` maps every hunk
+  onto the declaration that contains it and answers with symbol ids** you feed straight to
+  `get_symbol_source`, `EXACT` only when a hunk sits inside exactly one declaration and `HEURISTIC`
+  with the raw line range and a reason otherwise; `diff_text` returns the bounded raw diff and is the
+  last resort. All three take `baseRef=` and are scoped to the workspace root with git's own
+  `--relative`, so a workspace nested inside a larger repository never reports a file outside it.
+  **This is a second deliberate shell-out** — `GitRunner` over the shared `ChildProcess` runner that
+  `DotnetRunner` now also uses, with the same deadline, drain and kill contract. The tool surface goes
+  from 83 to **86**.
+- **`build`, `run_tests`, `rerun_failed` and `list_tests` take `configuration` and `targetFramework`**
+  (I69, I70), passed straight through as `dotnet -c` and `-f`. A Release-only failure and a single
+  framework of a multi-targeted project are now reachable without a `Bash dotnet build -c Release`.
+- **`read_text tail=N`** (I74) returns the last N lines the way `tail -n` does, so the end of a
+  40 000-line log is addressable. Overrides `startLine`/`endLine`.
+- **`search_text` and `search_regex` take `context=N` (0–5) and `unique=true`** (I74, I75). Context
+  lines are indented continuation lines on the hit's own record, so a search no longer needs a
+  follow-up `read_text`; `context=0` is byte-identical to the previous answer, asserted by a test.
+  `unique=true` collapses repeated matching lines to the first record plus `x<count>`.
+- **`search_text` and `search_regex` take `root=<absolute directory>`** (I74), so a log folder outside
+  every workspace root is searchable — `read_text` already read outside roots; the searches did not.
+  The answer carries an `outside-workspace` line naming the root. A relative root is refused, and a
+  root that does not exist answers `DocumentNotFound` rather than a misleading zero.
+- **`get_symbol_source` takes `symbolIds`** (I72, I80), returning several members in one response and
+  reporting each id that does not resolve inline as `NOT_RESOLVED <id>` instead of failing the call.
+- **Every `symbolId` tool takes `symbol` as an alias** (I77), and no tool declares `symbolId`
+  required — a call with neither answers `ERROR InvalidArgument` naming `symbolId`, never the SDK's
+  opaque `An error occurred invoking 'X'.`
+- **`add_member` adds enum members**, addressed by the enum's symbol id, and **`replace_symbol` and
+  `delete_symbol` work on an enum member** (I47). Adding an error code, a diagnostic id or an enum
+  case no longer falls out of the compile-gated symbol path into `edit_text force=true`.
+- **`add_member path=<file.cs>`** (I57) appends namespace-level type declarations to an existing
+  file as one compile-gated edit, so a sibling type needs neither a whole-file `write_text` nor a
+  forced text edit.
+- **`write_text delete=true`** (I53) deletes a file. A `.cs` document goes through `EditGate`, so the
+  removal is compile-gated and covered by `undo_last_change`; a path outside the root is refused.
+- **`doctor` reports the machine's installed SDKs and runtimes** (I71) from `dotnet --list-sdks`,
+  `--list-runtimes` and `--version`, so a missing .NET 6 runtime is named before a `run_tests` on a
+  `net6.0` project fails in the test host. The old line is relabelled `server runtime` because
+  `Environment.Version` describes the server process, not what the machine offers a build.
+- **`workspace_status` reports `mapped=`** (I54) — how many analyzer or source-generator assemblies
+  this process holds — so the I52 regression detector is observable without `unload_workspace`
+  destroying the state being measured. Paths under `verbose=true`.
+- **`SchemaCensusE2ETests`** (I93, I77): census gates discovered from `tools/list` asserting that
+  every mutating tool takes `verbose`, every `symbolId` tool has a `symbol` sibling, and no tool
+  declares `symbolId` required.
+
+### Fixed
+
+- **Every child process the server spawned inherited the server's own stdin — the MCP protocol pipe**
+  (I95). `DotnetRunner` redirected stdout and stderr but never stdin, so `dotnet build`, `dotnet test`
+  and every `git` call was handed the live channel the client speaks on. Beyond the protocol hazard it
+  was the dominant cost of a shell-out: measured against `fixtures/FixtureSolution`, the git E2E suite
+  took **248 s (~50 s per call)** where the identical command from a shell in the same directory took
+  **86 ms**; redirecting and closing stdin took the same suite to **5.9 s**. The fix lands in the one
+  shared `ChildProcess` runner, so it applies to `build`, `run_tests`, `rerun_failed`, `list_tests`
+  and the git tools alike.
+
+### Changed
+
+- **A clipped `read_text` names where to continue** (I76): `next: startLine=<first line not returned>
+  (total=<lines>)`, plus an `outline: get_file_outline path=…` steer on a `.cs` file. A read the
+  *caller's own* `startLine`/`endLine` ended is not clipped and gets no steer.
+- **`list_projects` prints each project's workspace-relative path** (I49) and advertises `filter=`.
+- **A complete listing advertises its narrowing parameter above 25 records** (I51), not only when it
+  truncated — so `list_projects`, which has no cap, can finally say `filter=` exists.
+- **`build` reports `warnings=N emitted`** (I58). MSBuild re-emits nothing for an up-to-date project,
+  so the count is what *this* build produced, not a cleanliness verdict on the solution. Three
+  routes to a positive "nothing recompiled" detector were refuted and none shipped; the wording no
+  longer claims what it cannot prove.
+- **The compile gate no longer rolls an edit back for a name the project never resolved** (I79). A
+  `CS0246`/`CS0234` that the baseline already carried — or that lands in a file which did not exist
+  before the edit — is reported as `PRE_EXISTING the project does not resolve a name this new file
+  uses: …` with a remedy, and the edit is applied. Everything else keeps today's rollback, so a real
+  regression is still refused. This removes the trigger for the most expensive habit measured in the
+  session logs: a built-in `Write` to a `.cs` file after the gate refused a new test file whose
+  package reference the workspace had never resolved.
+- **The call-tool filter answers every binder failure structurally** (I77, I90), not only
+  `ArgumentException`: an argument the SDK cannot coerce now returns `ERROR InvalidArgument` naming
+  the tool's required and accepted parameters. `ToolBoundary` renders anything else as
+  `ERROR Internal <Type>: <message>` with a remedy, under the new `TerseErrorCode.Internal`.
+
 ## [0.20.0] - 2026-08-06
 
 **Response format changed, on every tool.** Measured over 1 050 real `terse` calls in one project's

@@ -27,7 +27,7 @@
   <img src="https://img.shields.io/badge/Roslyn-semantic-512BD4.svg" alt="Roslyn"/>
   <img src="https://img.shields.io/badge/XAML-WPF_·_Avalonia_·_WinUI_·_MAUI-0078D4.svg" alt="XAML"/>
   <img src="https://img.shields.io/badge/Razor-Blazor_aware-512BD4.svg" alt="Razor"/>
-  <img src="https://img.shields.io/badge/tools-83-26C281.svg" alt="83 tools"/>
+  <img src="https://img.shields.io/badge/tools-86-26C281.svg" alt="86 tools"/>
   <img src="https://img.shields.io/badge/tokens-10--30×_fewer-26C281.svg" alt="10-30x fewer tokens"/>
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"/></a>
 </p>
@@ -372,12 +372,12 @@ same matcher untouched. Remove it by deleting the `terse guard` entry from `sett
 
 ## 🧰 The tools
 
-**83 tools.** One record per line, an explicit `truncated`/`total`, an `EXACT` / `HEURISTIC` tag,
+**86 tools.** One record per line, an explicit `truncated`/`total`, an `EXACT` / `HEURISTIC` tag,
 workspace-relative paths, and truncation that names the parameter which narrows it.
 
 | Group | Tools |
 |---|---|
-| **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` (`path=`, alias `workspace=`) · `list_projects` (`filter=`) |
+| **Workspace** | `load_workspace` · `workspace_status` (`mapped=` when analyzer assemblies are held) · `list_workspaces` · `unload_workspace` (`path=`, alias `workspace=`) · `list_projects` (name, language, document count and path; `filter=`) |
 | **Navigation** | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
 | **.NET semantics grep cannot reach** | `find_registrations` · `list_endpoints` |
 | **Analyze & clean** | `analyze` · `format` · `cleanup` · `clean` · `get_diagnostics` |
@@ -388,6 +388,7 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 | **Localization (`.resx`/`.resw`)** | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Files** | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
+| **Git** | `changed_files` · `diff_symbols` · `diff_text` |
 | **Build & test** | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 <details>
@@ -409,7 +410,13 @@ workspace-relative paths, and truncation that names the parameter which narrows 
 | `Read` a `.razor` / `.cshtml` file | `razor_outline` · `razor_component` | the component tree with every `<Card />` resolved to its type, and its full `[Parameter]` list |
 | `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_set_directive` | element-addressed, and the Razor generator re-runs so a broken edit is rolled back |
 | find-and-replace a name | `rename_symbol` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
-| `Bash: dotnet build` / `test` | `build` · `run_tests` · `rerun_failed` | deduplicated diagnostics, no MSBuild spew; green is one line **whatever it warned about** and red lists errors only (`verbose=true` for the warnings); `project=` takes a project **name** or a path, and a locked output is retried rather than reported raw |
+| `Bash: git status` / `git diff` to review your own change | `changed_files` · `diff_symbols` · `diff_text` | one line per file, then every hunk mapped onto the declaration containing it as a symbol id you feed straight to `get_symbol_source`; the raw hunks only when you ask for them |
+| `Bash: dotnet build` / `test` | `build` · `run_tests` · `rerun_failed` | deduplicated diagnostics, no MSBuild spew; green is one line **whatever it warned about** and red lists errors only (`verbose=true` for the warnings); `project=` takes a project **name** or a path, `configuration=` and `targetFramework=` map to `-c` and `-f`, and a locked output is retried rather than reported raw |
+| `Read` on several members, one call each | `get_symbol_source(symbolIds=[…])` | all of them in one response; an id that does not resolve is `NOT_RESOLVED <id>`, not a failed call |
+| `Grep -C3`, then `Read` around the hit | `search_text(query, context=3)` | the surrounding lines arrive indented on the hit's own record; `unique=true` collapses repeated lines to `x<count>`; `root=` searches an absolute directory outside the workspace |
+| `tail -n 200` on a log | `read_text(path, tail=200)` | the last N lines; a clipped read ends with `next: startLine=…` so the follow-up never overlaps or gaps |
+| `Bash: rm` a file | `write_text(path, delete=true)` | containment-checked, and a `.cs` document is compile-gated and undoable |
+| `edit_text force=true` to add an enum case or a sibling type | `add_member` | an enum symbol id takes enum members; `path=` appends a namespace-level type to an existing file |
 | `Bash: dotnet format` / `clean` | `format` · `cleanup fix=all` · `clean` | compile-gated code fixes, a one-line verdict, freed-byte counters — never raw CLI output |
 | a per-file analyzer sweep | `analyze path=src/**/*.cs` · `analyze changed=true` | a file, a directory, a glob, or just what you touched — one call instead of one per file |
 | `Glob` for `*.sln` in an unfamiliar repo | `load_workspace discover=true` | every solution and project under a directory, shallowest first, loading none of them |

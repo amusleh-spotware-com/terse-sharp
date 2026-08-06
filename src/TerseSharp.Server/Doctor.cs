@@ -4,6 +4,7 @@ public static class Doctor
 {
     public static async Task<string> RunAsync(string? workspace, CancellationToken cancellationToken)
     {
+        var target = workspace ?? Discovered();
         var lines = new List<string>
         {
             SdkLine(),
@@ -12,10 +13,25 @@ public static class Doctor
             await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
             await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
             WatcherLine(),
-            await WorkspaceLineAsync(workspace, cancellationToken).ConfigureAwait(false)
         };
 
+        lines.AddRange(await InstalledLinesAsync(Probed(target), cancellationToken).ConfigureAwait(false));
+        lines.Add(await WorkspaceLineAsync(target, cancellationToken).ConfigureAwait(false));
+
         return string.Join("\n", lines);
+    }
+
+    private static string Probed(string? target)
+    {
+        if (target is not { Length: > 0 })
+            return Directory.GetCurrentDirectory();
+
+        var full = Path.GetFullPath(target);
+
+        if (Directory.Exists(full))
+            return full;
+
+        return Path.GetDirectoryName(full) is { Length: > 0 } directory ? directory : Directory.GetCurrentDirectory();
     }
 
     private static string SdkLine()
@@ -23,11 +39,37 @@ public static class Doctor
         var runtime = Environment.Version;
 
         return Check(
-            "dotnet runtime",
-            runtime.ToString(),
+            "server runtime",
+            string.Create(CultureInfo.InvariantCulture, $"{runtime} - the runtime this server process is on, not what the machine offers a build"),
             runtime.Major >= 10,
             "install the .NET 10 SDK from https://dot.net");
     }
+
+    private static async Task<string[]> InstalledLinesAsync(string probeDirectory, CancellationToken cancellationToken)
+    {
+        var installed = await DotnetRunner.InstalledAsync(probeDirectory, cancellationToken).ConfigureAwait(false);
+
+        return
+        [
+            Check(
+                "dotnet sdks",
+                Listed(installed.Sdks) + "; selected in " + probeDirectory + ": " + Selected(installed.Selected),
+                installed.Sdks.Length > 0 && installed.Selected.Length > 0,
+                "install the .NET SDK from https://dot.net, or relax the global.json pin"),
+            Check(
+                "dotnet runtimes",
+                Listed(installed.Runtimes),
+                installed.Runtimes.Length > 0,
+                "install the runtime every target framework in the solution needs from https://dot.net"),
+        ];
+    }
+
+    private static string Selected(string version) =>
+        version.Length is 0 ? "none - the SDK the effective global.json pins is missing" : version;
+
+
+    private static string Listed(string[] values) =>
+        values.Length is 0 ? "none reported" : string.Join(", ", values);
 
     private static string ClientLine()
     {

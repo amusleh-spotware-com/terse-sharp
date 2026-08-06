@@ -55,6 +55,18 @@ public static class EditGate
         if (Describe(report, verbose) is { Length: > 0 } counters)
             response.Note(counters);
 
+        if (report.Unresolved.Length > 0)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"UNRESOLVED {report.Unresolved.Length} name(s) this project does not resolve; the edit was applied, not rolled back"));
+
+            foreach (var unresolved in report.Unresolved)
+                response.Note(unresolved);
+
+            response.Note("remedy: add the missing reference to the project, or accept it if the name is resolved by a build the workspace has not seen");
+        }
+
         if (report.NewErrors.Length is 0)
             return;
 
@@ -98,14 +110,47 @@ public static class EditGate
         var projects = Affected(before, changed);
         var baseline = await TallyAsync(before, projects, cancellationToken).ConfigureAwait(false);
         var current = await TallyAsync(after, projects, cancellationToken).ConfigureAwait(false);
+        var appeared = current.Errors.Where(entry => Appeared(baseline.Errors, entry)).Select(entry => entry.Key).ToArray();
+        var arrived = Arrived(before, after, changed);
 
         return new GateReport(
-            [.. current.Errors.Where(entry => Appeared(baseline.Errors, entry)).Select(entry => entry.Key).Take(10)],
+            [.. appeared.Where(key => !Unresolvable(key, arrived, baseline.Errors)).Take(10)],
+            [.. appeared.Where(key => Unresolvable(key, arrived, baseline.Errors)).Take(10)],
             current.ErrorCount,
             current.ErrorCount - baseline.ErrorCount,
             current.WarningCount,
             current.WarningCount - baseline.WarningCount);
     }
+
+    internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
+        UnresolvedName(key) && (baseline.ContainsKey(key) || InArrivedFile(key, arrived));
+
+    private static bool InArrivedFile(string key, HashSet<string> arrived)
+    {
+        if (arrived.Count is 0)
+            return false;
+
+        var start = key.IndexOf(' ', StringComparison.Ordinal) + 1;
+        var end = key.IndexOf(": ", StringComparison.Ordinal);
+
+        return start > 0 && end > start && arrived.Contains(key[start..end]);
+    }
+
+    private static HashSet<string> Arrived(Solution before, Solution after, IReadOnlyList<DocumentId> changed)
+    {
+        var arrived = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var id in changed)
+        {
+            if (before.GetDocument(id) is null && after.GetDocument(id) is { FilePath: { } path })
+                arrived.Add(path);
+        }
+
+        return arrived;
+    }
+
+    private static bool UnresolvedName(string key) =>
+        key.StartsWith("CS0246 ", StringComparison.Ordinal) || key.StartsWith("CS0234 ", StringComparison.Ordinal);
 
     private static ProjectId[] Affected(Solution solution, IReadOnlyList<DocumentId> changed)
     {
@@ -173,7 +218,13 @@ public static class EditGate
         return project is null ? Task.FromResult<Compilation?>(null) : project.GetCompilationAsync(cancellationToken);
     }
 
-    private sealed record GateReport(string[] NewErrors, int Errors, int ErrorDelta, int Warnings, int WarningDelta);
+    private sealed record GateReport(
+        string[] NewErrors,
+        string[] Unresolved,
+        int Errors,
+        int ErrorDelta,
+        int Warnings,
+        int WarningDelta);
 
     private readonly record struct Tally(Dictionary<string, int> Errors, int ErrorCount, int WarningCount);
     private static string Compact(ResponseBuilder response, DocumentDiff[] diffs, string root)
@@ -192,7 +243,8 @@ public static class EditGate
         !options.Verbose
         && !options.DryRun
         && diffs.Length is not 0
-        && report is not { NewErrors.Length: > 0 };
+        && report is not { NewErrors.Length: > 0 }
+        && report is not { Unresolved.Length: > 0 };
 
     private static async Task<string?> EndingAsync(
         LoadedWorkspace workspace,

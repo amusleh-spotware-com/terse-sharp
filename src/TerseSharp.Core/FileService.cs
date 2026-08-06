@@ -190,7 +190,17 @@ public static class FileService
 
         return request.Section is { Length: > 0 } heading
             ? Slice(label, text, heading, request)
-            : Result.Ok(Render(label, text, request.Range, request));
+            : Result.Ok(Render(label, text, Tailed(text, request), request));
+    }
+
+    private static LineRange Tailed(string text, ReadRequest request)
+    {
+        if (request.Tail <= 0)
+            return request.Range;
+
+        var total = CountLines(text);
+
+        return request.Range with { Start = Math.Max(1, total - request.Tail + 1), End = 0 };
     }
 
     private static Result<string> Outline(string path, string label, string text, bool verbose)
@@ -241,8 +251,24 @@ public static class FileService
         foreach (var line in selection.Lines)
             response.Line(line);
 
+        AppendContinuation(response, path, selection);
+
         return response.ToString();
     }
+
+    private static void AppendContinuation(ResponseBuilder response, string path, LineSelection selection)
+    {
+        if (selection.NextLine is 0)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"next: startLine={selection.NextLine} (total={selection.TotalLines})"));
+
+        if (SourceFile.IsCSharp(Located(path)))
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"outline: get_file_outline path={Located(path)}"));
+    }
+
     private static ReadOnlySpan<char> Located(string label) => IsOutside(label)
         ? label.AsSpan(0, label.Length - OutsideSuffix.Length)
         : label;
@@ -259,6 +285,9 @@ public static class FileService
         var number = 0;
         var previous = -1;
         var covered = 0;
+        var last = 0;
+        var shortened = 0;
+        var clipped = false;
 
         foreach (var line in text.AsSpan().EnumerateLines())
         {
@@ -267,10 +296,21 @@ public static class FileService
             if (number > total)
                 break;
 
-            if (!range.Covers(number) || lines.Count >= range.MaxLines || budget <= 0)
+            if (!range.Covers(number))
                 continue;
 
+            if (lines.Count >= range.MaxLines || budget <= 0)
+            {
+                clipped = true;
+
+                break;
+            }
+
             covered++;
+            last = number;
+
+            if (line.Length > budget)
+                shortened = number;
 
             if (Dropped(line, format))
                 continue;
@@ -280,8 +320,16 @@ public static class FileService
             previous = number;
         }
 
-        return new LineSelection(lines, total, covered);
+        return new LineSelection(lines, total, covered, Continuation(clipped, last, total, shortened));
     }
+
+    private static int Continuation(bool clipped, int last, int total, int shortened) => (clipped, last) switch
+    {
+        (false, _) or (_, 0) => 0,
+        _ when last >= total => 0,
+        _ when shortened == last => last,
+        _ => last + 1,
+    };
 
     private static bool Dropped(ReadOnlySpan<char> line, ReadFormat format) =>
         !format.Verbose && !format.KeepsBlankLines && line.TrimEnd().IsEmpty;
@@ -297,7 +345,7 @@ public static class FileService
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0);
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose);
 
@@ -306,7 +354,7 @@ public static class FileService
         public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
     }
 
-    private readonly record struct LineSelection(IReadOnlyList<string> Lines, int TotalLines, int CoveredLines);
+    private readonly record struct LineSelection(IReadOnlyList<string> Lines, int TotalLines, int CoveredLines, int NextLine);
     private static int CountLines(ReadOnlySpan<char> text)
     {
         if (text.Length is 0)
@@ -391,4 +439,63 @@ public static class FileService
     }
 
     private const string OutsideSuffix = "  " + OutsideMarker;
+
+    public static async Task<Result<string>> DeleteAsync(
+            LoadedWorkspace workspace,
+            string path,
+            bool dryRun,
+            bool force,
+            CancellationToken cancellationToken)
+    {
+        var resolved = PathGuard.Resolve(workspace, path);
+
+        if (!resolved.IsOk)
+            return Result.Fail<string>(resolved.Error!);
+
+        var full = resolved.Value!;
+
+        if (SourceFile.Reject(path, full, force) is { } refusal)
+            return refusal;
+
+        if (!File.Exists(full))
+            return Result.Fail<string>(Errors.DocumentNotFound(path));
+
+        if (DocumentLookup.Find(workspace, path) is { } document)
+            return await RemovedAsync(workspace, document, path, dryRun, cancellationToken).ConfigureAwait(false);
+
+        if (!dryRun)
+            File.Delete(full);
+
+        return Result.Ok(Removed(path, dryRun));
+    }
+
+    private static async Task<Result<string>> RemovedAsync(
+        LoadedWorkspace workspace,
+        Microsoft.CodeAnalysis.Document document,
+        string path,
+        bool dryRun,
+        CancellationToken cancellationToken)
+    {
+        if (dryRun)
+            return Result.Ok(Removed(path, true));
+
+        var applied = await EditGate.ApplyAsync(
+            workspace,
+            workspace.Solution.RemoveDocument(document.Id),
+            [document.Id],
+            new EditOptions("write_text", false, true, false),
+            cancellationToken).ConfigureAwait(false);
+
+        if (!applied.IsOk)
+            return applied;
+
+        if (document.FilePath is { Length: > 0 } file && File.Exists(file))
+            File.Delete(file);
+
+        return Result.Ok(Removed(path, false));
+    }
+
+    private static string Removed(string path, bool dryRun) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"write_text {(dryRun ? "dryRun" : "deleted")}  {path}");
 }

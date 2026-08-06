@@ -4,8 +4,9 @@ namespace TerseSharp.Core;
 
 public sealed class ResponseBuilder(string tool, string argument)
 {
-    private readonly List<Entry> entries = new(16);
+    private const int SteerThreshold = 25;
 
+    private readonly List<Entry> entries = new(16);
     private bool verbose;
 
     public ResponseBuilder Verbose(bool value)
@@ -70,12 +71,15 @@ public sealed class ResponseBuilder(string tool, string argument)
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{count.Shown} {count.Unit} (truncated={(truncated ? "true" : "false")}, total={count.Total}){(truncated ? Steer(count) : string.Empty)}\n");
+            $"{count.Shown} {count.Unit} (truncated={(truncated ? "true" : "false")}, total={count.Total}){(truncated ? Steer(count) : Advertised(count))}\n");
     }
 
     private static string Brief(Counted count) => count.Total > count.Shown
         ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit} truncated{Steer(count)}")
-        : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit}");
+        : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit}{Advertised(count)}");
+
+    private static string Advertised(Counted count) =>
+        count.Shown >= SteerThreshold ? Steer(count) : string.Empty;
 
     private static string Steer(Counted count) =>
         count.NarrowWith is { Length: > 0 } narrow ? " - narrow with " + narrow : string.Empty;

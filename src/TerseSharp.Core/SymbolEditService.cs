@@ -44,6 +44,9 @@ public static class SymbolEditService
         if (found is null)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
+        if (found.Node is EnumMemberDeclarationSyntax)
+            return await ReplaceEnumMemberAsync(workspace, found, declaration, options, cancellationToken).ConfigureAwait(false);
+
         if (Shared(found) is { } refusal)
             return Result.Fail<string>(refusal);
 
@@ -54,6 +57,26 @@ public static class SymbolEditService
             ? await SwapAsync(workspace, target, Rewritten(parsed.Value!, target.Node), options, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(parsed.Error!);
     }
+
+    private static async Task<Result<string>> ReplaceEnumMemberAsync(
+        LoadedWorkspace workspace,
+        EditTarget target,
+        string declaration,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var parsed = MemberDeclaration.ParseEnumMembers(declaration);
+
+        return parsed.IsOk
+            ? await SwapAsync(workspace, target, EnumRewritten(parsed.Value!, target.Node), options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(parsed.Error!);
+    }
+
+    private static SyntaxNode[] EnumRewritten(EnumMemberDeclarationSyntax[] members, SyntaxNode original) =>
+    [
+        members[0].WithTriviaFrom(original),
+        .. members.Skip(1).Select(member => (SyntaxNode)OnANewLine(member)),
+    ];
 
     public static async Task<Result<string>> AddMemberAsync(
         LoadedWorkspace workspace,
@@ -71,8 +94,11 @@ public static class SymbolEditService
 
         var target = await TargetAsync(workspace, containingType, cancellationToken).ConfigureAwait(false);
 
+        if (target?.Node is EnumDeclarationSyntax enumeration)
+            return await AddEnumMembersAsync(workspace, target, enumeration, declaration, options, cancellationToken).ConfigureAwait(false);
+
         if (target is null || target.Node is not TypeDeclarationSyntax type)
-            return Result.Fail<string>(Errors.Invalid("the target is not a type declaration", "pass a type symbol id"));
+            return Result.Fail<string>(Errors.Invalid("the target is not a type declaration", "pass a type or enum symbol id"));
 
         var members = MemberDeclaration.ParseAll(declaration);
 
@@ -80,6 +106,24 @@ public static class SymbolEditService
             ? await SwapAsync(workspace, target, [Appended(type, members.Value!)], options, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(members.Error!);
     }
+
+    private static async Task<Result<string>> AddEnumMembersAsync(
+        LoadedWorkspace workspace,
+        EditTarget target,
+        EnumDeclarationSyntax enumeration,
+        string declaration,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var parsed = MemberDeclaration.ParseEnumMembers(declaration);
+
+        return parsed.IsOk
+            ? await SwapAsync(workspace, target, [enumeration.AddMembers([.. parsed.Value!.Select(OnANewLine)])], options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(parsed.Error!);
+    }
+
+    private static EnumMemberDeclarationSyntax OnANewLine(EnumMemberDeclarationSyntax member) =>
+        member.WithLeadingTrivia(SyntaxFactory.ElasticCarriageReturnLineFeed);
 
     public static async Task<Result<string>> DeleteAsync(
         LoadedWorkspace workspace,
@@ -311,6 +355,66 @@ public static class SymbolEditService
 
     private static bool NeedsBlankLine(MemberDeclarationSyntax member) =>
             !member.GetLeadingTrivia().Any(SyntaxKind.EndOfLineTrivia);
+
+    public static async Task<Result<string>> AddToFileAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string declaration,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var document = DocumentLookup.Find(workspace, path);
+
+        if (document is null)
+            return Result.Fail<string>(Errors.DocumentNotFound(path));
+
+        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+
+        if (root is not CompilationUnitSyntax unit)
+            return Result.Fail<string>(Errors.DocumentNotFound(path));
+
+        var members = MemberDeclaration.ParseAll(declaration);
+
+        if (!members.IsOk)
+            return Result.Fail<string>(members.Error!);
+
+        var appended = Spaced(members.Value!);
+
+        return Namespaced(unit) is { } declared
+            ? await SwapAsync(workspace, new EditTarget(document, declared), [Filled(declared, appended)], options, cancellationToken).ConfigureAwait(false)
+            : await RootedAsync(workspace, document, unit.WithMembers(unit.Members.AddRange(appended)), options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<Result<string>> RootedAsync(
+        LoadedWorkspace workspace,
+        Document document,
+        CompilationUnitSyntax unit,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var annotated = unit.WithAdditionalAnnotations(Formatter.Annotation);
+        var formatted = await IndentedAsync(document.WithSyntaxRoot(annotated), cancellationToken).ConfigureAwait(false);
+        var updated = workspace.Solution.WithDocumentSyntaxRoot(document.Id, formatted);
+
+        return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static BaseNamespaceDeclarationSyntax? Namespaced(CompilationUnitSyntax unit) =>
+        unit.Members.OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault();
+
+
+    private static MemberDeclarationSyntax[] Spaced(IReadOnlyList<MemberDeclarationSyntax> members) =>
+        [.. members.Select(member => Separated(member, true))];
+
+
+    private static BaseNamespaceDeclarationSyntax Filled(
+        BaseNamespaceDeclarationSyntax declared,
+        IReadOnlyList<MemberDeclarationSyntax> members) => declared switch
+        {
+            NamespaceDeclarationSyntax block => block.WithMembers(block.Members.AddRange(members)),
+            FileScopedNamespaceDeclarationSyntax scoped => scoped.WithMembers(scoped.Members.AddRange(members)),
+            _ => declared,
+        };
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

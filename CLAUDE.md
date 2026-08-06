@@ -130,7 +130,7 @@ until it passes.
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **83 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **86 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
 `DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,
@@ -143,7 +143,9 @@ workspace walk).
 bare args default to `serve`), `McpHost` (generic host + stdio transport + `WithToolsFromAssembly`),
 `Tools/*.cs` (the `[McpServerToolType]` classes), `ClientRegistrar` + `Doctor` + `SkillAsset`
 (installs into `~/.claude.json` or `$CLAUDE_CONFIG_DIR`, Cursor, VS Code, Windsurf; `SKILL.md` is an
-embedded resource), `DotnetRunner` (the only shell-out: `dotnet build` / `dotnet test`, deadlined).
+embedded resource), `DotnetRunner` and `GitRunner` (the **two** deliberate shell-outs: `dotnet build`/`dotnet test` and
+read-only `git diff`/`git status`, both over the shared `ChildProcess` runner — one start, one drain,
+one deadline, one kill of the whole process tree).
 
 ### Request pipeline
 
@@ -156,7 +158,10 @@ Every tool method is a one-liner delegating to `ToolContext`:
   root and **releases the lease first** — for `build`/`run_tests`, which shell out and must be able
   to unload the workspace to release its MSBuild file locks.
 - `ToolContext.RejectWrite()` is the `--read-only` gate; every mutating tool must call it first.
-- `ToolBoundary.Run(Async)` catches expected exceptions and renders them; unexpected ones rethrow.
+- `ToolBoundary.Run(Async)` renders every exception: an expected one as its own code, anything else as
+  `ERROR Internal <Type>: <message>` with a remedy. `ToolArgumentFilter` does the same one layer up for
+  the binder, so an argument the MCP SDK cannot coerce answers `ERROR InvalidArgument` naming the
+  tool's required and accepted parameters instead of `An error occurred invoking 'X'.`
 
 `WorkspaceRegistry` (LRU, default 4) owns the loaded `MSBuildWorkspace`s. `Resolve` hands out a
 `WorkspaceLease`; an evicted or unloaded workspace is disposed only once the last lease is released,
@@ -561,7 +566,8 @@ and being absent from it is the point:**
 | every tool has an E2E test | `ToolCoverageE2ETests` | `tools/list`, both directions |
 | every tool is named in `SKILL.md`, `README.md`, `NUGET_README.md` | `DocsCoverageE2ETests` | `tools/list` |
 | every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus the `ProcessSpawning` / `WorkspaceMutating` / `Destructive` arrays — an exclusion set that carries no written reason per entry and no ratchet, so it does not yet meet the rule above it |
-| **every mutating tool takes `verbose`** | **none — 7 hand-written spot checks** | — |
+| every mutating tool takes `verbose` | `SchemaCensusE2ETests` | `tools/list` — every tool declaring `dryRun` must declare `verbose` |
+| every `symbolId` tool takes the `symbol` alias, and none declares `symbolId` required | `SchemaCensusE2ETests` | `tools/list` — the `properties` and `required` arrays |
 | **every listing tool has a token budget** | **none — `TokenBudgetE2ETests` is 20 per-tool `[Fact]`s, and its `EveryReadToolStaysWithinTheGlobalCap` names four tools by hand** | — |
 | **no build/test tool returns a warning unless `verbose=true`** (rule 4 above) | **none — 8 hand-written `DotnetRunnerTests` render cases plus `BuildWarningsE2ETests`; nothing discovers the family from `tools/list`** | — |
 

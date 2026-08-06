@@ -94,4 +94,28 @@ public sealed class ResponseBuilderTests
             ["3 files", "src/TerseSharp.Core/ServiceOne.cs", "src/TerseSharp.Core/ServiceTwo.cs", "src/TerseSharp.Core/ServiceThree.cs"],
             text.Split('\n'));
     }
+
+    [Fact]
+    public void Summary_WhenTheListingIsLargeButComplete_StillAdvertisesTheNarrowingParameter()
+    {
+        var text = new ResponseBuilder("list_projects", "A.slnx").Summary(145, 145, "projects", "filter=").ToString();
+
+        Assert.Equal("145 projects - narrow with filter=", text);
+    }
+
+    [Fact]
+    public void Summary_WhenTheListingIsSmall_StaysSilentAboutNarrowing()
+    {
+        var text = new ResponseBuilder("list_projects", "A.slnx").Summary(4, 4, "projects", "filter=").ToString();
+
+        Assert.Equal("4 projects", text);
+    }
+
+    [Fact]
+    public void Summary_WithNoNarrowingParameter_NeverAdvertisesOneHoweverLargeTheListing()
+    {
+        var text = new ResponseBuilder("list_endpoints", "A.slnx").Summary(900, 900, "endpoints").ToString();
+
+        Assert.Equal("900 endpoints", text);
+    }
 }

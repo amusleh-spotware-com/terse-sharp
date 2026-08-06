@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 83 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 86 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
 ---
 
 # TerseSharp
@@ -62,16 +62,24 @@ A silent drop is the breach, even when the reason would have been valid.
 |---|---|---|
 | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives |
 | `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented and stripped of blank lines; `verbose: true` for it verbatim |
+| `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` | all of them in one response; an id that does not resolve is reported `NOT_RESOLVED <id>`, never a failed call |
 | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies |
 | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
 | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
 | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
 | `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC`; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
-| `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line |
+| `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
+| `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
+| `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` | identical matching lines collapse to the first record plus `x<count>` |
+| `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
+| `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
+| `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
 | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
 | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
+| adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` | an enum id takes enum members; `replace_symbol` and `delete_symbol` work on one too |
+| adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` | appended to that file's namespace as one compile-gated edit — no whole-file rewrite, no forced text edit |
 | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
 | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call |
 | rewrite an **existing** `.cs` file whole | `write_text(path, content, force: true)` | compile-gated: rolled back if it introduces an error, `allowErrors: true` to opt out |
@@ -98,7 +106,11 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` | element-addressed, formatting preserved, compile-gated through the Razor generator |
 | "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
 | "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
+| `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included |
+| `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise |
+| `Bash: git diff` when you really need the hunks | `diff_text(path: …)` | the raw unified diff, bounded and workspace-relative - the most expensive answer here, so scope it |
 | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
+| `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
 | `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
@@ -239,6 +251,16 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
 `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` ·
 `razor_remove_element` · `razor_set_directive`.
 
+**Git** — `changed_files` · `diff_symbols` · `diff_text`. The only other deliberate shell-out beside
+`build`/`run_tests`, and the answer to the end-of-task review, which is defined over the diff. Start
+with `changed_files` (one line per file: path, `+added -deleted`, status; untracked included), then
+`diff_symbols` to turn the hunks into declaration ids, then `get_symbol_source` on the two or three
+bodies you actually intend to read. `diff_text` returns the raw unified diff and is the last resort —
+scope it with `path=`. All three take `baseRef=` (empty compares the working tree against `HEAD`) and
+are scoped to the workspace root with git's own `--relative`, so a workspace nested inside a larger
+repository never reports a file outside it. `diff_symbols` tags a hunk `EXACT` only when it sits
+inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.
+
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
 `search_text` and `search_regex` take `query`, `find_files` takes `glob`, and each accepts `pattern`
 as an alias, so the wrong name of the three is never a failed call. `find_files`, `search_text` and `search_regex`
@@ -264,7 +286,12 @@ directory symlinks — the same set every index uses, so a nested agent worktree
    (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
    A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
    guess**. Constructors, operators, indexers, generics and explicit interface implementations keep
-   their documentation id in outlines, because a name cannot address them.
+   their documentation id in outlines, because a name cannot address them. Every one of those tools
+   also accepts `symbol:` as an alias for `symbolId:`, and none of them declares the parameter
+   required — a call with neither answers `ERROR InvalidArgument` naming `symbolId`.
+   **Need several members?** `get_symbol_source(symbolIds: [...])` returns them in one response, and
+   an id that does not resolve is reported inline as `NOT_RESOLVED <id>` instead of failing the call.
+   Use it instead of one call per member.
 2. **Read the confidence tag.** `EXACT` came from the Roslyn semantic model. `HEURISTIC` came from a
    text or index match — verify before acting on it.
 3. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff, the diagnostic
@@ -293,7 +320,17 @@ directory symlinks — the same set every index uses, so a nested agent worktree
    returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
 6. **Truncation tells you what to do.** `<shown>/<total> <unit> truncated` is followed by
    `- narrow with <parameter>`. Follow that, rather than re-running with a bigger `maxResults` and
-   paying for the whole list.
+   paying for the whole list. A **complete** listing of 25 records or more names the same parameter,
+   so an uncapped tool like `list_projects` still tells you `filter=` exists — that is an offer, not a
+   truncation. `read_text` is the line-ranged equivalent: a read clipped by the tool's own cap ends
+   with `next: startLine=<first line not returned> (total=<lines>)`, and on a `.cs` file an
+   `outline: get_file_outline path=…` steer. A read your own `startLine`/`endLine` ended says nothing —
+   you already know where it stopped.
+   `list_projects` prints each project's workspace-relative path, so the name it lists and the
+   `project=` argument you feed to `build`/`run_tests` come from the same line.
+   `workspace_status` prints `mapped=N` **only** when this process is holding analyzer or
+   source-generator assemblies (or under `verbose=true`); a non-zero count means an external
+   `dotnet build` over those files will fail `MSB3027` until the server restarts.
 7. **Several worktrees or repos open?** Pass `workspace:`. An ambiguous request returns
    `AmbiguousWorkspace` listing the candidates rather than guessing — never assume it picked right.
 8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT`, `HEURISTIC`,

@@ -105,4 +105,9 @@ public static class Errors
 
     private const int MaxListedProjects = 8;
     private const int MaxListedCandidates = 5;
+
+    public static TerseError Internal(Exception exception) => new(
+        TerseErrorCode.Internal,
+        string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),
+        "this is a server defect, not a bad call - the arguments were accepted and the failure happened afterwards; report it at https://github.com/amusleh-spotware-com/terse-sharp/issues, and retry only if the message names a transient cause such as a locked file");
 }

@@ -25,6 +25,7 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
         "resx_set", "resx_remove", "resx_rename", "resx_validate",
         "razor_outline", "razor_component", "razor_find", "razor_bindings", "razor_codebehind",
         "razor_validate", "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
+        "changed_files", "diff_symbols", "diff_text",
     };
 
     [Fact]
@@ -46,4 +47,6 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain(Exercised, name => !advertised.Contains(name));
     }
+
+    internal static int ExercisedCount => Exercised.Count;
 }

@@ -64,4 +64,24 @@ public static class MemberDeclaration
     private static TerseError Unparsed() => Errors.Invalid(
             "the declaration did not parse",
             "pass one or more complete member declarations");
+
+    public static Result<EnumMemberDeclarationSyntax[]> ParseEnumMembers(string declarations)
+    {
+        var wrapped = SyntaxFactory.ParseCompilationUnit("enum TerseEnumerationProbe\n{\n" + declarations.Trim().TrimEnd(',') + ",\n}");
+
+        if (wrapped.Members is not [EnumDeclarationSyntax parsed] || Fatal(parsed) is { Length: > 0 })
+            return Result.Fail<EnumMemberDeclarationSyntax[]>(NotEnumMembers());
+
+        return parsed.Members.Count is 0
+            ? Result.Fail<EnumMemberDeclarationSyntax[]>(NotEnumMembers())
+            : Result.Ok<EnumMemberDeclarationSyntax[]>([.. parsed.Members]);
+    }
+
+    private static Diagnostic[] Fatal(EnumDeclarationSyntax parsed) =>
+        [.. parsed.GetDiagnostics().Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error)];
+
+
+    private static TerseError NotEnumMembers() => Errors.Invalid(
+        "the declaration did not parse as enum members",
+        "pass one or more enum member names, e.g. 'Internal' or 'Internal = 3, Retry'");
 }

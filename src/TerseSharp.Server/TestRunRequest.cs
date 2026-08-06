@@ -7,7 +7,8 @@ internal readonly record struct TestRunRequest(
     bool IncludePassed,
     int Slowest,
     TimeSpan Timeout,
-    bool Verbose = false)
+    bool Verbose = false,
+    BuildScope Scope = default)
 {
     public bool WantsDetail => Verbose || IncludePassed || Slowest > 0;
 }

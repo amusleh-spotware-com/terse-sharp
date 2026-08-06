@@ -1,8 +1,12 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 
 namespace TerseSharp.Server;
 
-public sealed record TestRunMemory(string WorkspaceRoot, string Target, ImmutableArray<string> FailedTests)
+public sealed record TestRunMemory(
+    string WorkspaceRoot,
+    string Target,
+    ImmutableArray<string> FailedTests,
+    BuildScope Scope = default)
 {
     public bool Covers(string workspaceRoot) =>
         WorkspaceRoot.Equals(workspaceRoot, PathBoundary.Comparison) && !FailedTests.IsDefaultOrEmpty;
@@ -16,6 +20,6 @@ public sealed class LastTestRun
 
     public TestRunMemory Memory => Volatile.Read(ref memory);
 
-    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests) =>
-        Volatile.Write(ref memory, new TestRunMemory(workspaceRoot, target, [.. failedTests.Take(MaxRememberedTests)]));
+    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests, BuildScope scope = default) =>
+        Volatile.Write(ref memory, new TestRunMemory(workspaceRoot, target, [.. failedTests.Take(MaxRememberedTests)], scope));
 }

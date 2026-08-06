@@ -125,9 +125,9 @@ public sealed class WorkspaceTools(ToolContext context)
 
         response.Note(Describe(workspace));
         response.Note(Counts(workspace, verbose));
-
         AppendSync(response, workspace.Sync, verbose);
         await AppendRazorAsync(response, workspace, verbose, cancellationToken).ConfigureAwait(false);
+        AppendMappedAnalyzers(response, workspace, verbose);
 
         if (verbose)
             response.Note(workspace.Indexes.Describe());
@@ -136,7 +136,6 @@ public sealed class WorkspaceTools(ToolContext context)
 
         return response.ToString();
     }
-
     private static string Counts(LoadedWorkspace workspace, bool verbose) => verbose
         ? string.Create(
             CultureInfo.InvariantCulture,
@@ -273,18 +272,17 @@ public sealed class WorkspaceTools(ToolContext context)
     private static string RenderProjects(LoadedWorkspace workspace, string? filter)
     {
         var projects = workspace.Solution.Projects
-                .Where(project => Matches(project.Name, filter))
-                .OrderBy(project => project.Name, StringComparer.Ordinal)
-                .ToArray();
+            .Where(project => Matches(project.Name, filter))
+            .OrderBy(project => project.Name, StringComparer.Ordinal)
+            .ToArray();
         var response = new ResponseBuilder("list_projects", workspace.SolutionPath);
-
-        response.Summary(projects.Length, projects.Length, "projects");
+        response.Summary(projects.Length, projects.Length, "projects", "filter=");
 
         foreach (var project in projects)
         {
             response.Line(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{project.Name}  {project.Language}  documents={project.Documents.Count()}"));
+                $"{project.Name}  {project.Language}  documents={project.Documents.Count()}  {PositionFormat.Relative(workspace.Root, project.FilePath)}"));
         }
 
         return response.ToString();
@@ -294,4 +292,26 @@ public sealed class WorkspaceTools(ToolContext context)
         filter is not { Length: > 0 } || name.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     private const int MaxFailureGroups = 20;
+
+    private static void AppendMappedAnalyzers(ResponseBuilder response, LoadedWorkspace workspace, bool verbose)
+    {
+        var mapped = MappedAnalyzers.Of(workspace.Solution);
+
+        if (mapped.Length is 0 && !verbose)
+            return;
+
+        response.Note(MappedNote(mapped.Length));
+
+        if (!verbose)
+            return;
+
+        foreach (var assembly in mapped)
+            response.Line(assembly);
+    }
+
+    private static string MappedNote(int count) => count is 0
+        ? "mapped=0"
+        : string.Create(
+            CultureInfo.InvariantCulture,
+            $"mapped={count} analyzer or source-generator assembly(ies) are held by this server process (pid {Environment.ProcessId}); an external build that copies over them fails MSB3027, and only restarting the server releases them");
 }
