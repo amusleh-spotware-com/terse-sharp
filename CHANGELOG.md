@@ -8,8 +8,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
-**Backlog closure.** This release closes a block of open rows in `IMPROVEMENTS.md` — every one a
-measured fallback, dead call or unprovable answer from a real session.
+## [0.21.0] - 2026-08-06
+
+**Backlog closure.** This release closes every open row in `IMPROVEMENTS.md` that had a fix — 24 of
+them — plus three defects found while proving the fixes. Every one was a measured fallback, dead
+call, unprovable answer or silent breakage from a real session.
+
+**Response formats changed**, so an agent or script that parsed them must be updated: `build` reports
+`warnings=N emitted`, a clipped `read_text` ends with `next: startLine=…`, `list_projects` prints each
+project's path, a complete listing of 25+ records advertises its narrowing parameter, and
+`workspace_status` can carry `mapped=`, `targetFramework=` and `idle=… compilations=dropped`. Under
+this project's own rule that is a MAJOR change; on `0.x` the MINOR segment carries it, as `0.20.0`
+did for the larger framing change.
+
+**The tool surface goes from 83 to 86** — `changed_files`, `diff_symbols` and `diff_text`.
 
 ### Added
 
@@ -1679,7 +1691,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.21.0
 [0.20.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.20.0
 [0.19.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.19.0
 [0.18.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.18.0
