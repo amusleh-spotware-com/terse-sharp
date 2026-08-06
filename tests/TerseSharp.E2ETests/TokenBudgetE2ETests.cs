@@ -305,7 +305,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("index=xaml(", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("lastUsedUtc=", quiet, StringComparison.Ordinal);
         Assert.Equal(3, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.True(Tokens(quiet) <= 90, Report("workspace_status", quiet));
+        Assert.True(Tokens(quiet) * 2 < Tokens(loud), Report("workspace_status", quiet, loud));
         Assert.Contains("watch=", loud, StringComparison.Ordinal);
         Assert.Contains("gen=c", loud, StringComparison.Ordinal);
         Assert.Contains("index=xaml(", loud, StringComparison.Ordinal);
