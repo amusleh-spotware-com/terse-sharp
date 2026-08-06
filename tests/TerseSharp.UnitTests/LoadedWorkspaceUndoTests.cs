@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.UnitTests;
 
+[Collection(nameof(FixtureSolutionCollection))]
 public sealed class LoadedWorkspaceUndoTests
 {
     [Fact]

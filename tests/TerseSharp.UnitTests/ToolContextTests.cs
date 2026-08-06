@@ -3,6 +3,7 @@ using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
 
+[Collection(nameof(FixtureSolutionCollection))]
 public sealed class ToolContextTests
 {
     [Fact]

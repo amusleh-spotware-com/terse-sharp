@@ -4,6 +4,7 @@ using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
 
+[Collection(nameof(FixtureSolutionCollection))]
 public sealed class AnalyzerRebindTests
 {
     [Fact]
