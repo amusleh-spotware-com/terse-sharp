@@ -250,8 +250,9 @@ an agent's context — a stale skill actively teaches the wrong call.
 Before any commit that adds, removes or changes a tool, a parameter, a default or a response format,
 answer all four:
 
-1. **README** — tool table, tool count, the "what each one replaces" table, the numbers table, and the
-   Status table (move the row out of 🔜 when it ships).
+1. **README** — the grouped tool table, the tool count (badge and prose), and the savings table. The
+   README is a first-read pitch, not a reference: keep it short, and put a detail a reader only wants
+   after installing behind a `<details>` or leave it to `SKILL.md`.
 2. **NUGET_README** — the same, in pure Markdown; it is a separate file and diverges silently.
 3. **SKILL.md** — `src/TerseSharp.Server/Assets/SKILL.md`, an **embedded resource shipped by
    `terse install --skill` and loaded straight into an agent's context**. It must name **every** tool
