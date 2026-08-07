@@ -157,4 +157,6 @@ internal static class ToolCensus
         text.IndexOf('\n', StringComparison.Ordinal) is var end and >= 0 ? text[..end] : text;
 
     public static int Tokens(string text) => (text.Length + 3) / 4;
+
+    public const int MinShellReplacements = 10;
 }

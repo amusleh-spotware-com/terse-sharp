@@ -296,6 +296,42 @@ beat the one it splits, not merely be useful.
 6. Unit tests for formatting and error paths.
 7. Update `CHANGELOG.md` under `## [Unreleased]`, the tool tables in `README.md`, and `NUGET_README.md`
    (a separate pure-Markdown copy — nuget.org does not render the GitHub README's HTML).
+8. **If the tool replaces a built-in or a shell command, extend `ToolGuard` in the same commit** — see
+   the gate directly below.
+
+### 🚫 HARD GATE — a tool that replaces a built-in ships with its guard row
+
+`src/TerseSharp.Server/ToolGuard.cs` is the `PreToolUse` hook installed by `terse install --guard`. It
+is the only thing that stops an agent from answering with `Read`, `Grep`, `cat`, `dotnet build` or
+`git diff` out of habit — and an unguarded replacement is a tool that measurably does not get called.
+
+So before finishing **any** change that adds or extends a tool, answer:
+
+> **"Does this tool replace a built-in tool or a shell command an agent would otherwise run?"**
+
+If yes, all four hold, in the same commit:
+
+1. **The `[Description]` opens with `Replaces Bash <command>`** for a shell command (`Replaces Bash
+   dotnet test`, `Replaces Bash git status and git diff --stat`) — that prefix is what the census gate
+   discovers.
+2. **`ToolGuard` denies it** — a path/extension row in `Extensions`, `MarkupExtensions` or
+   `RazorSuffixes` for a file kind, a shell name in `TextCommands` for a text reader, or a driver and
+   subcommand in `Replaced` for a CLI. Every deny reason **names the replacing tool**; a `Replaced`
+   row also ends with the `Remember` clause, so the agent does not retry the same command in `Bash`.
+   A row whose replacement only answers inside a loaded workspace is **scoped** — the git rows check
+   the hook payload's `cwd` for a `.sln`/`.slnx`/`.slnf`/`.csproj` at or above it, because the guard
+   is installed user-wide and `git status` in a TypeScript repo has no replacement.
+3. **`ToolGuardTests` covers both directions** — the new command denied, and the neighbouring command
+   nothing replaces (`dotnet restore`, `git commit`, `git log`) still allowed. A guard that denies a
+   command the server cannot answer is worse than no guard.
+4. **The docs say what it now denies** — the guard paragraph in `README.md` and `NUGET_README.md`, the
+   banned-shell list in `SKILL.md`, and the `CHANGELOG.md` entry.
+
+The census gate is `ToolCensusE2ETests.EveryToolThatAdvertisesItReplacesAShellCommand_IsDeniedByTheGuard`:
+it reads `tools/list`, extracts every `Replaces Bash …` command from the advertised descriptions, and
+fails when `ToolGuard` still allows one of them. Nothing is enrolled by hand, so a tool added later is
+covered automatically — which is the point. Do not weaken it by dropping the prefix from a
+description; that would silently un-enrol the tool.
 
 Removing or renaming a tool, making a parameter required, or changing a response format is a
 **MAJOR** version change: the tool surface is a public contract (see `RELEASING.md`). Record the
@@ -587,6 +623,7 @@ and being absent from it is the point:**
 | **no tool opens its response with its own name** | `ToolCensusE2ETests` + `ToolHappyPathE2ETests` + `RazorToolsE2ETests.NoRazorTool_OpensItsResponseWithItsOwnName` | `tools/list`, both directions, minus `ToolCensus.HappyPathExempt` — four reasoned, ratcheted entries with no success path on the fixture |
 | **every listing tool has a token budget** | `ToolCensusE2ETests.EveryProbedReadTool_StaysWithinItsTokenBudget` + `…EveryProcessSpawningTool_AnswersASuccessWithoutAHeaderAndWithinItsBudget` + `RazorToolsE2ETests.EveryProbedRazorReadTool_StaysWithinItsTokenBudget` | the `ToolCensus` probe catalogue, itself census-gated against `tools/list`; the Razor probes need the Razor fixture, so they are budgeted there; per-tool overrides live in `ToolCensus.BudgetOverrides`, reasoned and ratcheted |
 | **no build/test tool returns a warning unless `verbose=true`** (rule 4 above) | `BuildWarningsE2ETests.TheBuildAndTestFamily_IsDiscoveredFromTheAdvertisedSurface` + `…EveryBuildAndTestTool_HidesTheCompilerWarningsUnlessVerboseIsAsked` | `tools/list` — every tool declaring **both** `configuration` and `targetFramework`, which is exactly `build`, `run_tests`, `rerun_failed`, `list_tests` |
+| **every tool that advertises `Replaces Bash …` is denied by the guard** | `ToolCensusE2ETests.EveryToolThatAdvertisesItReplacesAShellCommand_IsDeniedByTheGuard` | `tools/list` — every advertised description opening with `Replaces Bash `, split on ` and `, each command run through `ToolGuard.Inspect`; the extracted set is asserted non-empty so the census cannot go vacuous |
 | **every shipped worked example names a real tool and only parameters that tool declares** | `ToolCensusE2ETests.EveryWorkedExample_NamesAnAdvertisedToolAndOnlyParametersThatToolDeclares` | `tools/list` — every `ToolExamples` entry is resolved against the advertised schema's `properties`, so a renamed parameter fails the build |
 | **every worked example actually reaches the `remedy:` of a rejected call** | `ToolCensusE2ETests.EveryToolWithAWorkedExample_CarriesItInTheRemedyOfARejectedCall` | `tools/list` — every `ToolExamples` entry whose tool declares a required parameter is called with no arguments and must get its own example back; the filtered set is asserted non-empty so the census cannot go vacuous |
 

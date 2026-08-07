@@ -19,12 +19,12 @@ public static class ToolGuard
         "get-childitem", "gci", "get-content", "gc", "select-string", "sls",
     ];
 
-    public static GuardVerdict Inspect(string tool, JsonObject input) => tool switch
+    public static GuardVerdict Inspect(string tool, JsonObject input, string? cwd = null) => tool switch
     {
         "Read" or "Write" or "Edit" or "MultiEdit" or "NotebookEdit" => OnPath(tool, Text(input, "file_path")),
         "Glob" => OnPath(tool, Text(input, "pattern")),
         "Grep" => OnGrep(input),
-        "Bash" => OnBash(Text(input, "command")),
+        "Bash" => OnBash(Text(input, "command"), cwd),
         _ => Allowed,
     };
 
@@ -57,7 +57,9 @@ public static class ToolGuard
             var root = JsonNode.Parse(payload) as JsonObject;
             var tool = root is null ? null : Text(root, "tool_name");
 
-            return tool is null ? Allowed : Inspect(tool, root!["tool_input"] as JsonObject ?? []);
+            return tool is null
+                ? Allowed
+                : Inspect(tool, root!["tool_input"] as JsonObject ?? [], Text(root, "cwd"));
         }
         catch (JsonException)
         {
@@ -82,14 +84,14 @@ public static class ToolGuard
     private static bool DotNetType(string? type) =>
         type is "cs" or "csharp" or "xaml" or "razor" or "cshtml";
 
-    private static GuardVerdict OnBash(string? command)
+    private static GuardVerdict OnBash(string? command, string? cwd)
     {
         if (command is null)
             return Allowed;
 
         foreach (var segment in Segments(command))
         {
-            if (Replaced(segment) is { } subcommand)
+            if (Replaced(segment, cwd) is { } subcommand)
                 return new GuardVerdict(true, BuildReason(segment, subcommand));
 
             if (Covered(segment) && IsTextRead(segment))
@@ -99,7 +101,7 @@ public static class ToolGuard
         return Allowed;
     }
 
-    private static string? Replaced(string segment)
+    private static string? Replaced(string segment, string? cwd)
     {
         var tokens = segment.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var driver = Path.GetFileNameWithoutExtension(tokens.FirstOrDefault() ?? string.Empty);
@@ -107,12 +109,13 @@ public static class ToolGuard
         if (driver.Equals("msbuild", StringComparison.OrdinalIgnoreCase))
             return "build";
 
+        if (driver.Equals("git", StringComparison.OrdinalIgnoreCase))
+            return Git(tokens, cwd);
+
         if (!driver.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
             return null;
 
-        var subcommand = tokens.Skip(1).FirstOrDefault(token => !token.StartsWith('-'));
-
-        return subcommand switch
+        return DotNetSubcommand(tokens) switch
         {
             "build" or "msbuild" => "build",
             "test" or "vstest" => "test",
@@ -124,19 +127,23 @@ public static class ToolGuard
 
     private static string BuildReason(string segment, string subcommand) => string.Create(
         CultureInfo.InvariantCulture,
-        $"TerseSharp guard: '{Trim(segment.Trim())}' is replaced by the terse-sharp MCP - {BuildReplacement(subcommand)}. {Rationale(subcommand)}");
+        $"TerseSharp guard: '{Trim(segment.Trim())}' is replaced by the terse-sharp MCP - {BuildReplacement(subcommand)}. {Rationale(subcommand)}{Remember}");
 
     private static string BuildReplacement(string subcommand) => subcommand switch
     {
         "build" => "use build",
         "format" => "use format, cleanup fix=all, or cleanup verify=true for --verify-no-changes",
         "clean" => "use clean",
+        "status" => "use changed_files",
+        "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show",
         _ => "use run_tests, rerun_failed or list_tests",
     };
 
     private static string Rationale(string subcommand) => subcommand switch
     {
         "format" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, and names every diagnostic no fixer covers.",
+        "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, so the end-of-task review costs a listing instead of a diff.",
+        "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths. Only git history - log, blame, show <ref>:<path> - and index or history mutation stay on the shell.",
         _ => "Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.",
     };
 
@@ -263,4 +270,69 @@ public static class ToolGuard
     private static readonly string[] MarkupExtensions = [".xaml", ".axaml", ".paml"];
 
     private static readonly string[] MarkupTypes = ["xaml", "axaml", "paml"];
+
+    private static readonly string[] GitGlobals = ["-C", "-c", "--git-dir", "--work-tree", "--namespace"];
+
+    private const string Remember = " Remember it: do not run this in Bash again - the tool answers it.";
+
+    private static string? Subcommand(string[] tokens, int start) =>
+        tokens.Skip(start).FirstOrDefault(token => !token.StartsWith('-'));
+
+    private static string? DotNetSubcommand(string[] tokens)
+    {
+        var subcommand = Subcommand(tokens, 1);
+
+        return subcommand is "watch" ? Scan(tokens, Array.IndexOf(tokens, "watch") + 1, WatchGlobals) : subcommand;
+    }
+
+    private static string? Git(string[] tokens, string? cwd) => Scan(tokens, 1, GitGlobals) switch
+    {
+        "status" when IsDotNetTree(cwd) => "status",
+        "diff" when IsDotNetTree(cwd) => "diff",
+        _ => null,
+    };
+
+    private static readonly string[] SolutionMarkers = ["*.sln", "*.slnx", "*.slnf", "*.csproj", "*.fsproj", "*.vbproj"];
+
+    private static readonly string[] WatchGlobals =
+        ["--project", "-p", "--launch-profile", "-lp", "--framework", "-f", "--configuration", "-c", "--property", "--verbosity", "-v"];
+
+    private static string? Scan(string[] tokens, int start, string[] globals)
+    {
+        for (var index = start; index > 0 && index < tokens.Length; index++)
+        {
+            if (tokens[index] is "--")
+                return null;
+
+            if (globals.Contains(tokens[index], StringComparer.Ordinal))
+                index++;
+            else if (!tokens[index].StartsWith('-'))
+                return tokens[index];
+        }
+
+        return null;
+    }
+
+    private static bool IsDotNetTree(string? cwd)
+    {
+        try
+        {
+            return Walk(cwd is { Length: > 0 } ? cwd : Environment.CurrentDirectory);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static bool Walk(string start)
+    {
+        for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
+        {
+            if (directory.Exists && SolutionMarkers.Any(marker => directory.EnumerateFiles(marker).Any()))
+                return true;
+        }
+
+        return false;
+    }
 }

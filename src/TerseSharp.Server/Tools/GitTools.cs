@@ -22,7 +22,7 @@ public sealed class GitTools(ToolContext context)
             cancellationToken);
 
     [McpServerTool(Name = "diff_symbols")]
-    [Description("Replaces reading a raw git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need.")]
+    [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need.")]
     public Task<string> DiffSymbols(
         [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
         [Description("Limit to one path or pathspec.")] string? path = null,

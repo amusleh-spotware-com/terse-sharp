@@ -8,8 +8,61 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **The guard denies `git status` and `git diff`, and tells the agent not to retry them in `Bash`.**
+  The working tree has been served by `changed_files`, `diff_symbols` and `diff_text` since 0.16.0,
+  but `terse guard` still waved every `git status --porcelain` and `git diff main...HEAD` through, so
+  the most expensive answer in a session stayed one keystroke away. Both are now denied in every flag
+  and `-C` form — `git -C src status`, `cd src && git diff`, `git diff --cached` — and the denial names
+  `changed_files` for a status and `diff_symbols, then diff_text` for a diff. The two rows are
+  **scoped to a .NET tree**: the hook is installed user-wide, so the denial fires only when the
+  payload's `cwd` sits at or below a `.sln`/`.slnx`/`.slnf`/`.csproj`/`.fsproj`/`.vbproj` — in a
+  repository TerseSharp does not serve, `changed_files` cannot answer and `git status` stays allowed.
+  Git **history** and
+  index/history mutation stay allowed, because nothing here replaces them: `log`, `blame`, `show`,
+  `difftool`, `add`, `commit`, `push`, `stash`. Every denial of a command a tool replaces now closes
+  with `Remember it: do not run this in Bash again - the tool answers it.`
+- **`dotnet watch build` and `dotnet watch test` are denied too.** The subcommand scan stopped at
+  `watch` and let the wrapped verb through, so the one shell form that rebuilds and re-tests on every
+  keystroke was the one the guard allowed. The scan skips a `watch` option's value and stops at `--`,
+  so `dotnet watch run --launch-profile test` and `dotnet watch run -- test` are still the app, not a
+  test run. `dotnet watch run`, `dotnet build-server` and the rest of the unreplaced CLI stay allowed.
+- **`diff_symbols` now says `Replaces Bash git diff`** instead of "Replaces reading a raw git diff",
+  which is what enrols it in the new census gate below.
+
+### Added
+
+- **A census gate that fails when a tool replaces a shell command the guard still allows.**
+  `ToolCensusE2ETests.EveryToolThatAdvertisesItReplacesAShellCommand_IsDeniedByTheGuard` reads
+  `tools/list`, extracts every command from a description opening with `Replaces Bash …`, and asserts
+  `ToolGuard` denies each one. Nothing is enrolled by hand, so a tool added later is covered
+  automatically, and the discovered set is ratcheted (`ToolCensus.MinShellReplacements`) so a
+  description that loses the prefix fails the gate instead of silently un-enrolling the tool.
+  `CLAUDE.md` now carries the matching hard gate: a tool that replaces a built-in
+  ships with its guard row, its two-direction `ToolGuardTests` cases and its docs, in the same commit.
+- **`build`, `run_tests`, `rerun_failed` and `list_tests` take `properties`** — MSBuild properties,
+  each written `Name=Value` and passed through as one `-p:Name=Value`, applied after `-c` and `-f`.
+  A project that only builds with `-p:NativeAppHostEnabled=false` was reachable by no tool, so the
+  whole build step fell back to `Bash`. An entry that is not `Name=Value` — including one that looks
+  like a CLI flag — is refused with `ERROR InvalidArgument` and a worked example before any process
+  starts, and `rerun_failed` reuses the properties of the run that produced the failures the same way
+  it reuses its configuration and target framework.
+
 ### Fixed
 
+- **`build` and `run_tests` no longer leak this process's MSBuild instance into the `dotnet` child**
+  — the fix for `MSB4237: The SDK resolver type "NuGetSdkResolver" failed to load. Could not load
+  file or assembly 'System.Runtime, Version=10.0.0.0'` on every solution whose `global.json` pins a
+  pre-net10 SDK. `MSBuildLocator.RegisterInstance` writes `MSBUILD_EXE_PATH`, `MSBuildExtensionsPath`
+  and `MSBuildSDKsPath` into the server's own environment; `ChildProcess` passed them on, so the
+  child muxer honoured `global.json`, loaded the pinned SDK's MSBuild, and was then pointed at the
+  net10 SDK's resolvers and tasks. Measured on a project pinned to `6.0.100 rollForward=disable`:
+  `MSBUILD_EXE_PATH` alone reproduces MSB4237 byte for byte and `MSBuildSDKsPath` alone gives MSB4062,
+  while the same directory restores cleanly from a shell. All three are now removed from every child
+  the server starts — `build`, `run_tests`, `rerun_failed`, `list_tests` and the git runner alike.
+  `ChildProcessTests` asserts the child cannot see them and that an unrelated variable is still
+  inherited, so the scrub cannot silently widen.
 - **The sync no longer records a file as absorbed on a stamp it never read** (I96). `Settle` stamped
   every drained path from a *fresh* `FileStamp.Of`, so a write landing between the merge and the
   settle — a window spanning the remaining merges and `AdoptAsync` — was recorded as absorbed while

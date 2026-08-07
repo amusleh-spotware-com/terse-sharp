@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ModelContextProtocol.Client;
 using TerseSharp.Server;
 
@@ -190,4 +191,29 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
         && required.ValueKind is JsonValueKind.Array
             ? required.GetArrayLength()
             : 0;
+
+    private const string Replaces = "Replaces Bash ";
+
+    private static string[] Shell(string description) =>
+        description.StartsWith(Replaces, StringComparison.Ordinal)
+            ? description[Replaces.Length..].Split('.')[0].Split(" and ", StringSplitOptions.TrimEntries)
+            : [];
+
+    [Fact]
+    public async Task EveryToolThatAdvertisesItReplacesAShellCommand_IsDeniedByTheGuard()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var replaced = tools.SelectMany(tool => Shell(tool.Description ?? string.Empty)).ToArray();
+        var allowed = replaced
+            .Where(command => !ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied)
+            .ToArray();
+
+        Assert.True(
+            replaced.Length >= ToolCensus.MinShellReplacements,
+            $"the enrolled shell-command set is a ratchet: {replaced.Length} < {ToolCensus.MinShellReplacements} - a description lost its 'Replaces Bash ' prefix and the tool is no longer census-gated");
+
+        Assert.True(
+            allowed.Length is 0,
+            "advertised as replaced by a tool, but terse guard still allows it in Bash: " + string.Join(", ", allowed));
+    }
 }

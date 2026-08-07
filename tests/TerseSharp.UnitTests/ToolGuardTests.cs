@@ -47,7 +47,6 @@ public sealed class ToolGuardTests
     [Theory]
     [InlineData("dotnet pack src/App/App.csproj")]
     [InlineData("dotnet restore src/App/App.csproj")]
-    [InlineData("git status --short")]
     [InlineData("git add src/App/OrderService.cs")]
     [InlineData("grep -rn TODO docs/")]
     [InlineData("ls src/App")]
@@ -60,6 +59,8 @@ public sealed class ToolGuardTests
     [InlineData("dotnet format style --severity info")]
     [InlineData("dotnet clean")]
     [InlineData("cd src && dotnet clean App.csproj")]
+    [InlineData("dotnet watch test")]
+    [InlineData("dotnet watch --project src/App build")]
     public void Inspect_ForADotnetCommandTerseSharpReplaces_Denies(string command) =>
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
@@ -68,6 +69,10 @@ public sealed class ToolGuardTests
     [InlineData("dotnet pack src/App -c Release")]
     [InlineData("dotnet publish")]
     [InlineData("dotnet run --project src/App")]
+    [InlineData("dotnet watch run")]
+    [InlineData("dotnet watch run --launch-profile test")]
+    [InlineData("dotnet watch run -- test")]
+    [InlineData("dotnet build-server shutdown")]
     [InlineData("dotnet tool update -g TerseSharp")]
     public void Inspect_ForADotnetCommandNoToolReplaces_Allows(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
@@ -301,5 +306,95 @@ public sealed class ToolGuardTests
         Assert.Contains("xaml_find", verdict.Reason, StringComparison.Ordinal);
         Assert.Contains("find_usages", verdict.Reason, StringComparison.Ordinal);
         Assert.DoesNotContain("search_symbols", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git status")]
+    [InlineData("git status --porcelain")]
+    [InlineData("git status --short")]
+    [InlineData("git diff")]
+    [InlineData("git diff --cached")]
+    [InlineData("git diff main...HEAD --stat")]
+    [InlineData("git -C src/App status")]
+    [InlineData("git -c core.pager=cat status")]
+    [InlineData("git --no-pager diff")]
+    [InlineData("git.exe status")]
+    [InlineData("cd src && git diff")]
+    public void Inspect_ForAGitCommandTerseSharpReplaces_Denies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+
+    [Theory]
+    [InlineData("git log -p")]
+    [InlineData("git blame src/App/OrderService.cs")]
+    [InlineData("git show HEAD:src/App/OrderService.cs")]
+    [InlineData("git difftool")]
+    [InlineData("git -c core.pager=cat log")]
+    [InlineData("git stash show -p")]
+    [InlineData("git commit -m \"diff status\"")]
+    [InlineData("git push origin main")]
+    [InlineData("git stash")]
+    public void Inspect_ForAGitCommandNoToolReplaces_Allows(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+
+    [Fact]
+    public void Inspect_ForGitStatus_NamesChangedFiles() =>
+        Assert.Contains(
+            "changed_files",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git status --porcelain" }).Reason,
+            StringComparison.Ordinal);
+
+    [Fact]
+    public void Inspect_ForGitDiff_NamesDiffSymbolsBeforeDiffText() =>
+        Assert.Contains(
+            "diff_symbols, then diff_text",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff main" }).Reason,
+            StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData("git status")]
+    [InlineData("git diff")]
+    [InlineData("dotnet build")]
+    [InlineData("dotnet test")]
+    public void Inspect_ForAReplacedCommand_TellsTheAgentNotToRunItInBashAgain(string command) =>
+        Assert.Contains(
+            "do not run this in Bash again",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Reason,
+            StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData("git status --porcelain")]
+    [InlineData("git diff main")]
+    public async Task Inspect_ForAGitCommandOutsideADotNetTree_Allows(string command)
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-guard-plain");
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "index.ts"), "export {};", TestContext.Current.CancellationToken);
+
+            Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, directory.FullName).Denied);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task Inspect_ForAGitCommandUnderADotNetProject_Denies()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-guard-solution");
+        var nested = directory.CreateSubdirectory("src").CreateSubdirectory("App");
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "App.csproj"), "<Project />", TestContext.Current.CancellationToken);
+
+            Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git status" }, nested.FullName).Denied);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
     }
 }

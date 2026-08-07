@@ -99,10 +99,16 @@ Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outl
 ```
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends, the shell text
-tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them, and `dotnet build`/`test`/`format`/`clean`
-and `msbuild`. Plain `.css`, `.js` and `dotnet restore`/`pack`/`publish` are allowed — nothing here
-replaces those. Malformed hook input allows the call, so a guard fault can never wedge a session, and
-you remove the guard by deleting the `terse guard` entry from Claude Code's `settings.json`.
+tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them, `dotnet build`/`test`/`format`/`clean`,
+`dotnet watch build`/`test` and `msbuild`, and the working-tree half of git — `git status` and
+`git diff`, in every flag and `-C` form, answered by `changed_files` and `diff_symbols` — but only
+when the working directory sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`, since the hook is installed
+user-wide and those tools cannot answer in a repository TerseSharp does not serve. A denied command
+also tells the agent not to run it in `Bash` again. Plain `.css`, `.js`,
+`dotnet restore`/`pack`/`publish`/`run`, and git history and mutation (`log`, `blame`, `show`, `add`,
+`commit`, `push`) are allowed — nothing here replaces those. Malformed hook input allows the call, so
+a guard fault can never wedge a session, and you remove the guard by deleting the `terse guard` entry
+from Claude Code's `settings.json`.
 
 `terse install --skill` ships Claude Code the skill that teaches the swaps. On any other agent, a
 short rule in `CLAUDE.md` / `AGENTS.md` / `.cursorrules` does the same job: *"C#/.NET goes through

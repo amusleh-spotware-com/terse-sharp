@@ -23,9 +23,14 @@ it in the table below.
 
 **The shell does not launder it.** `grep`, `rg`, `find`, `fd`, `cat`, `head`, `tail`, `sed`, `awk`,
 `ls`, `dir`, `tree`, `wc`, `nl`, `findstr`,
-`type`, `dotnet build`, `dotnet test`, `dotnet msbuild` and `msbuild` run through `Bash` are built-ins
+`type`, `dotnet build`, `dotnet test`, `dotnet watch build`, `dotnet watch test`, `dotnet msbuild` and
+`msbuild` run through `Bash` are built-ins
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
+
+**This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
+denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
+denial is not a reason to try a different spelling of the same shell command — call the tool.
 
 `dotnet format` and `dotnet clean` are covered too: `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them. `dotnet restore`, `pack`, `publish`, `run` and `tool` are **not** covered: no
 TerseSharp tool replaces them, so shelling out is the right call.
@@ -122,6 +127,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Bash: git diff` when you really need the hunks | `diff_text(path: …)` | the raw unified diff, bounded and workspace-relative - the most expensive answer here, so scope it |
 | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
 | `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
+| `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
 | `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
