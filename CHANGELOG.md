@@ -8,6 +8,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **`README.md` and `NUGET_README.md` are shorter** — 736 → 499 and 359 → 201 lines, with no tool,
+  guarantee or measurement dropped: the second and third diagrams, the duplicated "success costs
+  nothing" and freshness prose, and the FAQ's one-question-per-section shape are folded into the
+  sections that already said it. Both still name every advertised tool, which
+  `DocsCoverageE2ETests` enforces from `tools/list`.
+- **The git family is hard-gated in the docs that teach the agent, not only listed.** `SKILL.md`'s
+  hard gate now states that `git status`, `git status --porcelain`, `git diff` and `git diff <ref>`
+  are served by `changed_files`, `diff_symbols` and `diff_text` — running them in `Bash` is the same
+  breach as `grep` — and that only git **history** (`log`, `blame`, `show <ref>:<path>`) and
+  index/history mutation (`add`, `commit`, `push`) stay on the shell. The same rule is added to the
+  README's paste-ready hard-gate block and to this repo's `CLAUDE.md` develop-with-TerseSharp gate,
+  whose "`git` plumbing" exemption was wide enough to license the fallback the tools exist to remove.
+- **`CLAUDE.md` architecture is current** — the Core service list names the `Explore`, `Registration`,
+  `CodeFix`, `Clean`, `DiffSymbol`, `Resx*` and `Razor*` services it had grown, and the stale
+  "83-tool surface" reads 86, as does the README's architecture diagram.
+
 ## [0.23.0] - 2026-08-07
 
 **The census gaps are closed.** `CLAUDE.md` listed three "every X does Y" rules it stated as if

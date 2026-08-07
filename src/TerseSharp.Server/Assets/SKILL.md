@@ -30,6 +30,14 @@ too and are covered by the same gate — including later in a compound command
 `dotnet format` and `dotnet clean` are covered too: `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them. `dotnet restore`, `pack`, `publish`, `run` and `tool` are **not** covered: no
 TerseSharp tool replaces them, so shelling out is the right call.
 
+**The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff` and
+`git diff <ref>` are served by `changed_files`, `diff_symbols` and `diff_text` — all three take
+`baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
+re-usable as arguments. Running them in `Bash` is the same breach as `grep`. Only git **history** —
+`git log`, `git log -p`, `git blame`, `git show <ref>:<path>` — and anything that mutates the index or
+history — `git add`, `git commit`, `git push` — stay on the shell, because TerseSharp does not model
+them.
+
 **Banned reasoning.** Every one of these has produced a breach: "just this once" · "Grep is faster" ·
 "I only need one line" · "the tool errored so I'll use Grep" · "I
 already started with Read, I'll stay consistent" · "it's a tiny file" · "I'll just check quickly".
@@ -54,6 +62,8 @@ A silent drop is the breach, even when the reason would have been valid.
 - You have used only `search_text` and no `search_symbols`, `find_usages` or `get_file_outline` — you
   are text-grepping through a semantic server.
 - You are about to `Edit` a `.xaml`, `.resx` or `.razor` by line number.
+- You are about to run `git status` or `git diff` in `Bash` — `changed_files` and `diff_symbols`
+  answer both, for a fraction of the tokens.
 - You are about to open a `*_razor.g.cs` under `obj/` — that file is generated; edit the `.razor`.
 
 ## Replace the built-in on the left

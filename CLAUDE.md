@@ -18,7 +18,10 @@ Every read, search, edit, refactor, build and test **of this repository** goes t
 `terse` MCP server: `get_file_outline` / `get_symbol_source` instead of `Read`, `search_symbols` /
 `find_usages` instead of `Grep`, `find_files` instead of `Glob`, `replace_symbol_body` /
 `replace_symbol` / `add_member` instead of `Edit`, `read_text` / `edit_text` / `write_text` for
-`.md`, `.csproj`, `.slnx` and `.json`, `build` and `run_tests` instead of shelling out to `dotnet`.
+`.md`, `.csproj`, `.slnx` and `.json`, `build` and `run_tests` instead of shelling out to `dotnet`,
+and **`changed_files` / `diff_symbols` / `diff_text` instead of `Bash: git status` / `git diff`** —
+the working tree is served by tools, so only *history* (`git log`, `git blame`, `git show <ref>:<path>`)
+and index/history mutation (`git add`, `git commit`, `git push`) stay on `Bash`.
 
 This is not style. This repo is the one place where the server is driven by the agent that also
 maintains it, so **every session is the product's own usability test**. Friction you route around
@@ -32,8 +35,10 @@ Dropping to a built-in or to `Bash` is allowed only when:
    target — a rejected glob means fix the glob, not abandon the server.
 2. The task is verifying a **just-built** binary whose behaviour differs from the running server (the
    connected `terse` is whatever was installed, not `HEAD` — say which binary answered).
-3. Neither the server nor any tool exposes the action: `git` plumbing, `dotnet pack`, `dotnet restore`,
-   `dotnet tool install`, running the server by hand over stdio.
+3. Neither the server nor any tool exposes the action: `git` **history** (`log`, `blame`,
+   `show <ref>:<path>`) or index/history mutation (`add`, `commit`, `push`), `dotnet pack`,
+   `dotnet restore`, `dotnet tool install`, running the server by hand over stdio. The working tree
+   itself is **not** on this list — `changed_files`, `diff_symbols` and `diff_text` serve it.
 
 Say which of the three applies **at the call**, in one clause. A silent drop is the breach, and the
 same drop is a candidate for the improvement backlog below.
@@ -132,9 +137,12 @@ only MCP plumbing.**
 
 The tool surface is **86 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
-`RenameService`, `RefactorService`, `SymbolEditService`, `AnalysisService`, `DeadCodeService`,
-`DiagnosticsService`, `FormatService`, `TextSearchService`, `FileService`, `XamlService`,
-`XamlBindingService`, `XamlResourceGraph`, `ProjectFile`/`SolutionFile`. Supporting value types:
+`ExploreService`, `RegistrationService`, `RenameService`, `RefactorService`, `SymbolEditService`,
+`AnalysisService`, `DeadCodeService`, `CodeFixService`, `DiagnosticsService`, `FormatService`,
+`CleanService`, `TextSearchService`, `FileService`, `DiffSymbolService`, `XamlService`,
+`XamlBindingService`, `XamlResourceGraph`, `ResxService`/`ResxEditService`/`ResxUsageService`/`ResxValidation`,
+`RazorService`/`RazorEditService`/`RazorBindingService`/`RazorValidation`,
+`ProjectFile`/`SolutionFile`. Supporting value types:
 `SymbolReference` (short names and the query they parse into), `UsageContainer` (the declaration a
 usage sits in, from syntax alone), `TestScope` (`src`/`test` per project), `XamlFiles` (the guarded
 workspace walk).
@@ -256,7 +264,7 @@ answer all four:
 4. **CHANGELOG** — under `## [Unreleased]`, with the format change spelled out.
 
 A commit that changes behaviour and leaves any of the four stale is incomplete. "I'll update the docs
-after" is the same failure as "I'll add the test after": both are how an 83-tool surface drifts away
+after" is the same failure as "I'll add the test after": both are how an 86-tool surface drifts away
 from what it claims to be. When you cannot update one of them in the same commit, say which and why in
 the commit body.
 
