@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-07
+
 ### Changed
 
 - **The guard denies `git status` and `git diff`, and tells the agent not to retry them in `Bash`.**
@@ -1917,7 +1919,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.24.0
 [0.23.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.23.0
 [0.22.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.22.0
 [0.21.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.21.0
