@@ -370,7 +370,8 @@ objecting to. "It felt verbose" is not a finding; "the id is 62% of every outlin
 per 10-member outline" is.
 
 Every finding becomes one line in `IMPROVEMENTS.md` — observed cost, the tool, the proposed change,
-the expected saving. Then either fix it in the same task when it is cheap and in scope, or leave it
+the expected saving, and any approach already refuted for that row; the exact columns are fixed by
+the gate directly below, and a row that omits one of them fails it. Then either fix it in the same task when it is cheap and in scope, or leave it
 logged with a reason. Silently dropping it is the one outcome that is not allowed. Ranking rules:
 
 - **Improving an existing tool or its response format beats adding a tool.** The surface already
@@ -390,6 +391,56 @@ back clean. Banned rationalizations: "the task worked, so the tools are fine" ·
 just this once" · "the agent should have known which tool to call" (interface design beats
 instructions — if the agent guessed wrong, the schema or the description is the defect) · "too small
 to log" · "I'll note it next time".
+
+## 🚫 HARD GATE — `IMPROVEMENTS.md` is two tables and nothing else
+
+The file is a **backlog**, not a journal. It grew to 380 lines and 102 KB — five per-task review
+narratives, three standalone notes, a separate "Known limitations" section — and became unreadable at
+exactly the moment its whole purpose is to be scanned. So the shape is fixed, and it is enforced
+before any commit that touches it:
+
+```
+# Improvements backlog
+
+## Open
+
+| Finding | Tool | Proposed change | Expected saving | Rejected |
+
+## Closed
+
+| Finding | Tool | Change | Outcome |
+```
+
+**Two `##` sections. Two tables. No third section, no prose anywhere in the file** — no intro
+paragraph, no per-task review write-up, no note between tables, no status legend, no dated heading.
+A file with a third heading, or with a non-blank line that is not a table row, fails this gate.
+
+- **Open** is what is not done. `Rejected` carries the approaches already refuted **for that row** —
+  the `FileShare.ReadWrite` that was tried and reverted, the `lines=` half that was declined — so a
+  refuted approach is never lost and never re-attempted. Empty is `—`.
+- **Closed** is everything else: shipped, rejected, not-reproducible, not-soundly-implementable. The
+  `Outcome` column says which, and shipped rows **keep their measurement** so a regression is visible.
+  A rejected row keeps the evidence that closed it. Nothing is deleted from this table.
+- **A row is one table row.** Not a paragraph, not three. Finding, tool, change, number — if it needs
+  more than that, the extra belongs in `CHANGELOG.md`, in the traps section above, or in the task
+  report, not here.
+- **The end-of-task review is reported to the user, not written to the file.** Its five answers are
+  prose and prose does not go in `IMPROVEMENTS.md`; only the rows it produces do. Pasting the review
+  into the file is the specific failure that produced the 102 KB version.
+- **Closing a row moves it, it never leaves a note behind.** Cut the row out of `## Open`, rewrite its
+  `Proposed change` as what actually shipped, put the measurement in `Outcome`, and append it to
+  `## Closed`. A "closed — see below" line in the Open table is a third state and is banned.
+
+Ids are `I<n>`, allocated in sequence, bolded at the start of the `Finding` cell. An unnumbered
+historical row stays unnumbered — do not renumber the table to make it tidy.
+
+Census-gated by `BacklogShapeTests`, which reads the file and fails on a heading that is not one of
+the three at the top in that order — **any** level, so a `###` cannot smuggle a section back in — on
+any non-blank line that is not a heading or a table row, on a missing column header, and on a row
+whose cell count does not match its own table's header. A short row is silently padded by GitHub
+Flavored Markdown and a long one has its excess cells discarded, so the count is the only thing that
+proves the `Rejected` cell is really there. This rule cannot decay into prose the way the file it
+governs did.
 
 ## 🚫 HARD GATE — the file system is async, everywhere
 
@@ -615,6 +666,7 @@ and being absent from it is the point:**
 
 | Rule | Gate | Discovers its subject from |
 |---|---|---|
+| **`IMPROVEMENTS.md` is two tables and nothing else** | `BacklogShapeTests` | the file itself — every heading line must be exactly `# Improvements backlog`, `## Open`, `## Closed` in that order, every non-blank line must open with `#` or `\|`, both mandated column headers must be present, and every row must carry the cell count its own table's header declares |
 | every tool has an E2E test | `ToolCoverageE2ETests` | `tools/list`, both directions |
 | every tool is named in `SKILL.md`, `README.md`, `NUGET_README.md` | `DocsCoverageE2ETests` | `tools/list` |
 | every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus `ToolCensus.RobustnessExcluded` — seven entries, each carrying a written reason, ratcheted by `MaxRobustnessExclusions` |

@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- `IMPROVEMENTS.md` is now two tables and nothing else — `## Open` (Finding, Tool, Proposed change,
+  Expected saving, **Rejected**) and `## Closed` (Finding, Tool, Change, Outcome). The five per-task
+  review narratives, the notes blocks and the separate "Known limitations" section are folded into
+  rows; every row is one line. 380 lines → 177. The shape is a hard gate in `CLAUDE.md`, census-gated
+  by `BacklogShapeTests`, which fails on any extra heading at any level, on any non-blank line that is
+  not a heading or a table row, on a missing column header, and on a row whose cell count does not
+  match its own table's header.
+
 ## [0.24.0] - 2026-08-07
 
 ### Changed
