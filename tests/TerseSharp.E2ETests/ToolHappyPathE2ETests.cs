@@ -15,16 +15,6 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
 
     private const string View = "src/Fixture.Trading/Views/OrderView.xaml";
 
-    private static readonly string[] SpawnAProcess = ["build", "run_tests", "rerun_failed", "list_tests"];
-
-    private static readonly string[] ErrorPathOnly = ["unload_workspace", "undo_last_change", "package_add", "package_remove"];
-
-    private static readonly string[] NeedRazorFixture =
-    [
-        "razor_outline", "razor_component", "razor_find", "razor_bindings", "razor_codebehind",
-        "razor_validate", "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
-    ];
-
     public static TheoryData<string> HappyPath() => [.. Cases.Select(entry => entry.Tool)];
 
     [Theory]
@@ -35,16 +25,8 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         var text = await server.CallAsync(tool, arguments);
 
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
-        Assert.DoesNotContain(tool + " ", text.Split('\n')[0], StringComparison.Ordinal);
+        Assert.False(ToolCensus.OpensWithItsOwnName(tool, text), tool + " opened its response with its own name\n" + text);
         Assert.Contains(expect, text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task EveryAdvertisedTool_IsEitherOnTheHappyPathOrExplicitlyAccountedFor()
-    {
-        var accounted = Accounted();
-
-        Assert.DoesNotContain(await Advertised(), name => !accounted.Contains(name));
     }
 
     [Fact]
@@ -74,8 +56,13 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
     private async Task<string[]> Advertised() =>
         [.. (await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(tool => tool.Name)];
 
-    private static HashSet<string> Accounted() =>
-        [.. Cases.Select(entry => entry.Tool).Concat(SpawnAProcess).Concat(ErrorPathOnly).Concat(NeedRazorFixture)];
+    internal static HashSet<string> Accounted() =>
+    [
+        .. Cases.Select(entry => entry.Tool)
+            .Concat(ToolCensus.ProcessProbes.Select(probe => probe.Tool))
+            .Concat(ToolCensus.RazorProbes.Select(probe => probe.Tool))
+            .Concat(ToolCensus.HappyPathExempt.Select(exemption => exemption.Tool)),
+    ];
 
     private static Dictionary<string, string> Snapshot()
     {
@@ -90,7 +77,7 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
             StringComparer.OrdinalIgnoreCase);
     }
 
-    private static (string Tool, Dictionary<string, object?> Arguments, string Expect)[] Cases =>
+    internal static (string Tool, Dictionary<string, object?> Arguments, string Expect)[] Cases =>
     [
         ("load_workspace", new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx") }, "projects=1"),
         ("workspace_status", [], "documents="),

@@ -24,7 +24,7 @@ response format changed by that work: it is test and fixture only.
   reads `tools/list` and fails on any advertised tool that has neither a probe nor a written
   exemption; the header assertion itself runs on a **success** response —
   `ToolHappyPathE2ETests` for the fixture-probed tools, `RazorToolsE2ETests.NoRazorTool_OpensItsResponseWithItsOwnName`
-  for the ten Razor tools, and `ToolCensusE2ETests.NoProcessSpawningTool_OpensItsResponseWithItsOwnName`
+  for the ten Razor tools, and `ToolCensusE2ETests.EveryProcessSpawningTool_AnswersASuccessWithoutAHeaderAndWithinItsBudget`
   for `build`, `list_tests`, `run_tests` and `rerun_failed`. Four tools stay exempt with a reason and
   no success path on the fixture: `unload_workspace`, `undo_last_change`, `package_add`,
   `package_remove`. The census found one real case on its first run — `build ok  …` and
@@ -32,20 +32,26 @@ response format changed by that work: it is test and fixture only.
   **verdict** and not a request echo; they are registered in `ToolCensus.VerdictPrefixed` and
   `EveryVerdictPrefixedTool_StillAnswersWithTheVerdictItIsExemptFor` proves the exemption is still
   spent on the shape it was granted for.
-- **A census for the listing-tool token budget.**
-  `ToolCensusE2ETests.EveryProbedReadTool_StaysWithinItsTokenBudget` budgets **every** read probe in
-  the catalogue instead of four tools named by hand, and refuses to pass on fewer than 40 of them.
-  `search_text` and `search_regex` legitimately exceed the 800-token read cap on a full default page
-  of 100 matches, so they carry a reasoned, ratcheted override in `ToolCensus.BudgetOverrides`.
+- **A census for the listing-tool token budget.** Three tests budget **every** read probe in the
+  catalogue instead of four tools named by hand:
+  `ToolCensusE2ETests.EveryProbedReadTool_StaysWithinItsTokenBudget` for the 42 fixture reads (it
+  refuses to pass on fewer than 40), `EveryProcessSpawningTool_AnswersASuccessWithoutAHeaderAndWithinItsBudget`
+  for the four process tools, and `RazorToolsE2ETests.EveryProbedRazorReadTool_StaysWithinItsTokenBudget`
+  for the six Razor reads, which need the Razor fixture. `search_text` and `search_regex` legitimately
+  exceed the 800-token read cap on a full default page of 100 matches, so they carry a reasoned,
+  ratcheted override in `ToolCensus.BudgetOverrides`.
 - **A census for warnings-behind-`verbose` on the build/test family.**
   `BuildWarningsE2ETests.TheBuildAndTestFamily_IsDiscoveredFromTheAdvertisedSurface` discovers the
   family as every advertised tool declaring **both** `configuration` and `targetFramework` — exactly
   `build`, `run_tests`, `rerun_failed`, `list_tests` — and
   `EveryBuildAndTestTool_HidesTheCompilerWarningsUnlessVerboseIsAsked` sweeps it.
-- **`fixtures/WarningSolution` gains a test project**, `tests/Fixture.Warning.Tests`, so `run_tests`
-  and `list_tests` are covered against a solution that really compiles with warnings rather than only
-  at the render-function level. It is deliberately warning-free itself: the three warnings the
-  `build` assertions count come from `src/Fixture.Warning/Calculator.cs` alone.
+- **`fixtures/WarningSolution` gains a test project**, `tests/Fixture.Warning.Tests`, so `run_tests`,
+  `list_tests` and `rerun_failed` are covered against a solution that really compiles with warnings
+  rather than only at the render-function level. It is deliberately warning-free itself — the three
+  warnings the `build` assertions count come from `src/Fixture.Warning/Calculator.cs` alone — and it
+  carries one deliberately failing test, because `rerun_failed` refuses before it ever builds when
+  nothing failed, which would have made its leg of the sweep unable to fail. The sweep now asserts
+  no member answered `ERROR`, so a tool that never reaches a build can no longer be counted as proof.
 
 ### Changed
 

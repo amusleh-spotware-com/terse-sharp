@@ -422,4 +422,35 @@ public sealed class RazorToolsE2ETests : IAsyncLifetime
 
     private Task<string> RazorAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task NoRazorTool_OpensItsResponseWithItsOwnName()
+    {
+        foreach (var probe in ToolCensus.RazorProbes)
+        {
+            var text = await RazorAsync(probe.Tool, probe.Arguments);
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.False(
+                ToolCensus.OpensWithItsOwnName(probe.Tool, text),
+                probe.Tool + " opened its response with its own name\n" + text);
+        }
+    }
+
+    [Fact]
+    public async Task EveryProbedRazorReadTool_StaysWithinItsTokenBudget()
+    {
+        var probes = ToolCensus.RazorProbes.Where(probe => !probe.Arguments.ContainsKey("dryRun")).ToArray();
+
+        Assert.True(probes.Length >= 6, $"only {probes.Length} Razor read tools were budgeted");
+
+        foreach (var probe in probes)
+        {
+            var text = await RazorAsync(probe.Tool, probe.Arguments);
+
+            Assert.True(
+                ToolCensus.Tokens(text) <= ToolCensus.Budget(probe.Tool),
+                string.Create(CultureInfo.InvariantCulture, $"{probe.Tool}={ToolCensus.Tokens(text)}/{ToolCensus.Budget(probe.Tool)}\n{text}"));
+        }
+    }
 }

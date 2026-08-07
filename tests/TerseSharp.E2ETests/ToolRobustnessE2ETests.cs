@@ -7,12 +7,6 @@ namespace TerseSharp.E2ETests;
 [Collection(nameof(TerseServerCollection))]
 public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
 {
-    private static readonly string[] ProcessSpawning = ["build", "run_tests", "rerun_failed", "list_tests"];
-
-    private static readonly string[] WorkspaceMutating = ["load_workspace", "unload_workspace"];
-
-    private static readonly string[] Destructive = ["clean"];
-
     [Fact]
     public async Task EveryTool_WithGarbageArguments_AnswersWithAStructuredErrorAndNoStackTrace()
     {
@@ -92,9 +86,7 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
     }
 
     private static bool Excluded(string name) =>
-        ProcessSpawning.Contains(name, StringComparer.Ordinal)
-        || WorkspaceMutating.Contains(name, StringComparer.Ordinal)
-        || Destructive.Contains(name, StringComparer.Ordinal);
+        Array.Exists(ToolCensus.RobustnessExcluded, exemption => string.Equals(exemption.Tool, name, StringComparison.Ordinal));
 
     private async Task<string> CallAsync(McpClientTool tool, Dictionary<string, object?> arguments)
     {

@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="src/Fixture.Warning/Fixture.Warning.csproj" />
+  <Project Path="tests/Fixture.Warning.Tests/Fixture.Warning.Tests.csproj" />
 </Solution>

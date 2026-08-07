@@ -1,7 +1,11 @@
-﻿namespace TerseSharp.E2ETests;
+﻿using ModelContextProtocol.Client;
+
+namespace TerseSharp.E2ETests;
 
 public sealed class BuildWarningsE2ETests : IAsyncLifetime
 {
+    private static readonly string[] DeliberateWarningCodes = ["CS0169", "CS0414", "CS0219"];
+
     private static readonly string WarningRoot =
         Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "WarningSolution");
 
@@ -41,10 +45,67 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
         Assert.Contains("CS0219", text, StringComparison.Ordinal);
     }
 
-    private Task<string> RebuiltAsync(Dictionary<string, object?> arguments)
+    [Fact]
+    public async Task TheBuildAndTestFamily_IsDiscoveredFromTheAdvertisedSurface()
+    {
+        var family = await FamilyAsync();
+
+        Assert.True(family.Length >= 4, "the discovered build/test family was too small: " + Named(family));
+    }
+
+    [Fact]
+    public async Task EveryBuildAndTestTool_HidesTheCompilerWarningsUnlessVerboseIsAsked()
+    {
+        var family = await FamilyAsync();
+        var leaking = new List<string>();
+        var refused = new List<string>();
+
+        Assert.True(family.Length >= 4, "the discovered build/test family was too small: " + Named(family));
+
+        await RebuiltAsync("run_tests", []);
+
+        foreach (var tool in family)
+        {
+            var text = await RebuiltAsync(tool, []);
+
+            if (text.Contains("ERROR", StringComparison.Ordinal))
+                refused.Add(tool + " -> " + text);
+
+            if (Leaks(text))
+                leaking.Add(tool + " -> " + text);
+        }
+
+        Assert.True(refused.Count is 0, "tools that never reached a build, so the sweep proved nothing: " + string.Join(" | ", refused));
+        Assert.True(leaking.Count is 0, "tools returning a compiler warning without verbose: " + string.Join(" | ", leaking));
+    }
+
+    private async Task<string[]> FamilyAsync()
+    {
+        var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        return [.. surface.Where(Scoped).Select(tool => tool.Name).Order(StringComparer.Ordinal)];
+    }
+
+    private static string Named(string[] family) =>
+        family.Length is 0 ? "(none)" : string.Join(", ", family);
+
+    private static bool Scoped(McpClientTool tool) =>
+        Declares(tool, "configuration") && Declares(tool, "targetFramework");
+
+    private static bool Declares(McpClientTool tool, string parameter) =>
+        tool.JsonSchema.TryGetProperty("properties", out var properties)
+        && properties.TryGetProperty(parameter, out _);
+
+    private static bool Leaks(string text) =>
+        text.Contains(": warning ", StringComparison.Ordinal)
+        || DeliberateWarningCodes.Any(code => text.Contains(code, StringComparison.Ordinal));
+
+    private Task<string> RebuiltAsync(Dictionary<string, object?> arguments) => RebuiltAsync("build", arguments);
+
+    private Task<string> RebuiltAsync(string tool, Dictionary<string, object?> arguments)
     {
         File.SetLastWriteTimeUtc(CalculatorPath, DateTime.UtcNow);
 
-        return server.CallAsync("build", arguments, TestContext.Current.CancellationToken);
+        return server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
     }
 }

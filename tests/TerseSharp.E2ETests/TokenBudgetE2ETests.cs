@@ -122,20 +122,6 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task EveryReadToolStaysWithinTheGlobalCap()
-    {
-        var responses = new[]
-        {
-            await server.CallAsync("workspace_status", []),
-            await server.CallAsync("list_projects", []),
-            await server.CallAsync("search_symbols", new() { ["query"] = "Order" }),
-            await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:Fixture.Trading.OrderService" }),
-        };
-
-        Assert.All(responses, response => Assert.True(Tokens(response) <= 800, Report("read tool", response)));
-    }
-
-    [Fact]
     public async Task ResxGet_KeysOnly_CostsAFractionOfReadingTheWidestResourceFile()
     {
         var keys = await server.CallAsync("resx_get", new()
@@ -279,8 +265,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         }
     }
 
-    private static int Tokens(string text) => (text.Length + 3) / 4;
-
+    private static int Tokens(string text) => ToolCensus.Tokens(text);
     private static int Lines(string text) => text.Split('\n').Length;
 
     private static int Gutters(string text) => text

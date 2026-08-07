@@ -572,15 +572,22 @@ and being absent from it is the point:**
 |---|---|---|
 | every tool has an E2E test | `ToolCoverageE2ETests` | `tools/list`, both directions |
 | every tool is named in `SKILL.md`, `README.md`, `NUGET_README.md` | `DocsCoverageE2ETests` | `tools/list` |
-| every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus the `ProcessSpawning` / `WorkspaceMutating` / `Destructive` arrays — an exclusion set that carries no written reason per entry and no ratchet, so it does not yet meet the rule above it |
+| every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus `ToolCensus.RobustnessExcluded` — seven entries, each carrying a written reason, ratcheted by `MaxRobustnessExclusions` |
 | every mutating tool takes `verbose` | `SchemaCensusE2ETests` | `tools/list` — every tool declaring `dryRun` must declare `verbose` |
 | every `symbolId` tool takes the `symbol` alias, and none declares `symbolId` required | `SchemaCensusE2ETests` | `tools/list` — the `properties` and `required` arrays |
-| **every listing tool has a token budget** | **none — `TokenBudgetE2ETests` is 20 per-tool `[Fact]`s, and its `EveryReadToolStaysWithinTheGlobalCap` names four tools by hand** | — |
-| **no build/test tool returns a warning unless `verbose=true`** (rule 4 above) | **none — 8 hand-written `DotnetRunnerTests` render cases plus `BuildWarningsE2ETests`; nothing discovers the family from `tools/list`** | — |
+| **no tool opens its response with its own name** | `ToolCensusE2ETests` + `ToolHappyPathE2ETests` + `RazorToolsE2ETests.NoRazorTool_OpensItsResponseWithItsOwnName` | `tools/list`, both directions, minus `ToolCensus.HappyPathExempt` — four reasoned, ratcheted entries with no success path on the fixture |
+| **every listing tool has a token budget** | `ToolCensusE2ETests.EveryProbedReadTool_StaysWithinItsTokenBudget` + `…EveryProcessSpawningTool_AnswersASuccessWithoutAHeaderAndWithinItsBudget` + `RazorToolsE2ETests.EveryProbedRazorReadTool_StaysWithinItsTokenBudget` | the `ToolCensus` probe catalogue, itself census-gated against `tools/list`; the Razor probes need the Razor fixture, so they are budgeted there; per-tool overrides live in `ToolCensus.BudgetOverrides`, reasoned and ratcheted |
+| **no build/test tool returns a warning unless `verbose=true`** (rule 4 above) | `BuildWarningsE2ETests.TheBuildAndTestFamily_IsDiscoveredFromTheAdvertisedSurface` + `…EveryBuildAndTestTool_HidesTheCompilerWarningsUnlessVerboseIsAsked` | `tools/list` — every tool declaring **both** `configuration` and `targetFramework`, which is exactly `build`, `run_tests`, `rerun_failed`, `list_tests` |
 
-The last three rows are the ones to close first: they are stated in this file as if enforced, and they
-are not. Closing the third needs a warning-emitting **test** project in `fixtures/WarningSolution` —
-today it has none, so `run_tests` and `list_tests` are covered only at the render-function level.
+**The exemption sets are the whole contract.** A census that discovers its subject from `tools/list`
+and then exempts a tool must say, in the checked-in record, *why* — `ToolExemption(Tool, Reason)`,
+`ToolVerdict(Tool, Prefix, Reason)` and `ToolBudget(Tool, Tokens, Reason)` all carry one, and
+`ToolCensusE2ETests.EveryExemptionCarriesAReasonAndTheSetOnlyEverShrinks` fails on an empty reason and
+on a set that grew past its `Max…` ratchet. `NoExemptionSurvivesTheToolItNames` deletes the other
+half: an exemption naming a tool the server no longer advertises is a failure, not dead weight.
+`build ok  …` and `run_tests PASSED  …` are registered in `ToolCensus.VerdictPrefixed` — those two
+first lines are a **verdict**, not a request echo, and `EveryVerdictPrefixedTool_StillAnswersWithTheVerdictItIsExemptFor`
+proves the exemption is still spent on the shape it was granted for.
 
 **Never delete, skip, `[Fact(Skip=…)]` or weaken a test — or its assertions — to make a suite go
 green.** A red test is resolved by fixing the code, by fixing an expectation that was itself wrong, or
