@@ -10,17 +10,24 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
     [McpServerTool(Name = "build")]
-    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity, configuration=Release to build a non-default configuration, and targetFramework to build one framework of a multi-targeted project.")]
+    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity, configuration=Release to build a non-default configuration, targetFramework to build one framework of a multi-targeted project, and properties for MSBuild properties such as NativeAppHostEnabled=false.")]
     public Task<string> Build(
         [Description("Project path; empty builds the solution.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty builds every framework a multi-targeted project declares.")] string? targetFramework = null,
+        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Return every diagnostic, warnings included, and the full report even when the build succeeds. Default false, which answers a successful build in one line and hides warnings on a failed one. The warnings= count reports what this build emitted, so a build that recompiled nothing reports 0.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
-            Contained(target, project, resolved => BuildWithRecoveryAsync(
-                target, resolved, new BuildScope(configuration, targetFramework), verbose, cancellationToken)));
+        {
+            var scope = Scoped(configuration, targetFramework, properties);
+
+            return scope.IsOk
+                ? Contained(target, project, resolved => BuildWithRecoveryAsync(
+                    target, resolved, scope.Value, verbose, cancellationToken))
+                : Task.FromResult(scope.Error!.Render());
+        });
 
     [McpServerTool(Name = "clean")]
     [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
@@ -41,13 +48,14 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; a test failure returns each failure's message, expected and actual values, and one source frame, and a build that failed under the run returns its error-severity diagnostics only, never its warnings. Pass verbose=true to get the full report on a green run, and the hidden warnings on a failed build; configuration and targetFramework scope the run the way they scope build, so noBuild=true against a Release tree tests the Release binaries.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; a test failure returns each failure's message, expected and actual values, and one source frame, and a build that failed under the run returns its error-severity diagnostics only, never its warnings. Pass verbose=true to get the full report on a green run, and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run the way they scope build, so noBuild=true against a Release tree tests the Release binaries.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
         [Description("Project path; empty runs every test project.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
+        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
         [Description("List passing tests too.")] bool includePassed = false,
         [Description("List the N slowest tests.")] int slowest = 0,
@@ -59,28 +67,35 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         {
             var selection = Selection(test, filter);
 
-            return selection.IsOk
-                ? Contained(target, project, resolved => RunAsync(
-                    target,
-                    new TestRunRequest(
-                        resolved ?? target.SolutionPath,
-                        selection.Value,
-                        noBuild,
-                        includePassed,
-                        slowest,
-                        Seconds(timeoutSeconds),
-                        verbose,
-                        new BuildScope(configuration, targetFramework)),
-                    cancellationToken))
-                : Task.FromResult(selection.Error!.Render());
+            if (!selection.IsOk)
+                return Task.FromResult(selection.Error!.Render());
+
+            var scope = Scoped(configuration, targetFramework, properties);
+
+            if (!scope.IsOk)
+                return Task.FromResult(scope.Error!.Render());
+
+            return Contained(target, project, resolved => RunAsync(
+                target,
+                new TestRunRequest(
+                    resolved ?? target.SolutionPath,
+                    selection.Value,
+                    noBuild,
+                    includePassed,
+                    slowest,
+                    Seconds(timeoutSeconds),
+                    verbose,
+                    scope.Value),
+                cancellationToken));
         });
 
     [McpServerTool(Name = "rerun_failed")]
-    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration and targetFramework that run used. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
+    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
     public Task<string> RerunFailed(
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
         [Description("Build configuration, passed to dotnet as -c. Empty reuses the configuration of the run that produced the failures.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f. Empty reuses the target framework of the run that produced the failures.")] string? targetFramework = null,
+        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value. Empty reuses the properties of the run that produced the failures.")] string[]? properties = null,
         [Description("Return the full report even when every re-run test passed, and the warnings of a build that failed under the re-run.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -89,7 +104,16 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         {
             var memory = lastRun.Memory;
 
-            return memory.Covers(target.Root)
+            if (!memory.Covers(target.Root))
+            {
+                return Task.FromResult(Errors.Invalid(
+                    "no failing test is remembered for this workspace",
+                    "call run_tests in this workspace first; a green run leaves nothing to re-run").Render());
+            }
+
+            var scope = Scoped(configuration, targetFramework, properties);
+
+            return scope.IsOk
                 ? RunAsync(
                     target,
                     new TestRunRequest(
@@ -100,40 +124,41 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                         0,
                         Seconds(timeoutSeconds),
                         verbose,
-                        Remembered(memory.Scope, configuration, targetFramework)),
+                        Remembered(memory.Scope, scope.Value)),
                     cancellationToken)
-                : Task.FromResult(Errors.Invalid(
-                    "no failing test is remembered for this workspace",
-                    "call run_tests in this workspace first; a green run leaves nothing to re-run").Render());
+                : Task.FromResult(scope.Error!.Render());
         });
 
-    private static BuildScope Remembered(BuildScope remembered, string? configuration, string? targetFramework) => new(
-        configuration is { Length: > 0 } ? configuration : remembered.Configuration,
-        targetFramework is { Length: > 0 } ? targetFramework : remembered.TargetFramework);
-
     [McpServerTool(Name = "list_tests")]
-    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration and targetFramework scope the listing the way they scope build.")]
+    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build.")]
     public Task<string> ListTests(
         [Description("Substring filter on the name.")] string? contains = null,
         [Description("Project name or path; empty lists every test project.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty lists every framework a multi-targeted test project declares.")] string? targetFramework = null,
+        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
-            Contained(target, project, resolved => RecoveredAsync(target, "test listing", async () =>
-            {
-                var run = await DotnetRunner.ListTestNamesAsync(
-                    target,
-                    resolved ?? target.SolutionPath,
-                    contains,
-                    new BuildScope(configuration, targetFramework),
-                    Seconds(timeoutSeconds),
-                    cancellationToken).ConfigureAwait(false);
+        {
+            var scope = Scoped(configuration, targetFramework, properties);
 
-                return new LockedRun(run.Response, run.Locked);
-            }, cancellationToken)));
+            return scope.IsOk
+                ? Contained(target, project, resolved => RecoveredAsync(target, "test listing", async () =>
+                {
+                    var run = await DotnetRunner.ListTestNamesAsync(
+                        target,
+                        resolved ?? target.SolutionPath,
+                        contains,
+                        scope.Value,
+                        Seconds(timeoutSeconds),
+                        cancellationToken).ConfigureAwait(false);
+
+                    return new LockedRun(run.Response, run.Locked);
+                }, cancellationToken))
+                : Task.FromResult(scope.Error!.Render());
+        });
 
     private Task<string> BuildWithRecoveryAsync(
         WorkspaceTarget target,
@@ -287,4 +312,27 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     private readonly record struct LockedRun(string Response, bool Locked);
+
+    private static bool IsProperty(ReadOnlySpan<char> property) =>
+        property.IndexOf('=') > 0 && property[0] is not '-';
+
+    private static Result<BuildScope> Scoped(string? configuration, string? targetFramework, IReadOnlyList<string>? properties)
+    {
+        foreach (var property in properties ?? [])
+        {
+            if (property is null || !IsProperty(property))
+            {
+                return Result.Fail<BuildScope>(Errors.Invalid(
+                    "properties entry " + (property ?? "null") + " is not Name=Value",
+                    "pass each MSBuild property as Name=Value, e.g. properties=[\"NativeAppHostEnabled=false\"]"));
+            }
+        }
+
+        return Result.Ok(new BuildScope(configuration, targetFramework, properties));
+    }
+
+    internal static BuildScope Remembered(BuildScope remembered, BuildScope requested) => new(
+        requested.Configuration is { Length: > 0 } ? requested.Configuration : remembered.Configuration,
+        requested.TargetFramework is { Length: > 0 } ? requested.TargetFramework : remembered.TargetFramework,
+        requested.Properties is { Count: > 0 } ? requested.Properties : remembered.Properties);
 }

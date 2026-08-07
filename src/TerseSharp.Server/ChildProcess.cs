@@ -4,6 +4,9 @@ namespace TerseSharp.Server;
 
 internal static class ChildProcess
 {
+    private static readonly string[] RegisteredMsBuildVariables =
+        ["MSBUILD_EXE_PATH", "MSBuildExtensionsPath", "MSBuildSDKsPath"];
+
     public static async Task<ProcessRun> RunAsync(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -11,18 +14,7 @@ internal static class ChildProcess
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        var start = new ProcessStartInfo(fileName)
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-
-        foreach (var argument in arguments)
-            start.ArgumentList.Add(argument);
-
+        var start = StartInfo(fileName, arguments, workingDirectory);
         var stopwatch = Stopwatch.StartNew();
         using var process = Started(start, fileName);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -99,5 +91,25 @@ internal static class ChildProcess
             string.Create(CultureInfo.InvariantCulture, $"TIMED_OUT after {stopwatch.ElapsedMilliseconds} ms; the process tree was killed"),
             stopwatch.ElapsedMilliseconds,
             TimedOut: true);
+    }
+
+    internal static ProcessStartInfo StartInfo(string fileName, IReadOnlyList<string> arguments, string workingDirectory)
+    {
+        var start = new ProcessStartInfo(fileName)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        foreach (var argument in arguments)
+            start.ArgumentList.Add(argument);
+
+        foreach (var variable in RegisteredMsBuildVariables)
+            start.Environment.Remove(variable);
+
+        return start;
     }
 }

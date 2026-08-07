@@ -108,4 +108,49 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
 
         return server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
     }
+
+    [Fact]
+    public async Task Build_WithAnMsBuildProperty_AppliesItToTheBuild()
+    {
+        var text = await RebuiltAsync(new() { ["properties"] = new[] { "TreatWarningsAsErrors=true" } });
+
+        Assert.Contains("exitCode=1", text, StringComparison.Ordinal);
+        Assert.Contains("CS0169", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("build ok", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("--interactive")]
+    [InlineData("")]
+    [InlineData("=NoName")]
+    [InlineData("NoSeparator")]
+    [InlineData(null)]
+    public async Task Build_WithAPropertyThatIsNotNameEqualsValue_IsRefusedWithARemedy(string? property)
+    {
+        var text = await server.CallAsync(
+            "build",
+            new() { ["properties"] = new[] { property } },
+            TestContext.Current.CancellationToken);
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("is not Name=Value", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithAnMsBuildProperty_AppliesItToTheBuildUnderTheRun()
+    {
+        var text = await RebuiltAsync("run_tests", new() { ["properties"] = new[] { "TreatWarningsAsErrors=true" } });
+
+        Assert.Contains("CS0169", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("run_tests PASSED", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListTests_WithAnMsBuildProperty_AppliesItToTheBuildUnderTheListing()
+    {
+        var text = await RebuiltAsync("list_tests", new() { ["properties"] = new[] { "TreatWarningsAsErrors=true" } });
+
+        Assert.Contains("CS0169", text, StringComparison.Ordinal);
+    }
 }

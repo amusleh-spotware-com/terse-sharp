@@ -45,8 +45,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   each written `Name=Value` and passed through as one `-p:Name=Value`, applied after `-c` and `-f`.
   A project that only builds with `-p:NativeAppHostEnabled=false` was reachable by no tool, so the
   whole build step fell back to `Bash`. An entry that is not `Name=Value` — including one that looks
-  like a CLI flag — is refused with `ERROR InvalidArgument` and a worked example before any process
-  starts, and `rerun_failed` reuses the properties of the run that produced the failures the same way
+  like a CLI flag — is refused before any process starts, with an `ERROR InvalidArgument` whose
+  `remedy:` names a valid entry, and `rerun_failed` reuses the properties of the run that produced
+  the failures the same way
   it reuses its configuration and target framework.
 
 ### Fixed
@@ -61,8 +62,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `MSBUILD_EXE_PATH` alone reproduces MSB4237 byte for byte and `MSBuildSDKsPath` alone gives MSB4062,
   while the same directory restores cleanly from a shell. All three are now removed from every child
   the server starts — `build`, `run_tests`, `rerun_failed`, `list_tests` and the git runner alike.
-  `ChildProcessTests` asserts the child cannot see them and that an unrelated variable is still
-  inherited, so the scrub cannot silently widen.
+  `ChildProcessTests` asserts the scrub removes exactly those three from a child's environment and
+  leaves every other variable inherited, and — because a hand-written list in one project cannot see
+  a change in another — a census assertion registers `MSBuildLocator` and fails if any other
+  `MSBuild`-prefixed variable **whose value names a directory** is set in the process without being
+  scrubbed.
 - **The sync no longer records a file as absorbed on a stamp it never read** (I96). `Settle` stamped
   every drained path from a *fresh* `FileStamp.Of`, so a write landing between the merge and the
   settle — a window spanning the remaining merges and `AdoptAsync` — was recorded as absorbed while

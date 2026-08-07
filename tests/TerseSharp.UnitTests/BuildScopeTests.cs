@@ -44,4 +44,33 @@ public sealed class BuildScopeTests
         Assert.True(scope.IsDefault);
         Assert.Equal(["build"], scope.Applied(["build"]));
     }
+
+    [Fact]
+    public void Applied_WithProperties_PassesEachAsMinusP()
+    {
+        var arguments = new BuildScope(null, null, ["NativeAppHostEnabled=false", "ContinuousIntegrationBuild=true"])
+            .Applied(["build", "A.slnx"]);
+
+        Assert.Equal(
+            ["build", "A.slnx", "-p:NativeAppHostEnabled=false", "-p:ContinuousIntegrationBuild=true"],
+            arguments);
+    }
+
+    [Fact]
+    public void Applied_WithEverything_PassesPropertiesLast()
+    {
+        var arguments = new BuildScope("Release", "net10.0", ["NativeAppHostEnabled=false"]).Applied(["build", "A.slnx"]);
+
+        Assert.Equal(
+            ["build", "A.slnx", "-c", "Release", "-f", "net10.0", "-p:NativeAppHostEnabled=false"],
+            arguments);
+    }
+
+    [Fact]
+    public void IsDefault_WithPropertiesOnly_IsFalse() =>
+        Assert.False(new BuildScope(null, null, ["NativeAppHostEnabled=false"]).IsDefault);
+
+    [Fact]
+    public void IsDefault_WithAnEmptyPropertyList_IsTrue() =>
+        Assert.True(new BuildScope(null, null, []).IsDefault);
 }
