@@ -78,6 +78,9 @@ public sealed class IndexE2ETests
         await using var solution = await StartAsync(watch: true);
 
         await Resolve(solution, "AccentBrush");
+
+        Assert.Contains("0 symbols", await Symbols(solution, "IndexUntouched"), StringComparison.Ordinal);
+
         await AppendAsync(solution.OrderServicePath, "\npublic sealed class IndexUntouched\n{\n}\n");
 
         Assert.True(

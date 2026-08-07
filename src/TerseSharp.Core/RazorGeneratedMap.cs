@@ -84,12 +84,31 @@ public static class RazorGeneratedMap
     {
         foreach (var project in workspace.Solution.Projects)
         {
+            if (Cached.TryGetValue(project.Id, out var known) && known.Generated.Count > 0)
+                return true;
+
+            if (!DeclaresRazor(project))
+                continue;
+
             if (await InProjectAsync(project, cancellationToken).ConfigureAwait(false) is { Count: > 0 })
                 return true;
         }
 
         return false;
     }
+
+    private static bool DeclaresRazor(Project project)
+    {
+        foreach (var document in project.AdditionalDocuments)
+        {
+            if (WorkspaceFiles.Matches(Path.GetExtension((document.FilePath ?? document.Name).AsSpan()), RazorSuffixes))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static readonly string[] RazorSuffixes = [".razor", ".cshtml"];
 
     public static string? RazorPathOf(string generatedText)
     {

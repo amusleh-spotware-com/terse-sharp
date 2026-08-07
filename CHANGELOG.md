@@ -8,6 +8,77 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+**The census gaps are closed.** `CLAUDE.md` listed three "every X does Y" rules it stated as if
+enforced and that nothing enforced — plus **I93**, the fourth. All four now discover their subject
+from `tools/list`, so a tool added later cannot be exempt by default. No tool, parameter, default or
+response format changed by that work: it is test and fixture only.
+
+### Added
+
+- **`ToolCensus`, one checked-in catalogue for every census exemption** (I93). Probes, exclusions,
+  verdict prefixes and budget overrides are records that each carry a **written reason**, and
+  `ToolCensusE2ETests.EveryExemptionCarriesAReasonAndTheSetOnlyEverShrinks` fails on an empty reason
+  or on a set that grew past its `Max…` ratchet. `NoExemptionSurvivesTheToolItNames` fails on an
+  exemption naming a tool the server no longer advertises.
+- **A census for the no-header rule** (I93). `ToolCensusE2ETests.EveryAdvertisedTool_IsProbedOrExemptWithAWrittenReason`
+  reads `tools/list` and fails on any advertised tool that has neither a probe nor a written
+  exemption; the header assertion itself runs on a **success** response —
+  `ToolHappyPathE2ETests` for the fixture-probed tools, `RazorToolsE2ETests.NoRazorTool_OpensItsResponseWithItsOwnName`
+  for the ten Razor tools, and `ToolCensusE2ETests.NoProcessSpawningTool_OpensItsResponseWithItsOwnName`
+  for `build`, `list_tests`, `run_tests` and `rerun_failed`. Four tools stay exempt with a reason and
+  no success path on the fixture: `unload_workspace`, `undo_last_change`, `package_add`,
+  `package_remove`. The census found one real case on its first run — `build ok  …` and
+  `run_tests PASSED  …` do open with the tool's own name, deliberately, because those lines are a
+  **verdict** and not a request echo; they are registered in `ToolCensus.VerdictPrefixed` and
+  `EveryVerdictPrefixedTool_StillAnswersWithTheVerdictItIsExemptFor` proves the exemption is still
+  spent on the shape it was granted for.
+- **A census for the listing-tool token budget.**
+  `ToolCensusE2ETests.EveryProbedReadTool_StaysWithinItsTokenBudget` budgets **every** read probe in
+  the catalogue instead of four tools named by hand, and refuses to pass on fewer than 40 of them.
+  `search_text` and `search_regex` legitimately exceed the 800-token read cap on a full default page
+  of 100 matches, so they carry a reasoned, ratcheted override in `ToolCensus.BudgetOverrides`.
+- **A census for warnings-behind-`verbose` on the build/test family.**
+  `BuildWarningsE2ETests.TheBuildAndTestFamily_IsDiscoveredFromTheAdvertisedSurface` discovers the
+  family as every advertised tool declaring **both** `configuration` and `targetFramework` — exactly
+  `build`, `run_tests`, `rerun_failed`, `list_tests` — and
+  `EveryBuildAndTestTool_HidesTheCompilerWarningsUnlessVerboseIsAsked` sweeps it.
+- **`fixtures/WarningSolution` gains a test project**, `tests/Fixture.Warning.Tests`, so `run_tests`
+  and `list_tests` are covered against a solution that really compiles with warnings rather than only
+  at the render-function level. It is deliberately warning-free itself: the three warnings the
+  `build` assertions count come from `src/Fixture.Warning/Calculator.cs` alone.
+
+### Changed
+
+- **`ToolRobustnessE2ETests` no longer excludes tools by bare name.** The `ProcessSpawning`,
+  `WorkspaceMutating` and `Destructive` arrays are replaced by `ToolCensus.RobustnessExcluded`, seven
+  `ToolExemption` records each stating why that tool cannot be swept, under a ratchet.
+- **`TokenBudgetE2ETests.EveryReadToolStaysWithinTheGlobalCap` is replaced**, not deleted, by
+  `ToolCensusE2ETests.EveryProbedReadTool_StaysWithinItsTokenBudget`, which covers its four tools and
+  every other read probe as well.
+- **`IMPROVEMENTS.md`** — **I93** moves from open to shipped, and **I91** and **I92** are re-examined
+  and stay **not taken**, now with the measurement rather than the estimate: the declared-tag design
+  for I92 was costed at ~14 call sites and an emitter census found **~30** across 15 `TerseSharp.Core`
+  files, two of them load-bearing for behaviour (`XamlRename` filters on `Confidence is "EXACT"`, and
+  `TextSearchService` strips its own `"  HEURISTIC  "` to build the `unique=` dedup key), for a
+  0.89 % saving behind a MAJOR format change. `CLAUDE.md`'s census table records the gates that now
+  enforce its three previously-unenforced rows.
+- **`workspace_status` no longer runs the Razor source generators on projects that have no Razor**
+  (I67). It walked **every** project calling `GetSourceGeneratedDocumentsAsync`, which forces a full
+  compilation, to answer one `generator=ok|unavailable` word — measured at **1448 MB / 29 391 ms**
+  against 415 MB / 2.2 s without it on a 148-project solution. A project that holds no
+  `.razor`/`.cshtml` additional document cannot have produced Razor output, so it is skipped.
+
+  This row had six falsified hypotheses behind it, and the seventh attempt only landed because the
+  real cause was finally instrumented rather than guessed. It was never a product coupling.
+  `MSBuildWorkspace` attaches a lazy `FileTextLoader` per document and the load never asks for a
+  compilation, so **no `.cs` content is read at load time**. Unfiltered, the generator scan forced a
+  compilation of every project on the first `workspace_status`, which materialized every document's
+  text *before* the test appended to one. Filtered, nothing did — so when the watcher's edit was
+  drained, `WorkspaceSync.ReplaceAsync` compared the document's *lazily read* text against the file
+  and found them equal, because both sides read the same post-append bytes. No `ChangeKind.Code` bump
+  followed, while `search_symbols` still saw the new type. The test now runs a search **before** the
+  append, which parses every document and pins its text, so the edit must arrive through the watcher.
+
 ## [0.22.0] - 2026-08-06
 
 **The improvements backlog is empty of fixable rows.** One row remains open —

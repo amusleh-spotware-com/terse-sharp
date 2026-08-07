@@ -341,4 +341,21 @@ public sealed class WorkspaceRegistryTests
 
         Assert.True(semantic.Workspace.TakeDroppedNotice());
     }
+
+    [Fact]
+    public async Task GeneratorRanAsync_SkipsEveryProjectThatDeclaresNoRazorAdditionalDocument()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        var workspace = registry.All()[0];
+
+        RazorGeneratedMap.Forget();
+
+        Assert.False(await RazorGeneratedMap.GeneratorRanAsync(workspace, TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(
+            workspace.Solution.Projects,
+            project => RazorGeneratedMap.Knows(project.Id));
+    }
 }
