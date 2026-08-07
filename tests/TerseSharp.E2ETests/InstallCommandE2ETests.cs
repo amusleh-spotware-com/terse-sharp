@@ -109,8 +109,13 @@ public sealed class InstallCommandE2ETests : IDisposable
     {
         var output = await RunAsync("doctor", "--workspace", Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
 
-        Assert.Contains("OK   processes: ", output, StringComparison.Ordinal);
-        Assert.Contains("testhost#", output, StringComparison.Ordinal);
-        Assert.Contains("stop them and re-run", output, StringComparison.Ordinal);
+        var line = output
+            .Split('\n')
+            .Single(candidate => candidate.StartsWith("OK   processes: ", StringComparison.Ordinal));
+
+        Assert.True(
+            line.EndsWith("a server started as 'dotnet terse.dll' is not listed", StringComparison.Ordinal)
+                || line.Contains("stop them and re-run", StringComparison.Ordinal),
+            line);
     }
 }

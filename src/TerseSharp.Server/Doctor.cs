@@ -186,7 +186,11 @@ public static class Doctor
         var live = Live();
 
         return live.Length is 0
-            ? Check("processes", "no other terse or testhost process is running", true, string.Empty)
+            ? Check(
+                "processes",
+                "no other terse or testhost process is running - a server started as 'dotnet terse.dll' is not listed",
+                true,
+                string.Empty)
             : Check(
                 "processes",
                 string.Create(
