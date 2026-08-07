@@ -131,8 +131,14 @@ change, the expected saving. Shipped entries keep their measurement so a regress
 
 ## Open
 
-Nothing is open. Every row either shipped with its measurement above, or sits in
-**Known limitations** below with the evidence that closed it.
+Every row from the original backlog is closed — shipped with its measurement above, or in
+**Known limitations** below with the evidence that closed it. What remains are two product bugs the
+I67 instrumentation exposed, neither introduced by this work, both with a recorded reproduction.
+
+| Finding | Tool | Proposed change | Expected saving |
+|---|---|---|---|
+| **I96** **`WorkspaceSync.Settle` restamps a drained path with a freshly read stamp instead of the one `MergeAsync` actually absorbed.** A write landing between `MergeAsync` and `Settle` — a window that spans the remaining merges *and* `AdoptAsync` — is recorded as absorbed but was never read. The watcher re-`Notice`s the path, the next drain short-circuits on `stamps[path] == stamp`, and the solution serves the **previous** content permanently, until a later write changes length or mtime. Two saves in quick succession (format-on-save, a rebase, a test that writes twice) is enough | `WorkspaceSync` | thread the stamp `MergeAsync` acted on through to `Settle`, or refuse to stamp a path whose stamp moved during the drain | a stale answer tagged `EXACT`, which is the failure class the response rules exist to prevent — worse than the counter bug that exposed it. Found by the I67 instrumentation; not introduced by it |
+| **I97** **The first external edit to a `.cs` file whose text Roslyn has not materialized is invisible to `ChangeKind.Code`.** `MSBuildWorkspace` attaches a lazy `FileTextLoader`, so until something forces a compilation or parses the document, `ReplaceAsync`'s `current.ContentEquals(text)` compares the same post-edit disk bytes on both sides, reports no change, and never bumps the generation. Masked until now: any workspace with a razor file had every text materialized by the first `workspace_status`, which **I67** has just stopped doing | `WorkspaceSync`, `LoadedWorkspace` | compare against the stamp the loader recorded rather than against freshly read text, or force text materialization for a document the watcher reports | bounded today — `RegistrationIndex` is the only Code-keyed consumer and building it materializes what it needs — so the visible loss is the `gen=cN` counter and `DropSnapshots(changed)`. Reproduced deterministically: see the I67 row |
 
 ## 2026-08-06 — response framing, measured over 1 050 calls
 
