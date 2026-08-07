@@ -21,18 +21,22 @@ public static class XamlStyleGraph
         var applicable = styles.Where(style => Applies(style, typeName)).ToArray();
         var response = new ResponseBuilder("xaml_styles", typeName);
 
-        response.Summary(Math.Min(applicable.Length, maxResults), applicable.Length, "styles", "maxResults=");
+        response.Summary(ResultCap.Shown(applicable.Length, maxResults), applicable.Length, "styles", "maxResults=");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"scanned={graph.FileCount} files"));
 
         if (applicable.Length is 0)
             response.Line(string.Create(CultureInfo.InvariantCulture, $"no Style targets '{typeName}' in any XAML file under the workspace root"));
 
-        foreach (var style in applicable.OrderBy(style => style.Key is null ? 0 : 1).ThenBy(style => style.File, StringComparer.Ordinal).Take(maxResults))
+        foreach (var style in applicable
+            .OrderBy(style => style.Key is null ? 0 : 1)
+            .ThenBy(style => style.File, StringComparer.Ordinal)
+            .Take(ResultCap.Shown(applicable.Length, maxResults)))
+        {
             response.Line(Describe(style, styles));
+        }
 
         return Result.Ok(response.ToString());
     }
-
     private static string? Target(XamlElementInfo element) =>
         element.Attribute("TargetType") ?? element.Attribute("DataType");
 

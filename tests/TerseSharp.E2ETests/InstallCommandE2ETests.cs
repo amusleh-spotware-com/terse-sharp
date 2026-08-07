@@ -103,4 +103,14 @@ public sealed class InstallCommandE2ETests : IDisposable
 
         return await output + await error;
     }
+
+    [Fact]
+    public async Task Doctor_ReportsTheLiveTerseAndTesthostProcesses()
+    {
+        var output = await RunAsync("doctor", "--workspace", Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+
+        Assert.Contains("OK   processes: ", output, StringComparison.Ordinal);
+        Assert.Contains("testhost#", output, StringComparison.Ordinal);
+        Assert.Contains("stop them and re-run", output, StringComparison.Ordinal);
+    }
 }

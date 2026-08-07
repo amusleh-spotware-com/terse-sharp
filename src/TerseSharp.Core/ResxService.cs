@@ -14,9 +14,9 @@ public static class ResxService
 
         var response = new ResponseBuilder("resx_files", "solution");
 
-        response.Summary(Math.Min(maxResults, matched.Length), matched.Length, "families", "filter=");
+        response.Summary(ResultCap.Shown(matched.Length, maxResults), matched.Length, "families", "filter=");
 
-        foreach (var family in matched.Take(maxResults))
+        foreach (var family in matched.Capped(maxResults))
             response.Line(Describe(index, family));
 
         return Result.Ok(response.ToString());
@@ -56,9 +56,9 @@ public static class ResxService
         var hits = Hits(workspace.Indexes.Resx(), query, scope, culture).ToArray();
         var response = new ResponseBuilder("resx_find", query);
 
-        response.Summary(Math.Min(maxResults, hits.Length), hits.Length, "entries", "culture=");
+        response.Summary(ResultCap.Shown(hits.Length, maxResults), hits.Length, "entries", "culture=");
 
-        foreach (var hit in hits.Take(maxResults))
+        foreach (var hit in hits.Capped(maxResults))
             response.Line(hit);
 
         return Result.Ok(response.ToString());
@@ -111,10 +111,10 @@ public static class ResxService
         var keys = Keys(index, family, selection);
         var response = new ResponseBuilder("resx_get", family.Relative);
 
-        response.Summary(Math.Min(maxResults, keys.Count), keys.Count, "keys", "prefix=");
+        response.Summary(ResultCap.Shown(keys.Count, maxResults), keys.Count, "keys", "prefix=");
         response.Note(Header(family, selected));
 
-        foreach (var name in keys.Take(maxResults))
+        foreach (var name in keys.Capped(maxResults))
             response.Line(Row(index, name, selected, selection.Values));
 
         return response.ToString();

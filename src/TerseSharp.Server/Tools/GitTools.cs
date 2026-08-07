@@ -99,9 +99,9 @@ public sealed class GitTools(ToolContext context)
 
         var response = new ResponseBuilder("changed_files", string.Empty);
 
-        response.Summary(Math.Min(lines.Count, maxResults), lines.Count, "files", "baseRef= or maxResults=");
+        response.Summary(ResultCap.Shown(lines.Count, maxResults), lines.Count, "files", "baseRef= or maxResults=");
 
-        foreach (var line in lines.Take(maxResults))
+        foreach (var line in lines.Capped(maxResults))
             response.Line(line);
 
         return response.ToString();

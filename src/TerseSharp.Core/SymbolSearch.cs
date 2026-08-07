@@ -57,14 +57,12 @@ public static class SymbolSearch
             .Select(symbol => new Identified(symbol, SymbolId.From(symbol).Value))
             .DistinctBy(entry => entry.Id, StringComparer.Ordinal)];
 
-    private static ISymbol[] Rank(Identified[] distinct, int maxResults) =>
-        [.. distinct
-            .OrderByDescending(entry => entry.Symbol.DeclaredAccessibility is Accessibility.Public)
-            .ThenBy(entry => entry.Symbol.Name.Length)
-            .ThenBy(entry => entry.Id, StringComparer.Ordinal)
-            .Take(maxResults)
-            .Select(entry => entry.Symbol)];
-
+    private static ISymbol[] Rank(Identified[] distinct, int maxResults) => [.. distinct
+    .OrderByDescending(entry => entry.Symbol.DeclaredAccessibility is Accessibility.Public)
+    .ThenBy(entry => entry.Symbol.Name.Length)
+    .ThenBy(entry => entry.Id, StringComparer.Ordinal)
+    .Take(ResultCap.Shown(distinct.Length, maxResults))
+    .Select(entry => entry.Symbol)];
     private static bool KindMatches(ISymbol symbol, string? kind) =>
         string.IsNullOrWhiteSpace(kind)
         || SymbolFormat.Kind(symbol).Equals(kind, StringComparison.OrdinalIgnoreCase)

@@ -173,8 +173,9 @@ public sealed class NavigationTools(ToolContext context)
     {
         var found = await SymbolSearch.FindAsync(workspace, query, kind, maxResults, cancellationToken).ConfigureAwait(false);
         var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
-        var shownComponents = Math.Min(components.Count, maxResults);
-        var shownSymbols = Math.Min(found.Ranked.Count, maxResults - shownComponents);
+        var budget = ResultCap.Shown(components.Count + found.Total, maxResults);
+        var shownComponents = Math.Min(components.Count, budget);
+        var shownSymbols = Math.Min(found.Ranked.Count, budget - shownComponents);
         var response = new ResponseBuilder("search_symbols", query);
 
         response.Summary(shownComponents + shownSymbols, components.Count + found.Total, "symbols", "kind= or maxResults=");

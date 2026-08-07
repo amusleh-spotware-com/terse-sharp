@@ -41,13 +41,13 @@ public static class ExploreService
         var records = reach.Files.Concat(reach.Xaml).ToArray();
         var response = new ResponseBuilder("impact_of", SymbolReference.Brief(symbol));
 
-        response.Summary(Math.Min(maxResults, records.Length), records.Length, "affected files", "maxResults=");
+        response.Summary(ResultCap.Shown(records.Length, maxResults), records.Length, "affected files", "maxResults=");
         response.Note(Counts(reach));
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"projects that would recompile: {projects.Length} ({string.Join(", ", projects.Take(8))})"));
 
-        foreach (var line in records.Take(maxResults))
+        foreach (var line in records.Capped(maxResults))
             response.Line(line);
 
         return response.ToString();

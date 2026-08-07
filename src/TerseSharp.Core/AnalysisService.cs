@@ -146,7 +146,7 @@ public static class AnalysisService
         var response = new ResponseBuilder("analyze", path ?? "solution");
 
         response.Summary(
-            Math.Min(maxResults, shown.Count),
+            ResultCap.Shown(shown.Count, maxResults),
             shown.Count,
             sinceLast ? "new diagnostics" : "diagnostics",
             "minSeverity=, ids= or path=");
@@ -163,10 +163,10 @@ public static class AnalysisService
                     $"since the previous analyze of this scope: appeared={delta.Appeared.Count} fixed={delta.Fixed.Count} unchanged={delta.Unchanged} total={lines.Length}"));
         }
 
-        foreach (var line in shown.Take(maxResults))
+        foreach (var line in shown.Capped(maxResults))
             response.Line(line);
 
-        foreach (var line in sinceLast ? delta.Fixed.Take(maxResults) : [])
+        foreach (var line in sinceLast ? delta.Fixed.Capped(maxResults) : [])
             response.Line("FIXED " + line);
 
         return response.ToString();

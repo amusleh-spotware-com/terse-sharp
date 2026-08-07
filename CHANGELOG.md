@@ -8,23 +8,70 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **The sync no longer records a file as absorbed on a stamp it never read** (I96). `Settle` stamped
+  every drained path from a *fresh* `FileStamp.Of`, so a write landing between the merge and the
+  settle — a window spanning the remaining merges and `AdoptAsync` — was recorded as absorbed while
+  the solution held the previous content, permanently, until a later write changed the file's length
+  or mtime. `MergeAsync` now records only the stamp it read, and only when that stamp is unchanged
+  after the read; `Settle` no longer restamps a code path at all; and a drain that throws forgets the
+  stamps it took. `AbsorbAsync` also re-checks every changed path immediately before adopting: since
+  Roslyn's `TryApplyChanges` **writes the absorbed text back to disk**, adopting a stale read would
+  have reverted a concurrent external edit. Regression test: `WorkspaceSyncTests
+  .SyncAsync_ForAWriteLandingDuringTheDrain_StillAbsorbsItOnTheNextSync`, observed red before the fix.
+- **The first external edit to a file Roslyn has not materialized now moves the code generation**
+  (I97). `MSBuildWorkspace` attaches a lazy `FileTextLoader`, so `ReplaceAsync` compared the same
+  post-edit disk bytes on both sides and reported no change. A document whose text was never
+  materialized cannot be *proved* unchanged, so it is now counted as changed — without calling
+  `WithDocumentText`, which would make Roslyn rewrite the file and move its mtime.
+  `SyncAsync_ForAnExternalEditBeforeTheTextIsMaterialised_NeverRewritesTheFile` locks that down.
+- **`write_text` no longer promises freshness it cannot deliver across processes** (I101). Its
+  description scoped the "visible to every semantic tool on the next call, with no reload" guarantee
+  to the workspace that performed the write, and says that another loaded workspace, or another
+  `terse` process, picks the write up through its own watcher.
+
+### Added
+
+- **`doctor` lists the live `terse` and `testhost` processes** (I100) — pid, resident megabytes and
+  start time — because a stale one holds the built binaries and makes a build silently no-op and a
+  test run report the previous binary's result. This was the last non-git `Bash` fallback measured in
+  the census-gate task.
+- **A rejected call carries a worked example of the tool it named** (I98). `ToolExamples` ships one
+  known-good call for the twelve tools whose valid arguments are not derivable from the schema — the
+  ten `razor_*` tools and `package_add`/`package_remove` — and `ToolArgumentFilter` appends it to the
+  `remedy:` line, so one deliberate empty call replaces reading a test file for a working argument
+  set. Census-gated in both directions by `ToolCensusE2ETests`.
+- **`read_text` says when `startLine` is past the last line** (I102) — `startLine=N is past the last
+  line (total=T)` — instead of an empty payload that reads like an empty file.
+
 ### Changed
 
-- **`README.md` and `NUGET_README.md` are shorter** — 736 → 499 and 359 → 201 lines, with no tool,
-  guarantee or measurement dropped: the second and third diagrams, the duplicated "success costs
-  nothing" and freshness prose, and the FAQ's one-question-per-section shape are folded into the
-  sections that already said it. Both still name every advertised tool, which
-  `DocsCoverageE2ETests` enforces from `tools/list`.
+- **A capped listing whose overflow fits a 10 % slack returns the whole list** (I99) instead of a
+  steer the caller immediately spends a second call on: `find_files glob="tests/**/*.cs"` answered
+  `100/108 files truncated - narrow with …` and cost a second, wider call for the last 8 names.
+  `ResultCap.Shown(total, cap)` is now the one rule, applied by every capped listing tool —
+  `find_files`, `search_text`, `search_regex`, `search_symbols`, `find_usages`,
+  `find_implementations`, `find_registrations`, `list_endpoints`, `impact_of`, `diff_symbols`,
+  `changed_files`, `analyze`, `get_diagnostics`, the `resx_*`, `xaml_*` and `razor_*` listings.
+  A total beyond the slack still truncates and still steers.
+
+- **`README.md` and `NUGET_README.md` are rewritten for a first-time reader** — 736 → 203 and
+  359 → 131 lines. Install is the first section and is two commands; the savings table, the guard and
+  the grouped tool list follow; the architecture diagram, the competitor comparison, the guard's
+  full deny/allow matrix, the memory and freshness internals and the paste-ready hard-gate block are
+  cut or folded into a `<details>`, because they answer questions a reader only has after installing.
+  Both still name every advertised tool, which `DocsCoverageE2ETests` enforces from `tools/list`.
 - **The git family is hard-gated in the docs that teach the agent, not only listed.** `SKILL.md`'s
   hard gate now states that `git status`, `git status --porcelain`, `git diff` and `git diff <ref>`
   are served by `changed_files`, `diff_symbols` and `diff_text` — running them in `Bash` is the same
   breach as `grep` — and that only git **history** (`log`, `blame`, `show <ref>:<path>`) and
-  index/history mutation (`add`, `commit`, `push`) stay on the shell. The same rule is added to the
-  README's paste-ready hard-gate block and to this repo's `CLAUDE.md` develop-with-TerseSharp gate,
-  whose "`git` plumbing" exemption was wide enough to license the fallback the tools exist to remove.
-- **`CLAUDE.md` architecture is current** — the Core service list names the `Explore`, `Registration`,
-  `CodeFix`, `Clean`, `DiffSymbol`, `Resx*` and `Razor*` services it had grown, and the stale
-  "83-tool surface" reads 86, as does the README's architecture diagram.
+  index/history mutation (`add`, `commit`, `push`) stay on the shell. The same rule is added to this
+  repo's `CLAUDE.md` develop-with-TerseSharp gate, whose "`git` plumbing" exemption was wide enough to
+  license the fallback the tools exist to remove.
+- **`CLAUDE.md` is current** — the Core service list names the `Explore`, `Registration`, `CodeFix`,
+  `Clean`, `DiffSymbol`, `Resx*` and `Razor*` services it had grown, the stale "83-tool surface" reads
+  86, and the docs gate's README checklist names the sections the rewritten README actually has.
 
 ## [0.23.0] - 2026-08-07
 

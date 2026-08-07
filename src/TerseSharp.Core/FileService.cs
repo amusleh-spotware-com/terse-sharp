@@ -252,6 +252,8 @@ public static class FileService
         if (!request.Verbose && IsOutside(path))
             response.Note(OutsideMarker);
 
+        AppendPastEnd(response, range, selection);
+
         foreach (var line in selection.Lines)
             response.Line(line);
 
@@ -259,7 +261,6 @@ public static class FileService
 
         return response.ToString();
     }
-
     private static void AppendContinuation(ResponseBuilder response, string path, LineSelection selection)
     {
         if (selection.CutLine is not 0)
@@ -517,4 +518,14 @@ public static class FileService
     private static string Removed(string path, bool dryRun) => string.Create(
         CultureInfo.InvariantCulture,
         $"write_text {(dryRun ? "dryRun" : "deleted")}  {path}");
+
+    private static void AppendPastEnd(ResponseBuilder response, LineRange range, LineSelection selection)
+    {
+        if (selection.CoveredLines is not 0 || range.Start <= selection.TotalLines)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"startLine={range.Start} is past the last line (total={selection.TotalLines})"));
+    }
 }

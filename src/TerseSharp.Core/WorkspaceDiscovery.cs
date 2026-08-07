@@ -40,12 +40,12 @@ public static class WorkspaceDiscovery
         var found = Under(full).ToArray();
         var response = new ResponseBuilder("load_workspace", "discover " + full);
 
-        response.Summary(Math.Min(found.Length, maxResults), found.Length, "candidates", "a narrower directory");
+        response.Summary(ResultCap.Shown(found.Length, maxResults), found.Length, "candidates", "a narrower directory");
 
         if (found.Length is 0)
             response.Line("no .slnx, .sln, .slnf or .csproj under this directory");
 
-        foreach (var candidate in found.Take(maxResults))
+        foreach (var candidate in found.Capped(maxResults))
             response.Line(PositionFormat.Relative(full, candidate));
 
         return response.ToString();

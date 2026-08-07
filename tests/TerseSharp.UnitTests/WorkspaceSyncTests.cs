@@ -291,9 +291,12 @@ public sealed class WorkspaceSyncTests
     private static string AwkwardPath(TemporaryWorkspace loaded) =>
         Path.Combine(loaded.Files.ProjectDirectory, "Awkward.cs");
 
-    private static async Task<string> TextOfAsync(TemporaryWorkspace loaded)
+    private static Task<string> TextOfAsync(TemporaryWorkspace loaded) =>
+    TextOfAsync(loaded, "OrderService.cs");
+
+    private static async Task<string> TextOfAsync(TemporaryWorkspace loaded, string name)
     {
-        var text = await loaded.Document("OrderService.cs").GetTextAsync(TestContext.Current.CancellationToken);
+        var text = await loaded.Document(name).GetTextAsync(TestContext.Current.CancellationToken);
 
         return text.ToString();
     }
@@ -307,4 +310,124 @@ public sealed class WorkspaceSyncTests
 
     private static string Named(int index) =>
         "Type" + index.ToString(CultureInfo.InvariantCulture) + ".cs";
+
+    private const int DrainRaceRounds = 40;
+
+    private const int RaceAttempts = 200;
+    [Fact]
+    public async Task SyncAsync_ForAWriteLandingDuringTheDrain_StillAbsorbsItOnTheNextSync()
+    {
+        using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        await loaded.MaterialiseAsync(TestContext.Current.CancellationToken);
+        for (var round = 0; round < DrainRaceRounds; round++)
+        {
+            await AppendAsync(loaded.Files.OrderServicePath, Marker("Drained", round));
+            loaded.Sync.Notice(loaded.Files.OrderServicePath);
+            var draining = Task.Run(
+                () => loaded.SyncAsync(null, TestContext.Current.CancellationToken),
+                TestContext.Current.CancellationToken);
+            await RaceAsync(loaded.Files.OrderServicePath, Marker("Raced", round));
+            await DrainedAsync(draining);
+            loaded.Sync.Notice(loaded.Files.OrderServicePath);
+            await loaded.SyncAsync(null, TestContext.Current.CancellationToken);
+            var disk = await File.ReadAllTextAsync(loaded.Files.OrderServicePath, TestContext.Current.CancellationToken);
+            Assert.Equal(disk, await TextOfAsync(loaded));
+        }
+    }
+    private static async Task RaceAsync(string path, string addition)
+    {
+        for (var attempt = 0; attempt < RaceAttempts - 1; attempt++)
+        {
+            try
+            {
+                await AppendAsync(path, addition);
+                return;
+            }
+            catch (IOException)
+            {
+            }
+        }
+
+        await AppendAsync(path, addition);
+    }
+    private static async Task DrainedAsync(Task<bool> draining)
+    {
+        try
+        {
+            await draining;
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    private static readonly string[] Absorbable =
+        ["OrderService.cs", "Order.cs", "OrderBook.cs", "OrderRouter.cs", "Reconciler.cs"];
+
+    [Fact]
+    public async Task SyncAsync_WhenTheDrainFails_ForgetsTheStampsItTook()
+    {
+        using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        await loaded.MaterialiseAsync(TestContext.Current.CancellationToken);
+
+        foreach (var blocked in Absorbable)
+        {
+            var marker = Marker("AbsorbedAfterFailure", Array.IndexOf(Absorbable, blocked));
+            await NoticeAllAsync(loaded, marker);
+
+            using (new FileStream(Sourced(loaded, blocked), FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                await Assert.ThrowsAnyAsync<IOException>(
+                    () => loaded.SyncAsync(null, TestContext.Current.CancellationToken));
+            }
+
+            await SettleAllAsync(loaded);
+
+            foreach (var name in Absorbable)
+                Assert.Contains(marker, await TextOfAsync(loaded, name), StringComparison.Ordinal);
+        }
+    }
+
+    private static string Sourced(TemporaryWorkspace loaded, string name) =>
+        Path.Combine(loaded.Files.ProjectDirectory, name);
+
+    private static async Task NoticeAllAsync(TemporaryWorkspace loaded, string marker)
+    {
+        foreach (var name in Absorbable)
+        {
+            await AppendAsync(Sourced(loaded, name), marker);
+            loaded.Sync.Notice(Sourced(loaded, name));
+        }
+    }
+    private static async Task SettleAllAsync(TemporaryWorkspace loaded)
+    {
+        foreach (var name in Absorbable)
+            loaded.Sync.Notice(Sourced(loaded, name));
+
+        await loaded.SyncAsync(null, TestContext.Current.CancellationToken);
+    }
+    private static string Marker(string kind, int round) =>
+        string.Create(CultureInfo.InvariantCulture, $"// {kind}{round}\n");
+
+    [Fact]
+    public async Task SyncAsync_ForAnExternalEditBeforeTheTextIsMaterialised_StillBumpsCode()
+    {
+        using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        await AppendAsync(loaded.Files.OrderServicePath, Marker("NeverMaterialised", 0));
+        loaded.Sync.Notice(loaded.Files.OrderServicePath);
+        Assert.False(await loaded.SyncAsync(null, TestContext.Current.CancellationToken));
+        Assert.Equal(new WorkspaceGenerations(1, 0, 0, 0), loaded.Sync.Generations);
+        Assert.Contains(Marker("NeverMaterialised", 0), await TextOfAsync(loaded), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SyncAsync_ForAnExternalEditBeforeTheTextIsMaterialised_NeverRewritesTheFile()
+    {
+        using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        await AppendAsync(loaded.Files.OrderServicePath, Marker("UnmaterialisedTouch", 0));
+        var written = File.GetLastWriteTimeUtc(loaded.Files.OrderServicePath);
+        loaded.Sync.Notice(loaded.Files.OrderServicePath);
+        Assert.False(await loaded.SyncAsync(null, TestContext.Current.CancellationToken));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(loaded.Files.OrderServicePath));
+    }
 }

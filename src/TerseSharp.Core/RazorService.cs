@@ -64,9 +64,9 @@ public static class RazorService
         var hits = workspace.Indexes.Razor().Documents.SelectMany(document => Match(workspace, document, query, kind)).ToArray();
         var response = new ResponseBuilder("razor_find", query);
 
-        response.Summary(Math.Min(hits.Length, maxResults), hits.Length, "hits", "kind= or path=");
+        response.Summary(ResultCap.Shown(hits.Length, maxResults), hits.Length, "hits", "kind= or path=");
 
-        foreach (var hit in hits.Take(maxResults))
+        foreach (var hit in hits.Capped(maxResults))
             response.Line(hit);
 
         return Result.Ok(response.ToString());
@@ -94,27 +94,27 @@ public static class RazorService
         var document = context.Document;
         var shown = document.Elements.Where(element => elements || Interesting(element)).ToArray();
         var total = document.Directives.Count + document.Elements.Count;
+        var nodes = ResultCap.Shown(document.Directives.Count + shown.Length, maxResults);
         var response = new ResponseBuilder("razor_outline", context.Relative);
 
         response.Summary(
-            Math.Min(document.Directives.Count + shown.Length, maxResults),
+            nodes,
             total,
             "nodes",
             elements ? "maxResults=" : "maxResults=; plain HTML is hidden, pass elements=true for the whole tree");
 
         response.Note(Header(context));
 
-        foreach (var directive in document.Directives.Take(maxResults))
+        foreach (var directive in document.Directives.Take(nodes))
             response.Line(DirectiveRecord(directive));
 
-        foreach (var element in shown.Take(Math.Max(maxResults - document.Directives.Count, 0)))
+        foreach (var element in shown.Take(Math.Max(nodes - document.Directives.Count, 0)))
             response.Line(ElementRecord(context, element));
 
         Members(context, response);
 
         return response.ToString();
     }
-
     private static bool Interesting(RazorElement element) =>
         element.LooksLikeComponent
         || element.Attributes.Any(attribute => RazorBindingService.KindOf(attribute.Name) is not null);

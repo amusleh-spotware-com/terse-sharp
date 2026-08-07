@@ -299,6 +299,9 @@ directory symlinks — the same set every index uses, so a nested agent worktree
    was clipped it reads `4/17 usages truncated - narrow with <parameter>`. Nothing else is added:
    no "pass verbose=true" hint, no counter that reports a non-event. `verbose=true` restores the old
    shape verbatim — header and `(truncated=…, total=…)` — on every tool that takes it.
+   **A `truncated` count is always real.** When the total lands within 10 % of the cap the whole list
+   is returned instead — `108 files`, never `100/108 files truncated` — so a listing that says it
+   truncated is worth a second, narrower call, and one that does not never is.
 1. **Address a symbol by the name a response printed.** An outline prints `OrderService.Submit`, and
    adds the parameter list (`Reconcile(Order, decimal)`) only where the type overloads that name;
    every tool taking a `symbolId` accepts that, the full documentation id
@@ -346,7 +349,10 @@ directory symlinks — the same set every index uses, so a nested agent worktree
    `outline: get_file_outline path=…` steer. A read your own `startLine`/`endLine` ended says nothing —
    you already know where it stopped. When a **character** budget runs out inside a line you also get
    `line N was cut mid-way`; that is not a `startLine` you can follow, because a line range cannot
-   resume at a character offset — raise `maxChars` and re-read that line.
+   resume at a character offset — raise `maxChars` and re-read that line. A `startLine` beyond the
+   end of the file answers `startLine=N is past the last line (total=T)` rather than an empty
+   payload, so an out-of-range read is never mistaken for an empty file — and `total=T` is the
+   one-call answer to "how long is this file?".
    `list_projects` prints each project's workspace-relative path, so the name it lists and the
    `project=` argument you feed to `build`/`run_tests` come from the same line.
    `workspace_status` prints `mapped=N` **only** when this process is holding analyzer or
@@ -548,3 +554,8 @@ parameter means the argument names were wrong, and the remedy lists the ones the
 
 Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one outcome this server
 exists to prevent.
+
+**Need a call of a tool that actually works?** For the tools whose valid arguments are not derivable
+from the schema — the ten `razor_*` tools and `package_add`/`package_remove` — the `remedy:` of a
+rejected call ends with `example: <a complete, working call>`. Calling one of them with no arguments
+on purpose is a one-call way to get that shape; do not go read a test file for it.

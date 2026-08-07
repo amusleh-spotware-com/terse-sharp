@@ -172,10 +172,10 @@ public static class ResxUsageService
     {
         var response = new ResponseBuilder("resx_usages", key);
 
-        response.Summary(Math.Min(maxResults, usages.Count), usages.Count, "usages", "maxResults=");
+        response.Summary(ResultCap.Shown(usages.Count, maxResults), usages.Count, "usages", "maxResults=");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"composedLookups={composed}{Advisory(usages.Count, composed)}"));
 
-        foreach (var usage in usages.Take(maxResults))
+        foreach (var usage in usages.Capped(maxResults))
             response.Line(Describe(usage));
 
         return response.ToString();

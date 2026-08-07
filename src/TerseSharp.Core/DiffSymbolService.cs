@@ -21,12 +21,12 @@ public static class DiffSymbolService
 
         var response = new ResponseBuilder("diff_symbols", string.Empty);
 
-        response.Summary(Math.Min(records.Count, maxResults), records.Count, "declarations", "path= or maxResults=");
+        response.Summary(ResultCap.Shown(records.Count, maxResults), records.Count, "declarations", "path= or maxResults=");
 
         if (hunks.Count is 0)
             response.Note("the diff carried no hunks; nothing changed in the compared range");
 
-        foreach (var record in records.Take(maxResults))
+        foreach (var record in records.Capped(maxResults))
             response.Line(record);
 
         return response.ToString();

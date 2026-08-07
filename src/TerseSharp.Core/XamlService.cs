@@ -169,10 +169,10 @@ public static class XamlService
         var issues = graph.Files.SelectMany(file => Collect(file, graph)).Concat(unused).ToArray();
         var response = new ResponseBuilder("xaml_validate", "solution");
 
-        response.Summary(Math.Min(maxResults, issues.Length), issues.Length, "issues", "maxResults= or scope=file with path=");
+        response.Summary(ResultCap.Shown(issues.Length, maxResults), issues.Length, "issues", "maxResults= or scope=file with path=");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"scanned={graph.FileCount} files"));
 
-        foreach (var issue in issues.Take(maxResults))
+        foreach (var issue in issues.Capped(maxResults))
             response.Line(issue);
 
         return Result.Ok(response.ToString());
@@ -209,9 +209,9 @@ public static class XamlService
         var hits = graph.Files.SelectMany(file => Found(file, query, kind)).ToArray();
         var response = new ResponseBuilder("xaml_find", query);
 
-        response.Summary(Math.Min(maxResults, hits.Length), hits.Length, "matches", "kind= or maxResults=");
+        response.Summary(ResultCap.Shown(hits.Length, maxResults), hits.Length, "matches", "kind= or maxResults=");
 
-        foreach (var hit in hits.Take(maxResults))
+        foreach (var hit in hits.Capped(maxResults))
             response.Line(hit);
 
         return Result.Ok(response.ToString());

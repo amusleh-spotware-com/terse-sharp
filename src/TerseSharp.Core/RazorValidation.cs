@@ -338,9 +338,9 @@ public static class RazorValidation
 
         var response = new ResponseBuilder("razor_validate", argument);
 
-        response.Summary(Math.Min(findings.Count, maxResults), findings.Count, "findings", "rules=");
+        response.Summary(ResultCap.Shown(findings.Count, maxResults), findings.Count, "findings", "rules=");
 
-        foreach (var finding in findings.Take(maxResults))
+        foreach (var finding in findings.Capped(maxResults))
             response.Line(finding.Render());
 
         return response.ToString();

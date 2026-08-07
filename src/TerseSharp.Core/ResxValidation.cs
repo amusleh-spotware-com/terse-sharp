@@ -236,12 +236,12 @@ public static class ResxValidation
     {
         var response = new ResponseBuilder("resx_validate", scope);
 
-        response.Summary(Math.Min(maxResults, findings.Length), findings.Length, "findings", "rules=");
+        response.Summary(ResultCap.Shown(findings.Length, maxResults), findings.Length, "findings", "rules=");
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"checked={checkedScope.Families} family(ies) rules={string.Join(',', checkedScope.Rules)}"));
 
-        foreach (var finding in findings.Take(maxResults))
+        foreach (var finding in findings.Capped(maxResults))
         {
             response.Line(Describe(finding));
         }

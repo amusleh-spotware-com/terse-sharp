@@ -1,3 +1,7 @@
+using System.Text.Json;
+using ModelContextProtocol.Client;
+using TerseSharp.Server;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -113,4 +117,77 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
 
     private async Task<string[]> Advertised() =>
         [.. (await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken)).Select(tool => tool.Name)];
+
+    [Fact]
+    public async Task EveryWorkedExample_NamesAnAdvertisedToolAndOnlyParametersThatToolDeclares()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var declared = tools.ToDictionary(tool => tool.Name, Parameters, StringComparer.Ordinal);
+        var faults = new List<string>();
+
+        foreach (var name in ToolExamples.Tools)
+        {
+            if (!declared.TryGetValue(name, out var accepted))
+            {
+                faults.Add(name + " is not advertised");
+                continue;
+            }
+
+            var example = ToolExamples.For(name);
+            faults.AddRange(Keys(example, name).Where(key => !accepted.Contains(key)).Select(key => name + " names " + key));
+
+            if (!example.StartsWith(name + " ", StringComparison.Ordinal))
+                faults.Add(name + " does not open with its own tool name");
+        }
+
+        Assert.True(faults.Count is 0, string.Join("; ", faults));
+    }
+
+    [Fact]
+    public async Task EveryToolWithAWorkedExample_CarriesItInTheRemedyOfARejectedCall()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var demanding = tools.Where(tool => Demands(tool) is not 0).Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        var probed = ToolExamples.Tools.Where(demanding.Contains).ToArray();
+        var missing = new List<string>();
+
+        Assert.NotEmpty(probed);
+
+        foreach (var name in probed)
+        {
+            var response = await server.CallAsync(name, []);
+
+            if (!response.Contains("example: " + ToolExamples.For(name), StringComparison.Ordinal))
+                missing.Add(name);
+        }
+
+        Assert.True(
+            missing.Count is 0,
+            "no worked example reached the remedy of: " + string.Join(", ", missing));
+    }
+    private static HashSet<string> Parameters(McpClientTool tool)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        if (tool.ProtocolTool.InputSchema.TryGetProperty("properties", out var properties)
+            && properties.ValueKind is JsonValueKind.Object)
+        {
+            foreach (var property in properties.EnumerateObject())
+                names.Add(property.Name);
+        }
+
+        return names;
+    }
+
+    private static IEnumerable<string> Keys(string example, string tool) => example[(tool.Length + 1)..]
+        .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+        .Where(token => token.Contains('=', StringComparison.Ordinal))
+        .Select(token => token[..token.IndexOf('=', StringComparison.Ordinal)])
+        .Where(key => key.Length > 0 && char.IsLetter(key[0]));
+
+    private static int Demands(McpClientTool tool) =>
+        tool.ProtocolTool.InputSchema.TryGetProperty("required", out var required)
+        && required.ValueKind is JsonValueKind.Array
+            ? required.GetArrayLength()
+            : 0;
 }

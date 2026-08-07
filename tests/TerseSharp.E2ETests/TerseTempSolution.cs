@@ -38,11 +38,17 @@ internal sealed class TerseTempSolution : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await server.StopAsync();
-
-        Delete(Root);
+        try
+        {
+            foreach (var extra in attached)
+                await extra.StopAsync();
+        }
+        finally
+        {
+            await server.StopAsync();
+            Delete(Root);
+        }
     }
-
     private static string[] Arguments(string root, bool watch)
     {
         string[] common =
@@ -87,5 +93,15 @@ internal sealed class TerseTempSolution : IAsyncDisposable
         catch (UnauthorizedAccessException)
         {
         }
+    }
+
+    private readonly List<TerseServerProcess> attached = [];
+
+    public async Task<TerseServerProcess> AttachAsync(bool watch, CancellationToken cancellationToken)
+    {
+        var second = await TerseServerProcess.StartAsync(Root, Arguments(Root, watch), cancellationToken);
+        await second.CallAsync("workspace_status", [], cancellationToken);
+        attached.Add(second);
+        return second;
     }
 }

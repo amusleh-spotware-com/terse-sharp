@@ -37,9 +37,8 @@ internal static class ToolArgumentFilter
             string.Create(
                 CultureInfo.InvariantCulture,
                 $"{request.Params?.Name} rejected the call: {exception.GetType().Name}: {exception.Message}"),
-            Remedy(Required(schema), Accepted(schema)));
+            Remedy(Required(schema), Accepted(schema)) + ToolExamples.Suffix(request.Params?.Name));
     }
-
     private static TerseError Rejected(RequestContext<CallToolRequestParams> request, ArgumentException exception)
     {
         var schema = Schema(request);
@@ -53,9 +52,8 @@ internal static class ToolArgumentFilter
 
         return Errors.Invalid(
             request.Params?.Name + " rejected the call: " + Reason(exception, missing, unrecognized),
-            Remedy(required, accepted));
+            Remedy(required, accepted) + ToolExamples.Suffix(request.Params?.Name));
     }
-
     private static string Reason(ArgumentException exception, string[] missing, string[] unrecognized) =>
         Detail(missing, unrecognized) is { Length: > 0 } detail ? detail : exception.Message;
 

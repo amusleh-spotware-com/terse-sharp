@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace TerseSharp.Server;
 
 public static class Doctor
@@ -6,21 +8,21 @@ public static class Doctor
     {
         var target = workspace ?? Discovered();
         var lines = new List<string>
-        {
-            SdkLine(),
-            Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
-            ClientLine(),
-            await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
-            await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
-            WatcherLine(),
-        };
+{
+    SdkLine(),
+    Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
+    ClientLine(),
+    await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
+    await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
+    WatcherLine(),
+    ProcessLine(),
+};
 
         lines.AddRange(await InstalledLinesAsync(Probed(target), cancellationToken).ConfigureAwait(false));
         lines.Add(await WorkspaceLineAsync(target, cancellationToken).ConfigureAwait(false));
 
         return string.Join("\n", lines);
     }
-
     private static string Probed(string? target)
     {
         if (target is not { Length: > 0 })
@@ -174,5 +176,68 @@ public static class Doctor
             "skill=" + Asset(state.SkillInstalled, state.SkillCurrent) + " guard=" + Asset(state.GuardInstalled, state.GuardCurrent),
             !state.Stale,
             "run: terse install --skill --guard");
+    }
+
+    private const long BytesPerMegabyte = 1024 * 1024;
+    private static readonly string[] ProcessNames = ["terse", "testhost", "testhost.x86"];
+
+    private static string ProcessLine()
+    {
+        var live = Live();
+
+        return live.Length is 0
+            ? Check("processes", "no other terse or testhost process is running", true, string.Empty)
+            : Check(
+                "processes",
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{live.Length} live: {string.Join(", ", live)} - a stale one holds the built binaries, so a build can silently no-op and a test run can report the previous binary's result; stop them and re-run"),
+                true,
+                string.Empty);
+    }
+    private static string[] Live()
+    {
+        var self = Environment.ProcessId;
+        var found = new List<string>();
+
+        foreach (var name in ProcessNames)
+        {
+            foreach (var process in Processes(name))
+            {
+                using (process)
+                {
+                    if (process.Id != self)
+                        found.Add(Sketch(name, process));
+                }
+            }
+        }
+
+        return [.. found];
+    }
+
+    private static Process[] Processes(string name)
+    {
+        try
+        {
+            return Process.GetProcessesByName(name);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or PlatformNotSupportedException or NotSupportedException)
+        {
+            return [];
+        }
+    }
+
+    private static string Sketch(string name, Process process)
+    {
+        try
+        {
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"{name}#{process.Id} {process.WorkingSet64 / BytesPerMegabyte}MB started={process.StartTime.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)}");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or Win32Exception)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"{name}#{process.Id}");
+        }
     }
 }

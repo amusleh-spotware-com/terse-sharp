@@ -233,7 +233,6 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
         Assert.StartsWith("ERROR", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
-
     [Fact]
     public async Task ReadText_WithRepeatedHeadings_NumbersTheAnchorsLikeGitHub()
     {
@@ -306,5 +305,63 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
         var counted = slash < 0 ? summary : summary[(slash + 1)..];
 
         return counted[..counted.IndexOf(' ', StringComparison.Ordinal)];
+    }
+
+    [Fact]
+    public async Task FindFiles_WhenTheOverflowFitsTheSlack_ReturnsTheWholeListInsteadOfASteer()
+    {
+        var full = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "**/*.cs",
+            ["maxResults"] = 500,
+        });
+
+        var total = int.Parse(Total(full), CultureInfo.InvariantCulture);
+        Assert.True(total >= 11, "the fixture needs enough .cs files for a near-miss cap to carry slack");
+
+        var nearMiss = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "**/*.cs",
+            ["maxResults"] = total - 1,
+        });
+
+        Assert.DoesNotContain("truncated", nearMiss, StringComparison.Ordinal);
+        Assert.StartsWith(
+            total.ToString(CultureInfo.InvariantCulture) + " files",
+            nearMiss,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WhenTheOverflowExceedsTheSlack_StillTruncatesAndSteers()
+    {
+        var full = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "**/*.cs",
+            ["maxResults"] = 500,
+        });
+
+        var total = int.Parse(Total(full), CultureInfo.InvariantCulture);
+
+        var capped = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "**/*.cs",
+            ["maxResults"] = total / 2,
+        });
+
+        Assert.Contains(" truncated", capped, StringComparison.Ordinal);
+        Assert.Equal(Total(full), Total(capped));
+    }
+
+    [Fact]
+    public async Task ReadText_WithAStartLinePastTheEnd_SaysSoAndNamesTheTotal()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["startLine"] = 9000,
+        });
+
+        Assert.Contains("startLine=9000 is past the last line (total=", text, StringComparison.Ordinal);
     }
 }

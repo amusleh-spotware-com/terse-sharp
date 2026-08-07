@@ -40,7 +40,7 @@ public static class ReferenceService
             .ConfigureAwait(false);
 
         var found = implementations.ToArray();
-        var shown = Math.Min(maxResults, found.Length);
+        var shown = ResultCap.Shown(found.Length, maxResults);
         var response = new ResponseBuilder("find_implementations", SymbolId.From(symbol).Value);
 
         response.Summary(shown, found.Length, "implementations", "a more specific symbol, or raise maxResults=");
@@ -74,7 +74,7 @@ public static class ReferenceService
         bool containers,
         CancellationToken cancellationToken)
     {
-        var shown = Math.Min(maxResults, locations.Length);
+        var shown = ResultCap.Shown(locations.Length, maxResults);
         var files = locations
             .Select(location => PositionFormat.Source(location.Location).Path)
             .Concat(razor.Select(usage => usage.Path))

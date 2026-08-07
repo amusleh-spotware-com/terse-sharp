@@ -366,4 +366,27 @@ public sealed class WorkspaceSyncE2ETests
             () => solution.CallAsync("find_files", new() { ["glob"] = "**/*.md" }),
             "0 files"));
     }
+
+    private const string SecondOfTwo = "\npublic sealed class SecondOfTwoMarkerType;\n";
+
+    [Fact]
+    public async Task ASecondServerOverTheSameRoot_ConvergesOnTwoWritesInQuickSuccession()
+    {
+        await using var solution = await StartAsync(watch: true);
+        var second = await solution.AttachAsync(watch: true, TestContext.Current.CancellationToken);
+        await second.CallAsync(
+            "get_symbol_source",
+            new() { ["symbolId"] = "OrderService.Submit" },
+            TestContext.Current.CancellationToken);
+        await ReplaceSubmitBodyAsync(solution, "FirstOfTwoMarker");
+        await AppendAsync(solution.OrderServicePath, SecondOfTwo);
+        Assert.True(
+            await PollAsync(
+                () => second.CallAsync(
+                    "search_symbols",
+                    new() { ["query"] = "SecondOfTwoMarkerType" },
+                    TestContext.Current.CancellationToken),
+                "SecondOfTwoMarkerType"),
+            "the second server never converged on the newer of two writes made in quick succession");
+    }
 }

@@ -223,23 +223,24 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     }
 
     private async Task<List<string>> AbsorbAsync(
-        LoadedWorkspace workspace,
-        List<string> code,
-        HashSet<ChangeKind> kinds,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    List<string> code,
+    HashSet<ChangeKind> kinds,
+    CancellationToken cancellationToken)
     {
         var changed = new List<string>();
-
         if (code.Count is 0 || Reloading)
             return changed;
 
         var updated = workspace.Solution;
-
         foreach (var path in code)
             updated = await MergeAsync(updated, path, changed, cancellationToken).ConfigureAwait(false);
 
         if (changed.Count is 0)
             return changed;
+
+        if (Shifted(changed))
+            return [];
 
         if (await workspace.AdoptAsync(updated, cancellationToken).ConfigureAwait(false))
             kinds.Add(ChangeKind.Code);
@@ -256,18 +257,44 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         CancellationToken cancellationToken)
     {
         var stamp = FileStamp.Of(path);
-
         if (stamps.TryGetValue(path, out var known) && known == stamp)
             return solution;
 
         if (Find(solution, path) is not { } document)
+        {
+            stamps[path] = stamp;
             return Absent(solution, path, stamp);
+        }
 
-        return stamp == FileStamp.Missing
-            ? Rebuild(solution)
-            : await ReplaceAsync(document, changed, cancellationToken).ConfigureAwait(false);
+        if (stamp == FileStamp.Missing)
+            return Rebuild(solution);
+
+        var merged = await ReplaceAsync(document, changed, cancellationToken).ConfigureAwait(false);
+        if (FileStamp.Of(path) == stamp)
+            stamps[path] = stamp;
+
+        return merged;
     }
+    private static async Task<Solution> ReplaceAsync(
+        Document document,
+        List<string> changed,
+        CancellationToken cancellationToken)
+    {
+        var materialised = document.TryGetText(out _);
+        var text = Read(document.FilePath!);
+        var current = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
 
+        if (current.ContentEquals(text))
+        {
+            if (!materialised)
+                changed.Add(document.FilePath!);
+
+            return document.Project.Solution;
+        }
+
+        changed.Add(document.FilePath!);
+        return document.Project.Solution.WithDocumentText(document.Id, text);
+    }
     private Solution Absent(Solution solution, string path, FileStamp stamp) =>
         stamp != FileStamp.Missing && Attributable(solution, path) ? Rebuild(solution) : solution;
 
@@ -277,41 +304,20 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         IReadOnlyList<string> changed,
         HashSet<ChangeKind> kinds)
     {
-        foreach (var path in paths)
+        foreach (var path in paths.Where(path => Classify(path) is not ChangeKind.Code))
             stamps[path] = FileStamp.Of(path);
-
         workspace.DropSnapshots(changed);
-
         lock (generationGate)
         {
             foreach (var kind in kinds.Where(Countable))
                 generations = generations.Bump(kind);
         }
     }
-
-    private static async Task<Solution> ReplaceAsync(
-        Document document,
-        List<string> changed,
-        CancellationToken cancellationToken)
-    {
-        var text = Read(document.FilePath!);
-        var current = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-
-        if (current.ContentEquals(text))
-            return document.Project.Solution;
-
-        changed.Add(document.FilePath!);
-
-        return document.Project.Solution.WithDocumentText(document.Id, text);
-    }
-
     private static SourceText Read(string path)
     {
         using var stream = File.OpenRead(path);
-
         return SourceText.From(stream);
     }
-
     private static Document? Find(Solution solution, string path) => solution
         .GetDocumentIdsWithFilePath(path)
         .Select(solution.GetDocument)
@@ -330,9 +336,11 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     private void Restore(string[] paths)
     {
         foreach (var path in paths)
+        {
+            stamps.TryRemove(path, out _);
             pending[path] = 0;
+        }
     }
-
     private bool Countable(ChangeKind kind) =>
         kind is ChangeKind.Xaml or ChangeKind.Resx or ChangeKind.Razor || !Reloading;
 
@@ -359,4 +367,21 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
 
         Bumped(ChangeKind.Files);
     }
+
+    private bool Shifted(List<string> changed)
+    {
+        if (changed.All(Stable))
+            return false;
+
+        foreach (var path in changed)
+        {
+            stamps.TryRemove(path, out _);
+            pending[path] = 0;
+        }
+
+        return true;
+    }
+
+    private bool Stable(string path) =>
+        stamps.TryGetValue(path, out var stamp) && stamp == FileStamp.Of(path);
 }

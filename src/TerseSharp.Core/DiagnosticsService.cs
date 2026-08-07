@@ -54,9 +54,9 @@ public static class DiagnosticsService
 
         var response = new ResponseBuilder("get_diagnostics", path ?? "solution");
 
-        response.Summary(Math.Min(maxResults, deduplicated.Length), deduplicated.Length, "diagnostics");
+        response.Summary(ResultCap.Shown(deduplicated.Length, maxResults), deduplicated.Length, "diagnostics");
 
-        foreach (var entry in deduplicated.Take(maxResults))
+        foreach (var entry in deduplicated.Capped(maxResults))
             response.Line(entry.Count is 1 ? entry.Text : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}"));
 
         return response.ToString();

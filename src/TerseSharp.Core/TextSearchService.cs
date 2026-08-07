@@ -91,9 +91,9 @@ public static class TextSearchService
         var files = Matched(workspace, glob);
         var response = new ResponseBuilder("find_files", glob);
 
-        response.Summary(Math.Min(files.Count, maxResults), files.Count, "files", "a narrower glob= or maxResults=");
+        response.Summary(ResultCap.Shown(files.Count, maxResults), files.Count, "files", "a narrower glob= or maxResults=");
 
-        foreach (var file in files.Take(maxResults))
+        foreach (var file in files.Capped(maxResults))
             response.Line(file.RelativePath);
 
         return response.ToString();
@@ -199,7 +199,6 @@ public static class TextSearchService
     private static string Render(TextSearchRequest request, FileHits[] perFile)
     {
         var response = new ResponseBuilder(request.Tool, request.Pattern);
-        var shown = new List<string>(Math.Min(request.MaxResults, 512));
         var total = 0;
         var skipped = 0;
 
@@ -207,8 +206,13 @@ public static class TextSearchService
         {
             total += file.Total;
             skipped += file.Skipped;
-            shown.AddRange(file.Hits.Take(Math.Max(0, request.MaxResults - shown.Count)));
         }
+
+        var cap = ResultCap.Shown(total, request.MaxResults);
+        var shown = new List<string>(Math.Min(cap, 512));
+
+        foreach (var file in perFile)
+            shown.AddRange(file.Hits.Take(Math.Max(0, cap - shown.Count)));
 
         var tally = new SearchTally(shown.Count, total, skipped);
 
@@ -216,7 +220,6 @@ public static class TextSearchService
             ? Write(response, Collapsed(shown), request, tally)
             : Write(response, shown, request, tally);
     }
-
     private readonly record struct SearchTally(int Shown, int Total, int Skipped);
 
     private static List<string> Collapsed(List<string> shown)

@@ -14,12 +14,12 @@ public static class RegistrationService
         var found = index.Registrations.Where(registration => Matches(registration, query)).ToArray();
         var response = new ResponseBuilder("find_registrations", query);
 
-        response.Summary(Math.Min(maxResults, found.Length), found.Length, "registrations", "a more specific type name");
+        response.Summary(ResultCap.Shown(found.Length, maxResults), found.Length, "registrations", "a more specific type name");
 
         if (found.Length is 0)
             response.Note("no AddSingleton/AddScoped/AddTransient call mentions this type; it may be registered by assembly scanning, by a container module, or not at all");
 
-        foreach (var registration in found.Take(maxResults))
+        foreach (var registration in found.Capped(maxResults))
             response.Line(Describe(registration));
 
         return response.ToString();
@@ -36,20 +36,19 @@ public static class RegistrationService
         var response = new ResponseBuilder("list_endpoints", "solution");
 
         response.Summary(
-            Math.Min(maxResults, found.Count) + routes.Count,
+            ResultCap.Shown(found.Count, maxResults) + ResultCap.Shown(routes.Count, maxResults),
             found.Count + routes.Count,
             "endpoint registrations",
             "maxResults=");
 
-        foreach (var route in routes.Take(maxResults))
+        foreach (var route in routes.Capped(maxResults))
             response.Line(route);
 
-        foreach (var registration in found.Take(maxResults))
+        foreach (var registration in found.Capped(maxResults))
             response.Line(Describe(registration));
 
         return response.ToString();
     }
-
     private static bool Matches(ServiceRegistration registration, string query) =>
         query.Length is 0 || registration.Text.Contains(query, StringComparison.OrdinalIgnoreCase);
 

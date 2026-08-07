@@ -12,12 +12,12 @@ public static class XamlLocalization
         var uids = graph.Uids.ToArray();
         var response = new ResponseBuilder("xaml_localization", "solution");
 
-        response.Summary(Math.Min(maxResults, uids.Length), uids.Length, "x:Uid declarations", "maxResults=");
+        response.Summary(ResultCap.Shown(uids.Length, maxResults), uids.Length, "x:Uid declarations", "maxResults=");
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"resourceFiles={index.Families.Sum(family => family.Files.Count())} entries={entries.Count}"));
 
-        foreach (var uid in uids.Take(maxResults))
+        foreach (var uid in uids.Capped(maxResults))
             response.Line(Describe(uid, entries));
 
         return Result.Ok(response.ToString());
