@@ -728,6 +728,13 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
   working note into a release commit, and one commit did not contain the edit claimed for it because a
   parallel session's work landed in between. Stage by path, then `git show --stat HEAD` before saying
   what shipped.
+- **Never assert that the workspace document already agrees with disk — synchronise first.** An E2E
+  test wrote `OrderService.cs`'s own content back and expected `0 files changed`. Green on ubuntu and
+  windows, red on macOS: a preceding test mutates and restores that file, and FSEvents had not yet
+  delivered the restore, so the workspace still held the mutated text and the write was a real change.
+  The writers report their own change without waiting on a watcher, so **write once to synchronise,
+  then assert on the second call.** The same applies to any test that mutates a shared fixture file:
+  restore **both** the content and the mtime, or `analyze changed=true` in a later test sees your file.
 - **A test the fixture cannot fail is not coverage.** Dialect detection matched strings that occur in
   no real markup, so every file reported `dialect=wpf` and no test could fail — there was no non-WPF
   fixture. Overload selection was untested because the fixture had no overloads. A `find_usages` format
