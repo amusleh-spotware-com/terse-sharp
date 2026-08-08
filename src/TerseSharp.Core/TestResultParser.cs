@@ -127,6 +127,14 @@ public static partial class TestResultParser
     }
 
     private static string ProjectName(XElement run, XElement[] results, string path) => run.Descendants(Trx + "TestMethod").Attributes("codeBase").Select(attribute => attribute.Value).FirstOrDefault(Named) is { } assembly
-    ? Path.GetFileNameWithoutExtension(assembly.AsSpan()).ToString()
-    : Namespaced(results) ?? Path.GetFileNameWithoutExtension(path.AsSpan()).ToString();
+    ? AssemblyName(assembly)
+    : Namespaced(results) ?? AssemblyName(path);
+
+    private static string AssemblyName(ReadOnlySpan<char> path)
+    {
+        var name = path[(path.LastIndexOfAny('/', '\\') + 1)..];
+        var dot = name.LastIndexOf('.');
+
+        return dot > 0 ? name[..dot].ToString() : name.ToString();
+    }
 }

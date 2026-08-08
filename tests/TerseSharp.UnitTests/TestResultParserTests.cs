@@ -186,12 +186,14 @@ public sealed class TestResultParserTests
         Assert.Equal(report.DurationMs, report.Projects.Sum(project => project.DurationMs));
     }
 
-    [Fact]
-    public void Parse_AReportCarryingACodeBase_NamesTheTestAssembly()
+    [Theory]
+    [InlineData("xunit-vstest.trx")]
+    [InlineData("posix-codebase.trx")]
+    public void Parse_AReportCarryingACodeBase_NamesTheTestAssemblyWhicheverHostWroteThePath(string report)
     {
-        var report = TestResultParser.Parse([Fixtures.Trx("xunit-vstest.trx")], Fixtures.TrxRoot);
+        var parsed = TestResultParser.Parse([Fixtures.Trx(report)], Fixtures.TrxRoot);
 
-        Assert.Equal("Fixture.Trading.Tests", Assert.Single(report.Projects).Project);
+        Assert.Equal("Fixture.Trading.Tests", Assert.Single(parsed.Projects).Project);
     }
 
     [Fact]

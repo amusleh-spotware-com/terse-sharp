@@ -41,7 +41,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `query`; the blank-glob remedy now names all three spellings. (I131)
 - **`run_tests` reports per-project counts on a multi-project run.** The green one-liner and the full
   report gain `Name:total/durationMs` per project, so "which tier is slow" no longer costs a second
-  full run. A single-project run is byte-for-byte unchanged. (I125)
+  full run. A single-project run is byte-for-byte unchanged. The assembly name is split from the
+  `.trx`'s `codeBase` on both separators rather than by the host's `Path` API, because a `.trx` is
+  written by whichever machine ran the tests. (I125)
 - **`diff_symbols` ends with the exact `diff_text path=…` call** for the hunks it could only map
   `HEURISTIC`, capped at three paths. (I126)
 
