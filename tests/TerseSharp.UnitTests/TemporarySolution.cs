@@ -33,12 +33,14 @@ public sealed class TemporarySolution : IDisposable
     {
         Directory.CreateDirectory(destination);
 
-        foreach (var file in Directory.EnumerateFiles(source))
+        foreach (var file in Directory.EnumerateFiles(source).Where(Durable))
             CopyFile(file, Path.Combine(destination, Path.GetFileName(file)));
 
         foreach (var directory in Directory.EnumerateDirectories(source).Where(Copyable))
             Copy(directory, Path.Combine(destination, Path.GetFileName(directory)));
     }
+
+    private static bool Durable(string file) => !TerseSharp.Core.WorkspaceFiles.IsTemporary(file);
 
     private static void CopyFile(string file, string destination)
     {
@@ -47,6 +49,9 @@ public sealed class TemporarySolution : IDisposable
             File.Copy(file, destination);
         }
         catch (FileNotFoundException)
+        {
+        }
+        catch (IOException) when (!File.Exists(file))
         {
         }
     }

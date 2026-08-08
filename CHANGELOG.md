@@ -98,7 +98,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   attempts and said only that it gave up; both loops now run against a wall-clock budget and name the
   attempt count, the elapsed time and the last response. The 17 MB `search_text` test waits for the file
   to reach the workspace file index before asserting, and the `resx_set` entries test asserts the tool
-  reported a write before reading the file. (I121)
+  reported a write before reading the file. Separately, `TemporarySolution` no longer copies
+  `AtomicWrite`'s transient `*.terse-<pid>.tmp` files out of the shared fixture — it reuses the
+  product's own `WorkspaceFiles.IsTemporary` — which is what made a macOS CI leg die with
+  `The process cannot access the file … Scratch.fr.resx.terse-5083.tmp` on a change that touched only
+  a markdown file. (I121)
 
 ## [0.24.0] - 2026-08-07
 
