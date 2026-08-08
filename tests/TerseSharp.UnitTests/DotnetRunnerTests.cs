@@ -230,4 +230,30 @@ public sealed class DotnetRunnerTests
         Assert.DoesNotContain("CS0169", text, StringComparison.Ordinal);
         Assert.Contains("warnings=1 hidden", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void PerProject_OnASingleProjectRun_AddsNothingToTheGreenOneLiner()
+    {
+        var report = TerseSharp.Core.TestRunReport.Empty with
+        {
+            Projects = [new TerseSharp.Core.TestProjectSummary("Only.Tests", 3, 0, 0, 3, 12)],
+        };
+
+        Assert.Equal(string.Empty, DotnetRunner.PerProject(report));
+    }
+
+    [Fact]
+    public void PerProject_OnAMultiProjectRun_NamesEveryProjectWithItsOwnCountAndDuration()
+    {
+        var report = TerseSharp.Core.TestRunReport.Empty with
+        {
+            Projects =
+            [
+                new TerseSharp.Core.TestProjectSummary("TerseSharp.UnitTests", 310, 0, 0, 310, 12043),
+            new TerseSharp.Core.TestProjectSummary("TerseSharp.E2ETests", 168, 0, 0, 168, 110328),
+        ],
+        };
+
+        Assert.Equal("  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms", DotnetRunner.PerProject(report));
+    }
 }

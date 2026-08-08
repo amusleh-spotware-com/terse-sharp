@@ -143,4 +143,6 @@ public static class SymbolReference
         miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
 
     public static string Simple(ISymbol symbol) => symbol.ToDisplayString(Named);
+
+    public static string Unescaped(string text) => text.Contains('&', StringComparison.Ordinal) ? System.Net.WebUtility.HtmlDecode(text) : text;
 }

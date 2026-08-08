@@ -7,12 +7,13 @@ namespace TerseSharp.Core;
 public static class OutlineService
 {
     public static async Task<Result<string>> FileAsync(
-        LoadedWorkspace workspace,
-        string path,
-        bool signatures,
-        string ids,
-        bool usings,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    string path,
+    bool signatures,
+    string ids,
+    bool usings,
+    CancellationToken cancellationToken,
+    bool parameterNames = true)
     {
         var document = DocumentLookup.Find(workspace, path);
 
@@ -29,7 +30,7 @@ public static class OutlineService
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
         var declarations = Declarations(root);
-        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null);
+        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames);
 
         return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
             ? note
@@ -37,11 +38,12 @@ public static class OutlineService
     }
 
     public static async Task<Result<string>> TypeAsync(
-        LoadedWorkspace workspace,
-        ISymbol symbol,
-        bool signatures,
-        string ids,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    ISymbol symbol,
+    bool signatures,
+    string ids,
+    CancellationToken cancellationToken,
+    bool parameterNames = true)
     {
         if (Rejected(ids) is { } refusal)
             return refusal;
@@ -59,7 +61,7 @@ public static class OutlineService
 
         return model is null || node is not MemberDeclarationSyntax declaration || !IsTypeDeclaration(declaration)
             ? Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []))
-            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, new OutlineFormat(signatures, ids, null)));
+            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, new OutlineFormat(signatures, ids, null, parameterNames)));
     }
 
     private static Result<string>? Rejected(string ids) =>
@@ -126,11 +128,11 @@ public static class OutlineService
     };
 
     private static void AppendMember(
-        ResponseBuilder response,
-        MemberDeclarationSyntax member,
-        SemanticModel model,
-        OutlineFormat format,
-        IReadOnlySet<string> overloaded)
+    ResponseBuilder response,
+    MemberDeclarationSyntax member,
+    SemanticModel model,
+    OutlineFormat format,
+    IReadOnlySet<string> overloaded)
     {
         var symbol = model.GetDeclaredSymbol(member);
 
@@ -139,8 +141,12 @@ public static class OutlineService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"  {Reference(symbol, format.Ids, overloaded)}  {Signature(symbol, format.Signatures)} :{PositionFormat.LineRange(member)}"));
+            $"  {Reference(symbol, format.Ids, overloaded)}  {Signature(symbol, format)} :{PositionFormat.LineRange(member)}"));
     }
+
+    private static string Signature(ISymbol symbol, OutlineFormat format) => format.Signatures
+        ? string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol, format.ParameterNames)} ")
+        : string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} ");
 
     private static string Reference(ISymbol symbol, string ids, IReadOnlySet<string> overloaded)
     {
@@ -165,10 +171,6 @@ public static class OutlineService
 
         return repeated;
     }
-
-    private static string Signature(ISymbol symbol, bool signatures) => signatures
-        ? string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)} ")
-        : string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} ");
     private static string Located(GlobalStatementSyntax statement)
     {
         var span = statement.SyntaxTree.GetLineSpan(statement.Span);
@@ -210,5 +212,27 @@ public static class OutlineService
             directive.Alias is { } alias ? alias.Name.Identifier.ValueText + " = " : string.Empty,
             directive.NamespaceOrType?.ToString() ?? string.Empty);
 
-    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings);
+    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true);
+
+    private const string TextSteer =
+        "NOTE this is the outline, not the file text - a whole-file .cs read costs about three times as much and is almost never the question."
+        + " get_symbol_source symbolId=<an id above> for one member, get_symbol_source symbolIds=[...] for several, read_text verbose=true for the raw text.";
+
+    public static async Task<Result<string>> SteeredAsync(
+        LoadedWorkspace workspace,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var outline = await FileAsync(workspace, path, signatures: true, "short", usings: false, cancellationToken).ConfigureAwait(false);
+        return outline.IsOk ? Result.Ok(outline.Value! + "\n" + TextSteer) : outline;
+    }
+
+    public static Task<Result<string>> OrTextAsync(
+        LoadedWorkspace workspace,
+        string path,
+        FileService.ReadRequest request,
+        CancellationToken cancellationToken) =>
+        DocumentLookup.Find(workspace, path) is null
+            ? FileService.ReadTextAsync(workspace, path, request, cancellationToken)
+            : SteeredAsync(workspace, path, cancellationToken);
 }

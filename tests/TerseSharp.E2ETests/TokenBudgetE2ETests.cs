@@ -214,19 +214,23 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     [Fact]
     public async Task ReadText_OnTheWidestFile_NumbersOnlyTheLinesThatBreakTheSequence()
     {
-        var quiet = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+        var quiet = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["startLine"] = 1,
+        });
         var loud = await server.CallAsync("read_text", new()
         {
             ["path"] = "src/Fixture.Trading/OrderBook.cs",
             ["verbose"] = true,
         });
-
+        Assert.True(Gutters(quiet) > 0, Report("read_text", quiet));
         Assert.True(Gutters(quiet) * 2 < Gutters(loud), Report("read_text", quiet));
         Assert.True(Tokens(quiet) * 10 < Tokens(loud) * 9, Report("read_text", quiet, loud));
     }
 
     [Fact]
-    public async Task GetSymbolSource_OnTheWidestMember_IsDedentedAndBlankFree()
+    public async Task GetSymbolSource_OnTheWidestMember_IsDedentedWithoutRewritingTheLines()
     {
         var quiet = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderBook.TotalVolume" });
         var loud = await server.CallAsync("get_symbol_source", new()
@@ -235,7 +239,6 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             ["verbose"] = true,
         });
 
-        Assert.DoesNotContain("\n\n", quiet, StringComparison.Ordinal);
         Assert.Contains("\n{", quiet, StringComparison.Ordinal);
         Assert.Contains("\n    {", loud, StringComparison.Ordinal);
         Assert.True(Tokens(quiet) < Tokens(loud), Report("get_symbol_source", quiet, loud));
@@ -374,9 +377,13 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             ["path"] = "src/Fixture.Trading/OrderBook.cs",
             ["maxLines"] = 3,
         });
-        var whole = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
-
+        var whole = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["startLine"] = 1,
+        });
         Assert.Equal(2, Lines(clipped) - 3 - 1);
+        Assert.Contains("next: startLine=", clipped, StringComparison.Ordinal);
         Assert.DoesNotContain("next: startLine=", whole, StringComparison.Ordinal);
     }
 

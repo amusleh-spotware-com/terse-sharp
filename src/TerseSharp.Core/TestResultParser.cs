@@ -23,18 +23,21 @@ public static partial class TestResultParser
     {
         if (Load(path)?.Root is not { } run)
             return TestRunReport.Empty;
-
         var results = run.Descendants(Trx + "Results").Elements(Trx + "UnitTestResult").ToArray();
-
-        return new TestRunReport(
-            results.Count(result => Outcome(result) is "Passed"),
-            results.Count(result => Outcome(result) is "Failed"),
-            results.Count(result => Outcome(result) is "NotExecuted"),
-            results.Length,
-            results.Sum(Duration),
-            Failures(results, workspaceRoot),
-            Passed(results));
+        var passed = results.Count(result => Outcome(result) is "Passed");
+        var failed = results.Count(result => Outcome(result) is "Failed");
+        var skipped = results.Count(result => Outcome(result) is "NotExecuted");
+        var duration = results.Sum(Duration);
+        return new TestRunReport(passed, failed, skipped, results.Length, duration, Failures(results, workspaceRoot), Passed(results))
+        {
+            Projects = results.Length is 0
+                ? []
+                : [new TestProjectSummary(ProjectName(run, results, path), passed, failed, skipped, results.Length, duration)],
+        };
     }
+
+
+    private static bool Named(string value) => value.Length > 0;
 
     private static XDocument? Load(string path)
     {
@@ -102,4 +105,28 @@ public static partial class TestResultParser
 
     [GeneratedRegex(@"\sin\s(?<file>[^\r\n]+):line\s(?<line>\d+)")]
     private static partial Regex FrameLine();
+
+    private static int CommonLength(ReadOnlySpan<char> left, ReadOnlySpan<char> right)
+    {
+        var limit = Math.Min(left.Length, right.Length);
+        var index = 0;
+        while (index < limit && left[index] == right[index])
+            index++;
+        return index;
+    }
+
+    private static string? Namespaced(XElement[] results)
+    {
+        if (results.Length is 0)
+            return null;
+        var shared = Value(results[0], "testName").AsSpan();
+        foreach (var result in results)
+            shared = shared[..CommonLength(shared, Value(result, "testName"))];
+        var cut = shared.LastIndexOf('.');
+        return cut > 0 ? shared[..cut].ToString() : null;
+    }
+
+    private static string ProjectName(XElement run, XElement[] results, string path) => run.Descendants(Trx + "TestMethod").Attributes("codeBase").Select(attribute => attribute.Value).FirstOrDefault(Named) is { } assembly
+    ? Path.GetFileNameWithoutExtension(assembly.AsSpan()).ToString()
+    : Namespaced(results) ?? Path.GetFileNameWithoutExtension(path.AsSpan()).ToString();
 }

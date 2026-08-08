@@ -200,11 +200,15 @@ verbatim only when the tool passes `Verbose(true)`**:
   `get_symbol_source` of the constant that defines it — was silently rewritten. **A record's own text
   is never edited to save characters.**
 
-`TextCompressor.Source` dedents a source payload, drops its blank lines and strips trailing
-whitespace — but only when the payload holds no `"""` or `@"` literal, whose blank lines and trailing
-spaces are values, not layout. `read_text` prints the `N: ` gutter only where the numbering jumps, and
-its summary counts every line the range **covered**, so a blank line dropped for compression never
-makes a complete read report itself `truncated`. **Every path in a response is workspace-relative**
+`TextCompressor.Source` **only dedents** a source payload. It used to drop blank lines and strip
+trailing whitespace behind a `HasMultilineLiteral` guard; the squeeze was measured at 104 tokens of
+308 980 (0.03 %) across this repo's 283 `.cs` files — BPE already folds `\n\n` — and it was the one
+branch that rewrote payload text and could corrupt a raw-string literal, so it is gone. The dedent,
+worth 18–31 % at member scope, stays. `read_text` prints the `N: ` gutter only where the numbering
+jumps, and its summary counts every line the range **covered**, so a compressed read never reports
+itself `truncated`. **A `.cs` path asked for whole answers `get_file_outline`'s payload plus a steer,
+not the file text** — `verbose=true`, a line range, `tail` or `section` opts back into the text, and a
+`.cs` file that is not a workspace document falls through to the text unchanged. **Every path in a response is workspace-relative**
 (`PositionFormat.Relative`), whole and directly re-usable as an argument — path prefixes are never
 folded across records; only a file outside the workspace root is printed in full.
 

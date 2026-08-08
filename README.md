@@ -72,6 +72,7 @@ adds one line to the next tool response. `TERSE_UPDATE=0` turns it off.
 | Question | Built-in tools | TerseSharp | |
 |---|---|---|---|
 | What's on this 2,000-line type? | `Read` → **~6,000 tok** | `get_type_outline` → **~450 tok** | **13×** |
+| Read a whole `.cs` file | `Read` → the entire text | `read_text` answers the **outline** unless you ask for the text | **3×** |
 | Who calls this method? | `Grep` + follow-ups → **~4,000 tok** | `find_usages` → **~200 tok** | **20×** |
 | Rename across the solution | **~5,000 tok**, misses the interface | `rename_symbol` → **~150 tok**, correct | **30×** |
 | Why is the build red? | **~8,000 tok** of MSBuild spew | `build` → **~600 tok** | **13×** |
@@ -83,7 +84,11 @@ adds one line to the next tool response. `TERSE_UPDATE=0` turns it off.
 - 🧠 **Semantic, never textual.** Real references, not string matches — every record tagged `EXACT` or
   `HEURISTIC`, so you always know what you're trusting.
 - 🛡️ **Compile-gated edits.** An edit that introduces a compile error is rolled back before the agent
-  reports it done, and `undo_last_change` reverses the last one.
+  reports it done, and `undo_last_change` reverses the last one. `replace_symbol` takes a whole batch
+  of edits across files, so a signature change lands **with** the callers it breaks.
+- 🧾 **No silently-ignored arguments.** A parameter a tool doesn't declare is refused by name, with
+  every accepted spelling — a listing that quietly dropped your `maxResults` is a wrong answer the
+  agent can't detect.
 - 🔄 **Always fresh.** A file you just created, or an edit from your IDE, is already in the answer.
 - 🚫 **Never guesses.** Where it can't prove an answer it says so — a false positive costs an agent
   more than no answer.

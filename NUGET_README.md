@@ -49,6 +49,7 @@ Prefer to configure MCP by hand:
 | Question | Built-in tools | TerseSharp | |
 | --- | --- | --- | --- |
 | What's on this 2,000-line type? | `Read` → **~6,000 tokens** | `get_type_outline` → **~450** | **13×** |
+| Read a whole `.cs` file | `Read` → the entire text | `read_text` answers the **outline** unless you ask for the text | **3×** |
 | Who calls this method? | `Grep` + follow-up reads → **~4,000** | `find_usages` → **~200** | **20×** |
 | Rename it across the solution | ~5,000 tokens, **misses the interface** | `rename_symbol` → **~150**, correct | **30×** |
 | Why is the build red? | **~8,000 tokens** of MSBuild spew | `build` → **~600** | **13×** |
@@ -60,7 +61,11 @@ Asserted by a token-budget suite in CI on every commit, not estimated.
 - **Semantic, never textual.** Real references, not string matches — every record tagged `EXACT` or
   `HEURISTIC`, so you always know what you're trusting.
 - **Compile-gated edits.** An edit that introduces a compile error is rolled back before the agent
-  reports it done, and `undo_last_change` reverses the last one.
+  reports it done, and `undo_last_change` reverses the last one. `replace_symbol` takes a whole batch
+  of edits across files, so a signature change lands **with** the callers it breaks.
+- **No silently-ignored arguments.** A parameter a tool doesn't declare is refused by name, with every
+  accepted spelling — a listing that quietly dropped your `maxResults` is a wrong answer the agent
+  can't detect.
 - **Always fresh.** A file you just created, or an edit from your IDE, is already in the answer.
 - **Never guesses.** Where it can't prove an answer it says so — a false positive costs an agent more
   than no answer.

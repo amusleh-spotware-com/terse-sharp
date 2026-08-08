@@ -114,7 +114,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
 
             Assert.Contains(Probe, everything, StringComparison.Ordinal);
             Assert.DoesNotContain(Probe, scoped, StringComparison.Ordinal);
-            Assert.Contains("0 files", scoped, StringComparison.Ordinal);
+            Assert.All(Records(scoped), record => Assert.StartsWith("src/", record, StringComparison.Ordinal));
             Assert.Contains(Probe, named, StringComparison.Ordinal);
             Assert.Contains("1 files", named, StringComparison.Ordinal);
         }
@@ -123,6 +123,30 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+    [Fact]
+    public async Task DiffSymbols_WithAHunkNoDeclarationContains_NamesTheExactDiffTextCallForThatPath()
+    {
+        const string Probe = "appsettings.json";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, Probe);
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var written = File.GetLastWriteTimeUtc(path);
+        try
+        {
+            await File.WriteAllTextAsync(path, original.Replace("100", "250", StringComparison.Ordinal), TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("diff_symbols", new() { ["path"] = Probe });
+
+            Assert.Contains("HEURISTIC", text, StringComparison.Ordinal);
+            Assert.Contains("diff_text path=" + Probe, text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, original, CancellationToken.None);
+            File.SetLastWriteTimeUtc(path, written);
+        }
+    }
+    private static string[] Records(string listing) =>
+        [.. listing.Split('\n').Skip(1).Where(line => line.Length > 0)];
 }
 
 internal static class DiffSymbolProbe

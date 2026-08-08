@@ -7,7 +7,7 @@ public static class SourceService
     public static async Task<Result<string>> OfSymbolAsync(
         string root,
         ISymbol symbol,
-        bool verbose,
+        SourceFormat format,
         CancellationToken cancellationToken)
     {
         var references = symbol.DeclaringSyntaxReferences;
@@ -15,10 +15,10 @@ public static class SourceService
         if (references.Length is 0)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
-        var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value).Verbose(verbose);
+        var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value).Verbose(format.Verbose);
 
         foreach (var reference in references)
-            await AppendAsync(root, response, reference, verbose, cancellationToken).ConfigureAwait(false);
+            await AppendAsync(root, response, reference, format, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(response.ToString());
     }
@@ -27,17 +27,17 @@ public static class SourceService
         string root,
         ResponseBuilder response,
         SyntaxReference reference,
-        bool verbose,
+        SourceFormat format,
         CancellationToken cancellationToken)
     {
         var node = await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
         var span = node.GetLocation().GetLineSpan();
-        var source = node.ToFullString();
+        var source = format.Comments ? node.ToFullString() : CommentStripper.Without(node);
 
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"{PositionFormat.Relative(root, span.Path)}:{span.StartLinePosition.Line + 1}-{span.EndLinePosition.Line + 1}"));
-        response.Line(verbose ? source.Trim() : TextCompressor.Source(source));
+        response.Line(format.Verbose ? source.Trim() : TextCompressor.Source(source));
     }
 
     public static string Describe(string root, ISymbol symbol, bool verbose)
@@ -63,17 +63,16 @@ public static class SourceService
     }
 
     public static async Task<string> OfSymbolsAsync(
-            LoadedWorkspace workspace,
-            IReadOnlyList<string> symbolIds,
-            bool verbose,
-            CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> symbolIds,
+        SourceFormat format,
+        CancellationToken cancellationToken)
     {
-        var response = new ResponseBuilder("get_symbol_source", string.Join(", ", symbolIds)).Verbose(verbose);
-
+        var response = new ResponseBuilder("get_symbol_source", string.Join(", ", symbolIds)).Verbose(format.Verbose);
         response.Summary(symbolIds.Count, symbolIds.Count, "symbols");
 
         foreach (var symbolId in symbolIds)
-            await AppendResolvedAsync(workspace, response, symbolId, verbose, cancellationToken).ConfigureAwait(false);
+            await AppendResolvedAsync(workspace, response, symbolId, format, cancellationToken).ConfigureAwait(false);
 
         return response.ToString();
     }
@@ -82,7 +81,7 @@ public static class SourceService
         LoadedWorkspace workspace,
         ResponseBuilder response,
         string symbolId,
-        bool verbose,
+        SourceFormat format,
         CancellationToken cancellationToken)
     {
         var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
@@ -90,7 +89,6 @@ public static class SourceService
         if (!resolved.IsOk)
         {
             response.Note("NOT_RESOLVED " + symbolId + "  " + resolved.Error!.Message);
-
             return;
         }
 
@@ -99,11 +97,10 @@ public static class SourceService
         if (references.Length is 0)
         {
             response.Note("NO_SOURCE " + symbolId + "  it resolves to metadata, so this workspace holds no source for it");
-
             return;
         }
 
         foreach (var reference in references)
-            await AppendAsync(workspace.Root, response, reference, verbose, cancellationToken).ConfigureAwait(false);
+            await AppendAsync(workspace.Root, response, reference, format, cancellationToken).ConfigureAwait(false);
     }
 }

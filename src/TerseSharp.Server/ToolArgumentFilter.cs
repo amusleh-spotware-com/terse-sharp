@@ -7,24 +7,26 @@ namespace TerseSharp.Server;
 internal static class ToolArgumentFilter
 {
     public static McpRequestFilter<CallToolRequestParams, CallToolResult> Structured => next => async (request, cancellationToken) =>
+{
+    if (Unrecognized(request) is { } rejected)
+        return Failed(rejected);
+    try
     {
-        try
-        {
-            return await next(request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (ArgumentException exception)
-        {
-            return Failed(Rejected(request, exception));
-        }
-        catch (OperationCanceledException)
-        {
-            return Failed(Errors.Cancelled());
-        }
-        catch (Exception exception)
-        {
-            return Failed(Uncoercible(request, exception));
-        }
-    };
+        return await next(request, cancellationToken).ConfigureAwait(false);
+    }
+    catch (ArgumentException exception)
+    {
+        return Failed(Rejected(request, exception));
+    }
+    catch (OperationCanceledException)
+    {
+        return Failed(Errors.Cancelled());
+    }
+    catch (Exception exception)
+    {
+        return Failed(Uncoercible(request, exception));
+    }
+};
 
     private static TerseError Uncoercible(RequestContext<CallToolRequestParams> request, Exception exception)
     {
@@ -115,5 +117,21 @@ internal static class ToolArgumentFilter
             names.Add(property.Name);
 
         return [.. names];
+    }
+
+    private static TerseError? Unrecognized(RequestContext<CallToolRequestParams> request)
+    {
+        var schema = Schema(request);
+        var accepted = Accepted(schema);
+        if (accepted.Length is 0 || request.Params?.Arguments is not { Count: > 0 } supplied)
+            return null;
+        var unknown = supplied.Keys
+            .Where(name => !name.StartsWith('_') && !accepted.Contains(name, StringComparer.Ordinal))
+            .ToArray();
+        return unknown.Length is 0
+            ? null
+            : Errors.Invalid(
+                request.Params?.Name + " rejected the call: unrecognized " + string.Join(", ", unknown),
+                Remedy(Required(schema), accepted) + ToolExamples.Suffix(request.Params?.Name));
     }
 }

@@ -38,8 +38,8 @@ public static partial class DotnetRunner
         run.ExitCode is 0 && !run.TimedOut && report.Total > 0 && report.Failures.Length is 0;
 
     private static string QuietTest(TestRunReport report) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs}");
+    CultureInfo.InvariantCulture,
+    $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs}") + PerProject(report);
 
     internal static bool IsLockedOutput(int exitCode, string output) =>
         exitCode is not 0 && LockedOutput().IsMatch(output);
@@ -187,8 +187,8 @@ public static partial class DotnetRunner
     }
 
     private static string Counters(TestRunReport report, ProcessRun run) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}");
+    CultureInfo.InvariantCulture,
+    $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}") + PerProject(report);
 
     private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter)
     {
@@ -382,6 +382,12 @@ public static partial class DotnetRunner
 
         return [.. values];
     }
+
+    internal static string PerProject(TestRunReport report) => report.Projects.Length < 2
+    ? string.Empty
+    : "  " + string.Join("  ", report.Projects.Select(project => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{project.Project}:{project.Total}/{project.DurationMs}ms")));
 }
 
 internal sealed record ProcessRun(

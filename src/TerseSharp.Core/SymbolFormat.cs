@@ -46,4 +46,18 @@ public static class SymbolFormat
 
         return location is null ? "-" : PositionFormat.Describe(root, location);
     }
+
+    private static readonly SymbolDisplayFormat TypesOnly = new(
+        globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameOnly,
+        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+        memberOptions: SymbolDisplayMemberOptions.IncludeParameters
+            | SymbolDisplayMemberOptions.IncludeType
+            | SymbolDisplayMemberOptions.IncludeRef,
+        parameterOptions: SymbolDisplayParameterOptions.IncludeType
+            | SymbolDisplayParameterOptions.IncludeParamsRefOut,
+        miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes
+            | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+
+    public static string Describe(ISymbol symbol, bool parameterNames) => symbol.ToDisplayString(parameterNames ? Signature : TypesOnly);
 }

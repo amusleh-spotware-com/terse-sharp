@@ -66,9 +66,9 @@ public static class Errors
         "pass a path inside the loaded workspace");
 
     public static TerseError CompileRegression(IReadOnlyList<string> diagnostics) => new(
-        TerseErrorCode.CompileRegression,
-        "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
-        "fix the edit, or pass allowErrors=true to apply it anyway");
+    TerseErrorCode.CompileRegression,
+    "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
+    "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway");
 
     public static TerseError EditConflict(string message) => new(
         TerseErrorCode.EditConflict,
@@ -83,10 +83,12 @@ public static class Errors
         "the call was cancelled before it produced a result",
         "retry, or narrow the request with a path or maxResults");
 
-    public static TerseError Blank(string name) => new(
-        TerseErrorCode.InvalidArgument,
-        string.Create(CultureInfo.InvariantCulture, $"'{name}' is required and cannot be empty"),
-        string.Create(CultureInfo.InvariantCulture, $"pass a non-empty {name}"));
+    public static TerseError Blank(string name, params string[] aliases) => new(
+    TerseErrorCode.InvalidArgument,
+    string.Create(CultureInfo.InvariantCulture, $"'{name}' is required and cannot be empty"),
+    aliases.Length is 0
+        ? string.Create(CultureInfo.InvariantCulture, $"pass a non-empty {name}")
+        : string.Create(CultureInfo.InvariantCulture, $"pass a non-empty {name}, spelled {name} or {string.Join(" or ", aliases)}"));
 
     public static TerseError ProjectNotFound(string project, IReadOnlyList<string> known) => new(
         TerseErrorCode.ProjectNotFound,

@@ -1,5 +1,4 @@
 using TerseSharp.Core;
-using Xunit;
 
 namespace TerseSharp.UnitTests;
 
@@ -22,26 +21,27 @@ public sealed class TextCompressorTests
     }
 
     [Fact]
-    public void Source_DropsBlankAndWhitespaceOnlyLines()
+    public void Source_KeepsBlankAndWhitespaceOnlyLinesBecauseTheyMayBeInsideARawStringLiteral()
     {
         var text = "one\n\n   \ntwo\n";
 
-        Assert.Equal("one\ntwo", TextCompressor.Source(text));
+        Assert.Equal("one\n\n   \ntwo", TextCompressor.Source(text));
     }
 
     [Fact]
-    public void Source_StripsTrailingWhitespaceWithoutTouchingTheLeadingIndent()
+    public void Source_DedentsWithoutRewritingAnythingElseOnTheLine()
     {
         var text = "  a   \n  b\t\n";
 
-        Assert.Equal("a\nb", TextCompressor.Source(text));
+        Assert.Equal("a   \nb\t", TextCompressor.Source(text));
     }
 
     [Fact]
     public void Source_OnAnEmptyInput_AnswersEmpty() => Assert.Equal(string.Empty, TextCompressor.Source(string.Empty));
 
     [Fact]
-    public void Source_OnWhitespaceOnly_AnswersEmpty() => Assert.Equal(string.Empty, TextCompressor.Source("   \n\t\n"));
+    public void Source_OnWhitespaceOnly_KeepsItRatherThanInventingAnEmptyPayload() =>
+    Assert.Equal("   \n\t", TextCompressor.Source("   \n\t\n"));
 
     [Theory]
     [InlineData("Program.cs")]
@@ -60,4 +60,12 @@ public sealed class TextCompressorTests
     [InlineData("noextension")]
     public void KeepsBlankLines_IsTrueWhereABlankLineCarriesMeaning(string path) =>
         Assert.True(TextCompressor.KeepsBlankLines(path));
+
+    [Fact]
+    public void Source_OnARawStringLiteral_LeavesItsBlankLinesAndTrailingSpacesIntact()
+    {
+        var text = "    var json = \"\"\"\n    {\n\n      \"a\": 1   \n    }\n    \"\"\";\n";
+
+        Assert.Equal("var json = \"\"\"\n{\n\n  \"a\": 1   \n}\n\"\"\";", TextCompressor.Source(text));
+    }
 }

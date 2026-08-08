@@ -27,26 +27,20 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         CancellationToken cancellationToken)
     {
         if (symbolId is not { Length: > 0 } requested)
-            return Errors.Blank("symbolId").Render();
-
+            return Errors.Blank("symbolId", "symbol").Render();
         await ready.ConfigureAwait(false);
-
         return await ToolBoundary.RunAsync(async () =>
         {
             var resolved = await ResolveAsync(workspace, null, semantic: true, cancellationToken).ConfigureAwait(false);
-
             if (!resolved.IsOk)
                 return resolved.Error!.Render();
-
             using var lease = resolved.Value!;
             var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, cancellationToken).ConfigureAwait(false);
-
             return symbol.IsOk
                 ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)
                 : symbol.Error!.Render();
         }).ConfigureAwait(false);
     }
-
     public Task<string> WithWorkspace(
         string? workspace,
         string? pathHint,

@@ -30,46 +30,21 @@ public static class SymbolEditService
     }
 
     public static async Task<Result<string>> ReplaceDeclarationAsync(
-        LoadedWorkspace workspace,
-        ISymbol symbol,
-        string declaration,
-        EditOptions options,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    ISymbol symbol,
+    string declaration,
+    EditOptions options,
+    CancellationToken cancellationToken)
     {
         if (await RazorAsync(workspace, symbol, RazorMemberEdit.Declaration, declaration, options, cancellationToken).ConfigureAwait(false) is { } razor)
             return razor;
-
         var found = await TargetAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
-
         if (found is null)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
-
-        if (found.Node is EnumMemberDeclarationSyntax)
-            return await ReplaceEnumMemberAsync(workspace, found, declaration, options, cancellationToken).ConfigureAwait(false);
-
-        if (Shared(found) is { } refusal)
-            return Result.Fail<string>(refusal);
-
-        var target = Promoted(found);
-        var parsed = MemberDeclaration.ParseAll(declaration);
-
-        return parsed.IsOk
-            ? await SwapAsync(workspace, target, Rewritten(parsed.Value!, target.Node), options, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(parsed.Error!);
-    }
-
-    private static async Task<Result<string>> ReplaceEnumMemberAsync(
-        LoadedWorkspace workspace,
-        EditTarget target,
-        string declaration,
-        EditOptions options,
-        CancellationToken cancellationToken)
-    {
-        var parsed = MemberDeclaration.ParseEnumMembers(declaration);
-
-        return parsed.IsOk
-            ? await SwapAsync(workspace, target, EnumRewritten(parsed.Value!, target.Node), options, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(parsed.Error!);
+        var planned = Plan(found, declaration);
+        return planned.IsOk
+            ? await SwapAsync(workspace, planned.Value.Target, planned.Value.Nodes, options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(planned.Error!);
     }
 
     private static SyntaxNode[] EnumRewritten(EnumMemberDeclarationSyntax[] members, SyntaxNode original) =>
@@ -195,26 +170,19 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> SwapAsync(
-        LoadedWorkspace workspace,
-        EditTarget target,
-        IReadOnlyList<SyntaxNode> replacements,
-        EditOptions options,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    EditTarget target,
+    IReadOnlyList<SyntaxNode> replacements,
+    EditOptions options,
+    CancellationToken cancellationToken)
     {
-        var root = await target.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-
-        if (root is null)
-            return Result.Fail<string>(Errors.DocumentNotFound(target.Document.FilePath ?? target.Document.Name));
-
-        if (replacements is [var only] && only.ToFullString().Equals(target.Node.ToFullString(), StringComparison.Ordinal))
+        var planned = new PlannedEdit(target, replacements);
+        if (Identical(planned))
             return Result.Ok(Unchanged(options.Tool));
-
-        var annotated = replacements.Select(node => node.WithAdditionalAnnotations(Formatter.Annotation));
-        var swapped = root.ReplaceNode(target.Node, annotated);
-        var formatted = await IndentedAsync(target.Document.WithSyntaxRoot(swapped), cancellationToken).ConfigureAwait(false);
-        var updated = workspace.Solution.WithDocumentSyntaxRoot(target.Document.Id, formatted);
-
-        return await EditGate.ApplyAsync(workspace, updated, [target.Document.Id], options, cancellationToken).ConfigureAwait(false);
+        var swapped = await SwappedAsync(workspace.Solution, [planned], cancellationToken).ConfigureAwait(false);
+        return swapped.IsOk
+            ? await EditGate.ApplyAsync(workspace, swapped.Value!, [target.Document.Id], options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(swapped.Error!);
     }
 
     private static async Task<Result<string>> RemoveAsync(
@@ -249,7 +217,11 @@ public static class SymbolEditService
             : AsBlock(node, "{" + body + "}");
     }
 
-    private static SyntaxNode? WithBody(SyntaxNode node, BlockSyntax block) => node switch
+    private static SyntaxNode? WithBody(SyntaxNode node, BlockSyntax block) => Bodied(node, block) is { } bodied
+    ? bodied.WithTrailingTrivia(node.GetTrailingTrivia())
+    : null;
+
+    private static SyntaxNode? Bodied(SyntaxNode node, BlockSyntax block) => node switch
     {
         MethodDeclarationSyntax method => method.WithBody(block).WithExpressionBody(null).WithSemicolonToken(default),
         ConstructorDeclarationSyntax ctor => ctor.WithBody(block).WithExpressionBody(null).WithSemicolonToken(default),
@@ -316,22 +288,23 @@ public static class SymbolEditService
     private static SyntaxNode? WithExpression(SyntaxNode node, string body)
     {
         var expression = SyntaxFactory.ParseExpression(body[2..].TrimEnd().TrimEnd(';'));
-
         if (expression.ContainsDiagnostics)
             return null;
-
         var arrow = SyntaxFactory.ArrowExpressionClause(expression);
         var semicolon = SyntaxFactory.Token(SyntaxKind.SemicolonToken);
-
-        return node switch
-        {
-            MethodDeclarationSyntax method => method.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
-            ConstructorDeclarationSyntax ctor => ctor.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
-            AccessorDeclarationSyntax accessor => accessor.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
-            LocalFunctionStatementSyntax local => local.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
-            _ => null,
-        };
+        return Arrowed(node, arrow, semicolon) is { } arrowed
+            ? arrowed.WithTrailingTrivia(node.GetTrailingTrivia())
+            : null;
     }
+
+    private static SyntaxNode? Arrowed(SyntaxNode node, ArrowExpressionClauseSyntax arrow, SyntaxToken semicolon) => node switch
+    {
+        MethodDeclarationSyntax method => method.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+        ConstructorDeclarationSyntax ctor => ctor.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+        AccessorDeclarationSyntax accessor => accessor.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+        LocalFunctionStatementSyntax local => local.WithBody(null).WithExpressionBody(arrow).WithSemicolonToken(semicolon),
+        _ => null,
+    };
 
     private static bool IsExpressionBodied(SyntaxNode node) => node switch
     {
@@ -415,6 +388,168 @@ public static class SymbolEditService
             FileScopedNamespaceDeclarationSyntax scoped => scoped.WithMembers(scoped.Members.AddRange(members)),
             _ => declared,
         };
+
+    private const int MaxBatchedEdits = 20;
+
+    private readonly record struct PlannedEdit(EditTarget Target, IReadOnlyList<SyntaxNode> Nodes);
+
+    private static Result<PlannedEdit> Plan(EditTarget found, string declaration) =>
+        found.Node is EnumMemberDeclarationSyntax ? EnumPlan(found, declaration) : MemberPlan(found, declaration);
+
+    private static Result<PlannedEdit> EnumPlan(EditTarget found, string declaration)
+    {
+        var parsed = MemberDeclaration.ParseEnumMembers(declaration);
+        return parsed.IsOk
+            ? Result.Ok(new PlannedEdit(found, EnumRewritten(parsed.Value!, found.Node)))
+            : Result.Fail<PlannedEdit>(parsed.Error!);
+    }
+
+    private static Result<PlannedEdit> MemberPlan(EditTarget found, string declaration)
+    {
+        if (Shared(found) is { } refusal)
+            return Result.Fail<PlannedEdit>(refusal);
+        var target = Promoted(found);
+        var parsed = MemberDeclaration.ParseAll(declaration);
+        return parsed.IsOk
+            ? Result.Ok(new PlannedEdit(target, Rewritten(parsed.Value!, target.Node)))
+            : Result.Fail<PlannedEdit>(parsed.Error!);
+    }
+
+
+    private static TerseError Mismatched(int symbolIds, int declarations) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"symbolIds has {symbolIds} entries and declarations has {declarations}, so they cannot be paired"),
+        "pass one declaration per symbolId, in the same order");
+
+    private static TerseError TooMany(int requested) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"a batch carries at most {MaxBatchedEdits} edits and {requested} were passed"),
+        "split the batch, or edit the remaining members in a second call");
+
+    public static async Task<Result<string>> ReplaceDeclarationsAsync(
+    LoadedWorkspace workspace,
+    IReadOnlyList<string> symbolIds,
+    IReadOnlyList<string> declarations,
+    EditOptions options,
+    CancellationToken cancellationToken)
+    {
+        if (symbolIds.Count != declarations.Count)
+            return Result.Fail<string>(Mismatched(symbolIds.Count, declarations.Count));
+        if (symbolIds.Count is 0 or > MaxBatchedEdits)
+            return Result.Fail<string>(TooMany(symbolIds.Count));
+        var planned = await PlannedAsync(workspace, symbolIds, declarations, cancellationToken).ConfigureAwait(false);
+        return planned.IsOk
+            ? await BatchedAsync(workspace, planned.Value!, options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(planned.Error!);
+    }
+    private static bool Identical(PlannedEdit planned) =>
+        planned.Nodes is [var only] && only.ToFullString().Equals(planned.Target.Node.ToFullString(), StringComparison.Ordinal);
+
+    private static SyntaxNode? Applied(SyntaxNode root, IReadOnlyList<PlannedEdit> planned)
+    {
+        var current = root.TrackNodes(planned.Select(edit => edit.Target.Node));
+        foreach (var edit in planned)
+        {
+            if (current.GetCurrentNode(edit.Target.Node) is not { } node)
+                return null;
+            current = current.ReplaceNode(node, edit.Nodes.Select(replacement => replacement.WithAdditionalAnnotations(Formatter.Annotation)));
+        }
+        return current;
+    }
+
+    private static async Task<Result<Solution>> SwappedAsync(
+    Solution solution,
+    IReadOnlyList<PlannedEdit> planned,
+    CancellationToken cancellationToken)
+    {
+        var document = planned[0].Target.Document;
+
+        if (Overlaps(planned))
+            return Result.Fail<Solution>(Overlapping(document.Name));
+
+        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+
+        if (root is null)
+            return Result.Fail<Solution>(Errors.DocumentNotFound(document.FilePath ?? document.Name));
+
+        if (Applied(root, planned) is not { } rewritten)
+            return Result.Fail<Solution>(Overlapping(document.Name));
+
+        var formatted = await IndentedAsync(document.WithSyntaxRoot(rewritten), cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(solution.WithDocumentSyntaxRoot(document.Id, formatted));
+    }
+
+    private static async Task<Result<PlannedEdit[]>> PlannedAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> symbolIds,
+        IReadOnlyList<string> declarations,
+        CancellationToken cancellationToken)
+    {
+        var planned = new PlannedEdit[symbolIds.Count];
+        for (var index = 0; index < planned.Length; index++)
+        {
+            var one = await OneAsync(workspace, symbolIds[index], declarations[index], cancellationToken).ConfigureAwait(false);
+            if (!one.IsOk)
+                return Result.Fail<PlannedEdit[]>(one.Error!);
+            planned[index] = one.Value;
+        }
+        return Result.Ok(planned);
+    }
+
+    private static async Task<Result<PlannedEdit>> OneAsync(
+        LoadedWorkspace workspace,
+        string symbolId,
+        string declaration,
+        CancellationToken cancellationToken)
+    {
+        var symbol = await SymbolLookup.ResolveAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+        if (!symbol.IsOk)
+            return Result.Fail<PlannedEdit>(symbol.Error!);
+        var found = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
+        return found is null
+            ? Result.Fail<PlannedEdit>(Errors.SymbolNotFound(symbolId, []))
+            : Plan(found, declaration);
+    }
+
+    private static async Task<Result<string>> BatchedAsync(
+        LoadedWorkspace workspace,
+        PlannedEdit[] planned,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var solution = workspace.Solution;
+        var changed = new List<DocumentId>(planned.Length);
+        foreach (var group in planned.Where(edit => !Identical(edit)).GroupBy(edit => edit.Target.Document.Id))
+        {
+            var swapped = await SwappedAsync(solution, [.. group], cancellationToken).ConfigureAwait(false);
+            if (!swapped.IsOk)
+                return Result.Fail<string>(swapped.Error!);
+            solution = swapped.Value!;
+            changed.Add(group.Key);
+        }
+        return changed.Count is 0
+            ? Result.Ok(Unchanged(options.Tool))
+            : await EditGate.ApplyAsync(workspace, solution, changed, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static TerseError Overlapping(string file) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"two of the batched edits in {file} overlap - one declaration contains the other, so applying the outer one removes the inner"),
+        "send the outer declaration alone, already written the way you want the inner member, or split the batch");
+
+    private static bool Overlaps(IReadOnlyList<PlannedEdit> planned)
+    {
+        for (var outer = 0; outer < planned.Count; outer++)
+        {
+            for (var inner = outer + 1; inner < planned.Count; inner++)
+            {
+                if (Encloses(planned[outer], planned[inner]) || Encloses(planned[inner], planned[outer]))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool Encloses(PlannedEdit outer, PlannedEdit inner) =>
+        outer.Target.Node.Span.Contains(inner.Target.Node.Span);
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

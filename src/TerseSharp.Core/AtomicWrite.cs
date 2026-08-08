@@ -18,7 +18,7 @@ public static class AtomicWrite
         try
         {
             await WriteAsync(temporary, content, EncodingOf(path), cancellationToken).ConfigureAwait(false);
-            File.Move(temporary, path, overwrite: true);
+            await MoveAsync(temporary, path, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -26,7 +26,6 @@ public static class AtomicWrite
                 File.Delete(temporary);
         }
     }
-
     private static void EnsureDirectory(string path)
     {
         if (Path.GetDirectoryName(path) is { Length: > 0 } directory && !Directory.Exists(directory))
@@ -80,12 +79,37 @@ public static class AtomicWrite
         try
         {
             await File.WriteAllBytesAsync(temporary, content, cancellationToken).ConfigureAwait(false);
-            File.Move(temporary, path, overwrite: true);
+            await MoveAsync(temporary, path, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             if (File.Exists(temporary))
                 File.Delete(temporary);
+        }
+    }
+    private const int MoveAttempts = 8;
+    private const int MoveBackoffMilliseconds = 20;
+
+    private static Task BackoffAsync(int attempt, CancellationToken cancellationToken) =>
+        Task.Delay(attempt * MoveBackoffMilliseconds, cancellationToken);
+
+    private static async Task MoveAsync(string temporary, string path, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temporary, path, overwrite: true);
+                return;
+            }
+            catch (IOException) when (attempt < MoveAttempts)
+            {
+                await BackoffAsync(attempt, cancellationToken).ConfigureAwait(false);
+            }
+            catch (UnauthorizedAccessException) when (attempt < MoveAttempts)
+            {
+                await BackoffAsync(attempt, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 }

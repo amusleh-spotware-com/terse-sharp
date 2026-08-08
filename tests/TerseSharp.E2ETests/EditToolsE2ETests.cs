@@ -285,4 +285,118 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             File.SetLastWriteTimeUtc(path, written);
         }
     }
+
+    private const string SubmitId = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)";
+    private static readonly string[] SignatureChangeIds =
+    [
+        SubmitId,
+    "M:Fixture.Trading.OrderService.SubmitTwice(Fixture.Trading.Order)",
+    "M:Fixture.Trading.OrderRouter.Route(Fixture.Trading.Order)",
+    "M:Fixture.Trading.OrderRouter.Retry(Fixture.Trading.Order)",
+];
+    private static readonly string[] SignatureChangeDeclarations =
+    [
+        "public bool Submit(Order order, bool urgent) => repository.Submit(order) && urgent;",
+    "public bool SubmitTwice(Order order) => Submit(order, true) && Submit(order, true);",
+    "public bool Route(Order order) => service.Submit(order, false);",
+    "public bool Retry(Order order) => service.Submit(order, true);",
+];
+
+    [Fact]
+    public async Task ReplaceSymbol_ChangingASignatureAlone_IsReportedAsARollback()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = SubmitId,
+            ["declaration"] = SignatureChangeDeclarations[0],
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithABatchCarryingTheBrokenCallers_LandsAsOneCompileGatedEditAcrossBothFiles()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = SignatureChangeIds,
+            ["declarations"] = SignatureChangeDeclarations,
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("2 files changed", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", text, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.cs", text, StringComparison.Ordinal);
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithUnpairedBatchArrays_NamesBothCounts()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = SignatureChangeIds,
+            ["declarations"] = new[] { SignatureChangeDeclarations[0] },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("symbolIds has 4 entries and declarations has 1", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_WithTheBodyThatIsAlreadyThere_ChangesNothingInsteadOfEatingTheBlankLine()
+    {
+        var text = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = SubmitId,
+            ["body"] = "=> repository.Submit(order)",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("0 files changed", text, StringComparison.Ordinal);
+        Assert.Contains("identical to what is already there", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_TurningAnExpressionIntoABlock_LeavesTheBlankLineAfterTheMember()
+    {
+        var text = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = UnusedMethod,
+            ["body"] = "{\n    return 7;\n}",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("@@ -15,1 +15,4 @@", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=4", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReplaceSymbol_WithOverlappingBatchedEdits_IsRefusedInEitherOrder(bool innerFirst)
+    {
+        string[] ids = ["T:Fixture.Trading.OrderRouter", "M:Fixture.Trading.OrderRouter.Route(Fixture.Trading.Order)"];
+        string[] bodies =
+        [
+            "public sealed class OrderRouter\n{\n    private readonly OrderService service;\n\n    public OrderRouter(OrderService service) => this.service = service;\n\n    public bool Route(Order order) => service.Submit(order);\n\n    public bool Retry(Order order) => !service.Submit(order);\n}",
+        "public bool Route(Order order) => !service.Submit(order);",
+    ];
+
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = innerFirst ? [ids[1], ids[0]] : ids,
+            ["declarations"] = innerFirst ? [bodies[1], bodies[0]] : bodies,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("overlap", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("1 files changed", text, StringComparison.Ordinal);
+    }
 }

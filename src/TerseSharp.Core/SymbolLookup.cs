@@ -8,25 +8,21 @@ public static class SymbolLookup
     private const int NameCap = 100;
 
     public static async Task<Result<ISymbol>> ResolveAsync(
-        LoadedWorkspace workspace,
-        string symbolId,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    string symbolId,
+    CancellationToken cancellationToken)
     {
-        if (!SymbolReference.IsDocumentationId(symbolId))
-            return await ByNameAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
-
-        var matches = await FindAllAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+        var requested = SymbolReference.Unescaped(symbolId);
+        if (!SymbolReference.IsDocumentationId(requested))
+            return await ByNameAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+        var matches = await FindAllAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
         var distinct = matches.DistinctBy(Describe, StringComparer.Ordinal).ToArray();
-
         if (distinct.Length is 1)
             return Result.Ok(distinct[0]);
-
         if (distinct.Length > 1)
-            return Result.Fail<ISymbol>(Errors.AmbiguousSymbol(symbolId, [.. distinct.Select(Describe)]));
-
-        var nearest = await NearestAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
-
-        return Result.Fail<ISymbol>(Errors.SymbolNotFound(symbolId, nearest));
+            return Result.Fail<ISymbol>(Errors.AmbiguousSymbol(requested, [.. distinct.Select(Describe)]));
+        var nearest = await NearestAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+        return Result.Fail<ISymbol>(Errors.SymbolNotFound(requested, nearest));
     }
 
     private static async Task<Result<ISymbol>> ByNameAsync(

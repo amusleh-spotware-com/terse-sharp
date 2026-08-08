@@ -174,4 +174,39 @@ public sealed class TestResultParserTests
 
     private static TestFailure Failure(string name, string test) =>
         Parse(name).Failures.Single(failure => failure.Name.EndsWith(test, StringComparison.Ordinal));
+
+    [Fact]
+    public void Parse_OneReportPerProject_CarriesThatProjectsOwnCounters()
+    {
+        var report = TestResultParser.Parse([Fixtures.Trx("xunit-vstest.trx"), Fixtures.Trx("xunit-mtp.trx")], Fixtures.TrxRoot);
+
+        Assert.Equal(2, report.Projects.Length);
+        Assert.Equal(report.Total, report.Projects.Sum(project => project.Total));
+        Assert.Equal(report.Failed, report.Projects.Sum(project => project.Failed));
+        Assert.Equal(report.DurationMs, report.Projects.Sum(project => project.DurationMs));
+    }
+
+    [Fact]
+    public void Parse_AReportCarryingACodeBase_NamesTheTestAssembly()
+    {
+        var report = TestResultParser.Parse([Fixtures.Trx("xunit-vstest.trx")], Fixtures.TrxRoot);
+
+        Assert.Equal("Fixture.Trading.Tests", Assert.Single(report.Projects).Project);
+    }
+
+    [Fact]
+    public void Parse_AReportWithNoCodeBase_FallsBackToTheSharedTestNamespace()
+    {
+        var report = TestResultParser.Parse([Fixtures.Trx("xunit-mtp.trx")], Fixtures.TrxRoot);
+
+        Assert.Equal("Fixture.Trading.Tests.DeliberateOutcomesTests", Assert.Single(report.Projects).Project);
+    }
+
+    [Fact]
+    public void Parse_AnEmptyReport_ContributesNoProject()
+    {
+        var report = TestResultParser.Parse([Fixtures.Trx("empty-run.trx")], Fixtures.TrxRoot);
+
+        Assert.Empty(report.Projects);
+    }
 }

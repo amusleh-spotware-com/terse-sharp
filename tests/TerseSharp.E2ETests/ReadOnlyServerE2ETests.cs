@@ -87,6 +87,7 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         "delete_symbol" => new() { ["symbolId"] = Unused },
         "rename_symbol" => new() { ["symbolId"] = Unused, ["newName"] = "Spare" },
         "format" or "cleanup" => new() { ["path"] = "src/Fixture.Trading/Order.cs" },
+        "clean" => new() { ["project"] = ProjectFile },
         "extract_interface" => new() { ["typeSymbolId"] = ServiceType, ["interfaceName"] = "IOrderService" },
         "move_type_to_file" => new() { ["typeSymbolId"] = ServiceType },
         "move_type_to_namespace" => new() { ["typeSymbolId"] = ServiceType, ["targetNamespace"] = "Other" },

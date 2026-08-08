@@ -5,12 +5,7 @@ namespace TerseSharp.Core;
 
 public static class TextCompressor
 {
-    public static string Source(string text)
-    {
-        var indent = CommonIndent(text);
-
-        return HasMultilineLiteral(text) ? Dedented(text, indent) : Squeezed(text, indent);
-    }
+    public static string Source(string text) => Dedented(text, CommonIndent(text));
 
     private static string Dedented(string text, int indent)
     {
@@ -18,21 +13,6 @@ public static class TextCompressor
 
         foreach (var line in text.AsSpan().EnumerateLines())
             builder.Append(line.TrimEnd().IsEmpty ? line : line[indent..]).Append('\n');
-
-        return builder.ToString().TrimEnd('\n');
-    }
-
-    private static string Squeezed(string text, int indent)
-    {
-        var builder = new StringBuilder(text.Length);
-
-        foreach (var line in text.AsSpan().EnumerateLines())
-        {
-            var trimmed = line.TrimEnd();
-
-            if (!trimmed.IsEmpty)
-                builder.Append(trimmed[indent..]).Append('\n');
-        }
 
         return builder.ToString().TrimEnd('\n');
     }

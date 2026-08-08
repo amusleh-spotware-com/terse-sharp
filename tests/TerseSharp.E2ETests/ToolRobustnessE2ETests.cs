@@ -147,4 +147,43 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
         if (text.StartsWith("ERROR", StringComparison.Ordinal))
             Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ATool_GivenAParameterItDoesNotDeclare_SaysSoInsteadOfAnsweringAsIfItWereAbsent()
+    {
+        var text = await server.CallAsync("find_files", new() { ["glob"] = "*.cs", ["max_results"] = 3 });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("unrecognized max_results", text, StringComparison.Ordinal);
+        Assert.Contains("maxResults", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindUsages_GivenTheWrongNameForTheSymbolParameter_NamesEveryAcceptedSpelling()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["name"] = "OrderService.Submit" });
+
+        Assert.Contains("unrecognized name", text, StringComparison.Ordinal);
+        Assert.Contains("symbolId", text, StringComparison.Ordinal);
+        Assert.Contains("symbol", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithNoGlobAtAll_NamesEverySpellingOfIt()
+    {
+        var text = await server.CallAsync("find_files", []);
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("spelled glob or pattern or query", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithQueryInsteadOfGlob_AnswersTheSameListing()
+    {
+        var byQuery = await server.CallAsync("find_files", new() { ["query"] = "OrderService.cs" });
+
+        Assert.DoesNotContain("ERROR", byQuery, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", byQuery, StringComparison.Ordinal);
+    }
 }

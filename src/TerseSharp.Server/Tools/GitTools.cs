@@ -37,19 +37,19 @@ public sealed class GitTools(ToolContext context)
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "diff_text")]
-    [Description("The raw unified diff, bounded and workspace-relative. Use only after diff_symbols has told you which file you need - the hunk text is the most expensive answer in this server.")]
+    [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. It costs about one line of response per changed line, so bound it: path= scopes it to one file or pathspec and maxLines= caps it at 400 by default. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
     public Task<string> DiffText(
-        [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
-        [Description("Limit to one path or pathspec. Strongly recommended.")] string? path = null,
-        [Description("Max diff lines returned (400).")] int maxLines = 0,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(
-            workspace,
-            path,
-            loaded => TextAsync(loaded, baseRef, path, NavigationTools.Cap(maxLines, MaxDiffLines), cancellationToken),
-            semantic: false,
-            cancellationToken);
+    [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
+    [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
+    [Description("Max diff lines returned (400).")] int maxLines = 0,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default) =>
+    context.WithWorkspaceAsync(
+        workspace,
+        path,
+        loaded => TextAsync(loaded, baseRef, path, NavigationTools.Cap(maxLines, MaxDiffLines), cancellationToken),
+        semantic: false,
+        cancellationToken);
 
     private static async Task<string> ListAsync(
         LoadedWorkspace workspace,

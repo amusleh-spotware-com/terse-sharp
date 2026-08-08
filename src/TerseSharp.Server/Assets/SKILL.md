@@ -75,10 +75,11 @@ A silent drop is the breach, even when the reason would have been valid.
 
 | Instead of | Use | Why |
 |---|---|---|
-| `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives |
-| `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented and stripped of blank lines; `verbose: true` for it verbatim |
+| `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
+| `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
+| `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
 | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` | all of them in one response; an id that does not resolve is reported `NOT_RESOLVED <id>`, never a failed call |
-| `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies |
+| `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
 | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
 | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
@@ -97,6 +98,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
 | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; an out-of-range value names the range it could have picked |
 | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
+| a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` | one declaration per symbol, paired positionally, applied as **one** compile-gated edit across every file they live in — the way to land a signature change together with the callers it breaks instead of paying a `CompileRegression` and a retry |
 | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` | an enum id takes enum members; `replace_symbol` and `delete_symbol` work on one too |
 | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` | appended to that file's namespace as one compile-gated edit — no whole-file rewrite, no forced text edit |
 | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
@@ -126,12 +128,12 @@ A silent drop is the breach, even when the reason would have been valid.
 | "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
 | "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
 | `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, and `path=` scopes it to one pathspec on a shared tree |
-| `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise |
-| `Bash: git diff` when you really need the hunks | `diff_text(path: …)` | the raw unified diff, bounded and workspace-relative - the most expensive answer here, so scope it |
+| `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
+| `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `maxLines=` caps it at 400 |
 | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
 | `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
 | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
-| `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line; a failure carries its message, expected/actual and one source frame |
+| `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line, and a run that spanned several projects appends `Name:total/durationMs` per project so "which tier is slow" costs no second run; a failure carries its message, expected/actual and one source frame |
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
@@ -258,6 +260,14 @@ dependency ordering, and `replace_symbol` can split a member into overloads. On 
 already expression-bodied, `replace_symbol_body` accepts a bare expression as well as `=> expr` and a
 statement block.
 
+**`replace_symbol` also edits several files as one compile-gated edit.** Pass `symbolIds` and
+`declarations` — one declaration per symbol, paired positionally, at most 20, and more than one entry
+per file is allowed. That is how a signature change lands **together with the callers it breaks**:
+sent one at a time it is rolled back as a `CompileRegression`, and callee-first ordering does not help
+because the callee is what is changing. Unpaired arrays are refused naming both counts, and two edits
+where one declaration **contains** the other are refused whichever order you send them in, rather than
+silently dropping the inner one.
+
 **Refactor** — `extract_interface` · `move_type_to_file` · `move_type_to_namespace` ·
 `change_signature`.
 
@@ -295,7 +305,10 @@ inside exactly one declaration; anything else is `HEURISTIC` with the raw line r
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
 `search_text` and `search_regex` take `query`, `find_files` takes `glob`, and each accepts `pattern`
-as an alias, so the wrong name of the three is never a failed call. `find_files`, `search_text` and `search_regex`
+as an alias — `find_files` accepts `query` too — so the wrong name of the three is never a failed
+call. A parameter name **no** tool declares is refused before the call runs, naming every accepted
+spelling: an argument the server does not understand is never silently dropped, because a listing
+that ignored your `maxResults` is a confidently wrong answer you cannot detect. `find_files`, `search_text` and `search_regex`
 skip `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and
 directory symlinks — the same set every index uses, so a nested agent worktree never doubles a result.
 `read_text` also accepts an **absolute path outside every workspace root**, tagged
@@ -307,6 +320,14 @@ appends each file's UTC last-write time and byte length. `read_text` clips at **
 unless `maxChars` says otherwise (ceiling 131 072): the default is set so a whole-file read stays
 inline in your client rather than being spilled to a file that answers nothing, and the clip always
 names `next: startLine=`.
+
+**`read_text` on a `.cs` path asked for whole answers the outline, not the text.** No `startLine`,
+no `endLine`, no `tail`, no `section`, no `verbose` — you get exactly what `get_file_outline` would
+have returned, plus one line naming `get_symbol_source` and the opt-in. Whole-file `.cs` reads were
+71 % of everything this tool has ever returned and an outline is a third of the tokens, so this is
+the default that matches what the question almost always is. Pass `verbose: true` for the raw text,
+or any line range when you already know which lines you want. A `.cs` file that is not a document of
+this workspace is read as text unchanged.
 
 **Build and test** — `build` · `clean` · `run_tests` · `rerun_failed` · `list_tests`.
 
@@ -521,7 +542,11 @@ server ships. Component and parameter answers are then unavailable rather than e
 
 **A green run answers in one line** —
 `run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371` — so running the suite after every
-change is nearly free, and `build` behaves the same way
+change is nearly free. A run that spanned **more than one project** appends `Name:total/durationMs`
+per project to that same line
+(`… durationMs=122371  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms`), so
+"which tier is slow" and "did every tier actually run" are answered by the run you already paid for,
+not by a second one. A single-project run is unchanged. `build` behaves the same way
 (`build ok  errors=0 warnings=0  elapsedMs=4235`), warnings included: a build that succeeds is one
 line however many warnings it produced, and a build that fails lists errors only. `warnings=` counts
 what that build emitted, so a build that recompiled nothing reports `0`.

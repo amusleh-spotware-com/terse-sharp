@@ -7,28 +7,23 @@ namespace TerseSharp.Core;
 public static class DiffSymbolService
 {
     public static async Task<string> MapAsync(
-        LoadedWorkspace workspace,
-        string unifiedDiff,
-        int maxResults,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    string unifiedDiff,
+    int maxResults,
+    CancellationToken cancellationToken)
     {
         var hunks = DiffParser.Hunks(unifiedDiff);
         var records = new List<string>(Math.Min(Math.Max(hunks.Count, 1), 512));
         var seen = new HashSet<string>(StringComparer.Ordinal);
-
         foreach (var group in hunks.GroupBy(hunk => hunk.Path, StringComparer.Ordinal))
             await AppendFileAsync(workspace, group.Key, group, records, seen, cancellationToken).ConfigureAwait(false);
-
         var response = new ResponseBuilder("diff_symbols", string.Empty);
-
         response.Summary(ResultCap.Shown(records.Count, maxResults), records.Count, "declarations", "path= or maxResults=");
-
         if (hunks.Count is 0)
             response.Note("the diff carried no hunks; nothing changed in the compared range");
-
+        Steer(response, records, maxResults);
         foreach (var record in records.Capped(maxResults))
             response.Line(record);
-
         return response.ToString();
     }
 
@@ -111,4 +106,20 @@ public static class DiffSymbolService
     private static string Raw(string path, DiffHunk hunk, string reason) => string.Create(
         CultureInfo.InvariantCulture,
         $"{path}:{hunk.Start}-{hunk.End}  HEURISTIC  {reason}");
+
+    private const int MaxSteeredPaths = 3;
+
+    private static void Steer(ResponseBuilder response, IReadOnlyList<string> records, int maxResults)
+    {
+        var unmapped = records
+            .Capped(maxResults)
+            .Where(record => record.Contains("  HEURISTIC  ", StringComparison.Ordinal))
+            .Select(record => record[..record.IndexOf(':', StringComparison.Ordinal)])
+            .Distinct(StringComparer.Ordinal)
+            .Take(MaxSteeredPaths)
+            .ToArray();
+        if (unmapped.Length is 0)
+            return;
+        response.Note("for the hunk text these could not map, call " + string.Join(" then ", unmapped.Select(path => "diff_text path=" + path)));
+    }
 }

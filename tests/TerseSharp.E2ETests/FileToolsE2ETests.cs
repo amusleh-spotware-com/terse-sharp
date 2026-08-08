@@ -25,7 +25,11 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task ReadText_OnAWholeFileWithBlankLines_NeverClaimsItTruncated()
     {
-        var text = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["startLine"] = 1,
+        });
 
         Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
         Assert.Contains("namespace Fixture.Trading;", text, StringComparison.Ordinal);
@@ -180,5 +184,74 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("3 matches", kept, StringComparison.Ordinal);
         Assert.Contains("OrderService.cs", kept, StringComparison.Ordinal);
         Assert.DoesNotContain("OrderRouter.cs", kept, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_OnAWholeCsFile_AnswersTheOutlineAndNamesTheOptInForTheText()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+
+        Assert.Contains("OrderService.Submit", text, StringComparison.Ordinal);
+        Assert.Contains("read_text verbose=true for the raw text", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("repository.Submit(order)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_OnACsFileWithVerbose_StillReturnsTheText()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("repository.Submit(order)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("this is the outline", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_OnACsFileWithALineRange_StillReturnsThoseLines()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["startLine"] = 11,
+            ["endLine"] = 11,
+        });
+
+        Assert.Contains("repository.Submit(order)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("this is the outline", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_OnACsFileThatIsNotAWorkspaceDocument_StillReturnsItsText()
+    {
+        const string Loose = "terse-loose-file.cs";
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Loose,
+            ["content"] = "// belongs to no project\nclass Loose;\n",
+            ["force"] = true,
+        });
+        try
+        {
+            var text = await server.CallAsync("read_text", new() { ["path"] = Loose });
+
+            Assert.Contains("belongs to no project", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("this is the outline", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Loose, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_OnANonCsFile_IsUnaffected()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json" });
+
+        Assert.Contains("MaxVolume", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("this is the outline", text, StringComparison.Ordinal);
     }
 }

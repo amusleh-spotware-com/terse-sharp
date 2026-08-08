@@ -357,4 +357,103 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("worktree=", text, StringComparison.Ordinal);
         Assert.Contains("branch=", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbol_WithAnHtmlEscapedGenericParameterList_ResolvesTheSameOverload()
+    {
+        var escaped = await server.CallAsync("get_symbol", new()
+        {
+            ["symbolId"] = "Reconciler.Reconcile(Dictionary&lt;string,int&gt;, Order)",
+        });
+
+        Assert.DoesNotContain("ERROR", escaped, StringComparison.Ordinal);
+        Assert.Contains("Reconcile", escaped, StringComparison.Ordinal);
+        Assert.Contains("Dictionary", escaped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ByDefault_KeepsTheDocComment()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Reconciler.Reconcile(Order)" });
+
+        Assert.Contains("Reports whether the order carries any volume", text, StringComparison.Ordinal);
+        Assert.Contains("order.Volume > 0", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithCommentsOff_DropsTheDocCommentAndKeepsTheCode()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "Reconciler.Reconcile(Order)",
+            ["comments"] = false,
+        });
+
+        Assert.DoesNotContain("Reports whether the order carries any volume", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("///", text, StringComparison.Ordinal);
+        Assert.Contains("order.Volume > 0", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithCommentsOff_DropsAnInlineCommentWithoutLeavingItsLine()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "Reconciler.Reconcile(Order, decimal)" },
+            ["comments"] = false,
+        });
+
+        Assert.DoesNotContain("deliberate inline comment", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("//", text, StringComparison.Ordinal);
+        Assert.Contains("order.Volume > tolerance", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithParameterNamesOff_KeepsEveryTypeAndDropsOnlyTheNames()
+    {
+        var named = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/Reconciler.cs" });
+        var typed = await server.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "src/Fixture.Trading/Reconciler.cs",
+            ["parameterNames"] = false,
+        });
+
+        Assert.Contains("Reconcile(Order order)", named, StringComparison.Ordinal);
+        Assert.Contains("Reconcile(Order)", typed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Order order", typed, StringComparison.Ordinal);
+        Assert.Contains("Dictionary<string, int>", typed, StringComparison.Ordinal);
+        Assert.True(typed.Length < named.Length, typed);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithParameterNamesOff_DropsThemThereToo()
+    {
+        var typed = await server.CallAsync("get_type_outline", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.Reconciler",
+            ["parameterNames"] = false,
+        });
+
+        Assert.Contains("Reconcile(Order)", typed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Order order", typed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithCommentsOff_NeverJoinsTheTokensACommentWasSeparating()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "Reconciler.Butted",
+            ["comments"] = false,
+        });
+
+        Assert.DoesNotContain("separator", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("and a trailing one", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("publicdecimal", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("returnorder", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("1 --1", text, StringComparison.Ordinal);
+        Assert.Contains("public decimal Butted(Order order)", text, StringComparison.Ordinal);
+        Assert.Contains("var negated = 1 - -1;", text, StringComparison.Ordinal);
+        Assert.Contains("return order.Volume * negated;", text, StringComparison.Ordinal);
+    }
 }

@@ -58,4 +58,30 @@ public sealed class AtomicWriteTests : IDisposable
 
         return path;
     }
+
+    [Fact]
+    public async Task TextAsync_WhileAnotherReaderStillHoldsTheTarget_RetriesInsteadOfThrowing()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "terse-contended-" + Guid.NewGuid().ToString("N") + ".txt");
+        await File.WriteAllTextAsync(path, "before", TestContext.Current.CancellationToken);
+        var holder = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var release = Task.Run(
+            async () =>
+            {
+                await Task.Delay(40, TestContext.Current.CancellationToken);
+                await holder.DisposeAsync();
+            },
+            TestContext.Current.CancellationToken);
+        try
+        {
+            await AtomicWrite.TextAsync(path, "after", TestContext.Current.CancellationToken);
+
+            Assert.Equal("after", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            await release;
+            File.Delete(path);
+        }
+    }
 }

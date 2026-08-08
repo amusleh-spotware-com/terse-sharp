@@ -283,14 +283,12 @@ public sealed class WorkspaceSyncE2ETests
     public async Task EditText_ThenASymbolEditOnTheSameFile_KeepsBothChanges()
     {
         await using var solution = await StartAsync(watch: true);
-
         await solution.CallAsync("write_text", new()
         {
             ["path"] = AddedRelativePath,
             ["content"] = AddedSource,
             ["force"] = true,
         });
-
         var edited = await solution.CallAsync("edit_text", new()
         {
             ["path"] = AddedRelativePath,
@@ -298,23 +296,17 @@ public sealed class WorkspaceSyncE2ETests
             ["newText"] = "public sealed class SyncedType // marker",
             ["force"] = true,
         });
-
         Assert.Contains("changedLines=", edited, StringComparison.Ordinal);
-
         var replaced = await solution.CallAsync("replace_symbol_body", new()
         {
             ["symbolId"] = "SyncedType.Value",
             ["body"] = "=> 42;",
         });
-
         Assert.DoesNotContain("ERROR", replaced, StringComparison.Ordinal);
-
-        var after = await solution.CallAsync("read_text", new() { ["path"] = AddedRelativePath });
-
+        var after = await solution.CallAsync("read_text", new() { ["path"] = AddedRelativePath, ["verbose"] = true });
         Assert.Contains("// marker", after, StringComparison.Ordinal);
         Assert.Contains("Value() => 42;", after, StringComparison.Ordinal);
     }
-
     [Fact]
     public async Task ExternalCreate_OfANonCodeFile_IsListedByFindFilesWithoutAReload()
     {

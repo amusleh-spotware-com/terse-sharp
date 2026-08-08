@@ -6,30 +6,51 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text")]
-    [Description("Read any file, line-ranged. Use for non-C# files; for a .cs file prefer get_file_outline or get_symbol_source. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
+    [Description("Read any file, line-ranged. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
-        [Description("Path, absolute or workspace-relative.")] string path,
-        [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
-        [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
-        [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
-        [Description("Maximum characters of file text returned, default 40960 and at most 131072, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. The default is set so a whole-file read stays inline in the client instead of being spilled to a file that answers nothing; a clipped read names the line to continue from. Raise it on a file you truly need whole, lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
-        [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
-        [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
-        [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
-        [Description("Return the file verbatim - every line numbered, blank lines and trailing whitespace kept. Default false.")] bool verbose = false,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) =>
-        Read(
-            path,
-            new FileService.ReadRequest(
-                new FileService.LineRange(startLine, endLine, Lines(maxLines), Characters(maxChars)),
-                headings,
-                section,
-                verbose,
-                Math.Max(0, tail)),
-            workspace,
-            cancellationToken);
-
+    [Description("Path, absolute or workspace-relative.")] string path,
+    [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
+    [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
+    [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
+    [Description("Maximum characters of file text returned, default 40960 and at most 131072, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. The default is set so a whole-file read stays inline in the client instead of being spilled to a file that answers nothing; a clipped read names the line to continue from. Raise it on a file you truly need whole, lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
+    [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
+    [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
+    [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
+    [Description("Return the file verbatim - every line numbered, blank lines and trailing whitespace kept. On a .cs path this is also the opt-in that returns the text instead of the outline. Default false.")] bool verbose = false,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default)
+    {
+        var request = new FileService.ReadRequest(
+            new FileService.LineRange(startLine, endLine, Lines(maxLines), Characters(maxChars)),
+            headings,
+            section,
+            verbose,
+            Math.Max(0, tail));
+        return WholeCSharp(path, startLine, endLine, tail, maxLines, maxChars, section, headings, verbose)
+            && !context.OutsideEveryWorkspace(path)
+            ? context.WithWorkspaceAsync(
+                workspace,
+                path,
+                async loaded => NavigationTools.Unwrap(
+                    await OutlineService.OrTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken)
+            : Read(path, request, workspace, cancellationToken);
+    }
+    private static bool WholeCSharp(
+    string path,
+    int startLine,
+    int endLine,
+    int tail,
+    int maxLines,
+    int maxChars,
+    string? section,
+    bool headings,
+    bool verbose) =>
+    !verbose
+    && !headings
+    && section is null
+    && (startLine, endLine, tail, maxLines, maxChars) is ( <= 0, <= 0, <= 0, <= 0, <= 0)
+    && path.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
     private static int Characters(int requested) =>
         requested <= 0 ? FileService.DefaultResponseCharacters : Math.Min(requested, FileService.MaxResponseCharacters);
 
@@ -107,18 +128,19 @@ public sealed class FileTools(ToolContext context)
     [McpServerTool(Name = "find_files")]
     [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell.")]
     public Task<string> FindFiles(
-        [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (100).")] int maxResults = 0,
-        [Description("Alias for glob.")] string? pattern = null,
-        [Description("Append each listed file's UTC last-write time and byte length. Default false.")] bool stamps = false) =>
-        (glob ?? pattern) is { Length: > 0 } matched
-            ? context.WithWorkspace(
-                workspace,
-                null,
-                loaded => TextSearchService.FindFiles(loaded, matched, NavigationTools.Cap(maxResults, 100), stamps),
-                semantic: false)
-            : Task.FromResult(Errors.Blank("glob").Render());
+    [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Max results (100).")] int maxResults = 0,
+    [Description("Alias for glob.")] string? pattern = null,
+    [Description("Append each listed file's UTC last-write time and byte length. Default false.")] bool stamps = false,
+    [Description("Alias for glob.")] string? query = null) =>
+    (glob ?? pattern ?? query) is { Length: > 0 } matched
+        ? context.WithWorkspace(
+            workspace,
+            null,
+            loaded => TextSearchService.FindFiles(loaded, matched, NavigationTools.Cap(maxResults, 100), stamps),
+            semantic: false)
+        : Task.FromResult(Errors.Blank("glob", "pattern", "query").Render());
 
     [McpServerTool(Name = "search_text")]
     [Description("Literal text search across the workspace, or across any absolute directory with root=. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. context=N adds the surrounding lines so a hit needs no follow-up read, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]

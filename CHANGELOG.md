@@ -8,6 +8,74 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-08
+
+> **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
+> `read_text` on a `.cs` path asked for whole — no `startLine`, `endLine`, `tail`, `section` or
+> `verbose` — now answers that file's **outline** plus a steer instead of its text. Whole-file `.cs`
+> reads were 71.2 % of all `read_text` output and 32 % of every character this server has ever
+> returned; an outline is 32 % of the same file's tokens. Pass `verbose=true`, or any line range, to
+> get the text. A second format change: `TextCompressor.Source` no longer drops blank lines or strips
+> trailing whitespace, so a source payload is dedented and otherwise returned exactly as written.
+
+### Added
+
+- **`replace_symbol` applies edits to several files as ONE compile-gated edit.** Pass `symbolIds` and
+  `declarations` — one declaration per symbol, paired positionally — and a signature change lands
+  together with the callers it breaks, in however many files they live in and several per file. This
+  was the repo's most common rejection class: a signature change whose callers live in another
+  project always cost one `CompileRegression` plus a retry with `allowErrors: true`, paying the
+  rejected call *and* the whole declaration payload, six times in one measured run. Capped at 20
+  edits; unpaired arrays are refused naming both counts, and two edits where one declaration contains
+  the other are refused **in either order** rather than silently dropping the inner one.
+  `Errors.CompileRegression`'s remedy now names the batch. (I122)
+- **`get_symbol_source` takes `comments=false`**, dropping doc comments and inline comments through a
+  Roslyn rewriter. A comment on its own line goes with its indent and its newline, so no blank line is
+  left behind; a comment sitting between two tokens leaves exactly one space, so the stripped source
+  never joins `return`/*c*/`value` into `returnvalue`. Worth about a tenth of the response on a documented codebase and nothing on one that
+  carries no comments — which is why it is opt-in and never a default. (I128)
+- **`get_file_outline` and `get_type_outline` take `parameterNames=false`**, printing parameter types
+  without their names. Measured at about an eighth of an outline's tokens, and every overload is still
+  told apart. (I129)
+- **`find_files` accepts `query` as an alias of `glob`**, because `search_text` spells the same idea
+  `query`; the blank-glob remedy now names all three spellings. (I131)
+- **`run_tests` reports per-project counts on a multi-project run.** The green one-liner and the full
+  report gain `Name:total/durationMs` per project, so "which tier is slow" no longer costs a second
+  full run. A single-project run is byte-for-byte unchanged. (I125)
+- **`diff_symbols` ends with the exact `diff_text path=…` call** for the hunks it could only map
+  `HEURISTIC`, capped at three paths. (I126)
+
+### Changed
+
+- **`read_text` on a whole `.cs` file answers the outline plus a steer — a response-format change.**
+  Any line range, `tail`, `section` or `verbose=true` still returns the text, and a `.cs` file that is
+  not a workspace document falls through to the text unchanged. (I133)
+- **`TextCompressor.Source` only dedents — a response-format change.** Blank lines and trailing
+  whitespace now survive in every source payload. The blank-line squeeze saved 104 tokens of 308 980
+  (0.03 %) across this repo's 283 `.cs` files, because BPE already folds `\n\n`, and it was the one
+  branch that rewrote payload text and could corrupt a raw-string literal. The dedent, worth 18–31 %
+  at member scope, is untouched. (I127)
+- **An argument a tool does not declare is now rejected instead of silently ignored.**
+  `ToolArgumentFilter` compares the supplied argument names against the advertised schema before
+  dispatch and answers `ERROR InvalidArgument: <tool> rejected the call: unrecognized <names>` with
+  every accepted spelling and the tool's worked example. Before this,
+  `find_files {"pattern":"*.cs","max_results":3}` returned all 19 files — a confidently wrong answer
+  the agent could not detect. `Errors.Blank` also names a parameter's aliases now. (I130, I131)
+- **`diff_text`'s description states what it costs and how to bound it** rather than telling the agent
+  not to call it, and opens with `Replaces Bash git diff`. A discouraged tool measures as a missing
+  tool, and the missing tool was answered by the shell. (I126)
+
+### Fixed
+
+- **`replace_symbol_body` no longer eats the blank line after the member.** `WithBody` and
+  `WithExpression` discarded the replaced node's trailing trivia — `.WithSemicolonToken(default)` and
+  a freshly created semicolon token both drop it — so a body edit that should have been byte-identical
+  dirtied the file. A no-op body edit now answers `0 files changed` with the identical-content note.
+  `replace_symbol` was never affected. (I123)
+- **A symbol id that arrives HTML-escaped now resolves.** `SymbolLookup.ResolveAsync` decodes
+  `&lt;`/`&gt;`/`&amp;` before parsing, so a generic member id copied out of a rendered response no
+  longer costs a retry. The decode is skipped when the text carries no `&`. (I124)
+
 ## [0.25.0] - 2026-08-08
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
@@ -2015,7 +2083,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.26.0
 [0.25.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.25.0
 [0.24.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.24.0
 [0.23.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.23.0

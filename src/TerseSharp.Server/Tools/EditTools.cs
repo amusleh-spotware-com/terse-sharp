@@ -22,19 +22,22 @@ public sealed class EditTools(ToolContext context)
             loaded, resolved, body, Options("replace_symbol_body", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations instead to replace members in several files as ONE compile-gated edit, which is how a signature change lands together with the callers it breaks. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
-        [Description("Symbol id of the member.")] string? symbolId = null,
-        [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
-        [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
-        [Description(VerboseHelp)] bool verbose = false,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Alias for symbolId.")] string? symbol = null,
-        CancellationToken cancellationToken = default) =>
-        Supplied(workspace, symbolId ?? symbol, declaration, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
-            loaded, resolved, declaration, Options("replace_symbol", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
-
+    [Description("Symbol id of the member.")] string? symbolId = null,
+    [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
+    [Description("Diff only, write nothing.")] bool dryRun = false,
+    [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+    [Description(VerboseHelp)] bool verbose = false,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Alias for symbolId.")] string? symbol = null,
+    [Description("Symbol ids of the members to replace together, paired positionally with declarations. Several entries per file are allowed; two entries where one declaration contains the other are refused.")] string[]? symbolIds = null,
+    [Description("One complete declaration per entry of symbolIds, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
+    CancellationToken cancellationToken = default) =>
+    (symbolIds, declarations) is (null, null)
+        ? Supplied(workspace, symbolId ?? symbol, declaration, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
+            loaded, resolved, declaration, Options("replace_symbol", dryRun, allowErrors, verbose), cancellationToken), cancellationToken)
+        : Batched(workspace, symbolIds ?? [], declarations ?? [], Options("replace_symbol", dryRun, allowErrors, verbose), cancellationToken);
     [McpServerTool(Name = "add_member")]
     [Description("Add one or more members to a type, addressed by the type's symbol id - or, with path=, add namespace-level types to an existing .cs file. An enum symbol id takes enum members. Several declarations in one call land as a single compile-gated edit, so a set of members that reference each other needs no dependency ordering. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> AddMember(
@@ -132,4 +135,22 @@ public sealed class EditTools(ToolContext context)
         CancellationToken cancellationToken) => text is { Length: > 0 }
         ? Guarded(workspace, symbolId, action, cancellationToken)
         : Task.FromResult(Errors.Blank(name).Render());
+
+    private Task<string> Batched(
+        string? workspace,
+        string[] symbolIds,
+        string[] declarations,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var rejection = context.RejectWrite();
+        return rejection is not null
+            ? Task.FromResult(rejection)
+            : context.WithWorkspaceAsync(
+                workspace,
+                null,
+                async loaded => NavigationTools.Unwrap(await SymbolEditService.ReplaceDeclarationsAsync(
+                    loaded, symbolIds, declarations, options, cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken);
+    }
 }
