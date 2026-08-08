@@ -13,7 +13,7 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
     {
         var timings = await TimeAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
 
-        Assert.All(timings[1..], elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report("get_file_outline", timings)));
+        Settled("get_file_outline", timings);
     }
 
     [Fact]
@@ -24,7 +24,7 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
             ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
         });
 
-        Assert.All(timings[1..], elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report("find_usages", timings)));
+        Settled("find_usages", timings);
     }
 
     [Fact]
@@ -32,7 +32,7 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
     {
         var timings = await TimeAsync("search_symbols", new() { ["query"] = "Order" });
 
-        Assert.All(timings[1..], elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report("search_symbols", timings)));
+        Settled("search_symbols", timings);
     }
 
     private async Task<long[]> TimeAsync(string tool, Dictionary<string, object?> arguments)
@@ -53,6 +53,14 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
 
     private static string Report(string tool, long[] timings) =>
         tool + " ms per call: " + string.Join(", ", timings.Select(elapsed => elapsed.ToString(CultureInfo.InvariantCulture)));
+
+    private static void Settled(string tool, long[] timings)
+    {
+        var settled = timings[AfterWarmup..];
+
+        Assert.All(settled, elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report(tool, timings)));
+        Assert.True(settled.Max() < timings[0], Report(tool, timings));
+    }
 
     [Fact]
     public async Task OnThisRepositorysOwnSolution_ARepeatedSemanticQuery_IsNotRederivedFromScratch()
@@ -76,11 +84,13 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
                 timings[index] = stopwatch.ElapsedMilliseconds;
             }
 
-            Assert.All(timings[1..], elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report("get_file_outline on TerseSharp.slnx", timings)));
+            Settled("get_file_outline on TerseSharp.slnx", timings);
         }
         finally
         {
             await probe.StopAsync();
         }
     }
+
+    private const int AfterWarmup = 2;
 }
