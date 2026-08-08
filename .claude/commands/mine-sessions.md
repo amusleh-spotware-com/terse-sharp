@@ -13,13 +13,17 @@ input from the user; do not ask, do not confirm the window.
 1. **A finding without a number is not a finding.** "Reads feel wasteful" is banned. "36 `Read` calls
    in one session, 214 KB of tool results, ~53 500 tokens, against 10 `search_text` calls" is a
    finding. Every row carries a count, a byte/token/millisecond figure and the corpus it came from.
-2. **Nothing is too small to count.** This command's whole reason to exist is the long tail: a
-   trailing space on every line of every response, a two-character column separator, a repeated
-   `(truncated=false)`, a folded absolute path prefix, one redundant word in a tool `[Description]`
-   that is re-sent on every single request of every single session. A saving of 8 characters per line
-   over 40 000 lines is **80 000 characters ≈ 20 000 tokens** and outranks most new tools. "Too small
-   to log" is a banned phrase here — small findings are **aggregated into one row per family**, never
-   dropped (M8.4).
+2. **Nothing is too small to count — but a trim is only real once a tokenizer says so.** This
+   command's reason to exist is the long tail: a two-space column separator, a repeated
+   `(truncated=false)`, an absolute path, one redundant word in a tool `[Description]` re-sent on
+   every request of every session. A multi-space run costs exactly **1 token** wherever it appears,
+   so a 4-column table pays **3 tokens per row** for alignment nobody reads — over 40 000 rows that
+   is 120 000 tokens, and it outranks most new tools. "Too small to log" is a banned phrase here;
+   small findings are **aggregated into one row per family**, never dropped (M8.4).
+   **The mirror rule is equally binding: a trim that measures zero is not a finding either.** Blank
+   lines, trailing whitespace and abbreviation each measured **≤0.1% and 19-of-20 exactly zero** on
+   real payloads (M3.2). Proposing one of those is the same defect as failing to notice the padding —
+   both spend the reader's attention on a number that is not there.
 3. **Never copy content out of another project's transcript.** These sessions are from a private
    employer codebase (`cTraderDev`, `ctd-worktrees-*`, `cTraderAutomateApi`, …) and `IMPROVEMENTS.md`
    is pushed to a **public** repository. A row may name: tool names, call counts, byte sizes, token
@@ -29,10 +33,20 @@ input from the user; do not ask, do not confirm the window.
    test file`) not the value. The measurement script enforces a mechanical version of this rule and
    you enforce the rest by hand in M9.2.
 4. **Character economy is a claim about tokens, so state both.** Chars are what the script can count;
-   tokens are what is paid. Convert at ~4 chars/token for prose and ~3 for dense punctuation, say
-   which you used, and prefer trims that delete **whole tokens** (a word, a separator, a repeated
-   line prefix, a column) over trims that only shorten one — deleting 3 characters from the middle of
-   a word usually saves nothing at all.
+   tokens are what is paid. The measured ratio over real TerseSharp responses is **4.18 chars/token**,
+   which is why M2 estimates at `chars // 4` — and why an estimate is all it is. Prefer trims that
+   delete **whole tokens** (a separator, a padded column, a repeated line prefix, a whole field) over
+   trims that shorten one: deleting characters from inside a word usually saves nothing at all,
+   because a common word is already a single token.
+5. **Every claim names the instrument that verified it.** Three are admissible, in this order:
+   (a) **the corpus** — a count from the M2 scan over the real transcripts; (b) **a tokenizer
+   experiment** — an encode-before/encode-after on a real payload, in both `o200k_base` and
+   `cl100k_base`, labelled directional because neither is Claude's; (c) **a primary source** — a
+   vendor document or a paper, fetched and quoted, never a summary of a summary. Where an outside
+   claim contradicts the corpus, **the corpus wins and the row says so**. A claim that survived none
+   of the three is written `UNVERIFIED` in the report and is not allowed into `IMPROVEMENTS.md` at
+   all. This gate exists because a previous run of this command shipped a trim ledger whose three
+   headline classes were each worth ~0.1%, sourced from plausible reasoning that nobody encoded.
 
 **Also banned:** `AskUserQuestion`, `ExitPlanMode`, editing any file other than `IMPROVEMENTS.md`,
 `git add -A`, a `Co-Authored-By:` trailer, and writing any script anywhere inside the repository.
@@ -83,25 +97,25 @@ That is the whole run; it is a success, not a failure.
 
 Write the script to a **temporary directory** (`$TMPDIR` / `%TEMP%`), never into the repository, and
 run it with `python`. One script, one pass, comparable across runs — an eyeballed sample is not this
-phase. It measures four axes at once: **tokens**, **characters** (the trim ledger), **latency**, and
-**failure**.
+phase.
+
+**Two shell traps this command has already paid for.** On Windows, bash's `/tmp` and the Windows
+`%TEMP%` are the same directory but not the same *name*: write the file from bash with a POSIX path
+and hand `python` the **Windows** path, or it answers `can't open file`. And a heredoc longer than
+about 120 lines, or one containing a `'"` sequence, gets truncated mid-string and dies with
+`unexpected EOF while looking for matching '`. Append the script in chunks and `ast.parse` it before
+running it.
+
+**The schema below was verified against 282 061 records on 2026-08-08**; every field named here was
+counted, not assumed. The five things the previous version of this script got wrong are called out
+inline, because each one silently under-reported.
 
 ```python
-import collections, datetime, json, os, re, sys, time
+import ast, collections, datetime, json, os, re, sys
 
-weeks = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
-cutoff = time.time() - weeks * 7 * 86400
-roots, seen_roots = [], set()
-for candidate in (os.path.expanduser('~/.claude/projects'),
-                  os.path.join(os.environ.get('CLAUDE_CONFIG_DIR', ''), 'projects')):
-    if not candidate or not os.path.isdir(candidate):
-        continue
-    real = os.path.realpath(candidate).lower()
-    if real in seen_roots:
-        continue
-    seen_roots.add(real)
-    roots.append(candidate)
-
+WEEKS = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
+CUTOFF = datetime.datetime.now().timestamp() - WEEKS * 7 * 86400
+QUOTE = chr(34)
 BUILTIN = {'Read', 'Write', 'Edit', 'NotebookEdit', 'Grep', 'Glob', 'Bash',
            'WebFetch', 'WebSearch', 'Agent', 'Task', 'TodoWrite', 'Skill', 'ToolSearch'}
 SHELL_TEXT = re.compile(r'\b(grep|rg|cat|head|tail|sed|awk|ls|find|type)\b')
@@ -109,28 +123,38 @@ SHELL_GIT = re.compile(r'\bgit\s+(status|diff)\b')
 SHELL_DOTNET = re.compile(r'\bdotnet\s+(build|test|clean|format)\b')
 SLEEP = re.compile(r'\bsleep\s+(\d+)')
 ABSPATH = re.compile(r'[A-Za-z]:\\[\w.\-\\]+|/(?:Users|home|mnt|var|opt)/[\w.\-/]+')
+PADRUN = re.compile(r'(?<=\S) {2,}')
+INDENT = re.compile(r'^ {2,}')
 ERRCODE = re.compile(r'\bERROR\s+([A-Za-z][A-Za-z0-9_]*)')
-NOISE = ('(truncated=false', 'truncated=false)', 'remedy:', 'EXACT', 'HEURISTIC')
+CONSTANT = ('(truncated=false', 'errors=0 warnings=0', 'EXACT', 'remedy:')
 
-calls = collections.Counter()
-input_chars = collections.Counter()
-result_chars = collections.Counter()
-errors = collections.Counter()
-error_codes = collections.Counter()
+roots, seen = [], set()
+for candidate in (os.path.expanduser('~/.claude/projects'),
+                  os.path.join(os.environ.get('CLAUDE_CONFIG_DIR', ''), 'projects')):
+    if candidate and os.path.isdir(candidate):
+        real = os.path.realpath(candidate).lower()
+        if real not in seen:
+            seen.add(real)
+            roots.append(candidate)
+
+types = collections.Counter(); systems = collections.Counter()
+calls = collections.Counter(); errors = collections.Counter(); error_codes = collections.Counter()
+result_chars = collections.Counter(); input_chars = collections.Counter()
+steers = collections.Counter(); structured_trunc = collections.Counter()
+durations = collections.defaultdict(list); dupes = collections.Counter()
 per_project = collections.defaultdict(collections.Counter)
-bash_kind = collections.Counter()
-dupes = collections.Counter()
-steers = collections.Counter()
-noise = collections.Counter()
-trim = collections.Counter()
-line_freq = collections.Counter()
-line_projects = collections.defaultdict(set)
-durations = collections.defaultdict(list)
-payloads = []
-usage = collections.Counter()
-sessions = set()
-slept = 0
-fat_timeouts = 0
+bash_kind = collections.Counter(); attach = collections.Counter(); attach_n = collections.Counter()
+attribution = collections.Counter(); attributed_tokens = collections.Counter()
+denials = collections.Counter(); queue = collections.Counter(); stops = collections.Counter()
+by_model = collections.defaultdict(collections.Counter)
+trim = collections.Counter(); placebo = collections.Counter()
+line_freq = collections.Counter(); line_projects = collections.defaultdict(set)
+payloads = []; turns = []; compactions = []; api_errors = collections.Counter()
+sessions = set(); slept = interrupted = think_chars = think_n = think_sealed = 0
+persisted_n = persisted_bytes = spill_files = spill_bytes = 0
+delegations = 0; delegated_tokens = 0; delegated_ms = 0
+mcp_structured = mcp_structured_chars = 0
+records = with_message = 0
 
 def stamp(record):
     raw = record.get('timestamp')
@@ -142,129 +166,196 @@ def stamp(record):
         return None
 
 def prune():
-    if len(line_freq) <= 300_000:
-        return
-    for text, count in list(line_freq.items()):
-        if count < 2:
-            del line_freq[text]
-            line_projects.pop(text, None)
+    if len(line_freq) > 300_000:
+        for text, count in list(line_freq.items()):
+            if count < 2:
+                del line_freq[text]
+                line_projects.pop(text, None)
 
 def audit(text, project):
-    blank = indent = trail = 0
     local = collections.Counter()
+    blank = trail = 0
     for raw in text.split('\n'):
         body = raw.rstrip()
         trail += len(raw) - len(body)
         if not body:
             blank += len(raw) + 1
             continue
-        indent += len(body) - len(body.lstrip())
+        if INDENT.match(body):
+            trim['indent (1 token/line)'] += 1
+        trim['column padding (1 token/run)'] += len(PADRUN.findall(body))
         local[body] += 1
         if len(body) >= 12:
             line_freq[body] += 1
-            seen = line_projects[body]
-            if len(seen) < 6:
-                seen.add(project)
-    trim['trailing whitespace'] += trail
-    trim['blank lines'] += blank
-    trim['leading indent'] += indent
-    trim['repeated lines in one payload'] += sum((c - 1) * (len(s) + 1)
-                                                 for s, c in local.items() if c > 1)
-    trim['absolute path text'] += sum(len(m) for m in ABSPATH.findall(text))
-    for token in NOISE:
-        trim[f'literal {token!r}'] += text.count(token) * len(token)
+            group = line_projects[body]
+            if len(group) < 6:
+                group.add(project)
+    placebo['blank lines'] += blank
+    placebo['trailing whitespace'] += trail
+    trim['repeated lines'] += sum((c - 1) * (len(s) + 1) // 4 for s, c in local.items() if c > 1)
+    trim['absolute path text'] += sum(len(m) for m in ABSPATH.findall(text)) * 61 // 400
+    for token in CONSTANT:
+        trim['constant tags'] += text.count(token) * len(token) // 4
     prune()
 
 def walk():
-    seen_files = set()
+    files = set()
     for root in roots:
         for folder, _, names in os.walk(root):
+            if os.path.basename(folder) == 'tool-results':
+                yield folder, None, names
+                continue
             for name in names:
                 if not name.endswith('.jsonl'):
                     continue
                 path = os.path.join(folder, name)
                 key = os.path.realpath(path).lower()
-                if key in seen_files:
+                if key in files:
                     continue
                 try:
-                    if os.path.getmtime(path) >= cutoff:
-                        seen_files.add(key)
-                        rel = os.path.relpath(path, root)
-                        yield path, rel.split(os.sep)[0]
+                    if os.path.getmtime(path) >= CUTOFF:
+                        files.add(key)
+                        yield path, os.path.relpath(path, root).split(os.sep)[0], None
                 except OSError:
                     pass
 
-for path, project in walk():
-    sessions.add(path)
-    pending, seen = {}, collections.Counter()
-    with open(path, encoding='utf-8', errors='replace') as handle:
-        for line in handle:
+for path, project, spilled in walk():
+    if spilled is not None:
+        for name in spilled:
             try:
-                record = json.loads(line)
-            except ValueError:
+                if os.path.getmtime(os.path.join(path, name)) >= CUTOFF:
+                    spill_files += 1
+                    spill_bytes += os.path.getsize(os.path.join(path, name))
+            except OSError:
+                pass
+        continue
+    sessions.add(path)
+    pending, seen_calls = {}, collections.Counter()
+    for line in open(path, encoding='utf-8', errors='replace'):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        records += 1
+        kind = record.get('type', 'none')
+        types[kind] += 1
+        at = stamp(record)
+        if record.get('interruptedMessageId'):
+            interrupted += 1
+        if record.get('toolDenialKind'):
+            denials[record['toolDenialKind']] += 1
+        for key in ('attributionSkill', 'attributionMcpServer', 'attributionAgent', 'attributionPlugin'):
+            if record.get(key):
+                attribution[(key, record[key])] += 1
+        if kind == 'system':
+            subtype = record.get('subtype', 'none')
+            systems[subtype] += 1
+            if subtype == 'turn_duration' and isinstance(record.get('durationMs'), (int, float)):
+                turns.append(record['durationMs'])
+            elif subtype == 'compact_boundary':
+                meta = record.get('compactMetadata') or {}
+                compactions.append((meta.get('preTokens') or 0, meta.get('postTokens') or 0,
+                                    meta.get('trigger'), meta.get('durationMs') or 0))
+            elif subtype == 'api_error':
+                api_errors[str((record.get('error') or {}).get('status'))] += 1
+        elif kind == 'queue-operation':
+            queue[record.get('operation', 'none')] += 1
+        elif kind == 'attachment':
+            body = record.get('attachment') or {}
+            label = body.get('type', 'none')
+            attach_n[label] += 1
+            attach[label] += len(json.dumps(body))
+        meta = record.get('mcpMeta')
+        if isinstance(meta, dict) and meta.get('structuredContent') is not None:
+            mcp_structured += 1
+            mcp_structured_chars += len(json.dumps(meta['structuredContent']))
+        outcome = record.get('toolUseResult')
+        if isinstance(outcome, dict):
+            if outcome.get('persistedOutputPath'):
+                persisted_n += 1
+                persisted_bytes += outcome.get('persistedOutputSize') or 0
+            if outcome.get('truncated') or (outcome.get('file') or {}).get('truncatedByTokenCap'):
+                structured_trunc['harness'] += 1
+            if outcome.get('toolStats'):
+                delegations += 1
+                delegated_tokens += outcome.get('totalTokens') or 0
+                delegated_ms += outcome.get('totalDurationMs') or 0
+        message = record.get('message')
+        if not isinstance(message, dict):
+            continue
+        with_message += 1
+        model = message.get('model') or 'unknown'
+        if message.get('stop_reason'):
+            stops[message['stop_reason']] += 1
+        stats = message.get('usage')
+        if isinstance(stats, dict):
+            for key in ('input_tokens', 'output_tokens', 'cache_read_input_tokens'):
+                by_model[model][key] += stats.get(key) or 0
+            split = stats.get('cache_creation')
+            if isinstance(split, dict):
+                for key, value in split.items():
+                    if isinstance(value, (int, float)):
+                        by_model[model][key] += value
+            else:
+                by_model[model]['cache_creation_input_tokens'] += stats.get('cache_creation_input_tokens') or 0
+            for key in ('attributionSkill', 'attributionMcpServer', 'attributionAgent'):
+                if record.get(key):
+                    attributed_tokens[(key, record[key])] += (stats.get('output_tokens') or 0)
+        blocks = message.get('content')
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            if not isinstance(block, dict):
                 continue
-            at = stamp(record)
-            message = record.get('message') or {}
-            stats = message.get('usage')
-            if isinstance(stats, dict):
-                for key in ('input_tokens', 'output_tokens',
-                            'cache_creation_input_tokens', 'cache_read_input_tokens'):
-                    usage[key] += stats.get(key) or 0
-            blocks = message.get('content')
-            if not isinstance(blocks, list):
-                continue
-            for block in blocks:
-                if not isinstance(block, dict):
-                    continue
-                if block.get('type') == 'tool_use':
-                    tool = block.get('name') or '?'
-                    arguments = block.get('input') or {}
-                    calls[tool] += 1
-                    per_project[project][tool] += 1
-                    pending[block.get('id')] = (tool, project, at)
-                    payload = json.dumps(arguments, sort_keys=True)
-                    input_chars[tool] += len(payload)
-                    seen[(tool, payload[:4000])] += 1
-                    if tool == 'Bash':
-                        command = arguments.get('command', '') or ''
-                        kind = ('git status/diff' if SHELL_GIT.search(command) else
-                                'dotnet build/test/format' if SHELL_DOTNET.search(command) else
-                                'shell text tool' if SHELL_TEXT.search(command) else
-                                'sleep/wait' if SLEEP.search(command) else 'other')
-                        bash_kind[kind] += 1
-                        slept += sum(int(v) for v in SLEEP.findall(command))
-                elif block.get('type') == 'tool_result':
-                    tool, proj, started = pending.pop(block.get('tool_use_id'),
-                                                      ('?', project, None))
-                    content = block.get('content')
-                    text = content if isinstance(content, str) else json.dumps(content or '')
-                    size = len(text)
-                    result_chars[tool] += size
-                    payloads.append((size, tool, proj))
-                    audit(text, proj)
-                    if started and at and at >= started:
-                        elapsed = at - started
-                        durations[tool].append(elapsed)
-                        if tool == 'Bash' and elapsed < 30:
-                            fat_timeouts += 1
-                    if block.get('is_error') or text.lstrip().startswith('ERROR '):
-                        errors[tool] += 1
-                        found = ERRCODE.search(text)
-                        if found:
-                            error_codes[found.group(1)] += 1
-                    if 'narrow with' in text or '(truncated=true' in text:
-                        steers[tool] += 1
-                    if '(truncated=false' in text:
-                        noise[tool] += 1
-    for (tool, _payload), count in seen.items():
+            shape = block.get('type')
+            if shape == 'thinking':
+                think_n += 1
+                body = block.get('thinking') or ''
+                think_chars += len(body)
+                if not body:
+                    think_sealed += 1
+            elif shape == 'tool_use':
+                tool = block.get('name') or 'none'
+                arguments = block.get('input') or {}
+                calls[tool] += 1
+                per_project[project][tool] += 1
+                pending[block.get('id')] = (tool, at)
+                encoded = json.dumps(arguments, sort_keys=True)
+                input_chars[tool] += len(encoded)
+                seen_calls[(tool, encoded[:4000])] += 1
+                if tool == 'Bash':
+                    command = arguments.get('command', '') or ''
+                    bash_kind['git status/diff' if SHELL_GIT.search(command) else
+                              'dotnet build/test/format' if SHELL_DOTNET.search(command) else
+                              'shell text tool' if SHELL_TEXT.search(command) else
+                              'sleep/wait' if SLEEP.search(command) else 'other'] += 1
+                    slept += sum(int(v) for v in SLEEP.findall(command))
+            elif shape == 'tool_result':
+                tool, started = pending.pop(block.get('tool_use_id'), ('none', None))
+                content = block.get('content')
+                text = content if isinstance(content, str) else json.dumps(content or '')
+                result_chars[tool] += len(text)
+                payloads.append((len(text), tool, project))
+                audit(text, project)
+                if started and at and at >= started:
+                    durations[tool].append((at - started) * 1000)
+                if block.get('is_error') or text.lstrip().startswith('ERROR '):
+                    errors[tool] += 1
+                    found = ERRCODE.search(text)
+                    if found:
+                        error_codes[found.group(1)] += 1
+                if 'narrow with' in text or '(truncated=true' in text:
+                    steers[tool] += 1
+                    structured_trunc['tool steer'] += 1
+    for (tool, _), count in seen_calls.items():
         if count > 1:
             dupes[tool] += count - 1
 
 payloads.sort(reverse=True)
 total_calls = sum(calls.values())
 total_chars = sum(result_chars.values())
-builtin_calls = sum(count for tool, count in calls.items() if tool in BUILTIN)
-mcp_calls = sum(count for tool, count in calls.items() if tool.startswith('mcp__'))
+builtin = sum(c for t, c in calls.items() if t in BUILTIN)
+mcp = sum(c for t, c in calls.items() if t.startswith('mcp__'))
 
 def quantile(values, fraction):
     if not values:
@@ -272,141 +363,283 @@ def quantile(values, fraction):
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
 
-def line(label, value):
-    print(f'{label:<34}{value}')
+def show(label, value):
+    print(f'{label:<32}{value}')
 
-print(f'== window {weeks} week(s), {len(sessions)} transcripts, roots: {len(roots)}')
-line('tool calls', total_calls)
-line('built-in calls', f'{builtin_calls} ({builtin_calls * 100 // max(total_calls, 1)}%)')
-line('mcp calls', f'{mcp_calls} ({mcp_calls * 100 // max(total_calls, 1)}%)')
-line('tool-result chars', f'{total_chars:,} (~{total_chars // 4:,} tok)')
-line('tool-input chars', f'{sum(input_chars.values()):,}')
-line('measured tool wall time', f'{sum(sum(v) for v in durations.values()) / 3600:.2f} h')
-line('seconds slept in Bash', slept)
-for key, value in usage.most_common():
-    line(key, f'{value:,}')
+print(f'== window {WEEKS} week(s)  transcripts={len(sessions)}  roots={len(roots)}')
+show('records', f'{records:,} ({with_message:,} carry a message, '
+                f'{(records - with_message) * 100 // max(records, 1)}% do not)')
+show('record types', dict(types.most_common(8)))
+show('tool calls', f'{total_calls:,}  builtin={builtin * 100 // max(total_calls, 1)}%  '
+                   f'mcp={mcp * 100 // max(total_calls, 1)}%')
+show('tool-result chars', f'{total_chars:,} (~{total_chars // 4:,} tok)')
+show('tool-input chars', f'{sum(input_chars.values()):,}')
+show('spilled tool results', f'{persisted_n} records / {persisted_bytes:,} B  '
+                            f'(sidecar dir: {spill_files} files / {spill_bytes:,} B)')
+show('attachment context', f'{sum(attach_n.values()):,} records / {sum(attach.values()):,} B '
+                           f'= {sum(attach.values()) * 100 // max(total_chars, 1)}% of tool-result volume')
+show('thinking', f'{think_n:,} blocks, {think_sealed:,} sealed (empty text + signature); '
+                 f'{think_chars:,} chars readable - the cost is already inside output_tokens')
+show('mcp structuredContent', f'{mcp_structured:,} records / {mcp_structured_chars:,} chars')
+show('measured tool wall time', f'{sum(sum(v) for v in durations.values()) / 3.6e6:.1f} h')
+show('turn wall time', f'{sum(turns) / 3.6e6:.1f} h over {len(turns)} turns, '
+                       f'p50={quantile(turns, 0.5) / 1000:.0f}s')
+show('seconds slept in Bash', slept)
 
-print('\n== top tools by result payload')
+print('\n== token ledger per model (base-input-equivalent: read 0.1x, 5m write 1.25x, 1h write 2.0x)')
+for model, counter in sorted(by_model.items(), key=lambda kv: -sum(kv[1].values())):
+    bie = (counter['input_tokens']
+           + counter['cache_read_input_tokens'] * 0.1
+           + counter['ephemeral_5m_input_tokens'] * 1.25
+           + counter['ephemeral_1h_input_tokens'] * 2.0
+           + counter['cache_creation_input_tokens'] * 1.25)
+    print(f'  {model:<30}in={counter["input_tokens"]:>12,}  read={counter["cache_read_input_tokens"]:>14,}  '
+          f'1h={counter["ephemeral_1h_input_tokens"]:>12,}  5m={counter["ephemeral_5m_input_tokens"]:>11,}  '
+          f'out={counter["output_tokens"]:>11,}  BIE={bie:>15,.0f}')
+
+print('\n== tools: payload, latency, failure rate')
 for tool, chars in result_chars.most_common(25):
     spent = durations[tool]
-    print(f'{tool:<34}{calls[tool]:>5} calls  {chars:>10,} ch  ~{chars // 4:>8,} tok  '
-          f'{chars // max(calls[tool], 1):>7,} ch/call  in={input_chars[tool]:>8,} ch  '
-          f'p50={quantile(spent, 0.5):>6.1f}s  p95={quantile(spent, 0.95):>7.1f}s  '
-          f'tot={sum(spent) / 60:>7.1f}m  err={errors[tool]}  steers={steers[tool]}  '
-          f'noise={noise[tool]}')
+    n = max(calls[tool], 1)
+    print(f'  {tool:<40}{calls[tool]:>5}x  {chars:>10,} ch  {chars // n:>7,} ch/call  '
+          f'in={input_chars[tool] // n:>5} ch/call  p50={quantile(spent, .5):>7.0f}ms  '
+          f'p90={quantile(spent, .9):>8.0f}ms  p99={quantile(spent, .99):>9.0f}ms  '
+          f'tot={sum(spent) / 60000:>6.1f}m  err={errors[tool] * 100 / n:>5.1f}%  '
+          f'steer={steers[tool]}  dup={dupes[tool]}')
 
-print('\n== trim ledger (characters that carried no information)')
-for label, chars in trim.most_common():
-    share = chars * 100 / max(total_chars, 1)
-    print(f'{label:<34}{chars:>12,} ch  ~{chars // 4:>9,} tok  {share:>5.2f}% of all output')
+print('\n== trim ledger: tokens that carried no information (estimates, see M3 for the tokenizer)')
+for label, tokens in trim.most_common():
+    print(f'  {label:<34}~{tokens:>9,} tok  {tokens * 100 / max(total_chars // 4, 1):>5.2f}% of output')
+print('  -- measured placebo, DO NOT log as a saving (<=0.1% of tokens on real payloads) --')
+for label, chars in placebo.most_common():
+    print(f'  {label:<34} {chars:>9,} chars, ~0 tokens')
 
 print('\n== boilerplate lines (>=5 uses, >=3 projects, no path text)')
 shown = 0
 for text, count in line_freq.most_common(400):
-    if count < 5 or len(line_projects[text]) < 3 or ABSPATH.search(text):
-        continue
-    print(f'{count:>6}x  {len(text) * count:>9,} ch  {text[:60]!r}')
-    shown += 1
-    if shown == 20:
-        break
+    if count >= 5 and len(line_projects[text]) >= 3 and not ABSPATH.search(text):
+        print(f'  {count:>6}x  ~{len(text) * count // 4:>8,} tok  {text[:60]!r}')
+        shown += 1
+        if shown == 20:
+            break
 
-print('\n== Bash breakdown')
-for kind, count in bash_kind.most_common():
-    print(f'{kind:<34}{count}')
-line('bash calls under 30 s', fat_timeouts)
+print('\n== attachments (harness-injected context nobody calls for)')
+for label, size in attach.most_common(10):
+    print(f'  {label:<34}{attach_n[label]:>6} records  {size:>12,} B  ~{size // 4:>9,} tok')
 
-print('\n== repeated identical calls within a session')
-for tool, count in dupes.most_common(15):
-    print(f'{tool:<34}{count}')
+print('\n== attribution: who spent it')
+for (key, name), count in attribution.most_common(15):
+    print(f'  {key[11:]:<14}{name[:34]:<36}{count:>7} records  '
+          f'~{attributed_tokens[(key, name)]:>9,} output tok')
+print(f'  delegations={delegations}  self-reported tokens={delegated_tokens:,}  '
+      f'wall={delegated_ms / 3.6e6:.1f} h')
 
-print('\n== error codes')
-for code, count in error_codes.most_common(20):
-    print(f'{code:<34}{count}')
+print('\n== friction')
+show('error codes', dict(error_codes.most_common(10)))
+show('api errors', dict(api_errors.most_common(6)))
+show('permission denials', dict(denials))
+show('queue enqueue/remove', f'{queue.get("enqueue", 0)}/{queue.get("remove", 0)}')
+show('interruptions', interrupted)
+show('truncated (max_tokens)', stops.get('max_tokens', 0))
+show('truncation signals', dict(structured_trunc))
+show('bash breakdown', dict(bash_kind.most_common()))
+for pre, post, trigger, ms in compactions:
+    print(f'  compaction {trigger}: {pre:,} -> {post:,} tokens in {ms / 1000:.0f}s')
 
 print('\n== 15 largest single tool results')
 for size, tool, project in payloads[:15]:
-    print(f'{size:>9,} ch  {tool:<32}{project}')
+    print(f'  {size:>9,} ch  {tool:<34}{project}')
 
 print('\n== per project')
-for project, counter in sorted(per_project.items(), key=lambda item: -sum(item[1].values())):
-    total = sum(counter.values())
-    top = ', '.join(f'{tool}x{count}' for tool, count in counter.most_common(6))
-    print(f'{total:>6}  {project[:44]:<46}{top}')
+for project, counter in sorted(per_project.items(), key=lambda kv: -sum(kv[1].values())):
+    top = ', '.join(f'{t}x{c}' for t, c in counter.most_common(6))
+    print(f'  {sum(counter.values()):>6}  {str(project)[:44]:<46}{top}')
 
-print(f'\n== corpus  weeks={weeks} transcripts={len(sessions)} calls={total_calls} '
-      f'builtin={builtin_calls * 100 // max(total_calls, 1)}% '
-      f'resulttok={total_chars // 4} trimtok={sum(trim.values()) // 4}')
+print(f'\n== corpus  weeks={WEEKS} transcripts={len(sessions)} records={records} calls={total_calls} '
+      f'builtin={builtin * 100 // max(total_calls, 1)}% resulttok={total_chars // 4} '
+      f'attachtok={sum(attach.values()) // 4} trimtok={sum(trim.values())}')
 ```
 
-Run it as `python <script> <WEEKS>`. Read the **whole** output. **Do not** re-derive any number by hand
-afterwards — the script is the measurement of record, and the next run must be comparable to this one.
+Run it as `python <script> <WEEKS>`. Read the **whole** output. **Do not** re-derive any number by
+hand afterwards — the script is the measurement of record, and the next run must be comparable.
 
-Two things the script deliberately does, and you must not undo:
+**Five corrections this script encodes, each one a measured under-report in the version before it:**
 
-- **The boilerplate section is privacy-filtered**, not privacy-free. It prints a line only when it
-  appears in ≥3 different projects and contains no path-shaped text, which is what makes it *tool
-  framing* rather than *user content*. Never widen that filter, never print a line it suppressed, and
-  never paste one of these lines into `IMPROVEMENTS.md` unless it is unmistakably TerseSharp's own
-  response framing.
-- **`line_freq` is pruned at 300 000 entries.** A multi-month window over a large corpus otherwise
-  costs gigabytes. If you widen the window past ~8 weeks, say in the report that the boilerplate
-  section is a floor, not a total.
+1. **It reads every record class, not just the ones with a `message.content` list.** That guard alone
+   dropped **73 915 of 282 061 records (26.2%)** — every `turn_duration` (348.0 h of wall clock),
+   every `compact_boundary`, every `api_error`, every permission denial, and 70.0 MB of `attachment`
+   context.
+2. **It has a time axis.** Pairing `tool_use.id` to `tool_result.tool_use_id` and subtracting the two
+   records' `timestamp` values resolves **99.6%** of calls (73 186 of 73 448) and yields
+   p50 367 ms / p90 12 437 ms / p99 182 810 ms over 190.6 h. Without it the whole *Speed* finding
+   class in M5 is unmeasurable.
+3. **It keys tokens by `message.model` and splits `cache_creation` five ways.** The corpus spans
+   **8 models**, and cache writes are **97.1% one-hour** (797 152 487 vs 24 013 041), which bills at
+   2.0× base input against 1.25× for the five-minute tier — while cache *reads* are **98.8%** of all
+   input-side volume (33.30 B vs 387.9 M). Summing four counters unweighted is not a cost model. The
+   script reports a **base-input-equivalent** total rather than dollars, because a price it cannot
+   prove is exactly the confident wrong answer this repo bans.
+4. **It counts the payload that leaves the transcript.** `toolUseResult.persistedOutputSize` (52
+   records, 13.1 MB), the `tool-results/` sidecar directory (257 files, 71.7 MB), 70.0 MB of
+   attachments — `skill_listing` alone is **39.0 MB** — and 4 685 `mcpMeta.structuredContent`
+   payloads. `len(tool_result.content)` sees none of it.
+   **Do not price `thinking` from its text.** Recent transcripts persist a *sealed* block: `thinking`
+   is the empty string and only `signature` survives (475 of 475 in a spot-checked window), so a
+   character count silently reports zero and an older corpus reports a number that is not comparable.
+   Thinking bills as output and is already inside `output_tokens` — count the blocks, report how many
+   are sealed, and take the cost from the token ledger.
+5. **It divides errors by calls and attributes cost to a skill, a server and an agent.** A raw error
+   count ranks the busiest tool first; a *rate* found the real defects — `Write` **12.4%**
+   (397/3 198) against `read_text` **0.0%** (0/2 766), and inside TerseSharp itself `find_usages`
+   **7.7%** (17/222) and `find_files` **7.6%** (16/211), two tools whose arguments an agent evidently
+   guesses wrong. `attributionSkill` (50 094 records), `attributionMcpServer` (83 931) and
+   `attributionAgent` (37 797) turn a tool histogram into the per-skill breakdown `/usage` shows.
 
----
+**Two refinements, so the script does not over-claim either:**
+
+- **`toolUseResult` is on 76% of tool results, not all of them** (55 602 of 73 426). Read it when it
+  is there; never assume it.
+- **Structured truncation and the substring steer measure different things** — `toolUseResult
+  .truncated` fired **20** times, the `narrow with` / `(truncated=true` sniff **1 530**. The boolean
+  is harness-level truncation, the sniff is TerseSharp's own steer. Keep both; neither subsumes the
+  other.
+
+**Privacy, mechanically enforced:** the boilerplate section prints a line only when it appears in ≥3
+different projects and contains no path-shaped text, which is what makes it *tool framing* rather
+than user content. Never widen that filter. `line_freq` is pruned at 300 000 entries, so past ~8
+weeks that section is a floor, not a total — say so in the report.
 
 ## M3 — The micro-trim pass: every character in TerseSharp's own responses
 
-M2's trim ledger says how many characters carried no information **across all tools**. This phase
-attributes them to **TerseSharp's own response format**, which is the only surface this repo can
-change, and hunts the ones a whole-corpus counter cannot see.
+M2's trim ledger estimates. This phase **measures with a tokenizer**, because characters are what a
+counter can see and tokens are what is paid, and the two disagree so violently that three of the four
+"obvious" trims are worth nothing at all.
 
-Take the widest real response of each `mcp__terse-sharp__*` tool that appears in the corpus — largest
-by chars, from the M2 payload list — and read it character by character against this checklist. Each
-line is a class that has already produced a shipped saving in this repo, and each one is worth a row
-on its own.
+### M3.1 — Run the tokenizer experiment first, every time
+
+`pip install tiktoken`, then measure the **real** widest response of each `mcp__terse-sharp__*` tool
+in the corpus — take them from M2's largest-payload list, or from a live call. Never reason about
+tokens from character counts.
+
+```python
+import tiktoken
+o200k = tiktoken.get_encoding('o200k_base')
+cl100k = tiktoken.get_encoding('cl100k_base')
+def n(text, enc=o200k): return len(enc.encode(text))
+```
+
+For each candidate trim, encode the payload before and after, in **both** encodings. A trim is real
+only when the saving survives both — that is the only defence available against the fact that neither
+encoding is Claude's.
+
+> **The tokenizer caveat is not a footnote, it is the calibration.** Anthropic's own documentation:
+> *"Claude Fable 5 and Claude Mythos 5 use the tokenizer introduced with Claude Opus 4.7, which
+> produces roughly 30 percent more tokens than models before Claude Opus 4.7 for the same text"*, and
+> *"don't reuse token counts measured on a model before Claude Opus 4.7 to estimate costs"*. So a
+> tiktoken figure is **directional, never absolute**: use it to rank two formats, never to assert a
+> budget. Where an absolute number is needed, count it with the `/v1/messages/count_tokens` endpoint
+> against the model that will actually bill. Measured against real TerseSharp responses, the
+> character-to-token ratio is **4.18**, which is what makes M2's `chars // 4` a safe estimator and
+> nothing more.
+
+### M3.2 — The measured verdict table
+
+Measured 2026-08-08 on `o200k_base`, cross-checked on `cl100k_base`, over 20-row synthetic tables
+with **varied** rows (identical rows let BPE merge across lines and understate every separator cost)
+and over the 15 real captured TerseSharp responses in `.research/samples-*.txt`, 13 591 tokens total.
+
+| Class | Measured | Verdict |
+|---|---|---|
+| **Column separator: 2 spaces → 1 space** | **+3.00 tokens per row** on a 4-column table; 2-space and tab cost the same | **The single biggest format lever.** A multi-space run costs exactly **1 token**, whatever its width. One space costs zero |
+| Alignment padding (`f'{x:<34}'`) | **1.00 token per padded line** | Same mechanism. Pad for a human, pay a token per line |
+| Markdown pipes `\| a \| b \|` | **+4.05 tokens/row** over single-space, +0.35/cell over TSV | Never render a machine-read table as markdown |
+| Absolute → workspace-relative path | **61% fewer tokens** on a path-only payload | Highest-value single change on any path-heavy response |
+| JSON: minified vs `json.dumps` default | **+31%** for the spaces after `:` and `,`; `indent=2` is **+68%** | If a response is JSON, minify it |
+| Header-once rows (TSV) vs minified JSON | **26% fewer** | Real, but a third of what the separator fix gives, and it carries an accuracy caveat (below) |
+| Indentation | 1 space or a tab = **0 tokens**; 2+ spaces = **exactly 1 token/line**, at any depth | Depth is free. *Existence* is not |
+| Thousands separators | **+1 token per group** (`1234567` 3→5) | Drop them. Digit runs already chunk at ≤3, and modern Claude tokenizes numbers right-to-left, so the commas buy no arithmetic accuracy either |
+| Newline per record vs space-separated | **+0.95 tokens/record** | Usually worth paying — it is the record boundary |
+| **Abbreviation** (`errors`→`err`, `configuration`→`config`, 20 pairs) | **19 of 20 save exactly zero**; `changed`→`chg` **costs +1** | **Banned as a proposal.** A common word is already one token |
+| Identifier casing | `FileService`, `file_service`, `fileservice`, `FILESERVICE` all tie | No lever. Do not churn names for tokens |
+| **Blank lines** | 8 tokens across 13 591 = **0.1%** | **Placebo. Banned as a proposal** |
+| **Trailing whitespace** | 9 tokens across 13 591 = **0.1%** | **Placebo. Banned as a proposal** — but never let a payload *end* on whitespace, which is a prompt-boundary defect, not a cost one |
+| Dedenting real responses | 65 tokens = **0.5%** | Marginal |
+| **Collapsing internal multi-space runs** | **343 tokens = 2.5%** of all real captured output | The real long tail, and it is the same mechanism as row 1 |
+
+A trim not in that table needs its own before/after measurement in this run. A trim contradicted by
+that table is not proposed at all — and if a past run logged one, close the row as refuted.
+
+### M3.3 — Read the widest response of every tool against the framing checklist
+
+The verdict table prices *how* text is written. This checklist finds text that should not be there:
 
 | Class | What to look for | How to price it |
 |---|---|---|
-| **Framing** | a header restating the request, an echoed argument, a tool name at the start of its own answer, a trailing summary that repeats the first line | chars × calls of that tool in the corpus |
-| **Separators** | `  ` double spaces used as columns, ` \| ` pipes, `---` rules, a `:` after a label that a space would carry, `, ` where `,` reads the same | (chars saved per line) × (lines per response) × (calls) |
-| **Column value** | a column whose value is constant across every record, derivable from the request, or never read by the agent afterwards — check the *next* tool call to see whether it was used | full column width × record count |
-| **Path shape** | a repeated directory prefix, a redundant `./`, an extension the tool already implies, an absolute path where relative round-trips | measured from the ledger's `absolute path text` line |
-| **Constant tags** | `EXACT` on a tool that can only ever answer `EXACT`, `(truncated=false)`, `errors=0 warnings=0` on a tool that fails loudly, `remedy:` on a success | occurrences × length, straight from the ledger |
-| **Number format** | thousands separators, trailing `.0`, padded columns, a millisecond figure with 6 significant digits, a byte count where KB would do | usually 2–6 chars × every record |
-| **Blank lines** | a blank line between sections that a single newline separates just as well, a trailing newline run | ledger `blank lines` |
-| **Indentation** | leading spaces that survive `TextCompressor.Source`, alignment padding | ledger `leading indent` |
-| **Plural prose** | `N results found for` where `N` alone is unambiguous, `no matches were found` where `0` is the answer, an English sentence where a token would do | chars × calls |
-| **Repeated line prefix** | every record starting with the same file, symbol or project — a grouped form pays the prefix once | (prefix length + 1) × (records − groups) |
-| **Verbose-only leakage** | anything the success path emits that only `verbose=true` should — the HARD GATE in `CLAUDE.md` calls this out and it is still the highest-yield class | full removed body × success calls |
+| **Framing** | a header restating the request, an echoed argument, the tool's own name opening its answer, a closing line repeating the first | tokens × calls of that tool in the corpus |
+| **Column value** | a column that is constant across records, derivable from the request, or never referenced by the *next* tool call | column tokens × record count |
+| **Constant tags** | `EXACT` on a tool that can only answer `EXACT`, `(truncated=false)`, `errors=0 warnings=0` on a tool that fails loudly, `remedy:` on a success | straight from M2's ledger |
+| **Verbose-only leakage** | anything the success path emits that only `verbose=true` should — still the highest-yield class in this repo | removed tokens × success calls |
+| **Repeated line prefix** | every record opening with the same file, symbol or project | grouped form pays the prefix once — but see the safety rule below |
+| **Plural prose** | `N results found for …` where `N` alone is unambiguous; `no matches were found` where `0` is the answer | tokens × calls |
 
-Then audit **the surface itself**, which is paid on every request of every session whether a tool is
-called or not:
+**Safety rule, learned the hard way and non-negotiable: drop framing, never edit payload.** Folding a
+shared directory prefix or hoisting a shared confidence tag by *rewriting record text* corrupts any
+payload that legitimately contains that string — the exact bug that made a `get_symbol_source` of the
+constant defining `EXACT` come back silently altered. Prefix hoisting is also worth only ~3.8
+tokens/record against ~10 for absolute→relative, so do the safe one first.
 
-1. `search_regex` over `src/TerseSharp.Server/Tools/` for `\[Description\(` with a high `maxResults`,
-   and sum the returned line lengths. That is the floor of what the 86-tool advertised surface costs
-   **per request**. Multiply by the number of assistant turns in the corpus to price it.
-2. Flag every description that: repeats the tool's own name, explains *how* instead of *what it
-   returns and which built-in it replaces*, lists parameters the schema already declares, or spends
-   words on a case the `remedy:` already teaches. A word cut there is a word cut from every request
-   forever — this is the single highest-leverage character in the product.
-3. Do the same for `src/TerseSharp.Server/Assets/SKILL.md`: `read_text headings=true` for the map,
-   then price each section by its byte size. The skill is loaded whole into an agent's context.
-4. **Do not** propose deleting a `Replaces Bash …` prefix — `ToolCensusE2ETests` enrols the guard from
-   it. Cutting it silently un-enrols the tool. Record that constraint in the row's `Rejected` cell.
+### M3.4 — Audit the surface itself, which is paid whether a tool is called or not
 
-Every candidate from this phase becomes a row, or is folded into the family aggregate (M8.4). A trim
-you priced and then dropped without saying so is the one outcome this command forbids.
+1. `search_regex` over `src/TerseSharp.Server/Tools/` for `\[Description\(` with a high `maxResults`;
+   sum the returned line lengths. That is the floor of what the 86-tool advertised surface costs on
+   **every request**. Multiply by the assistant-turn count from M2 to price it.
+2. Flag every description that repeats the tool's own name, explains *how* rather than what it
+   returns and which built-in it replaces, restates parameters the schema already declares, or spends
+   words on a case the `remedy:` already teaches. **But do not confuse this with "shorter is better"**
+   — Anthropic's guidance is to write *detailed* tool descriptions, and the measured accuracy lever
+   points the other way: embedded tool-use examples took complex parameter handling from **72% to
+   90%**. Cut redundancy, not information; a worked example that prevents one malformed call has paid
+   for itself several times over.
+3. `read_text src/TerseSharp.Server/Assets/SKILL.md headings=true`, then price each section by byte
+   size. The skill is loaded whole into an agent's context.
+4. **Never propose deleting a `Replaces Bash …` prefix.** `ToolCensusE2ETests` enrols the guard from
+   it, so cutting it silently un-enrols the tool. Record that constraint in the row's `Rejected` cell.
 
----
+### M3.5 — The counter-evidence, which caps how far this phase may go
+
+Compression that changes *semantics* buys tokens with accuracy, and this repo would rather pay the
+tokens:
+
+- Token-optimised notations measured across four agentic benchmarks: **TOON −18% tokens at a 9pp
+  accuracy cost**, TRON −27% at up to 14pp. Both are far worse trades than the 26–61% available from
+  minification, relative paths and de-framing **at zero semantic change**.
+- Perplexity-based pruning (LLMLingua) reports 20× on prose, but **71.1% reduction on code produced
+  0% QA accuracy**. Anything that can delete a character inside a path, an error code or an
+  identifier is unsafe for tool output.
+- Header hoisting is not free either: repeated per-row keys let a model attend to each row
+  independently, and JSON has been measured to *beat* markdown on per-row lookup despite costing more
+  tokens. Prefer it for uniform bulk records; do not apply it to a payload the agent looks things up
+  in.
+- The reason to trim anyway: fewer tokens is itself an accuracy win. Performance degrades
+  continuously with input length well before the context limit, and a single distractor record
+  measurably lowers accuracy — so framing removed is haystack removed, not just cost removed.
+
+So the ranking for this phase: **de-frame → relativise paths → collapse multi-space runs → minify →
+only then consider changing the shape of the data.**
 
 ## M4 — The performance and memory pass
 
 Tokens are half the prime directive; the other half is speed, and a server that answers cheaply but
 slowly loses the session anyway.
 
-**Latency, from M2's `p50`/`p95`/`tot` columns.** For every `mcp__terse-sharp__*` tool in the top 25:
+**Latency, from M2's `p50`/`p90`/`p99`/`tot` columns.** The corpus-wide baseline, measured over
+73 186 paired calls on 2026-08-08, is **p50 367 ms · p90 12 437 ms · p99 182 810 ms**, 190.6 h of tool
+wall time against 348.0 h of turn wall time — so tools are roughly **55% of everything the agent
+waits for**. Judge every tool against that distribution, not against a feeling. For every
+`mcp__terse-sharp__*` tool in the top 25:
 
-- a `p95` more than 5× its `p50` is a **cold path** — first call after a load, an eviction, an
+- a `p90` above the corpus `p90` on a *read* tool is a defect: a read is supposed to be the cheap end.
+- a `p99` more than 5× its `p50` is a **cold path** — first call after a load, an eviction, an
   analyzer assembly load, a lazily built compilation. Name the trigger.
 - a `tot` in the tens of minutes on a read tool is a **budget** problem regardless of `p50`.
 - compare against the built-in it replaces where the corpus has both. **A terse tool slower than the
@@ -465,47 +698,85 @@ Look for these classes, each of which has produced a real shipped improvement in
 
 ## M6 — Deep research: what the field knows about agent accuracy and productivity
 
-The corpus says what *this* agent wasted. It cannot say what a better-designed tool surface would have
-avoided in the first place. This phase is **mandatory**, it is not a literature review for its own
-sake, and it ends in rows.
+The corpus says what *this* agent wasted. It cannot say what a better-designed tool surface would
+have avoided in the first place. This phase is **mandatory**, it is not a literature review for its
+own sake, and it ends in rows.
 
-**Scope — search for methods, then test them against the measured corpus:**
+### M6.1 — Start from the standing corpus of already-verified findings
 
-- tool and schema design for LLM agents: naming, description wording, parameter count and ordering,
-  required-vs-optional, enum-vs-free-text, error-message design, worked examples in the schema, how
-  tool-choice accuracy degrades with surface size;
-- context engineering: what to put in a system prompt versus a tool response, progressive disclosure,
-  just-in-time retrieval versus preloading, prompt-cache-friendly ordering, context rot and the
-  accuracy curve against context length, compaction and note-taking;
-- response format: structured versus prose returns, how truncation should be signalled, confidence
-  and provenance markers, refusal-to-guess as an accuracy device;
-- verification: adversarial self-check, execution as arbiter, judge panels, when a second opinion pays
-  for itself;
+A previous run of this command banked a research fan-out — 206 techniques across eight areas, each
+with `name / what / howToMeasure / expectedEffect / source`. Twenty-five of its claims have since
+been checked against the real transcripts, a tokenizer and the primary documents. **Do not re-derive
+what is already settled.** What is settled, with the instrument that settled it:
+
+| Finding | Verified by | Status |
+|---|---|---|
+| Cache reads are 98.8% of input-side volume; 1h writes are 97.1% of cache writes | corpus | confirmed — a cost model without multipliers is wrong by design |
+| A tool-result-only scan misses ~26% of records and 70 MB of attachment context | corpus | confirmed |
+| `tool_use`↔`tool_result` timestamps pair at 99.6% | corpus | confirmed |
+| Per-tool **error rate** exposes defects a raw count hides (`Write` 12.4% vs `read_text` 0.0%) | corpus | confirmed |
+| Multi-space padding costs 1 token per run; blank lines and trailing whitespace cost ~0 | tokenizer | confirmed / **refuted the intuition** |
+| 19 of 20 abbreviations save exactly zero tokens | tokenizer | confirmed |
+| Claude ≥4.7 tokenizes ~30% higher than earlier models; do not reuse old counts | primary source | confirmed verbatim |
+| Claude Code caps a tool response at **25 000 tokens**; concise vs detailed measured 72 vs 206 | primary source | confirmed verbatim |
+| Tool-use examples in the schema: **72% → 90%** on complex parameter handling | primary source | confirmed |
+| Error messages should be engineered as steering, not logs | primary source | confirmed verbatim |
+| API failures are dominated by rate limiting | corpus | **refuted here** — 503×198 against 429×6 |
+| "Claude's tool selection degrades past 30–50 tools" | not found in the cited page | **UNVERIFIED — do not cite** |
+| Compression that changes shape (TOON −18% at −9pp, TRON −27% at −14pp; LLMLingua 71% → 0% on code) | primary source | confirmed — caps how far M3 may go |
+
+Anything in that table is a premise, not a research task. Everything else in the banked set — and
+anything new — goes through M6.3.
+
+### M6.2 — Scope: search for methods, then test them against the measured corpus
+
+- tool and schema design: naming, description length as a two-sided optimum, parameter count,
+  enum-vs-free-text, embedded examples, error-message design, how selection accuracy degrades with
+  surface size, deferred/progressive tool loading;
+- context engineering: what belongs in a system prompt versus a tool response, just-in-time retrieval
+  versus preloading, cache-stable prefixes, context rot and the accuracy curve against length,
+  compaction economics, note-taking outside the window;
+- response format: structured versus prose, truncation signalling, confidence and provenance markers,
+  refusal-to-guess as an accuracy device, concise/detailed response modes;
+- verification: adversarial self-check, execution as arbiter, judge panels, when a second opinion
+  pays for itself, and the measured net-negativity of intrinsic self-correction without evidence;
 - multi-agent economics: measured token multipliers of fan-out, when delegation is negative-value;
-- benchmark evidence: token/latency/accuracy numbers from published agent evaluations of MCP servers
-  and semantic-code-navigation tools; failure modes measured in competing servers.
+- harness levers: permission allowlists, `PreToolUse` guards and `updatedInput`, per-subagent model
+  choice, tool-surface pruning, instruction-file size against instruction-following accuracy;
+- benchmark evidence: token, latency and accuracy numbers from published evaluations of MCP servers
+  and semantic code-navigation tools.
 
-**Method — a fan-out, adversarially verified:**
+### M6.3 — Method: fan out, then refute
 
-1. Spawn **at least eight** parallel research subagents, one per scope area above, each briefed to
-   return claims with sources and dates. Give them **zero** transcript content — they get the topic
-   only (gate 3). A subagent that cannot cite is returning an opinion.
-2. Prefer primary and dated sources: vendor engineering documentation, published evaluations, papers
-   with numbers. Reject undated blog assertions and anything whose only support is another agent's
-   summary.
-3. **Adversarially verify every claim you intend to act on**: a second agent whose instruction is to
-   *refute* it, and a check against the measured corpus. A claim that contradicts what M2–M5 measured
-   in this codebase loses to the measurement — the corpus is the arbiter, not the source.
-4. Discard anything already true of TerseSharp. The output of this phase is only the delta.
+1. Spawn **at least eight** parallel research subagents, one per scope area, each briefed to return
+   claims with sources and dates. Give them **zero** transcript content — the topic only (gate 3).
+   A subagent that cannot cite is returning an opinion.
+2. Prefer primary, dated sources: vendor engineering documentation, published evaluations, papers
+   with numbers. Reject undated assertions and anything supported only by another agent's summary.
+3. **Verify with the instruments of gate 5, in this order.** Re-derive it from the corpus if the
+   corpus can see it; encode it if a tokenizer can settle it; otherwise fetch the primary source and
+   **quote the sentence**. A claim attributed to a vendor document that is not in that document is
+   `UNVERIFIED`, however plausible — that is exactly how the "30–50 tools" figure entered this file.
+4. **Then try to refute.** A second agent whose instruction is to break the claim, plus a check
+   against what M2–M5 measured here. Where they disagree, **the corpus wins**.
+5. Discard anything already true of TerseSharp, and anything in the M6.1 table. The output of this
+   phase is only the delta.
 
-**Conversion — a research finding becomes a row only if it is actionable here.** Name the concrete
-change: a tool description reworded, a parameter added or removed, a response format changed, a
-`remedy:` that teaches the retry, a `SKILL.md` section rewritten, a default flipped. State the
-expected accuracy or productivity gain and how the next run would *observe* it — a row whose success
-can only be felt is not accepted. A method that is real but has no lever in this repo goes in the
-report's research section, not in the backlog.
+**A fan-out this size will hit a session limit.** The banked run died mid-verify at 16 agents,
+2.32 M tokens and 15 minutes, losing every Verify, Audit and Synthesize result while all eight
+Research results survived on disk. So: **run Research first and let it land**, keep the phases
+separate, and if the run is killed, recover from
+`<session>/subagents/workflows/<runId>/agent-*.jsonl` — the `StructuredOutput` tool input on each
+agent's last turn is the full result — rather than re-running the fan-out.
 
----
+### M6.4 — Conversion
+
+A research finding becomes a row only if it is actionable **here**. Name the concrete change: a tool
+description reworded, a parameter added or removed, a response format changed, a `remedy:` that
+teaches the retry, a `SKILL.md` section rewritten, a default flipped. State the expected accuracy or
+productivity gain, **the instrument that verified it**, and how the next run would *observe* it — a
+row whose success can only be felt is not accepted. A method that is real but has no lever in this
+repo goes in the report's research section, not in the backlog.
 
 ## M7 — Deduplicate against what is already logged
 
@@ -586,12 +857,15 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
 
 | Section | Content |
 |---|---|
-| Corpus | window in weeks, transcripts scanned, projects covered (slugs only), total tool calls, built-in vs MCP share, total tool-result tokens, tool-input chars, measured wall time, seconds slept, output/cache token totals |
+| Corpus | window in weeks, transcripts scanned, records read **and the share carrying no `message`**, projects covered (slugs only), total tool calls, built-in vs MCP share, tool-result tokens, tool-input chars, attachment tokens, spilled/sidecar bytes, thinking tokens, tool wall time against turn wall time, seconds slept |
+| Token ledger | per `message.model`: input, cache read, 1h and 5m writes, output, and the base-input-equivalent total. Never a dollar figure the corpus cannot prove |
 | Top waste | the eight cost centres from M2–M4, each with its number |
-| Trim ledger | the full M2 ledger — chars and tokens per class, and the share of all output it represents |
+| Attribution | tokens and records per skill, per MCP server, per subagent; the delegation ledger from `toolStats` (count, self-reported tokens, wall time) |
+| Friction | error **rate** per tool for tools with ≥50 calls, error-code histogram, API-error statuses, permission denials by kind, interruptions, queue enqueue/remove ratio, `max_tokens` truncations, compaction pre→post |
+| Trim ledger | the full M2 ledger in tokens per class and share of output — **and the placebo section stated as zero**, so the next run does not re-propose it |
 | Surface cost | total `[Description]` bytes and `SKILL.md` bytes, and what they cost per request |
 | Latency & memory | slowest tools by `p95` and by total minutes, RSS per workspace and per document, any cold-path trigger named |
-| Research | the methods M6 found worth adopting, each with a source and the refutation attempt it survived; and the ones dropped as already-true or not actionable here |
+| Research | the methods M6 found worth adopting, each with **the instrument that verified it** (corpus / tokenizer / primary source) and the refutation attempt it survived; the ones dropped as already-true or not actionable here; and an explicit `UNVERIFIED` list of every claim that survived no instrument |
 | New rows | every id written, with its one-line finding and expected saving, highest cost first |
 | Strengthened | existing rows given a new measurement instead of a duplicate |
 | Dropped | candidates measured but not logged, with their combined cost and the reason — never silent |
