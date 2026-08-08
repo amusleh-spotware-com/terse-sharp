@@ -1,5 +1,5 @@
 ---
-description: Mine every Claude Code session across all projects for token, character, latency, memory and productivity waste down to the individual character, deep-research the state of the art in agent accuracy, log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
+description: Mine every Claude Code session across all projects for token, character, latency, memory and productivity waste down to the individual character, mine the call sequences for composite and batch tools that fuse a measured round trip into one call, deep-research the state of the art in agent accuracy, log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
 argument-hint: "[weeks to scan, default 1]"
 ---
 
@@ -19,7 +19,7 @@ input from the user; do not ask, do not confirm the window.
    every request of every session. A multi-space run costs exactly **1 token** wherever it appears,
    so a 4-column table pays **3 tokens per row** for alignment nobody reads — over 40 000 rows that
    is 120 000 tokens, and it outranks most new tools. "Too small to log" is a banned phrase here;
-   small findings are **aggregated into one row per family**, never dropped (M8.4).
+   small findings are **aggregated into one row per family**, never dropped (M9.4).
    **The mirror rule is equally binding: a trim that measures zero is not a finding either.** Blank
    lines, trailing whitespace and abbreviation each measured **≤0.1% and 19-of-20 exactly zero** on
    real payloads (M3.2). Proposing one of those is the same defect as failing to notice the padding —
@@ -31,7 +31,7 @@ input from the user; do not ask, do not confirm the window.
    contain: source code, file paths inside those repos, type or member names, ticket text, user
    prompts, or a quoted tool result. When in doubt, state the shape (`a 40 KB whole-file read of a
    test file`) not the value. The measurement script enforces a mechanical version of this rule and
-   you enforce the rest by hand in M9.2.
+   you enforce the rest by hand in M10.2.
 4. **Character economy is a claim about tokens, so state both.** Chars are what the script can count;
    tokens are what is paid. The measured ratio over real TerseSharp responses is **4.18 chars/token**,
    which is why M2 estimates at `chars // 4` — and why an estimate is all it is. Prefer trims that
@@ -55,8 +55,8 @@ input from the user; do not ask, do not confirm the window.
 path are explicitly waived for this command by standing user instruction. Do not spawn one and do not
 report the phase as degraded.
 
-**Subagents:** banned for every phase that touches a transcript (M2–M5) — a reviewer adds nothing to a
-log scan and doubles the private-content exposure. **Permitted, and expected, in M6 only** (the
+**Subagents:** banned for every phase that touches a transcript (M2–M6) — a reviewer adds nothing to a
+log scan and doubles the private-content exposure. **Permitted, and expected, in M7 only** (the
 research fan-out), which reads the public web and is handed **no transcript content whatsoever** —
 not a path, not a slug, not a quoted result. A research subagent prompt that contains anything mined
 from a session is a breach of gate 3.
@@ -77,7 +77,7 @@ from a session is a breach of gate 3.
    - `~/.claude/projects/<project-slug>/<session-uuid>/subagents/agent-*.jsonl` — one per subagent,
      and these are where delegation cost hides;
    - if `CLAUDE_CONFIG_DIR` is set and its `projects/` exists and differs, scan that too.
-5. `TaskCreate` one task per phase, M1 through M10.
+5. `TaskCreate` one task per phase, M1 through M11.
 
 ---
 
@@ -149,12 +149,23 @@ denials = collections.Counter(); queue = collections.Counter(); stops = collecti
 by_model = collections.defaultdict(collections.Counter)
 trim = collections.Counter(); placebo = collections.Counter()
 line_freq = collections.Counter(); line_projects = collections.defaultdict(set)
+chains = collections.Counter(); same_target = collections.Counter(); refetch = collections.Counter()
+runs = collections.Counter(); longest = collections.Counter(); parallel = collections.Counter()
 payloads = []; turns = []; compactions = []; api_errors = collections.Counter()
 sessions = set(); slept = interrupted = think_chars = think_n = think_sealed = 0
 persisted_n = persisted_bytes = spill_files = spill_bytes = 0
 delegations = 0; delegated_tokens = 0; delegated_ms = 0
 mcp_structured = mcp_structured_chars = 0
 records = with_message = 0
+
+TARGET_KEYS = ('path', 'file', 'filePath', 'symbolId', 'symbol', 'query', 'pattern', 'name', 'command')
+
+def target(arguments):
+    for key in TARGET_KEYS:
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            return value[:200]
+    return ''
 
 def stamp(record):
     raw = record.get('timestamp')
@@ -230,7 +241,7 @@ for path, project, spilled in walk():
                 pass
         continue
     sessions.add(path)
-    pending, seen_calls = {}, collections.Counter()
+    pending, seen_calls, order = {}, collections.Counter(), []
     for line in open(path, encoding='utf-8', errors='replace'):
         try:
             record = json.loads(line)
@@ -304,6 +315,9 @@ for path, project, spilled in walk():
         blocks = message.get('content')
         if not isinstance(blocks, list):
             continue
+        fanout = sum(1 for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use')
+        if fanout:
+            parallel[min(fanout, 8)] += 1
         for block in blocks:
             if not isinstance(block, dict):
                 continue
@@ -323,6 +337,7 @@ for path, project, spilled in walk():
                 encoded = json.dumps(arguments, sort_keys=True)
                 input_chars[tool] += len(encoded)
                 seen_calls[(tool, encoded[:4000])] += 1
+                order.append((tool, target(arguments)))
                 if tool == 'Bash':
                     command = arguments.get('command', '') or ''
                     bash_kind['git status/diff' if SHELL_GIT.search(command) else
@@ -350,6 +365,29 @@ for path, project, spilled in walk():
     for (tool, _), count in seen_calls.items():
         if count > 1:
             dupes[tool] += count - 1
+    for i in range(len(order) - 1):
+        pair = (order[i][0], order[i + 1][0])
+        if pair[0] != pair[1]:
+            chains[pair] += 1
+            if order[i][1] and order[i][1] == order[i + 1][1]:
+                same_target[pair] += 1
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and order[j + 1][0] == order[i][0]:
+            j += 1
+        span = j - i + 1
+        if span >= 3:
+            runs[order[i][0]] += span
+            longest[order[i][0]] = max(longest[order[i][0]], span)
+        i = j + 1
+    touched = collections.defaultdict(set)
+    for tool, spot in order:
+        if spot:
+            touched[spot].add(tool)
+    for tools in touched.values():
+        if 2 <= len(tools) <= 4:
+            refetch[tuple(sorted(tools))] += 1
 
 payloads.sort(reverse=True)
 total_calls = sum(calls.values())
@@ -446,6 +484,27 @@ show('bash breakdown', dict(bash_kind.most_common()))
 for pre, post, trigger, ms in compactions:
     print(f'  compaction {trigger}: {pre:,} -> {post:,} tokens in {ms / 1000:.0f}s')
 
+print('\n== call chains: A immediately followed by B, one session, in order (composite candidates)')
+for (first, second), count in chains.most_common(30):
+    if count < 5:
+        break
+    bridge = result_chars[first] // max(calls[first], 1)
+    print(f'  {count:>6}x  {first} -> {second}   same-target={same_target[(first, second)]:>5}  '
+          f'intermediate={bridge // 4:>7,} tok/call  ~{count * bridge // 4:>9,} tok if fused')
+
+print('\n== same-tool runs of >=3 consecutive calls (batch candidates)')
+for tool, spent in runs.most_common(15):
+    framing = input_chars[tool] // max(calls[tool], 1)
+    print(f'  {tool:<40}{spent:>6} calls inside runs  longest={longest[tool]:>3}  '
+          f'in={framing:>5} ch/call  ~{spent * framing // 4:>8,} tok of repeated argument framing')
+
+print('\n== tool_use blocks per assistant message (parallelism the agent already achieved)')
+print('  ' + '  '.join(f'{n}:{c}' for n, c in sorted(parallel.items())))
+
+print('\n== one target touched by several tools in one session (re-fetch / fusion candidates)')
+for tools, count in refetch.most_common(12):
+    print(f'  {count:>6}x  {" + ".join(tools)}')
+
 print('\n== 15 largest single tool results')
 for size, tool, project in payloads[:15]:
     print(f'  {size:>9,} ch  {tool:<34}{project}')
@@ -457,7 +516,9 @@ for project, counter in sorted(per_project.items(), key=lambda kv: -sum(kv[1].va
 
 print(f'\n== corpus  weeks={WEEKS} transcripts={len(sessions)} records={records} calls={total_calls} '
       f'builtin={builtin * 100 // max(total_calls, 1)}% resulttok={total_chars // 4} '
-      f'attachtok={sum(attach.values()) // 4} trimtok={sum(trim.values())}')
+      f'attachtok={sum(attach.values()) // 4} trimtok={sum(trim.values())} '
+      f'chains={sum(chains.values())} runcalls={sum(runs.values())} '
+      f'fanout1={parallel.get(1, 0)} fanout2+={sum(c for n, c in parallel.items() if n > 1)}')
 ```
 
 Run it as `python <script> <WEEKS>`. Read the **whole** output. **Do not** re-derive any number by
@@ -494,6 +555,16 @@ hand afterwards — the script is the measurement of record, and the next run mu
    **7.7%** (17/222) and `find_files` **7.6%** (16/211), two tools whose arguments an agent evidently
    guesses wrong. `attributionSkill` (50 094 records), `attributionMcpServer` (83 931) and
    `attributionAgent` (37 797) turn a tool histogram into the per-skill breakdown `/usage` shows.
+6. **It has a sequence axis, which is the whole input to M6.** A histogram cannot see a composite or a
+   batch: both are properties of *call order inside one session*. The script keeps the ordered
+   `(tool, target)` list per transcript and reports four things — **chains** (A immediately followed by
+   B, with the share where both name the same target and the intermediate payload a fused call would
+   never return), **runs** (≥3 consecutive calls of the same tool, which is the batch signature),
+   **fan-out** (`tool_use` blocks per assistant message — the parallelism the agent already achieved
+   unaided, which a batch parameter has to beat rather than duplicate), and **re-fetch** (one path or
+   symbol touched by several different tools in one session). `target` is the first present of
+   `path`/`file`/`filePath`/`symbolId`/`symbol`/`query`/`pattern`/`name`/`command`, used only for
+   equality and **never printed** — gate 3 holds here exactly as everywhere else.
 
 **Two refinements, so the script does not over-claim either:**
 
@@ -692,17 +763,105 @@ Look for these classes, each of which has produced a real shipped improvement in
 | **Delegation** | subagent transcripts: what the fan-out cost in tokens versus what its report was worth, and whether the subagent used built-ins on code its parent had an MCP for |
 | **Context** | `cache_read` vs `cache_creation` ratio, a session that re-primed context repeatedly, an enormous system/skill payload loaded for a one-call task |
 | **Productivity** | permission denials and the retry that followed, a plan re-derived because an earlier answer was not written down, a gate the agent skipped and had to redo |
-| **Accuracy** | an answer the agent acted on and later had to undo — a confident wrong result, a stale read, a claim the tool could not prove. This class is scored in M6, because a wrong answer costs more than any payload |
+| **Accuracy** | an answer the agent acted on and later had to undo — a confident wrong result, a stale read, a claim the tool could not prove. This class is scored in M7, because a wrong answer costs more than any payload |
 
 ---
 
-## M6 — Deep research: what the field knows about agent accuracy and productivity
+## M6 — Composite, batch and new-tool synthesis
+
+M2's sequence axis and M5's round-trip evidence say where the agent spent **two calls on one answer**.
+This phase turns that into candidate changes, and it is the only place in this command where the
+question *"should there be a new tool?"* may be asked. Asked anywhere else it produces an 87th tool
+nobody calls, paid for in every request of every session.
+
+**Four mechanisms, ranked. Take the first one that covers the measured chain:**
+
+1. **Make the first response carry what the second was called for.** A format change: the id the
+   caller had to re-derive, the count it re-queried, the declaration it looked up afterwards. Costs no
+   surface, no parameter, no schema token, and deletes the whole second call. It outranks everything
+   below it.
+2. **Add a parameter to the existing tool that fuses the pair** — `usages=true`, `source=true`,
+   `context=N`. One schema line against one deleted round trip. The default stays **off**, or every
+   caller pays the fused payload for the case it did not want; propose a default only with the share
+   from M6.1.
+3. **Make the existing tool take a list where it takes one** — the batch case, derived from the runs
+   histogram, never from a feeling.
+4. **A new tool.** Only when 1–3 cannot express it, and only against the surface cost priced in M3.4:
+   a new tool's name and `[Description]` bytes are paid on every request whether it is called or not,
+   and that product is the denominator the saving has to beat.
+
+### M6.1 — The composite floor
+
+A chain `A -> B` is a candidate only when **all four** hold, each with its number from M2:
+
+- **frequency** — ≥1 occurrence per session on average, or ≥20 in the window;
+- **adjacency** — B is A's *immediate* successor, which is all the chains counter counts, so a fused
+  call would genuinely have removed a turn rather than reordered one;
+- **same target** — `same-target` is ≥50% of the pair's count. A pair that mostly walks on to a
+  *different* file or symbol is a workflow, not a composite;
+- **the intermediate is discarded** — read two occurrences in the transcript (M5) and confirm A's
+  payload was used only to derive B's arguments. Where A's payload was itself an answer, fusing saves
+  the round trip but **not** the tokens; the row says which of the two it claims.
+
+The `intermediate=` column is A's **mean payload over all its calls**, not over this pair's calls —
+an estimate, and it is labelled one. A row that turns it into a headline number re-measures it on the
+pair's own occurrences first.
+
+**The counter-case that caps this phase, and it is already refuted: a composite whose second half
+fires in fewer than half the cases makes the common case more expensive.** Break-even is
+`P(second call) × cost(second call) > cost added to every first call`. Compute it. A candidate that
+does not clear it goes in the row's `Rejected` cell, not into the backlog.
+
+### M6.2 — The batch floor
+
+A run of ≥3 consecutive calls of one tool is a batch candidate only when:
+
+- it appears in **≥3 different sessions** — one session's loop is a task shape, not a tool defect;
+- the deleted per-call cost is measured: the argument framing (`in=… ch/call` in the runs section)
+  plus the per-response framing, times the calls inside runs;
+- **the fan-out histogram is read first, and it cuts both ways.** Where the agent already issues
+  several `tool_use` blocks in one assistant message, those calls are parallel and a batch parameter
+  only wins if the *responses* share framing that could be emitted once. Where the histogram is
+  overwhelmingly `1:` — the 0.08-week probe on 2026-08-08 measured **1:2984 and nothing above it** —
+  the finding is the opposite one and it is bigger: the agent is issuing a run of dependent-looking
+  serial calls it never had to serialise. That is a `SKILL.md`/description row (mechanism 1) before it
+  is a batch row, because no server change is needed to collect it.
+
+Two constraints every batch proposal states, or it is not implementable here:
+
+- **it answers per item.** A batch that fails whole because item 7 was not found is worse than N
+  calls, because the agent cannot tell which item failed: per-item status, per-item error code.
+- **it scopes per item.** A batch whose items span workspaces or projects resolves each one — a helper
+  that re-derives scope from the raw path answers wrongly and silently, which is a shipped trap in
+  this repo, not a hypothetical.
+
+### M6.3 — The re-fetch, duplicate and steer signals
+
+- **re-fetch** (one target, several tools, one session) names the fusion nobody asked for — the same
+  file outlined, read and diffed. Rank by count; the row is almost always mechanism 1.
+- **`dup`** in the M2 tool table is the same call twice with identical arguments. That is never a
+  composite: it is an **idempotence or a caching** row, or evidence the first answer was not trusted.
+  Say which.
+- **`steer`** followed by the same tool with a wider cap is a **default** row, not a new tool — the cap
+  is wrong for that tool's real payload. Quantify the overflow, not the call.
+
+### M6.4 — Conversion
+
+Every candidate leaves this phase as a row whose `Tool` cell names **the existing tool and the
+parameter**, unless mechanism 4 won on the arithmetic — in which case the row states the surface cost
+it beat and the chain it deletes. `Expected saving` is `calls per session × tokens per call`, both
+from M2, never an estimate of how nice the tool would be. Anything that cleared no floor is named in
+the report's Dropped list with its measured count, never silently.
+
+---
+
+## M7 — Deep research: what the field knows about agent accuracy and productivity
 
 The corpus says what *this* agent wasted. It cannot say what a better-designed tool surface would
 have avoided in the first place. This phase is **mandatory**, it is not a literature review for its
 own sake, and it ends in rows.
 
-### M6.1 — Start from the standing corpus of already-verified findings
+### M7.1 — Start from the standing corpus of already-verified findings
 
 A previous run of this command banked a research fan-out — 206 techniques across eight areas, each
 with `name / what / howToMeasure / expectedEffect / source`. Twenty-five of its claims have since
@@ -726,9 +885,9 @@ what is already settled.** What is settled, with the instrument that settled it:
 | Compression that changes shape (TOON −18% at −9pp, TRON −27% at −14pp; LLMLingua 71% → 0% on code) | primary source | confirmed — caps how far M3 may go |
 
 Anything in that table is a premise, not a research task. Everything else in the banked set — and
-anything new — goes through M6.3.
+anything new — goes through M7.3.
 
-### M6.2 — Scope: search for methods, then test them against the measured corpus
+### M7.2 — Scope: search for methods, then test them against the measured corpus
 
 - tool and schema design: naming, description length as a two-sided optimum, parameter count,
   enum-vs-free-text, embedded examples, error-message design, how selection accuracy degrades with
@@ -746,7 +905,7 @@ anything new — goes through M6.3.
 - benchmark evidence: token, latency and accuracy numbers from published evaluations of MCP servers
   and semantic code-navigation tools.
 
-### M6.3 — Method: fan out, then refute
+### M7.3 — Method: fan out, then refute
 
 1. Spawn **at least eight** parallel research subagents, one per scope area, each briefed to return
    claims with sources and dates. Give them **zero** transcript content — the topic only (gate 3).
@@ -758,8 +917,8 @@ anything new — goes through M6.3.
    **quote the sentence**. A claim attributed to a vendor document that is not in that document is
    `UNVERIFIED`, however plausible — that is exactly how the "30–50 tools" figure entered this file.
 4. **Then try to refute.** A second agent whose instruction is to break the claim, plus a check
-   against what M2–M5 measured here. Where they disagree, **the corpus wins**.
-5. Discard anything already true of TerseSharp, and anything in the M6.1 table. The output of this
+   against what M2–M6 measured here. Where they disagree, **the corpus wins**.
+5. Discard anything already true of TerseSharp, and anything in the M7.1 table. The output of this
    phase is only the delta.
 
 **A fan-out this size will hit a session limit.** The banked run died mid-verify at 16 agents,
@@ -769,7 +928,7 @@ separate, and if the run is killed, recover from
 `<session>/subagents/workflows/<runId>/agent-*.jsonl` — the `StructuredOutput` tool input on each
 agent's last turn is the full result — rather than re-running the fan-out.
 
-### M6.4 — Conversion
+### M7.4 — Conversion
 
 A research finding becomes a row only if it is actionable **here**. Name the concrete change: a tool
 description reworded, a parameter added or removed, a response format changed, a `remedy:` that
@@ -778,7 +937,7 @@ productivity gain, **the instrument that verified it**, and how the next run wou
 row whose success can only be felt is not accepted. A method that is real but has no lever in this
 repo goes in the report's research section, not in the backlog.
 
-## M7 — Deduplicate against what is already logged
+## M8 — Deduplicate against what is already logged
 
 `read_text IMPROVEMENTS.md headings=true`, then read `## Open` and `## Closed` in full. **The file is
 exactly two tables and nothing else** — there is no `Known limitations` section, no per-task narrative,
@@ -799,7 +958,7 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
 
 ---
 
-## M8 — Write the rows
+## M9 — Write the rows
 
 1. Next id = highest existing `I<number>` + 1, continuing the sequence — never reuse one.
 2. Append to the `## Open` table with `edit_text`, anchored on text read in this run, in the file's own
@@ -820,8 +979,10 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
      `—` when there is none. A constraint that blocks the obvious fix belongs here (for example: the
      `Replaces Bash …` prefix cannot be shortened without un-enrolling the guard census).
 3. Rank the way this repo ranks: **fixing a fallback outranks a new capability**; **improving an
-   existing tool or response format outranks adding a tool**; a saving that cannot be measured is not
-   accepted. Highest measured cost first.
+   existing tool or response format outranks adding a tool**; within that, M6's mechanism order —
+   format change, then a fusing parameter, then a list parameter, then a new tool — decides between
+   two rows that address the same chain. A saving that cannot be measured is not accepted. Highest
+   measured cost first.
 4. **No cap, and no silent drop — the floor and the aggregation rule are the discipline.**
    - A candidate clears the floor on its own if it is worth **≥200 tokens per session**, **≥1 call per
      session**, **≥500 ms per call**, or a named accuracy gain.
@@ -837,7 +998,7 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
 
 ---
 
-## M9 — Verify, commit, push
+## M10 — Verify, commit, push
 
 1. `read_text IMPROVEMENTS.md section="## Open"` — the table still parses, ids are unique and
    sequential, and **every row has exactly five cells**. Then `read_text … headings=true`: exactly
@@ -848,24 +1009,26 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
 3. `changed_files` — `IMPROVEMENTS.md` must be the **only** path this run touched. No build, no test
    run: nothing else changed, and `IMPROVEMENTS.md` is not shipped in the package.
 4. `Bash: git add IMPROVEMENTS.md && git commit -m "Log I<n>–I<m> from the <N>-week session scan"`
-   (body: the corpus line from M8.5). **No `Co-Authored-By`.**
+   (body: the corpus line from M9.5). **No `Co-Authored-By`.**
 5. `Bash: git show --stat HEAD` then `git push origin main`. No review, by standing instruction.
 
 ---
 
-## M10 — Report
+## M11 — Report
 
 | Section | Content |
 |---|---|
 | Corpus | window in weeks, transcripts scanned, records read **and the share carrying no `message`**, projects covered (slugs only), total tool calls, built-in vs MCP share, tool-result tokens, tool-input chars, attachment tokens, spilled/sidecar bytes, thinking tokens, tool wall time against turn wall time, seconds slept |
 | Token ledger | per `message.model`: input, cache read, 1h and 5m writes, output, and the base-input-equivalent total. Never a dollar figure the corpus cannot prove |
 | Top waste | the eight cost centres from M2–M4, each with its number |
+| Sequence | the top call chains with their same-target share, the same-tool runs with their longest run, the fan-out histogram, and the re-fetch pairs — the raw input to M6 |
+| Composites & batches | every candidate from M6 with the mechanism it took (format / parameter / list / new tool), the floor it cleared, and the break-even arithmetic for every one that was rejected |
 | Attribution | tokens and records per skill, per MCP server, per subagent; the delegation ledger from `toolStats` (count, self-reported tokens, wall time) |
 | Friction | error **rate** per tool for tools with ≥50 calls, error-code histogram, API-error statuses, permission denials by kind, interruptions, queue enqueue/remove ratio, `max_tokens` truncations, compaction pre→post |
 | Trim ledger | the full M2 ledger in tokens per class and share of output — **and the placebo section stated as zero**, so the next run does not re-propose it |
 | Surface cost | total `[Description]` bytes and `SKILL.md` bytes, and what they cost per request |
 | Latency & memory | slowest tools by `p95` and by total minutes, RSS per workspace and per document, any cold-path trigger named |
-| Research | the methods M6 found worth adopting, each with **the instrument that verified it** (corpus / tokenizer / primary source) and the refutation attempt it survived; the ones dropped as already-true or not actionable here; and an explicit `UNVERIFIED` list of every claim that survived no instrument |
+| Research | the methods M7 found worth adopting, each with **the instrument that verified it** (corpus / tokenizer / primary source) and the refutation attempt it survived; the ones dropped as already-true or not actionable here; and an explicit `UNVERIFIED` list of every claim that survived no instrument |
 | New rows | every id written, with its one-line finding and expected saving, highest cost first |
 | Strengthened | existing rows given a new measurement instead of a duplicate |
 | Dropped | candidates measured but not logged, with their combined cost and the reason — never silent |
