@@ -128,4 +128,78 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
 
         return int.Parse(counted[..counted.IndexOf(' ')], CultureInfo.InvariantCulture);
     }
+
+    [Fact]
+    public async Task Gate_OverOneFile_AnswersOneVerdictLineCarryingTheAnalyzeCounts()
+    {
+        var text = await server.CallAsync("gate", new()
+        {
+            ["path"] = "src/Fixture.Trading/Order.cs",
+            ["dryRun"] = true,
+        });
+
+        var first = text.Split('\n')[0];
+
+        Assert.Matches("^(clean|FAILED)  analyzed=", first);
+        Assert.EndsWith("  dryRun", first, StringComparison.Ordinal);
+        Assert.Contains("remaining=", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Gate_ReportsTheSameDiagnosticsAnalyzeDoesForTheSameScope()
+    {
+        const string Path = "src/Fixture.Trading/OrderService.cs";
+
+        var analyzed = await server.CallAsync("analyze", new() { ["path"] = Path, ["minSeverity"] = "info" });
+        var gated = await server.CallAsync("gate", new() { ["path"] = Path, ["dryRun"] = true, ["verbose"] = true });
+
+        Assert.Contains("format:", gated, StringComparison.Ordinal);
+        Assert.Contains("cleanup:", gated, StringComparison.Ordinal);
+        Assert.Equal(Total(analyzed), Remaining(gated));
+    }
+
+    [Fact]
+    public async Task Gate_WhenAWriteStepWouldChangeAFile_NeverCondensesThatAway()
+    {
+        const string Target = "src/Fixture.Trading/Order.cs";
+        var full = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "Order.cs");
+        var original = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(full);
+
+        try
+        {
+            await server.CallAsync("write_text", new()
+            {
+                ["path"] = Target,
+                ["content"] = "using System.Text;\n" + original,
+                ["force"] = true,
+            });
+
+            var previewed = await server.CallAsync("gate", new() { ["path"] = Target, ["dryRun"] = true });
+            var applied = await server.CallAsync("gate", new() { ["path"] = Target });
+
+            Assert.StartsWith("FAILED  analyzed=", previewed, StringComparison.Ordinal);
+            Assert.Contains("VERIFY_FAILED", previewed, StringComparison.Ordinal);
+            Assert.StartsWith("clean  analyzed=", applied, StringComparison.Ordinal);
+            Assert.Contains("remaining=0", applied, StringComparison.Ordinal);
+            Assert.Contains("cleanup: ", applied, StringComparison.Ordinal);
+            Assert.Contains("Order.cs", applied, StringComparison.Ordinal);
+            Assert.DoesNotContain("using System.Text;", await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["content"] = original, ["force"] = true });
+            File.SetLastWriteTimeUtc(full, stamp);
+        }
+    }
+
+    private static int Remaining(string text)
+    {
+        var marker = text.IndexOf("remaining=", StringComparison.Ordinal) + "remaining=".Length;
+        var tail = text.AsSpan(marker);
+        var end = tail.IndexOfAny(" \r\n");
+
+        return int.Parse(end < 0 ? tail : tail[..end], CultureInfo.InvariantCulture);
+    }
 }

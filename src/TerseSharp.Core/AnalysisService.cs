@@ -17,11 +17,54 @@ public static class AnalysisService
         bool changed,
         CancellationToken cancellationToken)
     {
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, cancellationToken).ConfigureAwait(false);
+
+        if (!collected.IsOk)
+            return collected.Error!.Render();
+
+        var value = collected.Value;
+
+        return Render(
+            workspace.Root,
+            path,
+            Engines(value.Analyzed, includeDeadCode),
+            Filter(value.Found, value.Scope, minimum, ids),
+            Keep(value.Extra, ids),
+            maxResults,
+            sinceLast,
+            minimum,
+            ids,
+            includeDeadCode,
+            changed);
+    }
+
+    public static async Task<Result<string[]>> FindingsAsync(
+        LoadedWorkspace workspace,
+        string? path,
+        DiagnosticSeverity minimum,
+        bool includeDeadCode,
+        bool changed,
+        CancellationToken cancellationToken)
+    {
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, cancellationToken).ConfigureAwait(false);
+
+        return collected.IsOk
+            ? Result.Ok(Grouped(workspace.Root, Filter(collected.Value.Found, collected.Value.Scope, minimum, []), collected.Value.Extra))
+            : Result.Fail<string[]>(collected.Error!);
+    }
+
+    private static async Task<Result<Collected>> CollectedAsync(
+        LoadedWorkspace workspace,
+        string? path,
+        bool includeDeadCode,
+        bool changed,
+        CancellationToken cancellationToken)
+    {
         var unscoped = path is null && !changed;
         var documents = unscoped ? [] : DocumentScope.Select(workspace, path, changed);
 
         if (!unscoped && documents.Length is 0)
-            return Empty(path, changed).Render();
+            return Result.Fail<Collected>(Empty(path, changed));
 
         var targets = Targets(workspace, documents, unscoped).ToArray();
         var scope = Scope(workspace, documents, unscoped);
@@ -37,19 +80,14 @@ public static class AnalysisService
             ? await DeadCodeService.FindAsync(workspace, targets, scope, cancellationToken).ConfigureAwait(false)
             : [];
 
-        return Render(
-            workspace.Root,
-            path,
-            Engines(analyzed, includeDeadCode),
-            Filter(found, scope, minimum, ids),
-            Keep(extra, ids),
-            maxResults,
-            sinceLast,
-            minimum,
-            ids,
-            includeDeadCode,
-            changed);
+        return Result.Ok(new Collected(found, analyzed, extra, scope));
     }
+
+    private readonly record struct Collected(
+        ConcurrentBag<Diagnostic> Found,
+        ConcurrentBag<string> Analyzed,
+        IReadOnlyList<string> Extra,
+        DiagnosticScope Scope);
 
     private static List<string> Engines(ConcurrentBag<string> analyzed, bool includeDeadCode)
     {
@@ -114,6 +152,19 @@ public static class AnalysisService
         && (ids.Count is 0 || ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
         && scope.Includes(diagnostic);
 
+    private static string[] Grouped(string root, Diagnostic[] found, IReadOnlyList<string> extra) =>
+    [
+        .. found
+            .Select(diagnostic => DiagnosticFormat.Key(root, diagnostic))
+            .Concat(extra)
+            .GroupBy(text => text, StringComparer.Ordinal)
+            .Select(group => new { Text = group.Key, Count = group.Count() })
+            .OrderBy(entry => entry.Text, StringComparer.Ordinal)
+            .Select(entry => entry.Count is 1
+                ? entry.Text
+                : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}")),
+    ];
+
     private static string Render(
         string root,
         string? path,
@@ -127,18 +178,7 @@ public static class AnalysisService
         bool includeDeadCode,
         bool changed)
     {
-        var grouped = found
-            .Select(diagnostic => DiagnosticFormat.Key(root, diagnostic))
-            .Concat(extra)
-            .GroupBy(text => text, StringComparer.Ordinal)
-            .Select(group => new { Text = group.Key, Count = group.Count() })
-            .OrderBy(entry => entry.Text, StringComparer.Ordinal)
-            .ToArray();
-
-        var lines = grouped
-            .Select(entry => entry.Count is 1 ? entry.Text : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}"))
-            .ToArray();
-
+        var lines = Grouped(root, found, extra);
         var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{changed}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}");
         var delta = DiagnosticHistory.Record(scope, lines);
         var shown = sinceLast ? delta.Appeared : lines;

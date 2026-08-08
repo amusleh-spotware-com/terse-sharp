@@ -43,7 +43,7 @@ public static class SymbolLookup
                 "pass a documentation id such as M:Ns.Type.Member(Ns.Arg), or a name such as Type.Member"));
         }
 
-        var found = (await SymbolSearch.FindAsync(workspace, query.Member, null, NameCap + 1, cancellationToken).ConfigureAwait(false)).Ranked;
+        var found = (await SymbolSearch.FindAsync(workspace, query.Member, null, null, NameCap + 1, cancellationToken).ConfigureAwait(false)).Ranked;
 
         if (found.Count > NameCap)
             return Result.Fail<ISymbol>(Errors.SaturatedName(text, NameCap));
@@ -123,7 +123,7 @@ public static class SymbolLookup
         CancellationToken cancellationToken)
     {
         var name = LastSegment(symbolId);
-        var found = await SymbolSearch.FindAsync(workspace, name, null, 3, cancellationToken).ConfigureAwait(false);
+        var found = await SymbolSearch.FindAsync(workspace, name, null, null, 3, cancellationToken).ConfigureAwait(false);
 
         return [.. found.Ranked.Select(symbol => SymbolId.From(symbol).Value)];
     }

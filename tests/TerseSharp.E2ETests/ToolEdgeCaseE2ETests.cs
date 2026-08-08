@@ -412,4 +412,32 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
             CultureInfo.InvariantCulture,
             $"'{name}' never reached the workspace file index within {elapsed.Elapsed.TotalSeconds:F0}s of a {IndexBudget.TotalSeconds:F0}s budget; find_files last answered: {listing}"));
     }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAnArrayEntryThatCannotConvert_NamesTheArrayParameterAndQuotesTheOffendingText()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["declarations"] = new object[] { 17 },
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("declarations is an array parameter", text, StringComparison.Ordinal);
+        Assert.Contains("falls near:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithTwoArrayParametersBothLongerThanTheOffset_NeverAssertsAnOffsetItCannotAttribute()
+    {
+        var padding = new string('x', 200);
+
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderBook.Add", padding },
+            ["declarations"] = new object[] { padding, 17 },
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("symbolIds is an array parameter", text, StringComparison.Ordinal);
+    }
 }

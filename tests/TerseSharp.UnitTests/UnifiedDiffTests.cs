@@ -1,5 +1,4 @@
 using TerseSharp.Core;
-using Xunit;
 
 namespace TerseSharp.UnitTests;
 
@@ -41,5 +40,84 @@ public sealed class UnifiedDiffTests
 
         Assert.Contains("+TWO", diff, StringComparison.Ordinal);
         Assert.DoesNotContain("\r", diff, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChangedLines_ForTwoDistantEdits_CountsTheEditsNotTheSpanBetweenThem()
+    {
+        var (before, after) = DistantEdits();
+
+        Assert.Equal(2, UnifiedDiff.ChangedLines(before, after));
+    }
+
+    [Fact]
+    public void Between_ForTwoDistantEdits_EmitsOneHunkPerEditInsteadOfOneSpanningBoth()
+    {
+        var (before, after) = DistantEdits();
+
+        var diff = UnifiedDiff.Between("a.cs", before, after);
+
+        Assert.Equal(2, diff.Split('\n').Count(line => line.StartsWith("@@", StringComparison.Ordinal)));
+        Assert.DoesNotContain("-line20", diff, StringComparison.Ordinal);
+        Assert.Contains("-line2\n", diff, StringComparison.Ordinal);
+        Assert.Contains("+THIRTYSEVEN", diff, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChangedLines_ForAnInsertionInTheMiddle_CountsOnlyTheInsertedLines() =>
+        Assert.Equal(2, UnifiedDiff.ChangedLines("a\nb\nc\nd\ne", "a\nb\nX\nY\nc\nd\ne"));
+
+    private static (string Before, string After) DistantEdits()
+    {
+        var lines = Enumerable
+            .Range(0, 40)
+            .Select(index => "line" + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var before = string.Join('\n', lines);
+
+        return (
+            before,
+            before
+                .Replace("line2\n", "TWO\n", StringComparison.Ordinal)
+                .Replace("line37\n", "THIRTYSEVEN\n", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("", "", 0)]
+    [InlineData("", "a", 1)]
+    [InlineData("a", "", 1)]
+    [InlineData("only", "ONLY", 1)]
+    public void ChangedLines_ForDegenerateInputs_CountsWhatChanged(string before, string after, int expected) =>
+        Assert.Equal(expected, UnifiedDiff.ChangedLines(before, after));
+
+    [Fact]
+    public void Between_ForARegionTooLargeToAlign_FallsBackToOneBlockInsteadOfAllocatingTheTable()
+    {
+        var before = string.Join('\n', Enumerable.Range(0, 2100).Select(index => "a" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        var after = string.Join('\n', Enumerable.Range(0, 2100).Select(index => "b" + index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+        var diff = UnifiedDiff.Between("a.cs", before, after);
+
+        Assert.Equal(1, diff.Split('\n').Count(line => line.StartsWith("@@", StringComparison.Ordinal)));
+        Assert.Equal(2100, UnifiedDiff.ChangedLines(before, after));
+    }
+
+    [Fact]
+    public void Between_NumbersEachHunkFromTheLineItStartsAt()
+    {
+        var diff = UnifiedDiff.Between("a.cs", "a\nb\nc\nd\ne", "a\nB\nc\nD\ne");
+
+        Assert.Contains("@@ -2,1 +2,1 @@", diff, StringComparison.Ordinal);
+        Assert.Contains("@@ -4,1 +4,1 @@", diff, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Report_AnswersTheSameTextAndCountAsTheTwoSeparateCalls()
+    {
+        var (before, after) = DistantEdits();
+
+        var report = UnifiedDiff.Report("a.cs", before, after);
+
+        Assert.Equal(UnifiedDiff.Between("a.cs", before, after), report.Text);
+        Assert.Equal(UnifiedDiff.ChangedLines(before, after), report.ChangedLines);
     }
 }

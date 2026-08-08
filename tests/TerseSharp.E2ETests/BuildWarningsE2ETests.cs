@@ -153,4 +153,24 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
 
         Assert.Contains("CS0169", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task SearchSymbols_WithScope_KeepsOnlyThatHalfOfTheSolution()
+    {
+        var production = Path.Combine("Fixture.Warning", "Calculator.cs");
+        var both = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator" }, TestContext.Current.CancellationToken);
+        var source = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator", ["scope"] = "src" }, TestContext.Current.CancellationToken);
+        var tests = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator", ["scope"] = "test" }, TestContext.Current.CancellationToken);
+        var wrong = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator", ["scope"] = "production" }, TestContext.Current.CancellationToken);
+
+        Assert.Contains("CalculatorTests.cs", both, StringComparison.Ordinal);
+        Assert.Contains(production, both, StringComparison.Ordinal);
+        Assert.Contains(production, source, StringComparison.Ordinal);
+        Assert.DoesNotContain("CalculatorTests.cs", source, StringComparison.Ordinal);
+        Assert.Contains("CalculatorTests.cs", tests, StringComparison.Ordinal);
+        Assert.DoesNotContain(production, tests, StringComparison.Ordinal);
+        Assert.True(source.Length < both.Length, source);
+        Assert.Contains("ERROR InvalidArgument", wrong, StringComparison.Ordinal);
+        Assert.Contains("scope=src, scope=test", wrong, StringComparison.Ordinal);
+    }
 }

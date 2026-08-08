@@ -23,11 +23,9 @@ public sealed record DocumentDiff(string Path, string Text, int ChangedLines)
             return null;
 
         var path = updated.FilePath ?? updated.Name;
+        var report = UnifiedDiff.Report(path, originalText, updatedText);
 
-        return new DocumentDiff(
-            path,
-            UnifiedDiff.Between(path, originalText, updatedText),
-            UnifiedDiff.ChangedLines(originalText, updatedText));
+        return new DocumentDiff(path, report.Text, report.ChangedLines);
     }
 
     private static async Task<string> Read(Document document, CancellationToken cancellationToken)

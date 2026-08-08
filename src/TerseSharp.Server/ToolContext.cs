@@ -23,21 +23,29 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
     internal void Preload(Task load) => ready = ObserveAsync(load);
 
     public async Task<string> WithSymbolAsync(
-    string? workspace,
-    string? symbolId,
-    Func<LoadedWorkspace, ISymbol, Task<string>> action,
-    CancellationToken cancellationToken,
-    string? path = null)
+        string? workspace,
+        string? symbolId,
+        Func<LoadedWorkspace, ISymbol, Task<string>> action,
+        CancellationToken cancellationToken,
+        string? path = null,
+        Func<LoadedWorkspace, string?>? guard = null)
     {
         if (symbolId is not { Length: > 0 } requested)
             return Errors.Blank("symbolId", "symbol").Render();
+
         await ready.ConfigureAwait(false);
+
         return await ToolBoundary.RunAsync(async () =>
         {
             var resolved = await ResolveAsync(workspace, path, semantic: true, cancellationToken).ConfigureAwait(false);
+
             if (!resolved.IsOk)
                 return resolved.Error!.Render();
+
             using var lease = resolved.Value!;
+
+            if (guard?.Invoke(lease.Workspace) is { } refused)
+                return refused;
 
             return await AttributedAsync(lease.Workspace, async () =>
             {

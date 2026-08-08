@@ -58,7 +58,7 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
     [
         "write_text", "edit_text",
         "replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol",
-        "format", "cleanup", "clean",
+        "format", "cleanup", "clean", "gate",
         "extract_interface", "move_type_to_file", "move_type_to_namespace", "change_signature",
         "undo_last_change",
         "solution_add_project", "solution_remove_project",
@@ -86,7 +86,7 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         "add_member" => new() { ["typeSymbolId"] = ServiceType, ["declaration"] = "public int A() => 1;" },
         "delete_symbol" => new() { ["symbolId"] = Unused },
         "rename_symbol" => new() { ["symbolId"] = Unused, ["newName"] = "Spare" },
-        "format" or "cleanup" => new() { ["path"] = "src/Fixture.Trading/Order.cs" },
+        "format" or "cleanup" or "gate" => new() { ["path"] = "src/Fixture.Trading/Order.cs" },
         "clean" => new() { ["project"] = ProjectFile },
         "extract_interface" => new() { ["typeSymbolId"] = ServiceType, ["interfaceName"] = "IOrderService" },
         "move_type_to_file" => new() { ["typeSymbolId"] = ServiceType },

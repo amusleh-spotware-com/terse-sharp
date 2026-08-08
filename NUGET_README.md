@@ -4,7 +4,7 @@
 
 A Roslyn-powered [MCP](https://modelcontextprotocol.io) server so your agent navigates, edits,
 refactors, builds and tests .NET **semantically** — instead of reading whole files and grepping for
-symbols. **86 tools. One install. No IDE, no licence, no language server.**
+symbols. **87 tools. One install. No IDE, no licence, no language server.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/amusleh-spotware-com/terse-sharp/ci.yml?branch=main&label=CI)](https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
@@ -78,9 +78,10 @@ names the tool to use instead — covering `.cs`, `.razor`, `.xaml`, `.axaml`, `
 `.sln` and friends, the shell text tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them,
 `dotnet build`/`test`/`format`/`clean` and `dotnet watch build`/`test`, and the working-tree half of
 git — `git status` and `git diff`, answered by `changed_files` and `diff_symbols`, plus a bare
-`git ls-files`, answered by `find_files tracked=true`, and only when the
-working directory sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`, since the hook is user-wide and
-those tools cannot answer in a repository TerseSharp does not serve. A denied command also tells the
+`git ls-files`, answered by `find_files tracked=true`, and only when the directory the command
+actually addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj` — the `-C` target, or a directory
+operand, before the working directory. The hook is user-wide and those tools answer about the loaded
+workspace, so `git -C ../notes status` is allowed. A denied command also tells the
 agent not to run it in `Bash` again. Plain `.css`, `.js`,
 `dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git history and mutation
 (`log`, `blame`, `show`, `add`, `commit`, `push`) are allowed, because nothing here replaces those; malformed hook input allows the
@@ -95,7 +96,7 @@ catalogue, which is attached to every request and past a certain size measurably
 accuracy. It hides nothing: every other tool still answers when called by name, and `workspace_status`
 reports which profile is running.
 
-**86 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
+**87 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with
 `verbose=true` for the diff and `dryRun=true` to preview it. Any caveat prints in full.
 
@@ -104,7 +105,7 @@ success that costs nothing — every mutating tool answers in one line per chang
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
 | **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
 | **What grep can't reach** | `find_registrations` (DI: open generics, factories, `Add*` extensions) · `list_endpoints` (ASP.NET Core `Map*`) |
-| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` · `clean` · `get_diagnostics` |
+| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
 | **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
@@ -138,6 +139,14 @@ into the markup — but only where an `x:Class` or `x:DataType` *proves* the ref
   compilations back.
 - **Parallel worktrees** — every answer names its worktree and branch, and an ambiguous request lists
   the candidates instead of guessing.
+
+## Contributing
+
+The easiest way to help: clone the repo and run `/mine-sessions` in Claude Code. It reads your own
+session logs, measures where the tools cost you tokens or round trips, and appends the findings to
+`IMPROVEMENTS.md`. Skim the new rows — keep the ones that look real, drop anything that leaked a path
+or a secret — then open a PR with just that file. We work through the backlog every weekend, so your
+friction becomes next week's release.
 
 ## Links
 

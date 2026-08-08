@@ -17,7 +17,7 @@ public static class EditGate
 
         var report = options.AllowErrors
             ? null
-            : await AnalyseAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
+            : await AnalyseAsync(workspace.Solution, adopted, changed, workspace.Root, cancellationToken).ConfigureAwait(false);
 
         if (options.DryRun)
             return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root));
@@ -110,13 +110,14 @@ public static class EditGate
         Solution before,
         Solution after,
         IReadOnlyList<DocumentId> changed,
+        string root,
         CancellationToken cancellationToken)
     {
         var projects = Affected(before, changed);
-        var baseline = await TallyAsync(before, projects, cancellationToken).ConfigureAwait(false);
-        var current = await TallyAsync(after, projects, cancellationToken).ConfigureAwait(false);
+        var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
+        var current = await TallyAsync(after, projects, root, cancellationToken).ConfigureAwait(false);
         var appeared = current.Errors.Where(entry => Appeared(baseline.Errors, entry)).Select(entry => entry.Key).ToArray();
-        var arrived = Arrived(before, after, changed);
+        var arrived = Arrived(before, after, changed, root);
 
         return new GateReport(
             [.. appeared.Where(key => !Unresolvable(key, arrived, baseline.Errors)).Take(10)],
@@ -141,14 +142,14 @@ public static class EditGate
         return start > 0 && end > start && arrived.Contains(key[start..end]);
     }
 
-    private static HashSet<string> Arrived(Solution before, Solution after, IReadOnlyList<DocumentId> changed)
+    private static HashSet<string> Arrived(Solution before, Solution after, IReadOnlyList<DocumentId> changed, string root)
     {
         var arrived = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var id in changed)
         {
             if (before.GetDocument(id) is null && after.GetDocument(id) is { FilePath: { } path })
-                arrived.Add(path);
+                arrived.Add(PositionFormat.Relative(root, path));
         }
 
         return arrived;
@@ -173,6 +174,7 @@ public static class EditGate
     private static async Task<Tally> TallyAsync(
         Solution solution,
         IReadOnlyList<ProjectId> projects,
+        string root,
         CancellationToken cancellationToken)
     {
         var tally = new Tally(new Dictionary<string, int>(StringComparer.Ordinal), 0, 0);
@@ -182,13 +184,13 @@ public static class EditGate
             var compilation = await Compile(solution, projectId, cancellationToken).ConfigureAwait(false);
 
             if (compilation is not null)
-                tally = Collect(tally, compilation.GetDiagnostics(cancellationToken));
+                tally = Collect(tally, compilation.GetDiagnostics(cancellationToken), root);
         }
 
         return tally;
     }
 
-    private static Tally Collect(Tally tally, IEnumerable<Diagnostic> diagnostics)
+    private static Tally Collect(Tally tally, IEnumerable<Diagnostic> diagnostics, string root)
     {
         var errors = tally.ErrorCount;
         var warnings = tally.WarningCount;
@@ -196,7 +198,7 @@ public static class EditGate
         foreach (var diagnostic in diagnostics)
         {
             if (diagnostic.Severity is DiagnosticSeverity.Error)
-                errors += Record(tally.Errors, diagnostic);
+                errors += Record(tally.Errors, diagnostic, root);
 
             if (diagnostic.Severity is DiagnosticSeverity.Warning)
                 warnings++;
@@ -205,11 +207,11 @@ public static class EditGate
         return tally with { ErrorCount = errors, WarningCount = warnings };
     }
 
-    private static int Record(Dictionary<string, int> errors, Diagnostic diagnostic)
+    private static int Record(Dictionary<string, int> errors, Diagnostic diagnostic, string root)
     {
         var key = string.Create(
             CultureInfo.InvariantCulture,
-            $"{diagnostic.Id} {diagnostic.Location.GetLineSpan().Path}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+            $"{diagnostic.Id} {PositionFormat.Relative(root, diagnostic.Location.GetLineSpan().Path)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
 
         errors[key] = errors.GetValueOrDefault(key) + 1;
 

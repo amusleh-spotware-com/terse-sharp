@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 86 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 87 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
 ---
 
 # TerseSharp
@@ -31,6 +31,7 @@ tripwires — are the hard gate directly **below** the table.
 | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
 | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` | `path=` resolves the name inside that file first and only falls back to the solution when the file holds no match — `get_symbol` and `get_type_outline` take it too, `symbolIds=` scopes every id in the batch, and a `path=` naming no document answers `DocumentNotFound` instead of being ignored |
 | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
+| a name the tests declare dozens of times | `search_symbols(query, scope: "src")` | keeps one half of the solution - `src` for the production projects, `test` for the ones referencing a test framework; an unknown value is refused rather than searching everything |
 | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
 | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
@@ -89,6 +90,7 @@ tripwires — are the hard gate directly **below** the table.
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
+| running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0` - and keeping only the diagnostics still unfixed |
 | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
 | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
@@ -117,14 +119,21 @@ too and are covered by the same gate — including later in a compound command
 denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
 denial is not a reason to try a different spelling of the same shell command — call the tool.
 
-`dotnet format` and `dotnet clean` are covered too: `format`, `cleanup fix=…`, `cleanup verify=true` and `clean` replace them. `dotnet restore`, `pack`, `publish`, `run` and `tool` are **not** covered: no
+`dotnet format` and `dotnet clean` are covered too, and the guard names the **exact** replacement per
+sub-command: `dotnet format analyzers` -> `cleanup fix=analyzers` (`cleanup verify=true fix=analyzers`
+for `--verify-no-changes`), `dotnet format style` -> `cleanup fix=style`, a bare `dotnet format` ->
+`format` for whitespace plus `cleanup fix=all`, and `dotnet clean` -> `clean`. Those two verify modes
+check exactly the rule sets the two CI commands check, so there is never a reason to shell out for
+them. `dotnet restore`, `pack`, `publish`, `run` and `tool` are **not** covered: no
 TerseSharp tool replaces them, so shelling out is the right call.
 
 **The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff` and
 `git diff <ref>` are served by `changed_files`, `diff_symbols` and `diff_text` — all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. Running them in
-`Bash` is the same breach as `grep`. Only git **history** —
+`Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
+directory the command actually addresses (`-C` target, then a directory operand, then the working
+directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Only git **history** —
 `git log`, `git log -p`, `git blame`, `git show <ref>:<path>` — and anything that mutates the index or
 history — `git add`, `git commit`, `git push` — stay on the shell, because TerseSharp does not model
 them.
@@ -171,7 +180,7 @@ was evicted, not lost, and the next call naming it reloads it. The user can chan
 `terse serve --max-workspaces N` or `TERSE_MAX_WORKSPACES` — worth telling them when a big solution
 is making the server heavy, because a loaded workspace costs roughly 3 GB on a 148-project tree.
 **The server may be running a tool profile.** `terse serve --tools core` (or `TERSE_TOOLS=core`)
-advertises about twenty tools instead of all 86, because the full catalogue costs tokens on every
+advertises about twenty tools instead of all 87, because the full catalogue costs tokens on every
 request and measurably lowers tool-selection accuracy. It hides nothing: **every tool in this document
 still answers when you call it by name**, whether or not `tools/list` shows it. `workspace_status`
 prints `tools=core - N advertised` when a profile is active, so you can tell.
@@ -228,7 +237,7 @@ folded to one `FAILED <project>  messages=N` line per project under a `N load fa
 project(s)` header. `verbose=true` prints every message of both. So do not read a warning count as a
 broken workspace, and do not fall back to the built-ins over one.
 
-**Navigate** — `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` ·
+**Navigate** — `search_symbols` (`scope=src|test` keeps one half of the solution) · `get_symbol` · `get_file_outline` · `get_type_outline` ·
 `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of`.
 A usage inside generated code is tagged `gen` rather than `src` — it is a real reference, but the file
 is regenerated, so never edit it.
@@ -268,7 +277,17 @@ that change set is carried across the unload-and-reload `build`/`run_tests` perf
 output, so an analyze after a build no longer answers `no document under that scope was modified` — so the
 end-of-task gate over a task's touched files is **one** call, not one per file; `sinceLast=true` reports
 only what appeared since the previous run of the same scope, plus what was fixed) ·
-`get_diagnostics` · `format` (whitespace; `verify=true` for a one-line verdict, `path=` takes a file, a directory or a glob) · `cleanup` (`fix=usings` by default; `fix=style|analyzers|all` applies the referenced analyzers' code fixes with `ids=` and `severity=` filters, reports `UNFIXED <id>` for what no fixer covers, and never rewrites generated code) · `clean` (deletes `bin`/`obj`, `dryRun=true` to preview, not covered by `undo_last_change`).
+`get_diagnostics` · `format` (whitespace; `verify=true` for a one-line verdict, `path=` takes a file, a directory or a glob) · `cleanup` (`fix=usings` by default; `fix=style|analyzers|all` applies the referenced analyzers' code fixes with `ids=` and `severity=` filters, reports `UNFIXED <id>` for what no fixer covers, and never rewrites generated code) · `clean` (deletes `bin`/`obj`, `dryRun=true` to preview, not covered by `undo_last_change`) ·
+`gate` (the end-of-task sequence as one call: `analyze` at `info`, `format`, `cleanup fix=all`, then
+`analyze` again, over the files changed since the workspace loaded unless `path=` or `solution=true`
+says otherwise). `gate` answers **one verdict line** - `clean` or `FAILED` - and, when it is not clean, each step's
+own line plus the diagnostics that are still unfixed; never a diff. It condenses to that single line
+only when every step was genuinely quiet, so a `VERIFY_FAILED`, an `UNFIXED`, a rolled-back step or a
+file the run rewrote is always shown. Under `dryRun=true` a tree that **would** change answers
+`FAILED`, which is what a pre-push check is for. `dryRun=true` makes both write steps verify instead of write, so
+nothing is modified; `verbose=true` adds each step's own report. It never replaces reading `build`
+before `run_tests`: those two stay separate on purpose, because a test result read before its build is
+the previous binary's.
 
 **`format verify` and `cleanup verify` are not the same gate.** `format` compares against the Roslyn
 whitespace formatter, which `dotnet format style` and `dotnet format analyzers` do not run — a
@@ -338,7 +357,12 @@ directory symlinks — the same set every index uses, so a nested agent worktree
 `read_text` also accepts an **absolute path outside every workspace root**, tagged
 `outside-workspace`, so comparing a file against another repo needs no second `load_workspace` and no
 `workspace=` even with several loaded; every writer still refuses to leave the workspace.
-`search_regex` anchors `^` and `$` to each line. Both searches take `exclude=`, a glob applied after
+`search_regex` anchors `^` and `$` to each line, and a match that **spans** lines - `^\s*(public|private)`
+starting on the blank line above - is reported once, at the first line carrying its text, instead of
+twice with the blank line first. Both searches take `matchesOnly=true`, which prints the matched span
+instead of the whole line the way `grep -o` does and composes with `unique=true` to answer "which
+distinct values of this shape exist"; a match that is only whitespace still prints its line, so no
+record is ever empty. Both take `exclude=`, a glob applied after
 `glob=` has selected, for the folder a positive glob cannot leave out. `find_files(stamps: true)`
 appends each file's UTC last-write time and byte length. `read_text` clips at **40 960** characters
 unless `maxChars` says otherwise (ceiling 131 072): the default is set so a whole-file read stays
@@ -387,7 +411,9 @@ this workspace is read as text unchanged.
 3. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff, the diagnostic
    counts, and nothing is written; the response says `dryRun` so it can never be mistaken for a write.
 4. **A successful edit answers in one line per changed file, not a diff.**
-   `<workspace-relative path>  changedLines=N` — you already know what you wrote, so the diff is not
+   `<workspace-relative path>  changedLines=N` - and that count is the lines that actually changed,
+   summed over each separate change, not the span between the first and the last one; a diff is one
+   `@@` hunk per change. You already know what you wrote, so the diff is not
    repeated back to you, and there is no `N files changed` line above it, because the lines are the
    count. `edit_text` and `write_text` print the **file name alone**, because you
    passed the path in. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
@@ -415,6 +441,10 @@ this workspace is read as text unchanged.
    `replace_symbol_body` and `add_member` take `retryWith: "r3"` to replay exactly what was rejected —
    after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
    declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
+   **A token belongs to the workspace it was rejected in**: replaying it against another one - a
+   sibling worktree where the same symbol id resolves - is refused naming both roots, instead of
+   landing the held declaration in the wrong tree. Every diagnostic a rollback lists names its file
+   **workspace-relative**, like every other record.
 6. **Truncation tells you what to do.** `<shown>/<total> <unit> truncated` is followed by
    `- narrow with <parameter>`. Follow that, rather than re-running with a bigger `maxResults` and
    paying for the whole list. A **complete** listing of 25 records or more names the same parameter,
@@ -635,7 +665,10 @@ Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the n
 the name matched too many symbols to resolve safely — qualify it; `OutOfWorkspace` means the path
 escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
 no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
-parameter means the argument names were wrong, and the remedy lists the ones the tool declares;
+parameter means the argument names were wrong, and the remedy lists the ones the tool declares; an
+`InvalidArgument` carrying a `JsonException` also names the **array** parameter it could not convert
+and quotes the ~80 characters around the offending byte, so a 9 000-character `declarations=` is
+located without re-sending it;
 `ReadOnly` means the server runs with `--read-only`.
 
 Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one outcome this server

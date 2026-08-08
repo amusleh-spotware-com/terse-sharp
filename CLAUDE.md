@@ -53,7 +53,9 @@ dotnet test  TerseSharp.slnx                      # unit + E2E
 dotnet test tests/TerseSharp.UnitTests/TerseSharp.UnitTests.csproj
 dotnet test tests/TerseSharp.E2ETests/TerseSharp.E2ETests.csproj --filter "FullyQualifiedName~NavigationToolsE2ETests"
 
-# required before a PR (CI runs both on ubuntu; from an agent, use cleanup verify=true fix=all)
+# required before a PR - CI runs both on ubuntu. From an agent these are DENIED by the guard: use
+# cleanup verify=true fix=analyzers and cleanup verify=true fix=style, which check exactly the same
+# rule sets, plus cleanup verify=true fix=all as the superset sweep.
 dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info
 dotnet format style     TerseSharp.slnx --verify-no-changes --severity info
 
@@ -121,10 +123,12 @@ Before every push, in this order, reading each result before trusting the next:
    not an equivalent: measured at `b3c381e` it named four files (`ReleaseVersion.cs`,
    `ResponseBuilderTests.cs`, `UnifiedDiffTests.cs`, `WorkspaceRegistryTests.cs`) that both CI commands
    accept, and `format verify=true` is Roslyn's whitespace formatter, which CI does not run at all. So a
-   `VERIFY_FAILED` naming a file you did not touch is a prompt to look, not proof CI is red — the two
-   `dotnet format … --verify-no-changes --severity info` commands are the arbiter, and running them
-   scoped to the project you touched is the one legitimate `dotnet` shell-out on this path. Logged as
-   `I37`.
+   `VERIFY_FAILED` naming a file you did not touch is a prompt to look, not proof CI is red. The two
+   `dotnet format … --verify-no-changes --severity info` commands are what **the ubuntu runner**
+   executes — that is a statement about CI, **not a licence to run them here**. There is no legitimate
+   `dotnet` shell-out on this path: `cleanup verify=true fix=all` plus `format verify=true` is the
+   gate, and a disagreement you suspect between them and CI is reported as a finding, not resolved in
+   `Bash`. Logged as `I37`.
 
 A one-runner red is not automatically a flake, and "it passed on rerun" is not a diagnosis. Real
 one-legged failures have shipped here: a macOS-only race introduced by starting the transport before
@@ -138,7 +142,7 @@ until it passes.
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **86 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **87 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `ExploreService`, `RegistrationService`, `RenameService`, `RefactorService`, `SymbolEditService`,
 `AnalysisService`, `DeadCodeService`, `CodeFixService`, `DiagnosticsService`, `FormatService`,
@@ -272,7 +276,7 @@ answer all four:
 4. **CHANGELOG** — under `## [Unreleased]`, with the format change spelled out.
 
 A commit that changes behaviour and leaves any of the four stale is incomplete. "I'll update the docs
-after" is the same failure as "I'll add the test after": both are how an 86-tool surface drifts away
+after" is the same failure as "I'll add the test after": both are how an 87-tool surface drifts away
 from what it claims to be. When you cannot update one of them in the same commit, say which and why in
 the commit body.
 

@@ -115,7 +115,10 @@ public static class RazorEditGate
         bool refreshed)
     {
         var response = new ResponseBuilder(options.Tool, state).Verbose(options.Verbose);
-        var changed = UnifiedDiff.ChangedLines(context.Document.Text, updatedText);
+        var condensed = Condensed(options, refreshed, report);
+        var diff = condensed
+            ? new DiffReport(string.Empty, UnifiedDiff.ChangedLines(context.Document.Text, updatedText))
+            : UnifiedDiff.Report(context.Relative, context.Document.Text, updatedText);
 
         response.Summary(1, 1, "files changed");
 
@@ -131,11 +134,11 @@ public static class RazorEditGate
         if (report is { NewErrors.Count: > 0 })
             Warn(response, report);
 
-        if (Condensed(options, refreshed, report))
-            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{context.Relative}  changedLines={changed}")).ToString();
+        if (condensed)
+            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{context.Relative}  changedLines={diff.ChangedLines}")).ToString();
 
-        response.Line(UnifiedDiff.Between(context.Relative, context.Document.Text, updatedText));
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
+        response.Line(diff.Text);
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={diff.ChangedLines}"));
 
         return response.ToString();
     }

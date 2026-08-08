@@ -510,4 +510,67 @@ public sealed class ToolGuardTests
     [InlineData("git ls-remote")]
     public void Inspect_ForAGitListingNothingReplaces_Allows(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public async Task Inspect_ForAGitCommandDirectedAtADirectoryWithNoSolution_Allows()
+    {
+        var (dotnet, plain) = await TreesAsync();
+
+        var directed = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git -C " + plain + " ls-files" }, dotnet);
+        var relative = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git -C ../notes status" }, dotnet);
+        var operand = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git status ../notes" }, dotnet);
+
+        Assert.False(directed.Denied, directed.Reason);
+        Assert.False(relative.Denied, relative.Reason);
+        Assert.False(operand.Denied, operand.Reason);
+    }
+
+    [Fact]
+    public async Task Inspect_ForAGitCommandDirectedAtTheDotNetTreeItself_StillDenies()
+    {
+        var (dotnet, _) = await TreesAsync();
+
+        var here = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git status" }, dotnet);
+        var inside = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git -C . diff" }, dotnet);
+
+        Assert.True(here.Denied, here.Reason);
+        Assert.True(inside.Denied, inside.Reason);
+    }
+
+    private static async Task<(string DotNet, string Plain)> TreesAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-guard-" + Guid.NewGuid().ToString("N"));
+        var dotnet = Path.Combine(root, "solution");
+        var plain = Path.Combine(root, "notes");
+
+        Directory.CreateDirectory(dotnet);
+        Directory.CreateDirectory(plain);
+
+        await File.WriteAllTextAsync(Path.Combine(dotnet, "App.csproj"), "<Project />", TestContext.Current.CancellationToken);
+
+        return (dotnet, plain);
+    }
+
+    [Theory]
+    [InlineData("dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info", "cleanup verify=true fix=analyzers")]
+    [InlineData("dotnet format style TerseSharp.slnx --verify-no-changes --severity info", "cleanup verify=true fix=style")]
+    [InlineData("dotnet format analyzers", "cleanup fix=analyzers")]
+    [InlineData("dotnet format style", "cleanup fix=style")]
+    public void Inspect_ForDotnetFormatWithASubcommand_NamesTheExactCleanupThatVerifiesTheSameThing(string command, string replacement)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains(replacement, verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForDotnetFormatWithoutASubcommand_StillNamesTheWhitespaceAndCleanupPair()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet format TerseSharp.slnx --verify-no-changes" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("format verify=true", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("cleanup verify=true", verdict.Reason, StringComparison.Ordinal);
+    }
 }

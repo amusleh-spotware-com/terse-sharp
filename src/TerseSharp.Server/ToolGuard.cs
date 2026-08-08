@@ -119,11 +119,18 @@ public static class ToolGuard
         {
             "build" or "msbuild" => "build",
             "test" or "vstest" => "test",
-            "format" => "format",
+            "format" => Formatting(tokens),
             "clean" => "clean",
             _ => null,
         };
     }
+
+    private static string Formatting(string[] tokens) => Scan(tokens, Array.IndexOf(tokens, "format") + 1, []) switch
+    {
+        "analyzers" => "format-analyzers",
+        "style" => "format-style",
+        _ => "format",
+    };
 
     private static string BuildReason(string segment, string subcommand) => string.Create(
         CultureInfo.InvariantCulture,
@@ -132,7 +139,9 @@ public static class ToolGuard
     private static string BuildReplacement(string subcommand) => subcommand switch
     {
         "build" => "use build",
-        "format" => "use format, cleanup fix=all, or cleanup verify=true for --verify-no-changes",
+        "format" => "use format for whitespace and cleanup fix=all for the analyzer code fixes; format verify=true and cleanup verify=true replace --verify-no-changes",
+        "format-analyzers" => "use cleanup fix=analyzers, or cleanup verify=true fix=analyzers for --verify-no-changes - that verifies exactly what this command checks",
+        "format-style" => "use cleanup fix=style, or cleanup verify=true fix=style for --verify-no-changes - that verifies exactly what this command checks",
         "clean" => "use clean",
         "status" => "use changed_files",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show",
@@ -142,7 +151,7 @@ public static class ToolGuard
 
     private static string Rationale(string subcommand) => subcommand switch
     {
-        "format" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, and names every diagnostic no fixer covers.",
+        "format" or "format-analyzers" or "format-style" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, names every diagnostic no fixer covers, and answers a verify in one line instead of a per-file listing.",
         "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, so the end-of-task review costs a listing instead of a diff.",
         "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths. Only git history - log, blame, show <ref>:<path> - and index or history mutation stay on the shell.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
@@ -289,13 +298,60 @@ public static class ToolGuard
         return subcommand is "watch" ? Scan(tokens, Array.IndexOf(tokens, "watch") + 1, WatchGlobals) : subcommand;
     }
 
-    private static string? Git(string[] tokens, string? cwd) => Scan(tokens, 1, GitGlobals) switch
+    private static string? Git(string[] tokens, string? cwd)
     {
-        "status" when IsDotNetTree(cwd) => "status",
-        "diff" when IsDotNetTree(cwd) => "diff",
-        "ls-files" when IsDotNetTree(cwd) && Unflagged(tokens, "ls-files") => "ls-files",
-        _ => null,
-    };
+        var subcommand = Scan(tokens, 1, GitGlobals);
+        var directed = Directed(tokens, cwd, subcommand);
+
+        return subcommand switch
+        {
+            "status" when IsDotNetTree(directed) => "status",
+            "diff" when IsDotNetTree(directed) => "diff",
+            "ls-files" when IsDotNetTree(directed) && Unflagged(tokens, "ls-files") => "ls-files",
+            _ => null,
+        };
+    }
+
+    private static string Directed(string[] tokens, string? cwd, string? subcommand)
+    {
+        var here = cwd is { Length: > 0 } ? cwd : Environment.CurrentDirectory;
+        var root = Changed(tokens, here);
+        var operands = subcommand is { Length: > 0 } ? Array.IndexOf(tokens, subcommand) + 1 : tokens.Length;
+
+        return Operand(tokens, root, operands) ?? root;
+    }
+
+    private static string Changed(string[] tokens, string cwd)
+    {
+        var root = cwd;
+
+        for (var index = 1; index < tokens.Length - 1; index++)
+        {
+            if (tokens[index] is "-C" && Under(root, tokens[index + 1]) is { } target && Directory.Exists(target))
+                root = target;
+        }
+
+        return root;
+    }
+
+    private static string? Operand(string[] tokens, string root, int start)
+    {
+        for (var index = start; index < tokens.Length; index++)
+        {
+            if (tokens[index].StartsWith('-'))
+                continue;
+
+            var candidate = Under(root, tokens[index]);
+
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static string Under(string root, string path) =>
+        Path.IsPathRooted(path) ? path : Path.Combine(root, path);
 
     private static readonly string[] SolutionMarkers = ["*.sln", "*.slnx", "*.slnf", "*.csproj", "*.fsproj", "*.vbproj"];
 
@@ -334,11 +390,23 @@ public static class ToolGuard
     {
         for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
         {
-            if (directory.Exists && SolutionMarkers.Any(marker => directory.EnumerateFiles(marker).Any()))
+            if (Marked(directory))
                 return true;
         }
 
         return false;
+    }
+
+    private static bool Marked(DirectoryInfo directory)
+    {
+        try
+        {
+            return directory.Exists && SolutionMarkers.Any(marker => directory.EnumerateFiles(marker).Any());
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     private static string Bare(string token) => token.Trim(Wrappers);

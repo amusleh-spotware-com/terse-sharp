@@ -301,4 +301,66 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task SearchRegex_WithAPatternThatCanStartOnTheBlankLineAbove_LeavesNoRecordWithoutAPayload()
+    {
+        var text = await server.CallAsync("search_regex", new()
+        {
+            ["pattern"] = @"^\s*(public|internal|private)\s+[\w<>\[\],\? ]+\s+(\w+)\s*\(",
+            ["glob"] = "src/**/*.cs",
+            ["maxResults"] = 200,
+        });
+
+        var records = text.Split('\n').Where(line => line.Contains(Tag, StringComparison.Ordinal)).ToArray();
+
+        Assert.NotEmpty(records);
+        Assert.All(records, record => Assert.NotEqual(string.Empty, Payload(record)));
+    }
+
+    private const string Tag = "  HEURISTIC  ";
+
+    private static string Payload(string record) =>
+        record[(record.IndexOf(Tag, StringComparison.Ordinal) + Tag.Length)..].Trim();
+
+    [Fact]
+    public async Task SearchRegex_WithMatchesOnly_PrintsTheMatchedSpanInsteadOfTheWholeLine()
+    {
+        var lines = await server.CallAsync("search_regex", new()
+        {
+            ["pattern"] = @"public\s+sealed\s+record\s+\w+",
+            ["glob"] = "src/**/*.cs",
+        });
+
+        var spans = await server.CallAsync("search_regex", new()
+        {
+            ["pattern"] = @"public\s+sealed\s+record\s+\w+",
+            ["glob"] = "src/**/*.cs",
+            ["matchesOnly"] = true,
+        });
+
+        var first = spans.Split('\n').First(line => line.Contains(Tag, StringComparison.Ordinal));
+
+        Assert.Contains("record Order", spans, StringComparison.Ordinal);
+        Assert.DoesNotContain("(", Payload(first), StringComparison.Ordinal);
+        Assert.Contains("(", lines, StringComparison.Ordinal);
+        Assert.True(spans.Length < lines.Length, spans);
+    }
+
+    [Fact]
+    public async Task SearchText_WithMatchesOnlyAndUnique_CollapsesTheDistinctMatchedValues()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "public",
+            ["glob"] = "src/**/*.cs",
+            ["matchesOnly"] = true,
+            ["unique"] = true,
+        });
+
+        var records = text.Split('\n').Where(line => line.Contains(Tag, StringComparison.Ordinal)).ToArray();
+
+        Assert.Single(records);
+        Assert.Equal("public", Payload(records[0]).Split("  x")[0]);
+    }
 }

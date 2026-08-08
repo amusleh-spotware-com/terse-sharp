@@ -552,12 +552,14 @@ public static class ResxEditService
         }
         else
         {
-            foreach (var write in writes)
-                response.Line(UnifiedDiff.Between(write.Relative, write.Before, write.After));
+            var reports = writes.Select(write => UnifiedDiff.Report(write.Relative, write.Before, write.After)).ToArray();
+
+            foreach (var report in reports)
+                response.Line(report.Text);
 
             response.Line(string.Create(
                 CultureInfo.InvariantCulture,
-                $"changedLines={writes.Sum(write => UnifiedDiff.ChangedLines(write.Before, write.After))}"));
+                $"changedLines={reports.Sum(report => report.ChangedLines)}"));
         }
 
         foreach (var note in notes.Where(note => note.Length > 0))

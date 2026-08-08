@@ -193,22 +193,23 @@ public static class FileService
     private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
-        var changed = UnifiedDiff.ChangedLines(before, after);
 
-        if (!dryRun && !verbose && changed > 0)
+        if (!dryRun && !verbose && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
         {
             return response
-                .Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={changed}"))
+                .Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={quick}"))
                 .ToString();
         }
+
+        var report = UnifiedDiff.Report(path, before, after);
 
         response.Summary(1, 1, "files changed");
 
         if (dryRun && !verbose)
             response.Note("dryRun");
 
-        response.Line(UnifiedDiff.Between(path, before, after));
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
+        response.Line(report.Text);
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}"));
 
         return response.ToString();
     }
@@ -627,19 +628,20 @@ public static class FileService
         edit.Occurrence);
 
     private static string BatchResponse(
-    string path,
-    string before,
-    string after,
-    List<string> failures,
-    int applied,
-    int total,
-    EditRequest request)
+        string path,
+        string before,
+        string after,
+        List<string> failures,
+        int applied,
+        int total,
+        EditRequest request)
     {
         var response = new ResponseBuilder("edit_text", request.DryRun ? "dryRun" : "applied").Verbose(request.Verbose);
-        var changed = UnifiedDiff.ChangedLines(before, after);
+        var full = request.DryRun || request.Verbose;
+        var report = full ? UnifiedDiff.Report(path, before, after) : new DiffReport(string.Empty, UnifiedDiff.ChangedLines(before, after));
         var summary = string.Create(
             CultureInfo.InvariantCulture,
-            $"{Path.GetFileName(path.AsSpan())}  changedLines={changed}  edits={applied}/{total}");
+            $"{Path.GetFileName(path.AsSpan())}  changedLines={report.ChangedLines}  edits={applied}/{total}");
 
         if (!request.DryRun && !request.Verbose && failures.Count is 0)
             return response.Line(summary).ToString();
@@ -652,8 +654,8 @@ public static class FileService
         foreach (var failure in failures)
             response.Note(failure);
 
-        if (request.DryRun || request.Verbose)
-            response.Line(UnifiedDiff.Between(path, before, after));
+        if (full)
+            response.Line(report.Text);
 
         return response.ToString();
     }

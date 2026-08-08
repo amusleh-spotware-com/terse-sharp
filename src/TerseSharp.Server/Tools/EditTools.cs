@@ -31,7 +31,8 @@ public sealed class EditTools(ToolContext context)
         return Supplied(workspace, target, text, "body", (loaded, resolved) => SymbolEditService.ReplaceBodyAsync(
             loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose), cancellationToken),
             cancellationToken,
-            new Carry("replace_symbol_body", [target ?? string.Empty], [text]));
+            new Carry("replace_symbol_body", [target ?? string.Empty], [text]),
+            held?.Root);
     }
 
     [McpServerTool(Name = "replace_symbol")]
@@ -57,7 +58,7 @@ CancellationToken cancellationToken = default)
         var options = Options("replace_symbol", dryRun, allowErrors, verbose);
 
         if (held is { Targets.Count: > 1 })
-            return Batched(workspace, [.. held.Targets], [.. held.Payloads], options, cancellationToken);
+            return Batched(workspace, [.. held.Targets], [.. held.Payloads], options, cancellationToken, held.Root);
 
         if (held is null && (symbolIds, declarations) is not (null, null))
             return Batched(workspace, symbolIds ?? [], declarations ?? [], options, cancellationToken);
@@ -68,7 +69,8 @@ CancellationToken cancellationToken = default)
         return Supplied(workspace, target, text, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
             loaded, resolved, text, options, cancellationToken),
             cancellationToken,
-            new Carry("replace_symbol", [target ?? string.Empty], [text]));
+            new Carry("replace_symbol", [target ?? string.Empty], [text]),
+            held?.Root);
     }
     [McpServerTool(Name = "add_member")]
     [Description("Add one or more members to a type, addressed by the type's symbol id - or, with path=, add namespace-level types to an existing .cs file. An enum symbol id takes enum members. Several declarations in one call land as a single compile-gated edit, so a set of members that reference each other needs no dependency ordering. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
@@ -93,27 +95,34 @@ CancellationToken cancellationToken = default)
         var file = held is null ? path : Slot(held.Targets, 1);
         var text = held is null ? declaration : First(held.Payloads, declaration);
 
-        return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose), cancellationToken);
+        return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose), cancellationToken, held?.Root);
     }
 
     private Task<string> Added(
-    string? workspace,
-    string? typeSymbolId,
-    string? path,
-    string declaration,
-    EditOptions options,
-    CancellationToken cancellationToken) => (typeSymbolId, path) switch
-    {
-        ({ Length: > 0 }, { Length: > 0 }) => Task.FromResult(Errors.Invalid(
-            "both a type symbol id and a path were passed, and they name different containers",
-            "pass typeSymbolId to add members to a type, or path to add namespace-level types to a file - not both").Render()),
-        (_, { Length: > 0 } file) when declaration is { Length: > 0 } => AddToFile(workspace, file, declaration, options, cancellationToken),
-        (_, { Length: > 0 }) => Task.FromResult(Errors.Blank("declaration").Render()),
-        _ => Supplied(workspace, typeSymbolId, declaration, "declaration", (loaded, resolved) => SymbolEditService.AddMemberAsync(
-            loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration])),
-    };
+        string? workspace,
+        string? typeSymbolId,
+        string? path,
+        string declaration,
+        EditOptions options,
+        CancellationToken cancellationToken,
+        string? heldRoot = null) => (typeSymbolId, path) switch
+        {
+            ({ Length: > 0 }, { Length: > 0 }) => Task.FromResult(Errors.Invalid(
+                "both a type symbol id and a path were passed, and they name different containers",
+                "pass typeSymbolId to add members to a type, or path to add namespace-level types to a file - not both").Render()),
+            (_, { Length: > 0 } file) when declaration is { Length: > 0 } => AddToFile(workspace, file, declaration, options, cancellationToken, heldRoot),
+            (_, { Length: > 0 }) => Task.FromResult(Errors.Blank("declaration").Render()),
+            _ => Supplied(workspace, typeSymbolId, declaration, "declaration", (loaded, resolved) => SymbolEditService.AddMemberAsync(
+                loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration]), heldRoot),
+        };
 
-    private Task<string> AddToFile(string? workspace, string path, string declaration, EditOptions options, CancellationToken cancellationToken)
+    private Task<string> AddToFile(
+        string? workspace,
+        string path,
+        string declaration,
+        EditOptions options,
+        CancellationToken cancellationToken,
+        string? heldRoot = null)
     {
         var rejection = context.RejectWrite();
         var carry = new Carry("add_member", [string.Empty, path], [declaration]);
@@ -123,9 +132,10 @@ CancellationToken cancellationToken = default)
             : context.WithWorkspaceAsync(
                 workspace,
                 path,
-                async loaded => Carried(
+                async loaded => Elsewhere(heldRoot, loaded.Root) ?? Carried(
                     await SymbolEditService.AddToFileAsync(loaded, path, declaration, options, cancellationToken).ConfigureAwait(false),
-                    carry),
+                    carry,
+                    loaded.Root),
                 cancellationToken: cancellationToken);
     }
 
@@ -159,37 +169,44 @@ CancellationToken cancellationToken = default)
         new(tool, dryRun, allowErrors, verbose);
 
     private Task<string> Guarded(
-    string? workspace,
-    string? symbolId,
-    Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
-    CancellationToken cancellationToken,
-    Carry carry = default)
+        string? workspace,
+        string? symbolId,
+        Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
+        CancellationToken cancellationToken,
+        Carry carry = default,
+        string? heldRoot = null)
     {
         var rejection = context.RejectWrite();
 
         return rejection is not null
             ? Task.FromResult(rejection)
-            : context.WithSymbolAsync(workspace, symbolId, async (loaded, resolved) =>
-                Carried(await action(loaded, resolved).ConfigureAwait(false), carry), cancellationToken);
+            : context.WithSymbolAsync(
+                workspace,
+                symbolId,
+                async (loaded, resolved) => Carried(await action(loaded, resolved).ConfigureAwait(false), carry, loaded.Root),
+                cancellationToken,
+                guard: loaded => Elsewhere(heldRoot, loaded.Root));
     }
 
     private Task<string> Supplied(
-    string? workspace,
-    string? symbolId,
-    string text,
-    string name,
-    Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
-    CancellationToken cancellationToken,
-    Carry carry = default) => text is { Length: > 0 }
-    ? Guarded(workspace, symbolId, action, cancellationToken, carry)
-    : Task.FromResult(Errors.Blank(name).Render());
+        string? workspace,
+        string? symbolId,
+        string text,
+        string name,
+        Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
+        CancellationToken cancellationToken,
+        Carry carry = default,
+        string? heldRoot = null) => text is { Length: > 0 }
+        ? Guarded(workspace, symbolId, action, cancellationToken, carry, heldRoot)
+        : Task.FromResult(Errors.Blank(name).Render());
 
     private Task<string> Batched(
-    string? workspace,
-    string[] symbolIds,
-    string[] declarations,
-    EditOptions options,
-    CancellationToken cancellationToken)
+        string? workspace,
+        string[] symbolIds,
+        string[] declarations,
+        EditOptions options,
+        CancellationToken cancellationToken,
+        string? heldRoot = null)
     {
         var rejection = context.RejectWrite();
         var carry = new Carry("replace_symbol", symbolIds, declarations);
@@ -199,16 +216,16 @@ CancellationToken cancellationToken = default)
             : context.WithWorkspaceAsync(
                 workspace,
                 null,
-                async loaded => Carried(await SymbolEditService.ReplaceDeclarationsAsync(
-                    loaded, symbolIds, declarations, options, cancellationToken).ConfigureAwait(false), carry),
+                async loaded => Elsewhere(heldRoot, loaded.Root) ?? Carried(await SymbolEditService.ReplaceDeclarationsAsync(
+                    loaded, symbolIds, declarations, options, cancellationToken).ConfigureAwait(false), carry, loaded.Root),
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous CompileRegression, e.g. r3. The rejected declaration is held by the server, so a retry names the token instead of re-sending the text; combine it with allowErrors=true, or send the missing callee first and then retry.";
+    private const string RetryHelp = "Token from a previous CompileRegression, e.g. r3. The rejected declaration is held by the server, so a retry names the token instead of re-sending the text; combine it with allowErrors=true, or send the missing callee first and then retry. The token is bound to the workspace the edit was rejected in: a replay that resolves to another one is refused instead of landing there.";
 
     private readonly record struct Carry(string? Tool, string[]? Targets, string[]? Payloads);
 
-    private static string Carried(Result<string> result, Carry carry)
+    private static string Carried(Result<string> result, Carry carry, string root)
     {
         if (result.IsOk)
             return result.Value!;
@@ -216,10 +233,16 @@ CancellationToken cancellationToken = default)
         var error = result.Error!;
 
         return carry.Tool is { Length: > 0 } tool && error.Code is TerseErrorCode.CompileRegression
-            ? error.Render() + "\nretryWith=" + RejectedEdits.Remember(tool, carry.Targets ?? [], carry.Payloads ?? [])
+            ? error.Render() + "\nretryWith=" + RejectedEdits.Remember(root, tool, carry.Targets ?? [], carry.Payloads ?? [])
                 + "  the rejected text is held, so the retry names the token instead of re-sending it"
             : error.Render();
     }
+
+    private static string? Elsewhere(string? held, string root) => held is { Length: > 0 } origin && !PathBoundary.SameFile(origin, root)
+        ? Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"the held rejection belongs to {origin}, and this call resolved to {root}"),
+            "replay the token against the workspace it was rejected in, or re-send the declaration to edit this one").Render()
+        : null;
 
     private static string Unknown(string token, string tool) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"retryWith={token} names no held rejection of {tool}"),

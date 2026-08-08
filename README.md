@@ -13,7 +13,7 @@
   <a href="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml"><img src="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT"/></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 10"/>
-  <img src="https://img.shields.io/badge/tools-86-26C281.svg" alt="86 tools"/>
+  <img src="https://img.shields.io/badge/tools-87-26C281.svg" alt="87 tools"/>
   <img src="https://img.shields.io/badge/tokens-10--30×_fewer-26C281.svg" alt="10-30x fewer tokens"/>
 </p>
 
@@ -109,8 +109,10 @@ tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them, `dotnet build`/`t
 `dotnet watch build`/`test` and `msbuild`, and the working-tree half of git — `git status` and
 `git diff`, in every flag and `-C` form, answered by `changed_files` and `diff_symbols`, plus a bare
 `git ls-files`, answered by `find_files tracked=true` — but only
-when the working directory sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`, since the hook is installed
-user-wide and those tools cannot answer in a repository TerseSharp does not serve. A denied command
+when the directory the command actually addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`: the
+`-C` target, or a directory operand, before the working directory. The hook is installed user-wide and
+those tools answer about the loaded workspace, so `git -C ../notes status` is allowed — nothing here
+replaces it. A denied command
 also tells the agent not to run it in `Bash` again. Plain `.css`, `.js`,
 `dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git history and mutation
 (`log`, `blame`, `show`, `add`, `commit`, `push`) are allowed — nothing here replaces those. Malformed hook input allows the call, so
@@ -123,7 +125,7 @@ terse-sharp; `Read`/`Grep`/`Edit` on `.cs`, `.xaml`, `.razor` or `.resx` is forb
 
 ## 🧰 The tools
 
-**86 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
+**87 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with
 `verbose=true` for the diff and `dryRun=true` to preview it. Any caveat prints in full.
 
@@ -137,7 +139,7 @@ subset instead. It hides nothing: every other tool still answers when the agent 
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
 | **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
 | **What grep can't reach** | `find_registrations` (DI: open generics, factories, `Add*` extensions) · `list_endpoints` (ASP.NET Core `Map*`) |
-| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` · `clean` · `get_diagnostics` |
+| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
 | **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
@@ -217,7 +219,15 @@ Six shallow tools would be worse than none.
 ## 🤝 Contributing · 📄 License
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Two rules that aren't negotiable: **a tool without an E2E test
-isn't done**, and **a tool that doesn't beat the built-in it replaces doesn't ship**. Changes are in
+isn't done**, and **a tool that doesn't beat the built-in it replaces doesn't ship**.
+
+**The easiest way to help:** clone the repo and run `/mine-sessions` in Claude Code. It reads your own
+session logs, measures where the tools cost you tokens or round trips, and appends the findings to
+[IMPROVEMENTS.md](IMPROVEMENTS.md). Skim the new rows — keep the ones that look real, drop anything
+that leaked a path or a secret — then open a PR with just that file. We work through the backlog every
+weekend, so your friction becomes next week's release.
+
+Changes are in
 [CHANGELOG.md](CHANGELOG.md), releases in [RELEASING.md](RELEASING.md), security in
 [SECURITY.md](SECURITY.md). MIT Licensed — see [LICENSE](LICENSE).
 

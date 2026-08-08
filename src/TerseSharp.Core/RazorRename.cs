@@ -180,12 +180,10 @@ public static class RazorRename
 
         foreach (var rewrite in rewrites)
         {
-            var relative = PositionFormat.Relative(workspace.Root, rewrite.Path);
+            var report = UnifiedDiff.Report(PositionFormat.Relative(workspace.Root, rewrite.Path), rewrite.Before, rewrite.After);
 
-            response.Line(UnifiedDiff.Between(relative, rewrite.Before, rewrite.After));
-            response.Line(string.Create(
-                CultureInfo.InvariantCulture,
-                $"changedLines={UnifiedDiff.ChangedLines(rewrite.Before, rewrite.After)}"));
+            response.Line(report.Text);
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}"));
         }
 
         return response.ToString();

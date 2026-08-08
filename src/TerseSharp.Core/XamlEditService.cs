@@ -274,18 +274,19 @@ public static class XamlEditService
     private static string Describe(string tool, string relative, string before, string after, bool dryRun, bool verbose)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
-        var changed = UnifiedDiff.ChangedLines(before, after);
 
-        if (!dryRun && !verbose && changed > 0)
-            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={changed}")).ToString();
+        if (!dryRun && !verbose && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
+            return response.Line(string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={quick}")).ToString();
+
+        var report = UnifiedDiff.Report(relative, before, after);
 
         response.Summary(1, 1, "files changed");
 
         if (dryRun && !verbose)
             response.Note("dryRun");
 
-        response.Line(UnifiedDiff.Between(relative, before, after));
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={changed}"));
+        response.Line(report.Text);
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}"));
 
         return response.ToString();
     }

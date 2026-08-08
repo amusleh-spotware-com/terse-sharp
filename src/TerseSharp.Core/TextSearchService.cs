@@ -111,30 +111,41 @@ public static class TextSearchService
         var total = 0;
         var index = 0;
 
-        while (index < span.Length && matcher.Next(span, index) is var at and >= 0)
+        while (index < span.Length && matcher.Next(span, index) is { At: >= 0 } match)
         {
             total++;
 
             if (hits.Count < request.MaxResults)
-                hits.Add(Format(relativePath, span, at, ref tracker, request.Around));
+                hits.Add(Format(relativePath, span, match, ref tracker, request));
 
-            index = EndOfLine(span, at) + 1;
+            index = EndOfLine(span, match.At + Math.Max(match.Length - 1, 0)) + 1;
         }
 
         return new FileHits(hits, total, 0);
     }
 
-    private static string Format(string relativePath, ReadOnlySpan<char> text, int at, ref LineTracker tracker, int context)
+    private static int Content(ReadOnlySpan<char> text, TextMatch match)
     {
+        var offset = text.Slice(match.At, match.Length).IndexOfAnyExcept(Blank);
+
+        return offset < 0 ? match.At : match.At + offset;
+    }
+
+    private static string Format(string relativePath, ReadOnlySpan<char> text, TextMatch match, ref LineTracker tracker, TextSearchRequest request)
+    {
+        var at = Content(text, match);
+
         tracker.Advance(text, at);
 
         var start = text[..at].LastIndexOf('\n') + 1;
         var end = EndOfLine(text, at);
+        var matched = text.Slice(match.At, match.Length).Trim();
+        var payload = request.MatchesOnly && matched.Length > 0 ? matched : text[start..end].Trim();
         var hit = string.Create(
             CultureInfo.InvariantCulture,
-            $"{relativePath}:{tracker.Line}  HEURISTIC  {Shorten(text[start..end].Trim())}");
+            $"{relativePath}:{tracker.Line}  HEURISTIC  {Shorten(payload)}");
 
-        return context is 0 ? hit : hit + Around(text, new LineWindow(start, end, tracker.Line), context);
+        return request.Around is 0 ? hit : hit + Around(text, new LineWindow(start, end, tracker.Line), request.Around);
     }
 
     private static string Around(ReadOnlySpan<char> text, LineWindow window, int context)
@@ -189,6 +200,11 @@ public static class TextSearchService
     };
 
     private readonly record struct LineWindow(int Start, int End, int Line);
+
+    private readonly record struct TextMatch(int At, int Length);
+
+    private static readonly TextMatch Missing = new(-1, 0);
+    private static readonly SearchValues<char> Blank = SearchValues.Create(" \t\r\n\f\v");
 
     private static int EndOfLine(ReadOnlySpan<char> text, int at) =>
         text[at..].IndexOf('\n') is var offset and >= 0 ? at + offset : text.Length;
@@ -317,15 +333,19 @@ public static class TextSearchService
 
         public bool MayContain(ReadOnlySpan<byte> content) => Needle is null || content.IndexOf(Needle) >= 0;
 
-        public int Next(ReadOnlySpan<char> text, int from)
+        public TextMatch Next(ReadOnlySpan<char> text, int from)
         {
             if (Expression is null)
-                return text[from..].IndexOf(Pattern, StringComparison.Ordinal) is var offset and >= 0 ? from + offset : -1;
+            {
+                return text[from..].IndexOf(Pattern, StringComparison.Ordinal) is var offset and >= 0
+                    ? new TextMatch(from + offset, Pattern.Length)
+                    : Missing;
+            }
 
             foreach (var match in Expression.EnumerateMatches(text, from))
-                return match.Index;
+                return new TextMatch(match.Index, match.Length);
 
-            return -1;
+            return Missing;
         }
 
         private static Regex Compile(string pattern)

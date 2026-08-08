@@ -38,7 +38,7 @@ internal static class ToolArgumentFilter
         return Errors.Invalid(
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"{request.Params?.Name} rejected the call: {exception.GetType().Name}: {exception.Message}"),
+                $"{request.Params?.Name} rejected the call: {exception.GetType().Name}: {exception.Message}") + Located(request, exception),
             Remedy(Required(schema), Accepted(schema)) + ToolExamples.Suffix(request.Params?.Name));
     }
     private static TerseError Rejected(RequestContext<CallToolRequestParams> request, ArgumentException exception)
@@ -118,6 +118,76 @@ internal static class ToolArgumentFilter
 
         return [.. names];
     }
+
+    private static string[] Arrays(JsonElement? schema)
+    {
+        if (schema is not { } element
+            || !element.TryGetProperty("properties", out var properties)
+            || properties.ValueKind is not JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        var names = new List<string>();
+
+        foreach (var property in properties.EnumerateObject())
+        {
+            if (property.Value.TryGetProperty("items", out _))
+                names.Add(property.Name);
+        }
+
+        return [.. names];
+    }
+
+    private static string Located(RequestContext<CallToolRequestParams> request, Exception exception)
+    {
+        if (exception is not JsonException json || json.BytePositionInLine is not { } offset || request.Params?.Arguments is not { Count: > 0 } supplied)
+            return string.Empty;
+
+        var candidates = new List<string>();
+
+        foreach (var name in Arrays(Schema(request)))
+        {
+            if (supplied.TryGetValue(name, out var value) && offset < value.GetRawText().Length)
+                candidates.Add(name);
+        }
+
+        return Attributed(json, supplied, candidates, offset);
+    }
+
+    private static string Attributed(
+        JsonException json,
+        IDictionary<string, JsonElement> supplied,
+        List<string> candidates,
+        long offset)
+    {
+        var named = candidates.Find(candidate => json.Path is { Length: > 0 } path && path.Contains(candidate, StringComparison.Ordinal));
+
+        if (named is not null)
+            return "\n" + Quoted(named, supplied[named], offset);
+
+        return candidates switch
+        {
+            [] => string.Empty,
+            [var only] => "\n" + Quoted(only, supplied[only], offset),
+            _ => string.Create(
+                CultureInfo.InvariantCulture,
+                $"\nthe value that failed is one of the array parameters {string.Join(", ", candidates)}, at byte {offset} of its own JSON; the exception does not say which"),
+        };
+    }
+
+    private static string Quoted(string name, JsonElement value, long offset)
+    {
+        var raw = value.GetRawText();
+        var from = (int)Math.Max(0, offset - Window);
+        var to = (int)Math.Min(raw.Length, offset + Window);
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{name} is an array parameter, and byte {offset} of its {raw.Length} characters falls near: {raw.AsSpan(from, to - from)}");
+    }
+
+    private const int Window = 40;
 
     private static TerseError? Unrecognized(RequestContext<CallToolRequestParams> request)
     {

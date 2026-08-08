@@ -443,4 +443,19 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
 
         Assert.True(Tokens(scoped) <= Tokens(everything), Report("changed_files path", scoped, everything));
     }
+
+    [Fact]
+    public async Task Gate_OnItsWidestScope_CostsFarLessThanTheFourCallsItReplaces()
+    {
+        var gated = await server.CallAsync("gate", new() { ["solution"] = true, ["dryRun"] = true, ["verbose"] = true });
+        var analyzed = await server.CallAsync("analyze", new() { ["minSeverity"] = "info" });
+        var formatted = await server.CallAsync("format", new() { ["verify"] = true });
+        var cleaned = await server.CallAsync("cleanup", new() { ["verify"] = true, ["fix"] = "all" });
+
+        Assert.DoesNotContain("ERROR", gated, StringComparison.Ordinal);
+        Assert.True(Tokens(gated) <= 900, Report("gate", gated));
+        Assert.True(
+            Tokens(gated) < Tokens(analyzed) + Tokens(formatted) + Tokens(cleaned) + Tokens(analyzed),
+            Report("gate", gated, analyzed + formatted + cleaned + analyzed));
+    }
 }

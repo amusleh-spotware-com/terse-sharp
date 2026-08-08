@@ -8,6 +8,97 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-08-08
+
+> **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
+> `changedLines` counts the lines that changed rather than the span between the first and the last
+> change, and a diff is one `@@` hunk per change instead of one hunk spanning them all - so every
+> mutating tool's count and every `dryRun`/`verbose` diff is both more accurate and much smaller. A
+> `CompileRegression` names each rejected diagnostic's file **workspace-relative**, and `search_regex`
+> no longer emits a record whose payload is empty. The tool surface goes from 86 to **87**: `gate`
+> runs the mandated `analyze` -> `format` -> `cleanup` -> `analyze` sequence as one call and answers
+> one verdict line - `clean` or `FAILED`, never a bare success line over a step that had something to
+> say.
+
+### Added
+
+- **`gate` runs the end-of-task quality sequence as one call.** `analyze` at `info`, `format`,
+  `cleanup fix=all`, then `analyze` again — the order this repo's own `CLAUDE.md` mandates — over the
+  files changed since the workspace loaded, answering **one verdict line**
+  (`clean  analyzed=N fixed=M remaining=0`) and, when it is not clean, only the diagnostics still
+  unfixed. Never a diff. `path=` scopes it, `solution=true` gates every document, `dryRun=true` makes
+  both write steps verify instead of write, and `verbose=true` adds each step's own report. Measured
+  over one task: those four tools were called 6 times to gate 13 changes, always in that order —
+  3 of every 4 calls on the end-of-task path. It deliberately does **not** fuse in `build` and
+  `run_tests`: a test result read before its build is the previous binary's. The tool surface goes
+  from 86 to **87**.
+  Its verdict is `clean` or `FAILED` and it condenses to that one line **only** when every step was
+  genuinely quiet: a `VERIFY_FAILED`, an `UNFIXED`, a rolled-back step or a file the run rewrote all
+  keep the full report, because `FormatService` returns a failed verify inside a successful
+  `Result` and a bare `clean` over one would be the confident wrong answer this project exists to
+  prevent. `dryRun=true` reports `FAILED` when the tree would change - that is what a pre-push check
+  is for. (I148)
+- **`search_symbols` takes `scope=src` and `scope=test`**, keeping only the projects of that half
+  (`TestScope`, the same src/test split `find_usages` already tags each usage with). Measured on this
+  repo: `search_symbols query=Same kind=method` returned 28 declarations of which 26 were test
+  methods, burying the one production `PathBoundary.SameFile` the question was about. An unknown
+  value is refused naming the two it accepts, rather than silently searching everything. (I155)
+- **`search_text` and `search_regex` take `matchesOnly=true`**, printing the matched span instead of
+  the whole line the way `grep -o` does, and composing with `unique=true` to answer "which distinct
+  values of this shape exist". Two calls in one session fell back to `Bash: grep -o` over an XML in
+  the NuGet cache because a whole-line response returned ~40 lines to read 13 names. A match that is
+  only whitespace still prints its line, so no record is ever empty. (I151)
+
+### Fixed
+
+- **A `CompileRegression` names each rejected diagnostic's file workspace-relative.** It printed the
+  absolute path — `CS0103 C:\Users\...\src\TerseSharp.Core\GateHost.cs: ...` — while every other
+  record in the surface goes through `PositionFormat.Relative`, so the one payload an agent reads on
+  a failed edit was also the one it could not re-use as an argument. The same key backs the
+  `dryRun` "would be rolled back" list and the `UNRESOLVED` list, so all three are relative now.
+  (I147)
+- **`search_regex` no longer emits a record with an empty payload.** A pattern that can start on the
+  blank line above its content — `^\s*(public|internal|private)\s+…` — matched at the blank line,
+  and the scanner then advanced past the line holding the match's *start*, so the same declaration
+  was reported twice: once as `path:NN  HEURISTIC  ` with nothing after the tag, once for real. The
+  matcher now returns the match's length, a hit is reported at the first line carrying its text, and
+  the scan resumes after the line the match *ends* on. Measured on this repo's fixture: 66 records
+  became 33, and half the response was the empty half. (I149)
+- **An argument that fails to bind names the array parameter and quotes the offending text.**
+  `replace_symbol symbolIds=[…] declarations=[…]` answered
+  `JsonException: … Path: $ | LineNumber: 0 | BytePositionInLine: 9079` and then listed every accepted
+  parameter — locating nothing in a 9 079-character argument. An `InvalidArgument` carrying a
+  `JsonException` with a byte position now also names each array-schema parameter that was supplied
+  and quotes the ~80 characters around that offset. (I150)
+- **A `retryWith` token is bound to the workspace its edit was rejected in.** The token recorded no
+  root, so replaying it with a different `workspace=` replayed the held declaration into the other
+  worktree — and this tree keeps whole copies under `.claude/worktrees/agent-*`, where the same symbol
+  id resolves in both. A replay that resolves elsewhere is now refused, naming both roots, before the
+  symbol is looked up. Raised in the 0.27.0 review as a NIT and deferred, not refuted. (I152)
+- **`terse guard` names the exact `cleanup` that verifies what a `dotnet format` sub-command checks.**
+  `dotnet format analyzers` and `dotnet format style` were already denied, but with the generic
+  "use format, cleanup fix=all, or cleanup verify=true" message — so the agent had to guess which mode
+  matches, and `fix=all` is a superset that names files CI accepts. They now answer
+  `cleanup fix=analyzers` / `cleanup verify=true fix=analyzers` and `cleanup fix=style` /
+  `cleanup verify=true fix=style`, which verify **exactly** what those two commands check; a bare
+  `dotnet format` still names the whitespace-and-cleanup pair.
+- **`changedLines` counts the lines that changed, not the span between the first and last change,
+  and a diff is now one hunk per change instead of one hunk spanning them all.** `UnifiedDiff` had no
+  alignment step: it bracketed the edit with the common prefix and suffix and called everything
+  between them changed. A three-line `edit_text edits=[...]` over `README.md` answered
+  `changedLines=125` where git reports `+3 -3`, and `verbose=true` on it would have printed all 125
+  lines as removed and all 125 as added. Line alignment is now a real LCS over the bracketed region
+  (falling back to the old single block above 2 000 000 cells, so memory stays bounded on a huge
+  rewrite), `changedLines` sums `max(removed, added)` per block, and `Between` emits one
+  `@@ -a,b +c,d @@` hunk per block. This is a **response-format change**: every mutating tool's
+  `changedLines`, and every `dryRun`/`verbose` diff, gets more accurate and much smaller. (I154)
+- **`terse guard` no longer denies a git command aimed at a tree TerseSharp cannot answer for.**
+  `git -C ../other-repo ls-files` was denied and pointed at `find_files tracked=true`, which answers
+  about the **loaded workspace**, not about `<dir>` — a deny with no replacement. All three git rows
+  now resolve the directory the command actually addresses — the `-C` target, then a directory
+  operand, then the hook payload's `cwd` — and deny only when *that* sits under a
+  `.sln`/`.slnx`/`.slnf`/`.csproj`. `git -C src status` inside the same tree is still denied. (I153)
+
 ## [0.27.0] - 2026-08-08
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
@@ -2214,7 +2305,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.28.0
 [0.27.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.27.0
 [0.26.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.26.0
 [0.25.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.25.0

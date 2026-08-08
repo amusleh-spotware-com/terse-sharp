@@ -8,7 +8,8 @@ public readonly record struct TextSearchRequest(
     int Context = 0,
     bool Unique = false,
     string? Root = null,
-    string? Exclude = null)
+    string? Exclude = null,
+    bool MatchesOnly = false)
 {
     public const int MaxContext = 5;
 

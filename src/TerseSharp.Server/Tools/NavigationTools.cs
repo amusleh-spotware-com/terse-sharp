@@ -7,18 +7,27 @@ namespace TerseSharp.Server.Tools;
 public sealed class NavigationTools(ToolContext context)
 {
     [McpServerTool(Name = "search_symbols")]
-    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). Use instead of Grep for anything that is a type or member.")]
+    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. Use instead of Grep for anything that is a type or member.")]
     public Task<string> SearchSymbols(
         [Description("Name or CamelHump pattern.")] string query,
         [Description("Optional kind filter: class, interface, method, property, field, enum.")] string? kind = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (50).")] int maxResults = 0,
-        CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(
-            workspace,
-            null,
-            loaded => SearchAsync(loaded, query, kind, Cap(maxResults, 50), cancellationToken),
-            cancellationToken: cancellationToken);
+        [Description("Keep only one half of the solution: src for the production projects, test for the ones that reference a test framework. Empty searches both.")] string? scope = null,
+        CancellationToken cancellationToken = default)
+    {
+        var half = scope?.ToLowerInvariant();
+
+        return half is null or "" or "src" or "test"
+            ? context.WithWorkspaceAsync(
+                workspace,
+                null,
+                loaded => SearchAsync(loaded, query, kind, half, Cap(maxResults, 50), cancellationToken),
+                cancellationToken: cancellationToken)
+            : Task.FromResult(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"scope='{scope}' is not a known half of the solution"),
+                "pass scope=src, scope=test, or leave it empty to search both").Render());
+    }
 
     [McpServerTool(Name = "get_file_outline")]
     [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. parameterNames=false prints parameter types without their names, which is about an eighth of the response and still tells every overload apart.")]
@@ -176,17 +185,19 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         LoadedWorkspace workspace,
         string query,
         string? kind,
+        string? scope,
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var found = await SymbolSearch.FindAsync(workspace, query, kind, maxResults, cancellationToken).ConfigureAwait(false);
+        var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken).ConfigureAwait(false);
         var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
-        var budget = ResultCap.Shown(components.Count + found.Total, maxResults);
-        var shownComponents = Math.Min(components.Count, budget);
+        var declared = scope is "test" ? 0 : components.Count;
+        var budget = ResultCap.Shown(declared + found.Total, maxResults);
+        var shownComponents = Math.Min(declared, budget);
         var shownSymbols = Math.Min(found.Ranked.Count, budget - shownComponents);
         var response = new ResponseBuilder("search_symbols", query);
 
-        response.Summary(shownComponents + shownSymbols, components.Count + found.Total, "symbols", "kind= or maxResults=");
+        response.Summary(shownComponents + shownSymbols, declared + found.Total, "symbols", "kind=, scope= or maxResults=");
 
         if (!found.TotalIsExact)
             response.Note("WARNING total counts duplicate declarations across projects; narrow query= for an exact count");

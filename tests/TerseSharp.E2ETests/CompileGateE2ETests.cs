@@ -121,4 +121,46 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
 
         return new string(end < 0 ? tail : tail[..end]);
     }
+
+    [Fact]
+    public async Task ARejectedDiagnostic_NamesItsFileRelativeToTheWorkspaceRoot()
+    {
+        var rejected = await CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["body"] = "{ return \"a rejected string\"; }",
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine("src", "Fixture.Broken", "Calculator.cs"), rejected, StringComparison.Ordinal);
+        Assert.DoesNotContain(BrokenRoot, rejected, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARetryToken_ReplayedAgainstAnotherWorkspace_IsRefusedInsteadOfEditingIt()
+    {
+        await CallAsync("load_workspace", new()
+        {
+            ["path"] = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "FixtureSolution", "FixtureSolution.slnx"),
+        });
+
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => AHelperThatIsNowhere();",
+            ["workspace"] = "BrokenSolution",
+        });
+
+        var replayed = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["workspace"] = "FixtureSolution",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains("the held rejection belongs to", replayed, StringComparison.Ordinal);
+        Assert.Contains("BrokenSolution", replayed, StringComparison.Ordinal);
+        Assert.DoesNotContain("changedLines=", replayed, StringComparison.Ordinal);
+    }
 }

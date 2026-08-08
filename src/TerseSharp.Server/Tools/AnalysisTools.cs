@@ -96,4 +96,18 @@ public sealed class AnalysisTools(ToolContext context)
             : context.WithWorkspaceAsync(workspace, path, async loaded =>
                 NavigationTools.Unwrap(await action(loaded).ConfigureAwait(false)));
     }
+
+    [McpServerTool(Name = "gate")]
+    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0'; anything else keeps the diagnostics that are still unfixed. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
+    public Task<string> Gate(
+        [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty gates the files modified since the workspace loaded.")] string? path = null,
+        [Description("Gate every document instead of only the files modified since the workspace loaded. Ignored when path is passed. Default false.")] bool solution = false,
+        [Description("Verify instead of writing: format and cleanup report what they would change and nothing is modified. Default false.")] bool dryRun = false,
+        [Description("Add each step's own report under the verdict line. Default false.")] bool verbose = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default) =>
+        Guarded(workspace, path, loaded => GateService.RunAsync(
+            loaded,
+            new GateRequest(path, Changed: path is null && !solution, dryRun, verbose),
+            cancellationToken));
 }

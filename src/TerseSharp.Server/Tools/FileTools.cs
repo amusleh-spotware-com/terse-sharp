@@ -150,7 +150,7 @@ CancellationToken cancellationToken = default) =>
     : Task.FromResult(Errors.Blank("glob", "pattern", "query").Render());
 
     [McpServerTool(Name = "search_text")]
-    [Description("Literal text search across the workspace, or across any absolute directory with root=. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. context=N adds the surrounding lines so a hit needs no follow-up read, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
+    [Description("Literal text search across the workspace, or across any absolute directory with root=. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
     public Task<string> SearchText(
         [Description("Literal text to find.")] string? query = null,
         [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -161,11 +161,12 @@ CancellationToken cancellationToken = default) =>
         [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
         [Description("Alias for query.")] string? pattern = null,
         [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
+        [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false, context, unique, root, exclude), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly), cancellationToken);
 
     [McpServerTool(Name = "search_regex")]
-    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line. context=N adds the surrounding lines so a hit needs no follow-up read, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC.")]
+    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
         [Description(".NET regular expression.")] string? query = null,
         [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -176,8 +177,9 @@ CancellationToken cancellationToken = default) =>
         [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
         [Description("Alias for query.")] string? pattern = null,
         [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
+        [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true, context, unique, root, exclude), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly), cancellationToken);
 
     private Task<string> Search(TextQuery request, CancellationToken cancellationToken)
     {
@@ -192,7 +194,8 @@ CancellationToken cancellationToken = default) =>
             request.Context,
             request.Unique,
             request.Root,
-            request.Exclude);
+            request.Exclude,
+            request.MatchesOnly);
 
         return request.Root is { Length: > 0 }
             ? TextSearchService.SearchOutsideAsync(search, cancellationToken)
@@ -213,7 +216,8 @@ CancellationToken cancellationToken = default) =>
         int Context = 0,
         bool Unique = false,
         string? Root = null,
-        string? Exclude = null);
+        string? Exclude = null,
+        bool MatchesOnly = false);
 
     private Task<string> Guarded(
     string? workspace,

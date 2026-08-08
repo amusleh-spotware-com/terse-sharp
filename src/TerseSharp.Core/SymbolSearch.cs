@@ -11,11 +11,12 @@ public static class SymbolSearch
         LoadedWorkspace workspace,
         string query,
         string? kind,
+        string? scope,
         int maxResults,
         CancellationToken cancellationToken)
     {
         var ceiling = Math.Max(Math.Min(maxResults, 1024) * 8, 256);
-        var projects = workspace.Solution.Projects.ToArray();
+        var projects = Scoped(workspace, scope);
         var perProject = new ISymbol[projects.Length][];
 
         await Parallel.ForEachAsync(
@@ -32,6 +33,10 @@ public static class SymbolSearch
 
         return Summarize(perProject, ceiling, maxResults);
     }
+
+    private static Project[] Scoped(LoadedWorkspace workspace, string? scope) => scope is { Length: > 0 } wanted
+        ? [.. workspace.Solution.Projects.Where(project => string.Equals(TestScope.Of(project), wanted, StringComparison.Ordinal))]
+        : [.. workspace.Solution.Projects];
 
     private static SymbolMatches Summarize(ISymbol[][] perProject, int ceiling, int maxResults)
     {
