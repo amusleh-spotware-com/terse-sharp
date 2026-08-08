@@ -136,6 +136,7 @@ public static class ToolGuard
         "clean" => "use clean",
         "status" => "use changed_files",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show",
+        "ls-files" => "use find_files tracked=true",
         _ => "use run_tests, rerun_failed or list_tests",
     };
 
@@ -144,6 +145,7 @@ public static class ToolGuard
         "format" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, and names every diagnostic no fixer covers.",
         "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, so the end-of-task review costs a listing instead of a diff.",
         "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths. Only git history - log, blame, show <ref>:<path> - and index or history mutation stay on the shell.",
+        "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
         _ => "Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.",
     };
 
@@ -291,6 +293,7 @@ public static class ToolGuard
     {
         "status" when IsDotNetTree(cwd) => "status",
         "diff" when IsDotNetTree(cwd) => "diff",
+        "ls-files" when IsDotNetTree(cwd) && Unflagged(tokens, "ls-files") => "ls-files",
         _ => null,
     };
 
@@ -364,5 +367,21 @@ public static class ToolGuard
             command[index] = Bare(tokens[start + index]);
 
         return command;
+    }
+
+    private static bool Unflagged(string[] tokens, string subcommand)
+    {
+        var start = Array.IndexOf(tokens, subcommand);
+
+        if (start < 0)
+            return false;
+
+        for (var index = start + 1; index < tokens.Length; index++)
+        {
+            if (tokens[index].StartsWith('-'))
+                return false;
+        }
+
+        return true;
     }
 }

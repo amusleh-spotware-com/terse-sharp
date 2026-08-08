@@ -381,4 +381,55 @@ public sealed class WorkspaceSyncE2ETests
                 "SecondOfTwoMarkerType"),
             "the second server never converged on the newer of two writes made in quick succession");
     }
+
+    [Fact]
+    public async Task WriteText_OverAKnownFileReferencingAFileJustCreated_IsNotRolledBack()
+    {
+        await using var solution = await StartAsync(watch: false);
+
+        const string HostPath = "src/Fixture.Trading/GateHost.cs";
+        const string CalleePath = "src/Fixture.Trading/GateCallee.cs";
+
+        var host = await solution.CallAsync("write_text", new()
+        {
+            ["path"] = HostPath,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class GateHost\n{\n    public static int Seed() => 1;\n}\n",
+            ["force"] = true,
+        });
+        var outline = await solution.CallAsync("get_file_outline", new() { ["path"] = HostPath });
+        var callee = await solution.CallAsync("write_text", new()
+        {
+            ["path"] = CalleePath,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class GateCallee\n{\n    public static int Extra() => 41;\n}\n",
+            ["force"] = true,
+        });
+        var rewritten = await solution.CallAsync("write_text", new()
+        {
+            ["path"] = HostPath,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class GateHost\n{\n    public static int Seed() => GateCallee.Extra() + 1;\n}\n",
+            ["force"] = true,
+        });
+
+        Assert.Contains("changedLines=", host, StringComparison.Ordinal);
+        Assert.Contains("GateHost.Seed", outline, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", callee, StringComparison.Ordinal);
+        Assert.DoesNotContain("rolled back", rewritten, StringComparison.Ordinal);
+        Assert.DoesNotContain("CS0246", rewritten, StringComparison.Ordinal);
+        Assert.DoesNotContain("CS0103", rewritten, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", rewritten, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LoadWorkspace_ReportsColdCompilations_AndTheFirstSemanticCallReportsRealizingThem()
+    {
+        await using var solution = await StartAsync(watch: false);
+
+        var loaded = await solution.CallAsync("load_workspace", new() { ["reload"] = true });
+        var first = await solution.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+        var second = await solution.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+
+        Assert.Contains("compilations=cold", loaded, StringComparison.Ordinal);
+        Assert.Contains("compilations=realized in ", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("compilations=", second, StringComparison.Ordinal);
+    }
 }

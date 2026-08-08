@@ -6,73 +6,79 @@ namespace TerseSharp.Server.Tools;
 public sealed class WorkspaceTools(ToolContext context)
 {
     [McpServerTool(Name = "load_workspace")]
-    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first.")]
+    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it.")]
     public Task<string> LoadWorkspace(
-        [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
-        [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared.")] bool reload = false,
-        [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
-        [Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
-        [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
-        [Description("Max candidates when discover=true (100).")] int maxResults = 0,
-        CancellationToken cancellationToken = default) =>
-        ToolBoundary.RunAsync(async () =>
-        {
-            if (discover)
-                return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
+    [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
+    [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared.")] bool reload = false,
+    [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
+    [Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
+    [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
+    [Description("Max candidates when discover=true (100).")] int maxResults = 0,
+    CancellationToken cancellationToken = default) =>
+    ToolBoundary.RunAsync(async () =>
+    {
+        if (discover)
+            return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
 
-            var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
+        var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
 
-            if (target is null)
-                return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
+        if (target is null)
+            return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
 
-            var result = reload
-                ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
-                : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
+        var result = reload
+            ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
+            : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
 
-            return Render(result, verbose);
-        });
+        return Render(context.Registry, result, verbose);
+    });
 
     [McpServerTool(Name = "list_workspaces")]
-    [Description("List loaded workspaces with their git branch and worktree, so you can disambiguate several checkouts of one repo.")]
+    [Description("List loaded workspaces with their git branch and worktree, so you can disambiguate several checkouts of one repo. The solution path is absolute here, because it is what unload_workspace takes.")]
     public Task<string> ListWorkspaces() =>
-        ToolBoundary.RunAsync(async () =>
+    ToolBoundary.RunAsync(async () =>
+    {
+        await context.ReadyAsync().ConfigureAwait(false);
+
+        var all = context.Registry.All();
+        var response = new ResponseBuilder("list_workspaces", string.Empty);
+
+        response.Summary(all.Count, all.Count, "workspaces");
+
+        foreach (var workspace in all)
+            response.Line(Describe(workspace, relative: false));
+
+        if (all.Count is 0 && context.PreloadFailure is { } failure)
+            response.Note("the startup preload failed: " + failure);
+
+        return response.ToString();
+    });
+
+    [McpServerTool(Name = "unload_workspace")]
+    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name - the absolute one list_workspaces prints, or the short one workspace_status and load_workspace print, which is resolved against every loaded root and refuses when two of them answer to it. Analyzer and source-generator assemblies are loaded from a shadow copy, so a project's own output is never mapped; any assembly that did end up mapped is still reported, because only restarting the server releases those.")]
+    public Task<string> UnloadWorkspace(
+    [Description("Solution or project path to unload.")] string? path = null,
+    [Description("Alias for path; the solution path, not a worktree name.")] string? workspace = null) =>
+    (path ?? workspace) is { Length: > 0 } target
+        ? ToolBoundary.RunAsync(async () =>
         {
             await context.ReadyAsync().ConfigureAwait(false);
 
-            var all = context.Registry.All();
-            var response = new ResponseBuilder("list_workspaces", string.Empty);
+            var resolved = Resolved(target);
 
-            response.Summary(all.Count, all.Count, "workspaces");
+            if (!resolved.IsOk)
+                return resolved.Error!.Render();
 
-            foreach (var workspace in all)
-                response.Line(Describe(workspace));
+            var solution = resolved.Value!;
+            var mapped = Mapped(solution);
+            var response = new ResponseBuilder("unload_workspace", target);
 
-            if (all.Count is 0 && context.PreloadFailure is { } failure)
-                response.Note("the startup preload failed: " + failure);
+            response.Note(context.Registry.Unload(solution) ? "unloaded" : "not loaded");
+
+            AppendMapped(response, mapped);
 
             return response.ToString();
-        });
-
-    [McpServerTool(Name = "unload_workspace")]
-    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name; list_workspaces prints it. Analyzer and source-generator assemblies are loaded from a shadow copy, so a project's own output is never mapped; any assembly that did end up mapped is still reported, because only restarting the server releases those.")]
-    public Task<string> UnloadWorkspace(
-        [Description("Solution or project path to unload.")] string? path = null,
-        [Description("Alias for path; the solution path, not a worktree name.")] string? workspace = null) =>
-        (path ?? workspace) is { Length: > 0 } target
-            ? ToolBoundary.RunAsync(async () =>
-            {
-                await context.ReadyAsync().ConfigureAwait(false);
-
-                var mapped = Mapped(target);
-                var response = new ResponseBuilder("unload_workspace", target);
-
-                response.Note(context.Registry.Unload(target) ? "unloaded" : "not loaded");
-
-                AppendMapped(response, mapped);
-
-                return response.ToString();
-            })
-            : Task.FromResult(Errors.Blank("path").Render());
+        })
+        : Task.FromResult(Errors.Blank("path").Render());
 
     private string[] Mapped(string target)
     {
@@ -99,16 +105,16 @@ public sealed class WorkspaceTools(ToolContext context)
     }
 
     [McpServerTool(Name = "workspace_status")]
-    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, and any project that failed to load.")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when the server runs a tool profile - how many tools are advertised.")]
     public Task<string> WorkspaceStatus(
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
-        CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(
-            workspace,
-            null,
-            loaded => RenderStatusAsync(loaded, verbose, cancellationToken),
-            cancellationToken: cancellationToken);
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
+    CancellationToken cancellationToken = default) =>
+    context.WithWorkspaceAsync(
+        workspace,
+        null,
+        loaded => RenderStatusAsync(loaded, verbose, context.Advertised, cancellationToken),
+        cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects")]
     [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=.")]
@@ -120,15 +126,22 @@ public sealed class WorkspaceTools(ToolContext context)
     private static string? Discover() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
 
-    private static async Task<string> RenderStatusAsync(LoadedWorkspace workspace, bool verbose, CancellationToken cancellationToken)
+    private static async Task<string> RenderStatusAsync(
+    LoadedWorkspace workspace,
+    bool verbose,
+    IReadOnlySet<string>? advertised,
+    CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("workspace_status", workspace.SolutionPath).Verbose(verbose);
 
-        response.Note(Describe(workspace));
+        response.Note(Describe(workspace, relative: !verbose));
         response.Note(Counts(workspace, verbose));
         AppendSync(response, workspace.Sync, verbose);
         await AppendRazorAsync(response, workspace, verbose, cancellationToken).ConfigureAwait(false);
         AppendMappedAnalyzers(response, workspace, verbose);
+
+        if (ToolProfile.Describe(advertised) is { } profile)
+            response.Note(profile);
 
         if (verbose)
             response.Note(workspace.Indexes.Describe());
@@ -184,22 +197,26 @@ public sealed class WorkspaceTools(ToolContext context)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"razor={razor} files generator=ok"));
     }
 
-    private static string Describe(LoadedWorkspace workspace) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"{workspace.SolutionPath}  worktree={workspace.Git.WorktreeName} branch={workspace.Git.Branch}  projects={workspace.Load.ProjectCount}{Framework(workspace.Load.TargetFramework)}");
+    private static string Describe(LoadedWorkspace workspace, bool relative) => string.Create(
+    CultureInfo.InvariantCulture,
+    $"{(relative ? PositionFormat.Relative(workspace.Root, workspace.SolutionPath) : workspace.SolutionPath)}  worktree={workspace.Git.WorktreeName} branch={workspace.Git.Branch}  projects={workspace.Load.ProjectCount}{Framework(workspace.Load.TargetFramework)}");
 
     private static string Framework(string? targetFramework) =>
         targetFramework is { Length: > 0 } chosen ? "  targetFramework=" + chosen : string.Empty;
 
-    private static string Render(WorkspaceLoadResult result, bool verbose)
+    private static string Render(WorkspaceRegistry registry, WorkspaceLoadResult result, bool verbose)
     {
+        var loaded = Find(registry, result.SolutionPath);
         var response = new ResponseBuilder("load_workspace", result.SolutionPath).Verbose(verbose);
 
         if (!verbose)
-            response.Note(result.SolutionPath);
+            response.Note(Shown(loaded, result.SolutionPath));
 
         response.Note(Loaded(result, verbose));
         AppendLoadDiagnostics(response, result, verbose);
+
+        if (loaded is { CompilationsRealized: false })
+            response.Note("compilations=cold - the first semantic call realizes them and pays for it once");
 
         return response.ToString();
     }
@@ -326,4 +343,42 @@ public sealed class WorkspaceTools(ToolContext context)
         : string.Create(
             CultureInfo.InvariantCulture,
             $"mapped={count} analyzer or source-generator assembly(ies) are held by this server process (pid {Environment.ProcessId}); an external build that copies over them fails MSB3027, and only restarting the server releases them");
+
+    private static LoadedWorkspace? Find(WorkspaceRegistry registry, string solutionPath)
+    {
+        foreach (var loaded in registry.All())
+        {
+            if (Path.GetFullPath(loaded.SolutionPath).Equals(Path.GetFullPath(solutionPath), StringComparison.OrdinalIgnoreCase))
+                return loaded;
+        }
+
+        return null;
+    }
+
+    private static string Shown(LoadedWorkspace? loaded, string solutionPath) =>
+        loaded is null ? solutionPath : PositionFormat.Relative(loaded.Root, solutionPath);
+
+    private Result<string> Resolved(string target)
+    {
+        var full = Path.GetFullPath(target);
+        var matched = new List<string>();
+
+        foreach (var loaded in context.Registry.All())
+        {
+            if (Path.GetFullPath(loaded.SolutionPath).Equals(full, StringComparison.OrdinalIgnoreCase)
+                || Shown(loaded, loaded.SolutionPath).Equals(target, StringComparison.OrdinalIgnoreCase))
+            {
+                matched.Add(loaded.SolutionPath);
+            }
+        }
+
+        return matched switch
+        {
+            [var only] => Result.Ok(only),
+            [] => Result.Ok(target),
+            _ => Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{target}' names {matched.Count} loaded workspaces"),
+                "pass the absolute solution path; list_workspaces prints it in full for exactly this reason")),
+        };
+    }
 }

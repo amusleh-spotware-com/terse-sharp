@@ -63,28 +63,30 @@ public static class SourceService
     }
 
     public static async Task<string> OfSymbolsAsync(
-        LoadedWorkspace workspace,
-        IReadOnlyList<string> symbolIds,
-        SourceFormat format,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    IReadOnlyList<string> symbolIds,
+    SourceFormat format,
+    CancellationToken cancellationToken,
+    string? path = null)
     {
         var response = new ResponseBuilder("get_symbol_source", string.Join(", ", symbolIds)).Verbose(format.Verbose);
         response.Summary(symbolIds.Count, symbolIds.Count, "symbols");
 
         foreach (var symbolId in symbolIds)
-            await AppendResolvedAsync(workspace, response, symbolId, format, cancellationToken).ConfigureAwait(false);
+            await AppendResolvedAsync(workspace, response, symbolId, format, path, cancellationToken).ConfigureAwait(false);
 
         return response.ToString();
     }
 
     private static async Task AppendResolvedAsync(
-        LoadedWorkspace workspace,
-        ResponseBuilder response,
-        string symbolId,
-        SourceFormat format,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    ResponseBuilder response,
+    string symbolId,
+    SourceFormat format,
+    string? path,
+    CancellationToken cancellationToken)
     {
-        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken).ConfigureAwait(false);
 
         if (!resolved.IsOk)
         {

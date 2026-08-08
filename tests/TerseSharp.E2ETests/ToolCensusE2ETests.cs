@@ -228,4 +228,21 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
             allowed.Length is 0,
             "advertised as replaced by a tool, but terse guard still allows it in Bash: " + string.Join(", ", allowed));
     }
+
+    [Fact]
+    public async Task EveryToolInTheCoreProfile_IsAToolTheServerAdvertises()
+    {
+        var advertised = (await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken))
+            .Select(tool => tool.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var missing = ToolProfile.CoreTools.Where(name => !advertised.Contains(name)).ToArray();
+
+        Assert.True(
+            missing.Length is 0,
+            "named by the core tool profile but not advertised by the server, so the profile would hide it forever: "
+            + string.Join(", ", missing));
+
+        Assert.True(ToolProfile.CoreTools.Count < advertised.Count, "the core profile must be a proper subset of the surface");
+    }
 }

@@ -112,4 +112,52 @@ public static class SnippetSearch
 
         return shared >= MinSharedPrefix || line.Contains(anchor, StringComparison.Ordinal);
     }
+
+    public static IReadOnlyList<string> Sites(string haystack, string needle, int maxResults)
+    {
+        var text = haystack.AsSpan();
+        var value = needle.AsSpan();
+        var sites = new List<string>(maxResults);
+        var start = 0;
+        var index = 0;
+
+        while (value.Length > 0 && start <= text.Length && text[start..].IndexOf(value, StringComparison.Ordinal) is var offset and >= 0)
+        {
+            var at = start + offset;
+
+            index++;
+
+            if (sites.Count < maxResults)
+                sites.Add(Site(text, at, index));
+
+            start = at + value.Length;
+        }
+
+        return sites;
+    }
+
+    private static string Site(ReadOnlySpan<char> text, int at, int index) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"  occurrence={index}  line {LineNumber(text, at)}: {Clip(LineAround(text, at))}");
+
+    private static int LineNumber(ReadOnlySpan<char> text, int at)
+    {
+        var lines = 1;
+
+        foreach (var character in text[..at])
+        {
+            if (character is '\n')
+                lines++;
+        }
+
+        return lines;
+    }
+
+    private static ReadOnlySpan<char> LineAround(ReadOnlySpan<char> text, int at)
+    {
+        var start = text[..at].LastIndexOf('\n') + 1;
+        var end = text[at..].IndexOf('\n');
+
+        return text[start..(end < 0 ? text.Length : at + end)].TrimEnd('\r');
+    }
 }

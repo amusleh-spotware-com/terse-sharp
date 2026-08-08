@@ -77,17 +77,23 @@ An agent that has TerseSharp installed and reaches for `Read` and `Grep` out of 
 names the tool to use instead — covering `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`,
 `.sln` and friends, the shell text tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them,
 `dotnet build`/`test`/`format`/`clean` and `dotnet watch build`/`test`, and the working-tree half of
-git — `git status` and `git diff`, answered by `changed_files` and `diff_symbols`, and only when the
+git — `git status` and `git diff`, answered by `changed_files` and `diff_symbols`, plus a bare
+`git ls-files`, answered by `find_files tracked=true`, and only when the
 working directory sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`, since the hook is user-wide and
 those tools cannot answer in a repository TerseSharp does not serve. A denied command also tells the
 agent not to run it in `Bash` again. Plain `.css`, `.js`,
-`dotnet restore`/`pack`/`publish`/`run` and git history and mutation (`log`, `blame`, `show`, `add`,
-`commit`, `push`) are allowed, because nothing here replaces those; malformed hook input allows the
+`dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git history and mutation
+(`log`, `blame`, `show`, `add`, `commit`, `push`) are allowed, because nothing here replaces those; malformed hook input allows the
 call, so a guard fault can never wedge a session; and you remove the guard by deleting the
 `terse guard` entry from Claude Code's `settings.json`. Pair it with `--skill`, which ships Claude Code the skill that teaches the
 swaps — on any other agent, put the same rule in `AGENTS.md` or `.cursorrules`.
 
 ## The tools
+
+`terse serve --tools core` (or `TERSE_TOOLS=core`) advertises a 21-tool subset instead of the full
+catalogue, which is attached to every request and past a certain size measurably costs tool-selection
+accuracy. It hides nothing: every other tool still answers when called by name, and `workspace_status`
+reports which profile is running.
 
 **86 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with

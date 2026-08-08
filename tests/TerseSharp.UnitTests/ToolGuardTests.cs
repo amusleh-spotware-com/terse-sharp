@@ -490,4 +490,24 @@ public sealed class ToolGuardTests
         Assert.Contains("Resolve each holder below before stopping it.", note, StringComparison.Ordinal);
         Assert.Contains("holder pid=" + pid, note, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("git ls-files")]
+    [InlineData("git -C src ls-files")]
+    [InlineData("git ls-files fixtures")]
+    public void Inspect_ForABareGitLsFiles_NamesFindFilesTracked(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("find_files tracked=true", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git ls-files --others --exclude-standard")]
+    [InlineData("git ls-files --deleted")]
+    [InlineData("git ls-files -z")]
+    [InlineData("git ls-remote")]
+    public void Inspect_ForAGitListingNothingReplaces_Allows(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 }

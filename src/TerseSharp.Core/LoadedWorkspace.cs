@@ -572,10 +572,30 @@ public sealed class LoadedWorkspace : IDisposable
             CompilationsDropped = true;
             DroppedAfter = Idle;
             droppedNotice = true;
+            Interlocked.Exchange(ref realizedNoticeTaken, 0);
 
             return true;
         }
     }
 
     public TimeSpan DroppedAfter { get; private set; }
+
+    public bool CompilationsRealized
+    {
+        get
+        {
+            foreach (var project in Solution.Projects)
+            {
+                if (project.TryGetCompilation(out _))
+                    return true;
+            }
+
+            return false;
+        }
+    }
+
+    private int realizedNoticeTaken;
+
+    public bool TakeRealizedNotice() =>
+        Interlocked.CompareExchange(ref realizedNoticeTaken, 1, 0) is 0;
 }

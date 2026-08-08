@@ -174,7 +174,7 @@ public static class Doctor
         return Check(
             "assets",
             "skill=" + Asset(state.SkillInstalled, state.SkillCurrent) + " guard=" + Asset(state.GuardInstalled, state.GuardCurrent),
-            !state.Stale,
+            !state.NeedsInstall,
             "run: terse install --skill --guard");
     }
 

@@ -9,17 +9,102 @@ TerseSharp answers C# and XAML questions **semantically**, from a Roslyn workspa
 loaded. Reading a `.cs` file whole, or grepping for a type name, costs 10-30x more tokens and returns
 matches that are not references.
 
-## 🚫 HARD GATE — the built-ins are the last resort, not the first
+## Route every question by its target
 
-Before **every** `Read`, `Grep`, `Glob`, `Edit`, `Write` or code-touching `Bash` call, answer one
-question:
+**Every C#/.NET question has a tool, and the table below names it.** Read the left column, take the
+tool on the right, call it — that is the whole working rule, and it is the one thing to remember from
+this document. It holds for `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`,
+`.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx` and `.resw`, and for every question about
+C# symbols, references, diagnostics, builds, tests or the working tree.
 
-> **Is the target a `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`,
-> `.axaml`, `.paml`, `.resx` or `.resw` file, or a question about C# symbols, references, diagnostics,
-> builds or tests?**
+The rules that keep it that way — what the guard denies, what to do when a tool errors, and the
+tripwires — are the hard gate directly **below** the table.
 
-**If yes, the built-in is forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for
-it in the table below.
+## Replace the built-in on the left
+
+| Instead of | Use | Why |
+|---|---|---|
+| `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
+| `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
+| `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
+| `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` | all of them in one response; an id that does not resolve is reported `NOT_RESOLVED <id>`, never a failed call |
+| `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
+| a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` | `path=` resolves the name inside that file first and only falls back to the solution when the file holds no match — `get_symbol` and `get_type_outline` take it too, `symbolIds=` scopes every id in the batch, and a `path=` naming no document answers `DocumentNotFound` instead of being ignored |
+| `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
+| `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
+| `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
+| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
+| `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell |
+| `Bash: git ls-files` to tell a checked-in file from a scratch one | `find_files(glob, tracked: true)` | only the files git tracks, so build output and another session's untracked notes drop out; the bare `git ls-files` is denied by the guard, every flagged form is not |
+| `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC`; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
+| a search that keeps hitting a folder you do not want | `search_text(query, exclude: ".research/**")` | dropped after `glob=` has selected, so one call answers what two used to |
+| `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
+| `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
+| `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` | identical matching lines collapse to the first record plus `x<count>` |
+| `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
+| `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
+| a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from, and says `line N was cut mid-way` when the budget ran out **inside** a line — raise `maxChars` for that line, because a line range cannot resume at a character offset |
+| `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
+| `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
+| `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
+| three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch |
+| an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; a multi-match refusal lists the candidate lines with their numbers, so `occurrence=` is picked from the refusal and needs no re-read, and an out-of-range value names the range it could have picked |
+| `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
+| a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` | one declaration per symbol, paired positionally, applied as **one** compile-gated edit across every file they live in — the way to land a signature change together with the callers it breaks instead of paying a `CompileRegression` and a retry |
+| adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` | an enum id takes enum members; `replace_symbol` and `delete_symbol` work on one too |
+| adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` | appended to that file's namespace as one compile-gated edit — no whole-file rewrite, no forced text edit |
+| `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
+| `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call, and the next `.cs` write's compile gate already sees it, so two interdependent new files land in either order |
+| rewrite an **existing** `.cs` file whole | `write_text(path, content, force: true)` | compile-gated: rolled back if it introduces an error, `allowErrors: true` to opt out |
+| find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
+| `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
+| `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element, formatting preserved |
+| `Read` a `.xaml.cs` to see what the markup wires | `xaml_codebehind(path)` | `x:Class` plus every handler |
+| hunting a resource through `App.xaml` | `xaml_resolve(key)` | every declaration with its scope, one call; a key with no keyed declaration lists the implicit styles targeting it, `HEURISTIC`, and names no winner |
+| eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path type-checked through Roslyn |
+| "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
+| "what endpoints exist?" | `list_endpoints()` | every `Map*` with the member it sits in |
+| orienting on a symbol | `explore_symbol(symbolId)` | signature, doc, reach, implementations, XAML sites in one call |
+| judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
+| "why does this control look like that" | `xaml_styles(typeName)` | implicit and keyed styles with the `BasedOn` chain, capped by `maxResults` (100) |
+| "is this element translated" | `xaml_localization()` | every `x:Uid` joined to its `.resx`/`.resw` entry |
+| `Read` a `.resx`/`.resw` | `resx_get(path, cultures)` | every key with its value per culture; absent ones print `MISSING` |
+| `Grep` a resource key | `resx_find(query)` | key, value or comment, across every family |
+| "is this key still used" | `resx_usages(key)` | designer property through Roslyn, plus `GetString`, localizer, `x:Uid`, Razor |
+| "which strings are untranslated" | `resx_validate()` | missing, placeholder mismatch, duplicate, orphan, empty, stale designer |
+| `Edit` a `.resx`/`.resw` | `resx_set` · `resx_remove` · `resx_rename` | one `<data>` element rewritten; header, order, indentation, line endings and BOM kept |
+| `Read` a `.razor` or `.cshtml` file | `razor_outline(path)` | directives, component tree and `@code` members, each component resolved to its type |
+| "how do I use this component" | `razor_component(name)` | every `[Parameter]`, which are `[EditorRequired]`, from source **or** a referenced package |
+| `Grep` a tag, directive or route in markup | `razor_find(query, kind)` | component, element, attribute, directive, expression or route |
+| `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` | element-addressed, formatting preserved, compile-gated through the Razor generator |
+| "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
+| "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
+| `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, `path=` scopes it to one pathspec on a shared tree, and `exclude=` drops what a pathspec cannot leave out - `exclude: ".research/**"` for another session's notes; an excluded file is not counted |
+| `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
+| `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `maxLines=` caps it at 400 |
+| `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
+| `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
+| `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
+| `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line, and a run that spanned several projects appends `Name:total/durationMs` per project so "which tier is slow" costs no second run; a failure carries its message, expected/actual and one source frame |
+| re-running what broke | `rerun_failed` | replays the previous failures only |
+| `dotnet test --list-tests` | `list_tests(contains)` | names without running |
+| `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
+| `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
+| `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
+| formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
+| rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
+| `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
+| editing a `.csproj` by hand | `project_*` · `package_*` · `solution_*` | CPM-aware, containment-checked |
+
+## 🚫 HARD GATE — take the tool from the table; the built-ins are the last resort
+
+**Take the tool the table above names, on every call.** That is the whole rule, and it holds for
+`.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`, `.sln`/`.slnx`/`.slnf`, `.xaml`,
+`.axaml`, `.paml`, `.resx` and `.resw`, and for every question about C# symbols, references,
+diagnostics, builds, tests or the working tree.
+
+**So a `Read`, `Grep`, `Glob`, `Edit`, `Write` or code-touching `Bash` call on one of those is
+forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it in the table above.
 
 **The shell does not launder it.** `grep`, `rg`, `find`, `fd`, `cat`, `head`, `tail`, `sed`, `awk`,
 `ls`, `dir`, `tree`, `wc`, `nl`, `findstr`,
@@ -38,7 +123,8 @@ TerseSharp tool replaces them, so shelling out is the right call.
 **The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff` and
 `git diff <ref>` are served by `changed_files`, `diff_symbols` and `diff_text` — all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
-re-usable as arguments. Running them in `Bash` is the same breach as `grep`. Only git **history** —
+re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. Running them in
+`Bash` is the same breach as `grep`. Only git **history** —
 `git log`, `git log -p`, `git blame`, `git show <ref>:<path>` — and anything that mutates the index or
 history — `git add`, `git commit`, `git push` — stay on the shell, because TerseSharp does not model
 them.
@@ -71,79 +157,6 @@ A silent drop is the breach, even when the reason would have been valid.
   answer both, for a fraction of the tokens.
 - You are about to open a `*_razor.g.cs` under `obj/` — that file is generated; edit the `.razor`.
 
-## Replace the built-in on the left
-
-| Instead of | Use | Why |
-|---|---|---|
-| `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
-| `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
-| `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
-| `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` | all of them in one response; an id that does not resolve is reported `NOT_RESOLVED <id>`, never a failed call |
-| `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
-| `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`) |
-| `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
-| `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
-| `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
-| `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell |
-| `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC`; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
-| a search that keeps hitting a folder you do not want | `search_text(query, exclude: ".research/**")` | dropped after `glob=` has selected, so one call answers what two used to |
-| `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
-| `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
-| `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` | identical matching lines collapse to the first record plus `x<count>` |
-| `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
-| `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
-| a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from, and says `line N was cut mid-way` when the budget ran out **inside** a line — raise `maxChars` for that line, because a line range cannot resume at a character offset |
-| `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
-| `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
-| `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
-| an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; an out-of-range value names the range it could have picked |
-| `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
-| a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` | one declaration per symbol, paired positionally, applied as **one** compile-gated edit across every file they live in — the way to land a signature change together with the callers it breaks instead of paying a `CompileRegression` and a retry |
-| adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` | an enum id takes enum members; `replace_symbol` and `delete_symbol` work on one too |
-| adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` | appended to that file's namespace as one compile-gated edit — no whole-file rewrite, no forced text edit |
-| `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
-| `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call |
-| rewrite an **existing** `.cs` file whole | `write_text(path, content, force: true)` | compile-gated: rolled back if it introduces an error, `allowErrors: true` to opt out |
-| find-and-replace a name | `rename_symbol(symbolId, newName)` | solution-wide, incl. interfaces, overrides, doc crefs **and XAML** |
-| `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
-| `Edit` a `.xaml` file | `xaml_set_property(path, target, property, value)` | addressed by element, formatting preserved |
-| `Read` a `.xaml.cs` to see what the markup wires | `xaml_codebehind(path)` | `x:Class` plus every handler |
-| hunting a resource through `App.xaml` | `xaml_resolve(key)` | every declaration with its scope, one call; a key with no keyed declaration lists the implicit styles targeting it, `HEURISTIC`, and names no winner |
-| eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` | each path type-checked through Roslyn |
-| "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
-| "what endpoints exist?" | `list_endpoints()` | every `Map*` with the member it sits in |
-| orienting on a symbol | `explore_symbol(symbolId)` | signature, doc, reach, implementations, XAML sites in one call |
-| judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
-| "why does this control look like that" | `xaml_styles(typeName)` | implicit and keyed styles with the `BasedOn` chain, capped by `maxResults` (100) |
-| "is this element translated" | `xaml_localization()` | every `x:Uid` joined to its `.resx`/`.resw` entry |
-| `Read` a `.resx`/`.resw` | `resx_get(path, cultures)` | every key with its value per culture; absent ones print `MISSING` |
-| `Grep` a resource key | `resx_find(query)` | key, value or comment, across every family |
-| "is this key still used" | `resx_usages(key)` | designer property through Roslyn, plus `GetString`, localizer, `x:Uid`, Razor |
-| "which strings are untranslated" | `resx_validate()` | missing, placeholder mismatch, duplicate, orphan, empty, stale designer |
-| `Edit` a `.resx`/`.resw` | `resx_set` · `resx_remove` · `resx_rename` | one `<data>` element rewritten; header, order, indentation, line endings and BOM kept |
-| `Read` a `.razor` or `.cshtml` file | `razor_outline(path)` | directives, component tree and `@code` members, each component resolved to its type |
-| "how do I use this component" | `razor_component(name)` | every `[Parameter]`, which are `[EditorRequired]`, from source **or** a referenced package |
-| `Grep` a tag, directive or route in markup | `razor_find(query, kind)` | component, element, attribute, directive, expression or route |
-| `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` | element-addressed, formatting preserved, compile-gated through the Razor generator |
-| "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
-| "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
-| `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, and `path=` scopes it to one pathspec on a shared tree |
-| `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
-| `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `maxLines=` caps it at 400 |
-| `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
-| `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
-| `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
-| `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line, and a run that spanned several projects appends `Name:total/durationMs` per project so "which tier is slow" costs no second run; a failure carries its message, expected/actual and one source frame |
-| re-running what broke | `rerun_failed` | replays the previous failures only |
-| `dotnet test --list-tests` | `list_tests(contains)` | names without running |
-| `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
-| `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
-| `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
-| formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
-| rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
-| `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
-| editing a `.csproj` by hand | `project_*` · `package_*` · `solution_*` | CPM-aware, containment-checked |
-
 ## The whole surface, by job
 
 **Workspace** — `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` ·
@@ -157,6 +170,16 @@ least recently used being unloaded beyond that; a workspace that vanished from `
 was evicted, not lost, and the next call naming it reloads it. The user can change the limit with
 `terse serve --max-workspaces N` or `TERSE_MAX_WORKSPACES` — worth telling them when a big solution
 is making the server heavy, because a loaded workspace costs roughly 3 GB on a 148-project tree.
+**The server may be running a tool profile.** `terse serve --tools core` (or `TERSE_TOOLS=core`)
+advertises about twenty tools instead of all 86, because the full catalogue costs tokens on every
+request and measurably lowers tool-selection accuracy. It hides nothing: **every tool in this document
+still answers when you call it by name**, whether or not `tools/list` shows it. `workspace_status`
+prints `tools=core - N advertised` when a profile is active, so you can tell.
+**A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
+`compilations=cold - the first semantic call realizes them and pays for it once`, and the first
+semantic call that realizes them appends `compilations=realized in Nms (once per load, not per call)`.
+Read that as a one-off, not as the per-call cost of the tool that happened to pay it — measured at
+about 7 s on a 300-document solution — and do not reload or restart over it.
 **A workspace nobody has used for 15 minutes gives its compilations back** (`--idle-minutes`,
 `TERSE_IDLE_MINUTES`, `0` to disable), and so does any idle workspace once the heap passes 2 GB.
 `workspace_status` then says `idle=<n>m compilations=dropped`; the next semantic call re-realizes
@@ -300,7 +323,8 @@ scope it with `path=`. All three take `baseRef=` (empty compares the working tre
 `path=`, and are scoped to the workspace root with git's own `--relative`, so a workspace nested
 inside a larger repository never reports a file outside it. On a tree shared with other sessions,
 `changed_files(path: "src")` is the difference between reading your own change set and reading
-everybody's. `diff_symbols` tags a hunk `EXACT` only when it sits
+everybody's, and `changed_files(exclude: ".research/**")` drops the folders a positive pathspec
+cannot leave out. `diff_symbols` tags a hunk `EXACT` only when it sits
 inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
@@ -353,13 +377,19 @@ this workspace is read as text unchanged.
    **Need several members?** `get_symbol_source(symbolIds: [...])` returns them in one response, and
    an id that does not resolve is reported inline as `NOT_RESOLVED <id>` instead of failing the call.
    Use it instead of one call per member.
+   **When a name an outline just printed still answers `AmbiguousSymbol` or `SaturatedName`, pass the
+   file it came from**: `get_symbol_source`, `get_symbol` and `get_type_outline` take `path=`, resolve
+   the name inside that document first, and fall back to the solution only when the file holds no
+   match — so the answer never needs the full documentation id. A `path=` naming no document of the
+   workspace answers `DocumentNotFound` rather than being ignored.
 2. **Read the confidence tag.** `EXACT` came from the Roslyn semantic model. `HEURISTIC` came from a
    text or index match — verify before acting on it.
 3. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff, the diagnostic
    counts, and nothing is written; the response says `dryRun` so it can never be mistaken for a write.
 4. **A successful edit answers in one line per changed file, not a diff.**
    `<workspace-relative path>  changedLines=N` — you already know what you wrote, so the diff is not
-   repeated back to you. `edit_text` and `write_text` print the **file name alone**, because you
+   repeated back to you, and there is no `N files changed` line above it, because the lines are the
+   count. `edit_text` and `write_text` print the **file name alone**, because you
    passed the path in. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
    there is a non-zero count or delta to report. Pass `verbose=true` on any edit, refactor,
    `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*`
@@ -381,13 +411,19 @@ this workspace is read as text unchanged.
    edit is safe.
 5. **Edits are compile-gated.** An edit introducing a new compile error is rolled back and the error
    returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
+   **A rollback keeps your text**: the error ends `retryWith=r3`, and `replace_symbol`,
+   `replace_symbol_body` and `add_member` take `retryWith: "r3"` to replay exactly what was rejected —
+   after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
+   declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
 6. **Truncation tells you what to do.** `<shown>/<total> <unit> truncated` is followed by
    `- narrow with <parameter>`. Follow that, rather than re-running with a bigger `maxResults` and
    paying for the whole list. A **complete** listing of 25 records or more names the same parameter,
    so an uncapped tool like `list_projects` still tells you `filter=` exists — that is an offer, not a
    truncation. `read_text` is the line-ranged equivalent: a read clipped by the tool's own cap ends
    with `next: startLine=<first line not returned> (total=<lines>)`, and on a `.cs` file an
-   `outline: get_file_outline path=…` steer. A read your own `startLine`/`endLine` ended says nothing —
+   `outline: get_file_outline path=…` steer, on a `.md` file a `headings=true` then `section=` steer —
+   follow it instead of paging, because the heading map is one call and paging is one call per page.
+   A read your own `startLine`/`endLine` ended says nothing —
    you already know where it stopped. When a **character** budget runs out inside a line you also get
    `line N was cut mid-way`; that is not a `startLine` you can follow, because a line range cannot
    resume at a character offset — raise `maxChars` and re-read that line. A `startLine` beyond the

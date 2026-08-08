@@ -33,8 +33,10 @@ public static class EditGate
     private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root)
     {
         var response = new ResponseBuilder(options.Tool, state).Verbose(options.Verbose);
+        var condensed = Condensed(options, diffs, report);
 
-        response.Summary(diffs.Length, diffs.Length, "files changed");
+        if (!condensed)
+            response.Summary(diffs.Length, diffs.Length, "files changed");
 
         if (diffs.Length is 0)
             response.Note("no change - the result is identical to what is already there");
@@ -45,7 +47,7 @@ public static class EditGate
         if (report is not null)
             Announce(response, report, options.Verbose || options.DryRun);
 
-        if (Condensed(options, diffs, report))
+        if (condensed)
             return Compact(response, diffs, root);
 
         foreach (var diff in diffs)

@@ -7,25 +7,33 @@ namespace TerseSharp.Server;
 public static class McpHost
 {
     public static async Task RunAsync(
-        string? workspace,
-        bool readOnly,
-        bool watch,
-        int maxWorkspaces,
-        TimeSpan idleFor,
-        CancellationToken cancellationToken)
+    string? workspace,
+    bool readOnly,
+    bool watch,
+    int maxWorkspaces,
+    TimeSpan idleFor,
+    string? tools,
+    CancellationToken cancellationToken)
     {
         var builder = Host.CreateApplicationBuilder();
+        var advertised = ToolProfile.Resolve(tools);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
-        builder.Services.AddSingleton(_ => new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch), readOnly));
+        builder.Services.AddSingleton(_ => new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch), readOnly, advertised));
         builder.Services.AddSingleton<LastTestRun>();
         builder.Services
             .AddMcpServer()
             .WithStdioServerTransport()
             .WithToolsFromAssembly()
-            .WithRequestFilters(filters => filters.AddCallToolFilter(ToolArgumentFilter.Structured));
+            .WithRequestFilters(filters =>
+            {
+                filters.AddCallToolFilter(ToolArgumentFilter.Structured);
+
+                if (advertised is not null)
+                    filters.AddListToolsFilter(ToolProfile.Filter(advertised));
+            });
 
         var host = builder.Build();
 

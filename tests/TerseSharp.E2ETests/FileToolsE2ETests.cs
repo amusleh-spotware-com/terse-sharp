@@ -254,4 +254,51 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("MaxVolume", text, StringComparison.Ordinal);
         Assert.DoesNotContain("this is the outline", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindFiles_WithTracked_ListsOnlyWhatGitTracks()
+    {
+        const string Probe = "terse-untracked-probe.txt";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "probe\n" });
+        try
+        {
+            var loose = await server.CallAsync("find_files", new() { ["glob"] = "**/*.txt" });
+            var trackedText = await server.CallAsync("find_files", new() { ["glob"] = "**/*.txt", ["tracked"] = true });
+            var trackedCode = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["tracked"] = true });
+
+            Assert.Contains(Probe, loose, StringComparison.Ordinal);
+            Assert.DoesNotContain(Probe, trackedText, StringComparison.Ordinal);
+            Assert.Contains("OrderService.cs", trackedCode, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", trackedCode, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_WhenAMarkdownReadIsClipped_NamesHeadingsAndSectionBesideTheNextLine()
+    {
+        const string Probe = "terse-long-probe.md";
+        var content = string.Join(
+            "\n",
+            Enumerable.Range(0, 400).Select(index => index % 50 is 0
+                ? "## Section " + index.ToString(CultureInfo.InvariantCulture)
+                : "body line " + index.ToString(CultureInfo.InvariantCulture)));
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = content });
+        try
+        {
+            var clipped = await server.CallAsync("read_text", new() { ["path"] = Probe, ["maxLines"] = 20 });
+
+            Assert.Contains("next: startLine=21", clipped, StringComparison.Ordinal);
+            Assert.Contains("headings=true", clipped, StringComparison.Ordinal);
+            Assert.Contains("section=", clipped, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }

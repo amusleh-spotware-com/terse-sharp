@@ -456,4 +456,67 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("var negated = 1 - -1;", text, StringComparison.Ordinal);
         Assert.Contains("return order.Volume * negated;", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbolSource_WithPath_ResolvesANameTheSolutionCannotDisambiguate()
+    {
+        var ambiguous = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Route" });
+        var scoped = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "Route",
+            ["path"] = "src/Fixture.Trading/OrderRouter.cs",
+        });
+
+        Assert.Contains("ERROR", ambiguous, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", scoped, StringComparison.Ordinal);
+        Assert.Contains("service.Submit(order)", scoped, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.cs", scoped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithAPathThatHoldsNoMatch_FallsBackToTheSolution()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "OrderService.Submit",
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("repository.Submit(order)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithAPathThatIsNotADocument_SaysSoInsteadOfIgnoringIt()
+    {
+        var missing = await server.CallAsync("get_type_outline", new()
+        {
+            ["symbolId"] = "OrderRouter",
+            ["path"] = "src/Fixture.Trading/NoSuchFile.cs",
+        });
+        var scoped = await server.CallAsync("get_type_outline", new()
+        {
+            ["symbolId"] = "OrderRouter",
+            ["path"] = "src/Fixture.Trading/OrderRouter.cs",
+        });
+
+        Assert.Contains("ERROR", missing, StringComparison.Ordinal);
+        Assert.Contains("remedy:", missing, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", scoped, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.Route", scoped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithSeveralIdsAndAPath_ResolvesEveryOneInsideThatFile()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "Route", "Retry" },
+            ["path"] = "src/Fixture.Trading/OrderRouter.cs",
+        });
+
+        Assert.DoesNotContain("NOT_RESOLVED", text, StringComparison.Ordinal);
+        Assert.Contains("2 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("service.Submit(order)", text, StringComparison.Ordinal);
+    }
 }

@@ -147,6 +147,27 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
     }
     private static string[] Records(string listing) =>
         [.. listing.Split('\n').Skip(1).Where(line => line.Length > 0)];
+
+    [Fact]
+    public async Task ChangedFiles_WithExclude_DropsThePathsAPathspecCannotLeaveOut()
+    {
+        const string Probe = "terse-changed-files-exclude-probe.txt";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "probe\n" });
+        try
+        {
+            var everything = await server.CallAsync("changed_files", []);
+            var filtered = await server.CallAsync("changed_files", new() { ["exclude"] = "**/*.txt" });
+
+            Assert.Contains(Probe, everything, StringComparison.Ordinal);
+            Assert.DoesNotContain(Probe, filtered, StringComparison.Ordinal);
+            Assert.All(Records(filtered), record => Assert.DoesNotContain(".txt", record, StringComparison.Ordinal));
+            Assert.True(Records(filtered).Length < Records(everything).Length, filtered);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }
 
 internal static class DiffSymbolProbe

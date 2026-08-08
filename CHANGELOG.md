@@ -8,6 +8,135 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-08
+
+> **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
+> A successful edit no longer prints an `N files changed` line above its one-line-per-file answer —
+> the lines are the count, and the removed line was 720 responses of ceremony including the
+> ungrammatical `1 files`. It still prints for a `dryRun`, a `verbose` run, a rollback and a
+> `0 files changed`. `workspace_status` and `load_workspace` now print the solution path
+> **workspace-relative** instead of absolute. A clipped `.md` `read_text` gains a
+> `headings=true`/`section=` steer, and a `load_workspace` gains a `compilations=cold` note whose
+> counterpart, `compilations=realized in Nms`, is appended to the first semantic call that realizes
+> them.
+
+### Added
+
+- **`get_symbol_source`, `get_symbol` and `get_type_outline` take `path=`**, resolving the name inside
+  that file first and only falling back to the solution when the file holds no match. A member name an
+  outline has just printed — `TestResultParser.Parse`, `SymbolReference.Parse`, `DotnetRunner.Report` —
+  could still answer `SaturatedName` or `AmbiguousSymbol` solution-wide, costing one refused call plus a
+  retry with the full documentation id; the file the outline named is the disambiguator, so it is now an
+  argument. A `path=` that names no document of the workspace answers `DocumentNotFound` rather than
+  being ignored, and `symbolIds=` scopes every id in the batch. (I134)
+- **`changed_files` takes `exclude=`**, a glob applied after `path=` has selected, exactly as
+  `search_text` and `search_regex` already have one. On this shared tree 27 of 63 rows were another
+  session's untracked `.research/**` and `.serena/**` notes and every call paid for them; `path=`
+  enumerates what you want, and the set of another session's files is not knowable in advance. An
+  excluded file is not counted, so the summary reports what the listing actually holds. (I135)
+
+- **`find_files` takes `tracked=true`**, listing only the files git tracks, answered from
+  `git ls-files --cached` through the existing `GitRunner`. Nothing answered "which files does git
+  track under this path", so picking a checked-in fixture to mutate cost a `Bash: git ls-files | grep`
+  fallback — `find_files` lists what is on disk and `changed_files` lists only what changed.
+  `.gitignore` was refuted as a source: it answers ignoring, not tracking, and a file can be untracked
+  without being ignored. A bare `git ls-files` is now denied by `terse guard`; every flagged form
+  (`--others`, `--deleted`, `-z`) is left alone, because those are not replaced. (I137)
+- **The one-off cost of realizing a solution's compilations is now attributed to the call that pays
+  it.** `load_workspace` ends with `compilations=cold - the first semantic call realizes them and pays
+  for it once` while nothing is realized, and the first semantic call that does realize them appends
+  `compilations=realized in Nms (once per load, not per call)`. Measured at 7 414 ms on this repo's 301
+  documents with no response saying why, which is exactly how a per-call latency claim was
+  mis-diagnosed from transcript timestamps. Both notes are proven, not assumed: the state is read from
+  Roslyn's non-forcing `Project.TryGetCompilation`, so the note appears only when the call really moved
+  the workspace from cold to realized, and never on an `ERROR`. Pre-warming at load was refuted — it
+  moves the cost to where the agent can attribute it even less, and charges workspaces whose semantic
+  tools are never called. (I138)
+- **`terse serve --tools core` advertises a 21-tool subset instead of all 86** (`TERSE_TOOLS=core` does
+  the same). The full surface is attached to every request — 3 365 479 B, about 842 000 tokens, across
+  216 records in one measured week — and a catalogue this size is past every published inflection
+  point for tool-selection accuracy. **Only the advertised list shrinks: every hidden tool still
+  answers when called by name**, so nothing is lost, and `workspace_status` says
+  `tools=core - 21 advertised; every other tool still answers when called by name` so the profile is
+  never invisible. Deleting tools and shortening `[Description]` text were both refuted — every tool is
+  census-gated and used, and description quality is the opposite of the measured lever.
+  `ToolCensusE2ETests.EveryToolInTheCoreProfile_IsAToolTheServerAdvertises` fails if the profile ever
+  names a tool the server does not advertise. (I140)
+- **`edit_text` takes `edits=[{oldText,newText,section,occurrence}, ...]`**, applying several edits to
+  the SAME file in order as one write. Measured at 2 033 calls over 162 transcripts, 1 189 of them
+  inside runs of three or more consecutive calls (longest run 26) and 952 of 1 811 adjacent pairs
+  addressing the same path, each re-sending 847 characters of argument framing. **An entry whose anchor
+  fails is reported on its own line with its error code and remedy and the rest still land** — a
+  whole-call failure on one bad anchor was refuted, an agent recovers 37 points worse from it — and
+  the response then keeps its full form because a partial result is a caveat. Capped at 10, because
+  batched-item accuracy falls off past about six; a batch spanning several files was refused outright.
+  `newText` is now optional, since `edits=` carries it. (I141)
+- **A `CompileRegression` now hands back a `retryWith` token instead of discarding the declaration it
+  rejected.** 152 rollbacks in one measured window (`replace_symbol` 91, `add_member` 29, `write_text`
+  14, `replace_symbol_body` 10, `delete_symbol` 3) each threw away an average 870 characters of input
+  that the retry then re-sent. The rejection line now ends `retryWith=r3  the rejected text is held`,
+  and `replace_symbol`, `replace_symbol_body` and `add_member` take `retryWith=`, replaying the held
+  targets and declarations — including a multi-file `symbolIds`/`declarations` batch — under whatever
+  flags the retry passes (`allowErrors=true`, `dryRun=true`, or nothing, after the missing callee has
+  been added). The server holds the last 8 rejections of the process; a token it no longer holds
+  answers `retryWith=… names no held rejection of <tool>` rather than silently editing with an empty
+  declaration. Auto-applying the rejected edit was refused: `CS0103` is as often a genuine typo as a
+  symbol you are about to add. (I142)
+
+### Changed
+
+- **`SKILL.md` leads with the positive routing table; the prohibition list moved below it.** The skill
+  is ~13 000 tokens loaded whole into an agent's context and opened with a forbidden list — the form
+  measured to decay, from 73 % compliance at turn 5 to 33 % at turn 16, while commission constraints
+  hold at 100 % (arXiv:2604.20911, 4 416 trials, 12 models, decay induced by adding MCP tool schemas
+  to context). Nothing was deleted: the whole hard gate, its banned reasoning and its tripwires are
+  intact, they now follow the table they are about. Shortening the file was refuted — instruction-file
+  size is an affirmative null over 1 650 sessions (arXiv:2605.10039). (I144)
+- **A clipped `.md` read now steers to `headings=true` and `section=` beside `next: startLine=`**, the
+  way a clipped `.cs` read already steers to `get_file_outline`. 441 `read_text` responses truncated in
+  one window (`.cs` 290, `.md` 149) at a mean overflow of 79.3 %, with 165 repeat reads of a path
+  already truncated once — an agent paging a document the heading map would have answered in one call.
+  Raising the default `maxChars` was refuted: a 79.3 % mean overflow means a bigger cap would not close
+  it. (I145)
+- **Three framing residues, each below the individual floor, removed as one family (~20 000 tokens per
+  week combined).** `workspace_status` and `load_workspace` printed the **absolute** solution path
+  (116 and 55 responses) where the workspace is its own root — it is now workspace-relative, so a
+  solution at the root prints its file name and `verbose=true` still echoes the full path. The
+  redundant `N files changed` line above a one-line-per-file answer is gone (720 occurrences across
+  `replace_symbol`, `add_member`, `replace_symbol_body` and `delete_symbol`, including the
+  ungrammatical `1 files`); it still prints whenever the answer is not condensed — a `dryRun`, a
+  `verbose`, a rollback, or `0 files changed`. And `edit_text`'s multi-match refusal now lists the
+  candidate lines (`occurrence=1  line 12: …`, up to five), so `occurrence=` can be picked without a
+  re-read — 65 of 2 033 `edit_text` calls hit that refusal and 76 immediate retries followed. (I146)
+- **`unload_workspace` resolves the short solution name the other tools print.** Making the path
+  relative (I146) would otherwise have handed the agent a value that `Path.GetFullPath` resolves
+  against the server's working directory — on a tree with agent worktrees, `TerseSharp.slnx` would
+  have unloaded the wrong workspace and reported `unloaded`. It now matches the target against every
+  loaded workspace's absolute path **and** its printed short form, and refuses when two of them answer
+  to the same name rather than picking. `list_workspaces` keeps the absolute path, because that is the
+  value `unload_workspace` documents.
+
+### Fixed
+
+- **`doctor` no longer reports a never-installed asset as `OK`.** `AssetState.Stale` was
+  `(SkillInstalled && !SkillCurrent) || (GuardInstalled && !GuardCurrent)`, so a **missing** asset was
+  not stale and the `run: terse install --skill --guard` remedy never fired: `OK assets: skill=current
+  guard=absent`. The guard was absent on one machine for a week while built-ins were 29 % of 19 432
+  tool calls — it would have denied 3 040 shell text invocations, 503 `git status`/`git diff`, 195
+  `dotnet format`/`build`/`test` and 159 `Read` calls on `.cs`-family paths (~107 000 tokens). The
+  property is now `NeedsInstall` and is true for any asset that is missing **or** out of date, and
+  `ClientRegistrarTests.NeedsInstall_IsTrueForEveryAssetKindThatIsMissingOrStale` discovers the asset
+  kinds from `AssetState`'s own constructor, so a kind added later cannot be silently absent. Observed
+  red on the old expression (`SkillInstalled`), then green. (I139)
+- **A `.cs` write is compile-gated against the workspace as it is now, not as it was.** `write_text`,
+  `edit_text` and a `.cs` delete ran with `semantic: false`, so the pending notice for a file an earlier
+  `write_text` had just created was never drained: overwriting an existing document that referenced it
+  answered `CS0103`/`CS0246` and rolled the whole write back, and two interdependent new files could not
+  be created in either order without `allowErrors: true`. Those three tools now synchronise first when
+  the target is C#; a non-`.cs` write is unchanged and still pays no sync. Reproduced by
+  `WriteText_OverAKnownFileReferencingAFileJustCreated_IsNotRolledBack`, observed red with the exact
+  `CS0103 … was rolled back` of the report, then green. (I136)
+
 ## [0.26.0] - 2026-08-08
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
@@ -2085,7 +2214,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.27.0
 [0.26.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.26.0
 [0.25.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.25.0
 [0.24.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.24.0

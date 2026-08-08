@@ -159,13 +159,24 @@ public static class FileService
                 string.Create(CultureInfo.InvariantCulture, $"oldText matched {match.Occurrences} times, expected exactly 1"),
                 string.Create(
                     CultureInfo.InvariantCulture,
-                    $"pass occurrence=1..{match.Occurrences} to pick one, include more surrounding text so the match is unique, or pass section= for a markdown heading"))
+                    $"pass occurrence=1..{match.Occurrences} to pick one, include more surrounding text so the match is unique, or pass section= for a markdown heading{Candidates(before, oldText, match)}"))
             : Errors.Invalid(
                 "oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)",
                 MatchesDedented(before, oldText)
                     ? "it matches once indentation and blank lines are ignored, so it was pasted from a dedented, blank-stripped payload such as get_symbol_source - address a .cs member with replace_symbol_body or replace_symbol, and re-read anything else with read_text verbose=true"
                     : Nearest(before, oldText));
     }
+
+    private static string Candidates(string before, string oldText, SnippetMatch match)
+    {
+        var sites = SnippetSearch.Sites(before, oldText, MaxCandidateSites);
+
+        return sites.Count is 0 || (sites.Count < match.Occurrences && sites.Count < MaxCandidateSites)
+            ? string.Empty
+            : "\n" + string.Join("\n", sites);
+    }
+
+    private const int MaxCandidateSites = 5;
 
     private static string Nearest(string before, string oldText) =>
         SnippetSearch.NearMisses(before, oldText, MaxNearMisses) is { Count: > 0 } hits
@@ -298,6 +309,13 @@ public static class FileService
 
         if (SourceFile.IsCSharp(Located(path)))
             response.Note(string.Create(CultureInfo.InvariantCulture, $"outline: get_file_outline path={Located(path)}"));
+
+        if (DocumentOutline.IsMarkdown(Located(path)))
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"outline: read_text path={Located(path)} headings=true, then section=\"## Heading\" - paging costs one call per page, the heading map costs one"));
+        }
     }
 
     private static ReadOnlySpan<char> Located(string label) => IsOutside(label)
@@ -568,5 +586,115 @@ public static class FileService
         var needle = Dedented(oldText);
 
         return needle.Length is not 0 && Dedented(before).Contains(needle, StringComparison.Ordinal);
+    }
+
+    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0);
+
+    private static async Task<Result<(string Full, string Before)>> OpenedAsync(
+        LoadedWorkspace workspace,
+        string path,
+        bool force,
+        CancellationToken cancellationToken)
+    {
+        var resolved = PathGuard.Resolve(workspace, path);
+
+        if (!resolved.IsOk)
+            return Result.Fail<(string, string)>(resolved.Error!);
+
+        var full = resolved.Value!;
+
+        if (SourceFile.Reject(path, full, force) is { } refusal)
+            return Result.Fail<(string, string)>(refusal.Error!);
+
+        if (!File.Exists(full))
+            return Result.Fail<(string, string)>(Errors.DocumentNotFound(path));
+
+        return Result.Ok((full, await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false)));
+    }
+
+    private static string Failed(int number, TerseError error) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"FAILED edit {number}  {error.Code}: {error.Message}\n  remedy: {error.Remedy}");
+
+
+    private static EditRequest Requested(TextEdit edit, EditRequest request) => new(
+        edit.OldText ?? string.Empty,
+        edit.NewText ?? string.Empty,
+        edit.Section,
+        request.DryRun,
+        request.Force,
+        request.Verbose,
+        edit.Occurrence);
+
+    private static string BatchResponse(
+    string path,
+    string before,
+    string after,
+    List<string> failures,
+    int applied,
+    int total,
+    EditRequest request)
+    {
+        var response = new ResponseBuilder("edit_text", request.DryRun ? "dryRun" : "applied").Verbose(request.Verbose);
+        var changed = UnifiedDiff.ChangedLines(before, after);
+        var summary = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Path.GetFileName(path.AsSpan())}  changedLines={changed}  edits={applied}/{total}");
+
+        if (!request.DryRun && !request.Verbose && failures.Count is 0)
+            return response.Line(summary).ToString();
+
+        response.Line(summary);
+
+        if (request.DryRun)
+            response.Note("dryRun");
+
+        foreach (var failure in failures)
+            response.Note(failure);
+
+        if (request.DryRun || request.Verbose)
+            response.Line(UnifiedDiff.Between(path, before, after));
+
+        return response.ToString();
+    }
+
+    public static async Task<Result<string>> EditTextBatchAsync(
+        LoadedWorkspace workspace,
+        string path,
+        IReadOnlyList<TextEdit> edits,
+        EditRequest request,
+        CancellationToken cancellationToken)
+    {
+        var opened = await OpenedAsync(workspace, path, request.Force, cancellationToken).ConfigureAwait(false);
+
+        if (!opened.IsOk)
+            return Result.Fail<string>(opened.Error!);
+
+        var (full, before) = opened.Value;
+        var failures = new List<string>();
+        var after = before;
+        var applied = 0;
+
+        for (var index = 0; index < edits.Count; index++)
+        {
+            var rewritten = edits[index].NewText is null
+                ? Result.Fail<string>(Errors.Blank("newText"))
+                : Rewrite(after, Requested(edits[index], request));
+
+            if (rewritten.IsOk)
+            {
+                after = rewritten.Value!;
+                applied++;
+            }
+            else
+            {
+                failures.Add(Failed(index + 1, rewritten.Error!));
+            }
+        }
+
+        if (applied > 0 && !request.DryRun)
+            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(BatchResponse(path, before, after, failures, applied, edits.Count, request));
     }
 }

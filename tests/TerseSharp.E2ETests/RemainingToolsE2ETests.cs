@@ -188,4 +188,45 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         Assert.Equal("0 projects", missing);
         Assert.DoesNotContain("Fixture.Trading", missing, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ListWorkspaces_PrintsThePathUnloadWorkspaceTakes()
+    {
+        var listed = await server.CallAsync("list_workspaces", []);
+        var path = listed
+            .Split('\n')
+            .Select(line => line.Split("  ")[0])
+            .First(candidate => candidate.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase));
+
+        Assert.True(Path.IsPathRooted(path), listed);
+
+        var unloaded = await server.CallAsync("unload_workspace", new() { ["path"] = path });
+
+        Assert.Contains("unloaded", unloaded, StringComparison.Ordinal);
+        Assert.DoesNotContain("not loaded", unloaded, StringComparison.Ordinal);
+
+        await server.CallAsync("load_workspace", new() { ["path"] = path });
+    }
+
+    [Fact]
+    public async Task UnloadWorkspace_AcceptsTheShortPathLoadWorkspaceAndStatusPrint()
+    {
+        var loaded = await server.CallAsync("load_workspace", new()
+        {
+            ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+        });
+
+        Assert.Contains("FixtureSolution.slnx", loaded, StringComparison.Ordinal);
+        Assert.DoesNotContain(TerseServerFixture.FixtureRoot, loaded, StringComparison.Ordinal);
+
+        var unloaded = await server.CallAsync("unload_workspace", new() { ["path"] = "FixtureSolution.slnx" });
+
+        Assert.Contains("unloaded", unloaded, StringComparison.Ordinal);
+        Assert.DoesNotContain("not loaded", unloaded, StringComparison.Ordinal);
+
+        await server.CallAsync("load_workspace", new()
+        {
+            ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+        });
+    }
 }

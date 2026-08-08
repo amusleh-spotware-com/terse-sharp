@@ -7,22 +7,28 @@ public static class SymbolLookup
 {
     private const int NameCap = 100;
 
-    public static async Task<Result<ISymbol>> ResolveAsync(
+    public static Task<Result<ISymbol>> ResolveAsync(
     LoadedWorkspace workspace,
     string symbolId,
-    CancellationToken cancellationToken)
+    CancellationToken cancellationToken) =>
+    ResolveAsync(workspace, symbolId, null, cancellationToken);
+
+    public static async Task<Result<ISymbol>> ResolveAsync(
+        LoadedWorkspace workspace,
+        string symbolId,
+        string? path,
+        CancellationToken cancellationToken)
     {
         var requested = SymbolReference.Unescaped(symbolId);
-        if (!SymbolReference.IsDocumentationId(requested))
+
+        if (SymbolReference.IsDocumentationId(requested))
+            return await ByIdAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+
+        if (path is not { Length: > 0 } scope)
             return await ByNameAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
-        var matches = await FindAllAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
-        var distinct = matches.DistinctBy(Describe, StringComparer.Ordinal).ToArray();
-        if (distinct.Length is 1)
-            return Result.Ok(distinct[0]);
-        if (distinct.Length > 1)
-            return Result.Fail<ISymbol>(Errors.AmbiguousSymbol(requested, [.. distinct.Select(Describe)]));
-        var nearest = await NearestAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
-        return Result.Fail<ISymbol>(Errors.SymbolNotFound(requested, nearest));
+
+        return await InFileAsync(workspace, requested, scope, cancellationToken).ConfigureAwait(false)
+            ?? await ByNameAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<ISymbol>> ByNameAsync(
@@ -135,4 +141,59 @@ public static class SymbolLookup
     }
     private static string Addressable(ISymbol symbol) =>
         SymbolReference.RoundTrips(symbol) ? SymbolReference.Brief(symbol) : SymbolId.From(symbol).Value;
+
+    private static async Task<Result<ISymbol>> ByIdAsync(
+        LoadedWorkspace workspace,
+        string requested,
+        CancellationToken cancellationToken)
+    {
+        var matches = await FindAllAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+        var distinct = matches.DistinctBy(Describe, StringComparer.Ordinal).ToArray();
+
+        if (distinct.Length is 1)
+            return Result.Ok(distinct[0]);
+
+        if (distinct.Length > 1)
+            return Result.Fail<ISymbol>(Errors.AmbiguousSymbol(requested, [.. distinct.Select(Describe)]));
+
+        var nearest = await NearestAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+
+        return Result.Fail<ISymbol>(Errors.SymbolNotFound(requested, nearest));
+    }
+
+    private static async Task<Result<ISymbol>?> InFileAsync(
+        LoadedWorkspace workspace,
+        string text,
+        string path,
+        CancellationToken cancellationToken)
+    {
+        if (SymbolReference.Parse(text) is not { } query)
+            return null;
+
+        if (DocumentLookup.Find(workspace, path) is not { } document)
+            return Result.Fail<ISymbol>(Errors.DocumentNotFound(path));
+
+        var declared = await SymbolFinder
+            .FindSourceDeclarationsAsync(document.Project, query.Member, ignoreCase: false, cancellationToken)
+            .ConfigureAwait(false);
+
+        return Scoped(text, [.. declared
+        .Where(symbol => DeclaredIn(symbol, document.FilePath) && SymbolReference.Matches(symbol, query))
+        .DistinctBy(Describe, StringComparer.Ordinal)]);
+    }
+
+    private static Result<ISymbol>? Scoped(string text, ISymbol[] matches) => matches switch
+    {
+        [var only] => Result.Ok(only),
+        [] => null,
+        _ => Result.Fail<ISymbol>(Errors.AmbiguousName(
+            text,
+            [.. matches.Take(10).Select(symbol => SymbolId.From(symbol).Value)],
+            matches.Length)),
+    };
+
+
+    private static bool DeclaredIn(ISymbol symbol, string? filePath) =>
+        filePath is { Length: > 0 } && symbol.DeclaringSyntaxReferences.Any(reference =>
+            string.Equals(reference.SyntaxTree.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
 }

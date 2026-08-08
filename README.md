@@ -107,12 +107,13 @@ Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outl
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends, the shell text
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them, `dotnet build`/`test`/`format`/`clean`,
 `dotnet watch build`/`test` and `msbuild`, and the working-tree half of git — `git status` and
-`git diff`, in every flag and `-C` form, answered by `changed_files` and `diff_symbols` — but only
+`git diff`, in every flag and `-C` form, answered by `changed_files` and `diff_symbols`, plus a bare
+`git ls-files`, answered by `find_files tracked=true` — but only
 when the working directory sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`, since the hook is installed
 user-wide and those tools cannot answer in a repository TerseSharp does not serve. A denied command
 also tells the agent not to run it in `Bash` again. Plain `.css`, `.js`,
-`dotnet restore`/`pack`/`publish`/`run`, and git history and mutation (`log`, `blame`, `show`, `add`,
-`commit`, `push`) are allowed — nothing here replaces those. Malformed hook input allows the call, so
+`dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git history and mutation
+(`log`, `blame`, `show`, `add`, `commit`, `push`) are allowed — nothing here replaces those. Malformed hook input allows the call, so
 a guard fault can never wedge a session, and you remove the guard by deleting the `terse guard` entry
 from Claude Code's `settings.json`.
 
@@ -125,6 +126,11 @@ terse-sharp; `Read`/`Grep`/`Edit` on `.cs`, `.xaml`, `.razor` or `.resx` is forb
 **86 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with
 `verbose=true` for the diff and `dryRun=true` to preview it. Any caveat prints in full.
+
+A full catalogue is attached to every request, and past a certain size that measurably costs
+tool-selection accuracy, so `terse serve --tools core` (or `TERSE_TOOLS=core`) advertises a 21-tool
+subset instead. It hides nothing: every other tool still answers when the agent calls it by name, and
+`workspace_status` reports which profile is running.
 
 | Group | Tools |
 |---|---|

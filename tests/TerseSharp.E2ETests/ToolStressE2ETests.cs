@@ -97,6 +97,8 @@ public sealed class ToolStressE2ETests(TerseServerFixture server)
 
     private static async Task<string[]> RepeatAsync(int times, Func<Task<string>> call)
     {
+        await call();
+
         var answers = new string[times];
 
         for (var index = 0; index < times; index++)

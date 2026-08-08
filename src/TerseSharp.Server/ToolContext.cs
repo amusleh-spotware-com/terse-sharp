@@ -3,13 +3,15 @@ using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Server;
 
-public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDisposable
+public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IReadOnlySet<string>? advertised = null) : IDisposable
 {
     private Task ready = Task.CompletedTask;
 
     public WorkspaceRegistry Registry { get; } = registry;
 
     public bool ReadOnly { get; } = readOnly;
+
+    public IReadOnlySet<string>? Advertised { get; } = advertised;
 
     public string? PreloadFailure { get; private set; }
 
@@ -21,24 +23,30 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
     internal void Preload(Task load) => ready = ObserveAsync(load);
 
     public async Task<string> WithSymbolAsync(
-        string? workspace,
-        string? symbolId,
-        Func<LoadedWorkspace, ISymbol, Task<string>> action,
-        CancellationToken cancellationToken)
+    string? workspace,
+    string? symbolId,
+    Func<LoadedWorkspace, ISymbol, Task<string>> action,
+    CancellationToken cancellationToken,
+    string? path = null)
     {
         if (symbolId is not { Length: > 0 } requested)
             return Errors.Blank("symbolId", "symbol").Render();
         await ready.ConfigureAwait(false);
         return await ToolBoundary.RunAsync(async () =>
         {
-            var resolved = await ResolveAsync(workspace, null, semantic: true, cancellationToken).ConfigureAwait(false);
+            var resolved = await ResolveAsync(workspace, path, semantic: true, cancellationToken).ConfigureAwait(false);
             if (!resolved.IsOk)
                 return resolved.Error!.Render();
             using var lease = resolved.Value!;
-            var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, cancellationToken).ConfigureAwait(false);
-            return symbol.IsOk
-                ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)
-                : symbol.Error!.Render();
+
+            return await AttributedAsync(lease.Workspace, async () =>
+            {
+                var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, path, cancellationToken).ConfigureAwait(false);
+
+                return symbol.IsOk
+                    ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)
+                    : symbol.Error!.Render();
+            }).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
     public Task<string> WithWorkspace(
@@ -50,11 +58,11 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         WithWorkspaceAsync(workspace, pathHint, loaded => Task.FromResult(action(loaded)), semantic, cancellationToken);
 
     public async Task<string> WithWorkspaceAsync(
-        string? workspace,
-        string? pathHint,
-        Func<LoadedWorkspace, Task<string>> action,
-        bool semantic = true,
-        CancellationToken cancellationToken = default)
+    string? workspace,
+    string? pathHint,
+    Func<LoadedWorkspace, Task<string>> action,
+    bool semantic = true,
+    CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
 
@@ -67,7 +75,9 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
 
             using var lease = resolved.Value!;
 
-            return await action(lease.Workspace).ConfigureAwait(false);
+            return semantic
+                ? await AttributedAsync(lease.Workspace, () => action(lease.Workspace)).ConfigureAwait(false)
+                : await action(lease.Workspace).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
 
@@ -183,5 +193,22 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly) : IDi
         }
 
         return [.. paths.Order(StringComparer.Ordinal)];
+    }
+
+    private static async Task<string> AttributedAsync(LoadedWorkspace loaded, Func<Task<string>> action)
+    {
+        if (loaded.CompilationsRealized)
+            return await action().ConfigureAwait(false);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var answer = await action().ConfigureAwait(false);
+
+        return loaded.CompilationsRealized
+            && !answer.StartsWith("ERROR", StringComparison.Ordinal)
+            && loaded.TakeRealizedNotice()
+            ? answer + string.Create(
+                CultureInfo.InvariantCulture,
+                $"\ncompilations=realized in {stopwatch.ElapsedMilliseconds}ms (once per load, not per call)")
+            : answer;
     }
 }

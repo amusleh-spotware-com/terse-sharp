@@ -288,4 +288,29 @@ public sealed class ClientRegistrarTests : IDisposable
         Assert.Null(await ClientRegistrar.RefreshAsync(TestContext.Current.CancellationToken));
         Assert.Equal(settings, await File.ReadAllTextAsync(SettingsFile, TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public void NeedsInstall_IsTrueForEveryAssetKindThatIsMissingOrStale()
+    {
+        var parameters = typeof(AssetState).GetConstructors().Single().GetParameters();
+
+        Assert.NotEmpty(parameters);
+        Assert.Equal(0, parameters.Length % 2);
+        Assert.All(parameters, parameter => Assert.Equal(typeof(bool), parameter.ParameterType));
+
+        for (var kind = 0; kind < parameters.Length / 2; kind++)
+        {
+            Assert.EndsWith("Installed", parameters[kind * 2].Name, StringComparison.Ordinal);
+            Assert.EndsWith("Current", parameters[(kind * 2) + 1].Name, StringComparison.Ordinal);
+            Assert.True(Assets(parameters.Length, index => index != kind * 2).NeedsInstall, parameters[kind * 2].Name);
+            Assert.True(Assets(parameters.Length, index => index != (kind * 2) + 1).NeedsInstall, parameters[(kind * 2) + 1].Name);
+        }
+
+        Assert.False(Assets(parameters.Length, _ => true).NeedsInstall);
+    }
+
+    private static AssetState Assets(int length, Func<int, bool> value) => (AssetState)typeof(AssetState)
+        .GetConstructors()
+        .Single()
+        .Invoke([.. Enumerable.Range(0, length).Select(index => (object)value(index))]);
 }

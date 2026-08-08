@@ -92,4 +92,33 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
 
     private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task ARollback_NamesARetryTokenThatHoldsTheRejectedDeclaration()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => MissingHelperThatDoesNotExist();",
+        });
+
+        var token = Token(rejected);
+        var retried = await CallAsync("replace_symbol", new() { ["retryWith"] = token, ["dryRun"] = true });
+        var unknown = await CallAsync("replace_symbol", new() { ["retryWith"] = "r9999" });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains("retryWith=", rejected, StringComparison.Ordinal);
+        Assert.Contains("MissingHelperThatDoesNotExist", retried, StringComparison.Ordinal);
+        Assert.Contains("ERROR", unknown, StringComparison.Ordinal);
+        Assert.Contains("names no held rejection", unknown, StringComparison.Ordinal);
+    }
+
+    private static string Token(string rejection)
+    {
+        var marker = rejection.IndexOf("retryWith=", StringComparison.Ordinal) + "retryWith=".Length;
+        var tail = rejection.AsSpan(marker);
+        var end = tail.IndexOfAny(" \r\n");
+
+        return new string(end < 0 ? tail : tail[..end]);
+    }
 }

@@ -84,9 +84,14 @@ public static class TextSearchService
         return Result.Ok(matched);
     }
 
-    public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults, bool stamps)
+    public static string FindFiles(
+    LoadedWorkspace workspace,
+    string glob,
+    int maxResults,
+    bool stamps,
+    IReadOnlySet<string>? tracked = null)
     {
-        var files = Matched(workspace, glob);
+        var files = Tracked(Matched(workspace, glob), tracked);
         var response = new ResponseBuilder("find_files", glob);
         response.Summary(ResultCap.Shown(files.Count, maxResults), files.Count, "files", "a narrower glob= or maxResults=");
         foreach (var file in files.Capped(maxResults))
@@ -514,6 +519,22 @@ public static class TextSearchService
         foreach (var file in files)
         {
             if (!matcher.MatchesRelative(file.RelativePath))
+                kept.Add(file);
+        }
+
+        return kept;
+    }
+
+    private static List<WorkspacePath> Tracked(List<WorkspacePath> files, IReadOnlySet<string>? tracked)
+    {
+        if (tracked is null)
+            return files;
+
+        var kept = new List<WorkspacePath>(files.Count);
+
+        foreach (var file in files)
+        {
+            if (tracked.Contains(file.RelativePath))
                 kept.Add(file);
         }
 

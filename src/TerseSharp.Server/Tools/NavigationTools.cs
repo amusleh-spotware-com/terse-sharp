@@ -35,51 +35,55 @@ public sealed class NavigationTools(ToolContext context)
         cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "get_type_outline")]
-    [Description("Every member of one type with signatures and line ranges, without the bodies. parameterNames=false prints parameter types without their names, which is about an eighth of the response.")]
+    [Description("Every member of one type with signatures and line ranges, without the bodies. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetTypeOutline(
-    [Description("Symbol id of the type.")] string? symbolId = null,
-    [Description("Include member signatures. false gives ids and line ranges only.")] bool signatures = true,
-    [Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Alias for symbolId.")] string? symbol = null,
-    [Description("Print parameter names alongside their types. Default true; false keeps the types and drops the names.")] bool parameterNames = true,
-    CancellationToken cancellationToken = default) =>
-    context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) =>
-        Unwrap(await OutlineService.TypeAsync(loaded, resolved, signatures, ids ?? "short", cancellationToken, parameterNames).ConfigureAwait(false)),
-        cancellationToken);
+[Description("Symbol id of the type.")] string? symbolId = null,
+[Description("Include member signatures. false gives ids and line ranges only.")] bool signatures = true,
+[Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
+[Description("Workspace or worktree name.")] string? workspace = null,
+[Description("Alias for symbolId.")] string? symbol = null,
+[Description("Print parameter names alongside their types. Default true; false keeps the types and drops the names.")] bool parameterNames = true,
+[Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
+CancellationToken cancellationToken = default) =>
+context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) =>
+    Unwrap(await OutlineService.TypeAsync(loaded, resolved, signatures, ids ?? "short", cancellationToken, parameterNames).ConfigureAwait(false)),
+    cancellationToken,
+    path);
 
     [McpServerTool(Name = "get_symbol")]
-    [Description("Signature, kind, accessibility, location and XML doc of one symbol.")]
+    [Description("Signature, kind, accessibility, location and XML doc of one symbol. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetSymbol(
-        [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Return the XML documentation verbatim and echo the request. Default false.")] bool verbose = false,
-        [Description("Alias for symbolId.")] string? symbol = null,
-        CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-            Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken);
+    [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Return the XML documentation verbatim and echo the request. Default false.")] bool verbose = false,
+    [Description("Alias for symbolId.")] string? symbol = null,
+    [Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
+    CancellationToken cancellationToken = default) =>
+    context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+        Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken, path);
 
     [McpServerTool(Name = "get_symbol_source")]
-    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. Pass symbolIds to get several members in one response, each id that does not resolve reported inline as NOT_RESOLVED rather than failing the call. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
+    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. Pass symbolIds to get several members in one response, each id that does not resolve reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
     public Task<string> GetSymbolSource(
-    [Description("Symbol id of the member.")] string? symbolId = null,
-    [Description("Several symbol ids returned in one response. Replaces one call per member.")] string[]? symbolIds = null,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
-    [Description("Alias for symbolId.")] string? symbol = null,
-    [Description("Include doc comments and inline comments. Default true; false drops them, which is the cheap read when you only need the shape.")] bool comments = true,
-    CancellationToken cancellationToken = default) =>
-    SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(verbose, comments), cancellationToken);
+[Description("Symbol id of the member.")] string? symbolId = null,
+[Description("Several symbol ids returned in one response. Replaces one call per member.")] string[]? symbolIds = null,
+[Description("Workspace or worktree name.")] string? workspace = null,
+[Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
+[Description("Alias for symbolId.")] string? symbol = null,
+[Description("Include doc comments and inline comments. Default true; false drops them, which is the cheap read when you only need the shape.")] bool comments = true,
+[Description("File the names live in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
+CancellationToken cancellationToken = default) =>
+SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(verbose, comments), path, cancellationToken);
 
-    private Task<string> SourceOf(string[] requested, string? workspace, SourceFormat format, CancellationToken cancellationToken) => requested switch
+    private Task<string> SourceOf(string[] requested, string? workspace, SourceFormat format, string? path, CancellationToken cancellationToken) => requested switch
     {
         [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
         [var only] => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
-            Unwrap(await SourceService.OfSymbolAsync(loaded.Root, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken),
+            Unwrap(await SourceService.OfSymbolAsync(loaded.Root, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken, path),
         _ => context.WithWorkspaceAsync(
             workspace,
-            null,
-            loaded => SourceService.OfSymbolsAsync(loaded, requested[..Math.Min(requested.Length, MaxBatchedSymbols)], format, cancellationToken),
+            path,
+            loaded => SourceService.OfSymbolsAsync(loaded, requested[..Math.Min(requested.Length, MaxBatchedSymbols)], format, cancellationToken, path),
             cancellationToken: cancellationToken),
     };
 
