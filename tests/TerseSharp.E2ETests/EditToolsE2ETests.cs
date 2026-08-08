@@ -262,14 +262,18 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
         var before = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
         var written = File.GetLastWriteTimeUtc(path);
+        var arguments = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["content"] = before,
+            ["force"] = true,
+        };
+
         try
         {
-            var text = await server.CallAsync("write_text", new()
-            {
-                ["path"] = "src/Fixture.Trading/OrderService.cs",
-                ["content"] = before,
-                ["force"] = true,
-            });
+            await server.CallAsync("write_text", arguments);
+
+            var text = await server.CallAsync("write_text", arguments);
 
             Assert.Equal(before, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
             Assert.Contains("0 files changed", text, StringComparison.Ordinal);
@@ -277,6 +281,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         }
         finally
         {
+            await File.WriteAllTextAsync(path, before, TestContext.Current.CancellationToken);
             File.SetLastWriteTimeUtc(path, written);
         }
     }
