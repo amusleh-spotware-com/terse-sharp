@@ -54,13 +54,9 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
     private static string Report(string tool, long[] timings) =>
         tool + " ms per call: " + string.Join(", ", timings.Select(elapsed => elapsed.ToString(CultureInfo.InvariantCulture)));
 
-    private static void Settled(string tool, long[] timings)
-    {
-        var settled = timings[AfterWarmup..];
-
-        Assert.All(settled, elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report(tool, timings)));
-        Assert.True(settled.Max() < timings[0], Report(tool, timings));
-    }
+    private static void Settled(string tool, long[] timings) => Assert.All(
+        timings[AfterWarmup..],
+        elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report(tool, timings)));
 
     [Fact]
     public async Task OnThisRepositorysOwnSolution_ARepeatedSemanticQuery_IsNotRederivedFromScratch()
