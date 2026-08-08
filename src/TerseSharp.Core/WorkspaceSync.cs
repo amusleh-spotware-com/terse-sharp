@@ -263,13 +263,25 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         if (Find(solution, path) is not { } document)
         {
             stamps[path] = stamp;
+
             return Absent(solution, path, stamp);
         }
 
         if (stamp == FileStamp.Missing)
             return Rebuild(solution);
 
-        var merged = await ReplaceAsync(document, changed, cancellationToken).ConfigureAwait(false);
+        Solution merged;
+        try
+        {
+            merged = await ReplaceAsync(document, changed, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            Requeue(path);
+
+            return solution;
+        }
+
         if (FileStamp.Of(path) == stamp)
             stamps[path] = stamp;
 
@@ -336,13 +348,10 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     private void Restore(string[] paths)
     {
         foreach (var path in paths)
-        {
-            stamps.TryRemove(path, out _);
-            pending[path] = 0;
-        }
+            Requeue(path);
     }
     private bool Countable(ChangeKind kind) =>
-        kind is ChangeKind.Xaml or ChangeKind.Resx or ChangeKind.Razor || !Reloading;
+                kind is ChangeKind.Xaml or ChangeKind.Resx or ChangeKind.Razor || !Reloading;
 
     internal void Bumped(ChangeKind kind)
     {
@@ -374,14 +383,17 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
             return false;
 
         foreach (var path in changed)
-        {
-            stamps.TryRemove(path, out _);
-            pending[path] = 0;
-        }
+            Requeue(path);
 
         return true;
     }
 
     private bool Stable(string path) =>
         stamps.TryGetValue(path, out var stamp) && stamp == FileStamp.Of(path);
+
+    private void Requeue(string path)
+    {
+        stamps.TryRemove(path, out _);
+        pending[path] = 0;
+    }
 }

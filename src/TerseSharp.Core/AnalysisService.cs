@@ -180,10 +180,10 @@ public static class AnalysisService
                     documents.Select(id => workspace.Solution.GetDocument(id)?.FilePath).OfType<string>());
 
     private static TerseError Empty(string? path, bool changed) => changed
-            ? Errors.Invalid(
-                "no document under that scope was modified since the workspace loaded",
-                "drop changed=true to analyze the whole scope")
-            : Errors.DocumentNotFound(path ?? "solution");
+        ? Errors.Invalid(
+            "no document under that scope was modified since this workspace started tracking changes",
+            "drop changed=true to analyze the whole scope, or pass path= to name the files yourself")
+        : Errors.DocumentNotFound(path ?? "solution");
 }
 
 public static class DiagnosticFormat

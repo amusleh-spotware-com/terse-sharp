@@ -19,6 +19,9 @@ var guard = new Command("guard", "Hook entry point: reads a Claude Code PreToolU
 var install = new Command("install", "Register TerseSharp with your MCP clients.") { clientOption, workspaceOption, skillOption, guardOption };
 var uninstall = new Command("uninstall", "Remove TerseSharp from your MCP clients.") { clientOption };
 var doctor = new Command("doctor", "Verify SDK, MSBuild, client registration and workspace load.") { workspaceOption };
+var toolArgument = new Argument<string>("tool") { Description = "MCP tool name, e.g. get_file_outline." };
+var jsonOption = new Option<string?>("--json") { Description = "Tool arguments as a JSON object, e.g. '{\"path\": \"src/App.cs\"}'. Omit for none." };
+var call = new Command("call", "Call one MCP tool of this binary from the shell and print its response, so a claim about a freshly built terse can be tested without hand-writing JSON-RPC.") { toolArgument, workspaceOption, jsonOption };
 
 serve.SetAction((result, cancellationToken) =>
     McpHost.RunAsync(
@@ -49,6 +52,14 @@ guard.SetAction((_, cancellationToken) =>
 uninstall.SetAction(async result =>
     Console.WriteLine(await ClientRegistrar.Unregister(result.GetValue(clientOption)).ConfigureAwait(false)));
 
+call.SetAction((result, cancellationToken) =>
+    ToolCall.RunAsync(
+        result.GetValue(toolArgument)!,
+        result.GetValue(workspaceOption),
+        result.GetValue(jsonOption),
+        Console.Out,
+        cancellationToken));
+
 doctor.SetAction(async (result, cancellationToken) =>
     Console.WriteLine(await Doctor.RunAsync(result.GetValue(workspaceOption), cancellationToken).ConfigureAwait(false)));
 
@@ -59,6 +70,7 @@ var root = new RootCommand("TerseSharp - token-efficient Roslyn MCP server for C
     install,
     uninstall,
     doctor,
+    call,
 };
 
 string[] rootOptions = ["--version", "--help", "-h", "-?", "/?"];

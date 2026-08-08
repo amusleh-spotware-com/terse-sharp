@@ -1,8 +1,12 @@
+using System.Diagnostics;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
 public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
 {
+    private static readonly TimeSpan IndexBudget = TimeSpan.FromSeconds(60);
+
     [Fact]
     public async Task ReadText_WithStartAfterEnd_ReturnsNoLinesRatherThanFailing()
     {
@@ -373,11 +377,11 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
     public async Task SearchText_SkipsAFileTooLargeToScanAndSaysHowMany()
     {
         var path = Path.Combine(TerseServerFixture.FixtureRoot, "terse-huge.txt");
-
         await File.WriteAllTextAsync(path, new string('q', 17 * 1024 * 1024), TestContext.Current.CancellationToken);
-
         try
         {
+            await IndexedAsync("terse-huge.txt");
+
             var text = await server.CallAsync("search_text", new() { ["pattern"] = "qqqq", ["glob"] = "*.txt" });
 
             Assert.Contains("skipped 1 files over 16 MB", text, StringComparison.Ordinal);
@@ -387,5 +391,25 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         {
             File.Delete(path);
         }
+    }
+
+    private async Task IndexedAsync(string name)
+    {
+        var elapsed = Stopwatch.StartNew();
+        var listing = string.Empty;
+
+        while (elapsed.Elapsed < IndexBudget)
+        {
+            listing = await server.CallAsync("find_files", new() { ["glob"] = "*.txt" });
+
+            if (listing.Contains(name, StringComparison.Ordinal))
+                return;
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+
+        Assert.Fail(string.Create(
+            CultureInfo.InvariantCulture,
+            $"'{name}' never reached the workspace file index within {elapsed.Elapsed.TotalSeconds:F0}s of a {IndexBudget.TotalSeconds:F0}s budget; find_files last answered: {listing}"));
     }
 }

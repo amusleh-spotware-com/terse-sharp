@@ -4,7 +4,8 @@ internal readonly record struct WorkspaceSeed(
     WorkspaceGenerations Generations,
     bool Watch,
     string? UndoNote,
-    string? TargetFramework = null)
+    string? TargetFramework = null,
+    DateTimeOffset? ChangedSinceUtc = null)
 {
     public static WorkspaceSeed Fresh(bool watch) => new(default, watch, null);
 

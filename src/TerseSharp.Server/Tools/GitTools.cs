@@ -8,16 +8,17 @@ public sealed class GitTools(ToolContext context)
     private const int MaxDiffLines = 400;
 
     [McpServerTool(Name = "changed_files")]
-    [Description("Replaces Bash git status and git diff --stat. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files.")]
+    [Description("Replaces Bash git status and git diff --stat. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files, and path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do.")]
     public Task<string> ChangedFiles(
         [Description("Commit, branch or range to compare against, e.g. main or HEAD~3. Empty compares the working tree against HEAD.")] string? baseRef = null,
+        [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
         [Description("Max results (200).")] int maxResults = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(
             workspace,
-            null,
-            loaded => ListAsync(loaded, baseRef, NavigationTools.Cap(maxResults, 200), cancellationToken),
+            path,
+            loaded => ListAsync(loaded, baseRef, path, NavigationTools.Cap(maxResults, 200), cancellationToken),
             semantic: false,
             cancellationToken);
 
@@ -53,15 +54,16 @@ public sealed class GitTools(ToolContext context)
     private static async Task<string> ListAsync(
         LoadedWorkspace workspace,
         string? baseRef,
+        string? path,
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var numstat = await GitRunner.ReadAsync(workspace.Root, Arguments(["diff", "--numstat"], baseRef, null), cancellationToken).ConfigureAwait(false);
+        var numstat = await GitRunner.ReadAsync(workspace.Root, Arguments(["diff", "--numstat"], baseRef, path), cancellationToken).ConfigureAwait(false);
 
         if (!numstat.IsOk)
             return numstat.Error!.Render();
 
-        var status = await GitRunner.ReadAsync(workspace.Root, Arguments(["diff", "--name-status"], baseRef, null), cancellationToken).ConfigureAwait(false);
+        var status = await GitRunner.ReadAsync(workspace.Root, Arguments(["diff", "--name-status"], baseRef, path), cancellationToken).ConfigureAwait(false);
 
         if (!status.IsOk)
             return status.Error!.Render();
@@ -70,7 +72,7 @@ public sealed class GitTools(ToolContext context)
             ? Result.Ok(string.Empty)
             : await GitRunner.ReadAsync(
                 workspace.Root,
-                ["--no-optional-locks", "ls-files", "--others", "--exclude-standard", "--", "."],
+                ["--no-optional-locks", "ls-files", "--others", "--exclude-standard", "--", path is { Length: > 0 } pathspec ? pathspec : "."],
                 cancellationToken).ConfigureAwait(false);
 
         return untracked.IsOk
@@ -99,7 +101,7 @@ public sealed class GitTools(ToolContext context)
 
         var response = new ResponseBuilder("changed_files", string.Empty);
 
-        response.Summary(ResultCap.Shown(lines.Count, maxResults), lines.Count, "files", "baseRef= or maxResults=");
+        response.Summary(ResultCap.Shown(lines.Count, maxResults), lines.Count, "files", "path=, baseRef= or maxResults=");
 
         foreach (var line in lines.Capped(maxResults))
             response.Line(line);

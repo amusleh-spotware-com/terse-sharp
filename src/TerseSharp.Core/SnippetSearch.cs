@@ -11,17 +11,17 @@ public static class SnippetSearch
 
     private const int MinSharedPrefix = 6;
 
-    public static SnippetMatch Find(string haystack, string needle)
+    public static SnippetMatch Find(string haystack, string needle, int occurrence)
     {
         if (needle.Length is 0)
             return default;
 
-        var exact = Locate(haystack, needle);
+        var exact = Locate(haystack, needle, occurrence);
 
-        return exact.Occurrences is 0 ? Relaxed(haystack, needle) : exact;
+        return exact.Occurrences is 0 ? Relaxed(haystack, needle, occurrence) : exact;
     }
 
-    public static int Count(ReadOnlySpan<char> text, ReadOnlySpan<char> value) => Locate(text, value).Occurrences;
+    public static int Count(ReadOnlySpan<char> text, ReadOnlySpan<char> value) => Locate(text, value, 1).Occurrences;
 
     public static IReadOnlyList<string> NearMisses(string haystack, string needle, int maxResults)
     {
@@ -44,7 +44,7 @@ public static class SnippetSearch
         return hits;
     }
 
-    private static SnippetMatch Relaxed(string haystack, string needle)
+    private static SnippetMatch Relaxed(string haystack, string needle, int occurrence)
     {
         var text = LineEndings.Normalize(haystack);
         var value = LineEndings.Normalize(needle);
@@ -52,9 +52,9 @@ public static class SnippetSearch
         if (ReferenceEquals(text, haystack) && ReferenceEquals(value, needle))
             return new SnippetMatch(-1, needle.Length, 0, false);
 
-        var found = Locate(text, value);
+        var found = Locate(text, value, occurrence);
 
-        return found.IsUnique ? Mapped(haystack, found) : found with { Normalized = true };
+        return found.Start >= 0 ? Mapped(haystack, found) : found with { Normalized = true };
     }
 
     private static SnippetMatch Mapped(string haystack, SnippetMatch found)
@@ -62,25 +62,26 @@ public static class SnippetSearch
         var start = LineEndings.OriginalOffset(haystack, found.Start);
         var end = LineEndings.OriginalOffset(haystack, found.Start + found.Length);
 
-        return new SnippetMatch(start, end - start, 1, true);
+        return new SnippetMatch(start, end - start, found.Occurrences, true);
     }
 
-    private static SnippetMatch Locate(ReadOnlySpan<char> text, ReadOnlySpan<char> value)
+    private static SnippetMatch Locate(ReadOnlySpan<char> text, ReadOnlySpan<char> value, int occurrence)
     {
         var occurrences = 0;
-        var first = -1;
+        var chosen = -1;
         var start = 0;
 
         while (start <= text.Length && text[start..].IndexOf(value, StringComparison.Ordinal) is var offset and >= 0)
         {
-            if (occurrences is 0)
-                first = start + offset;
-
             occurrences++;
+
+            if (occurrences == occurrence)
+                chosen = start + offset;
+
             start += offset + value.Length;
         }
 
-        return new SnippetMatch(first, value.Length, occurrences, false);
+        return new SnippetMatch(chosen, value.Length, occurrences, false);
     }
 
     private static string Anchor(string needle)

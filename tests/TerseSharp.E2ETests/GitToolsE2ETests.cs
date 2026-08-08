@@ -100,6 +100,29 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Equal(-1, files[0].Deleted);
         Assert.Equal(3, files[1].Added);
     }
+
+    [Fact]
+    public async Task ChangedFiles_WithAPath_ListsOnlyWhatThatPathspecCovers()
+    {
+        const string Probe = "terse-changed-files-probe.txt";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "probe\n" });
+        try
+        {
+            var everything = await server.CallAsync("changed_files", []);
+            var scoped = await server.CallAsync("changed_files", new() { ["path"] = "src" });
+            var named = await server.CallAsync("changed_files", new() { ["path"] = Probe });
+
+            Assert.Contains(Probe, everything, StringComparison.Ordinal);
+            Assert.DoesNotContain(Probe, scoped, StringComparison.Ordinal);
+            Assert.Contains("0 files", scoped, StringComparison.Ordinal);
+            Assert.Contains(Probe, named, StringComparison.Ordinal);
+            Assert.Contains("1 files", named, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }
 
 internal static class DiffSymbolProbe

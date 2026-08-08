@@ -75,9 +75,7 @@ public sealed class FormatServiceTests
     public async Task Format_WithChangedOnly_AndNothingTouchedSinceLoad_RefusesInsteadOfSweepingEverything()
     {
         using var registry = new WorkspaceRegistry();
-
         await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
-
         using var lease = registry.Resolve(null, null).Value!;
 
         var result = await FormatService.RunAsync(
@@ -88,6 +86,7 @@ public sealed class FormatServiceTests
             TestContext.Current.CancellationToken);
 
         Assert.False(result.IsOk);
-        Assert.Contains("modified since the workspace loaded", result.Error!.Message, StringComparison.Ordinal);
+        Assert.Contains("no document under that scope was modified", result.Error!.Message, StringComparison.Ordinal);
+        Assert.Contains("path=", result.Error!.Remedy, StringComparison.Ordinal);
     }
 }

@@ -365,26 +365,25 @@ public sealed class WorkspaceSyncTests
         ["OrderService.cs", "Order.cs", "OrderBook.cs", "OrderRouter.cs", "Reconciler.cs"];
 
     [Fact]
-    public async Task SyncAsync_WhenTheDrainFails_ForgetsTheStampsItTook()
+    public async Task SyncAsync_WhenOneFileDeniesTheRead_AbsorbsTheRestAndRequeuesIt()
     {
         using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
         await loaded.MaterialiseAsync(TestContext.Current.CancellationToken);
-
         foreach (var blocked in Absorbable)
         {
-            var marker = Marker("AbsorbedAfterFailure", Array.IndexOf(Absorbable, blocked));
+            var marker = Marker("AbsorbedDespiteTheLock", Array.IndexOf(Absorbable, blocked));
             await NoticeAllAsync(loaded, marker);
-
             using (new FileStream(Sourced(loaded, blocked), FileMode.Open, FileAccess.Read, FileShare.None))
             {
-                await Assert.ThrowsAnyAsync<IOException>(
-                    () => loaded.SyncAsync(null, TestContext.Current.CancellationToken));
+                await loaded.SyncAsync(null, TestContext.Current.CancellationToken);
+                foreach (var name in Absorbable.Where(name => name != blocked))
+                    Assert.Contains(marker, await TextOfAsync(loaded, name), StringComparison.Ordinal);
+
+                Assert.DoesNotContain(marker, await TextOfAsync(loaded, blocked), StringComparison.Ordinal);
             }
 
-            await SettleAllAsync(loaded);
-
-            foreach (var name in Absorbable)
-                Assert.Contains(marker, await TextOfAsync(loaded, name), StringComparison.Ordinal);
+            await loaded.SyncAsync(null, TestContext.Current.CancellationToken);
+            Assert.Contains(marker, await TextOfAsync(loaded, blocked), StringComparison.Ordinal);
         }
     }
 
@@ -398,13 +397,6 @@ public sealed class WorkspaceSyncTests
             await AppendAsync(Sourced(loaded, name), marker);
             loaded.Sync.Notice(Sourced(loaded, name));
         }
-    }
-    private static async Task SettleAllAsync(TemporaryWorkspace loaded)
-    {
-        foreach (var name in Absorbable)
-            loaded.Sync.Notice(Sourced(loaded, name));
-
-        await loaded.SyncAsync(null, TestContext.Current.CancellationToken);
     }
     private static string Marker(string kind, int round) =>
         string.Create(CultureInfo.InvariantCulture, $"// {kind}{round}\n");

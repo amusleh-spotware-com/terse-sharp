@@ -23,7 +23,7 @@ public sealed class ShadowCopyAnalyzerLoaderTests
         "Fixture.Generator.dll");
 
     [Fact]
-    public async Task ReboundSolution_AfterRunningTheAnalyzer_LeavesTheOriginalAssemblyWritable()
+    public async Task ReboundSolution_AfterRunningTheAnalyzer_LeavesTheOriginalAssemblyUnmapped()
     {
         await EnsureBuiltAsync();
 
@@ -39,7 +39,7 @@ public sealed class ShadowCopyAnalyzerLoaderTests
         var diagnostics = await AnalyzerDiagnosticsAsync(Consumer(forked));
 
         Assert.Contains(diagnostics, diagnostic => diagnostic.Id is "FIX001");
-        Assert.True(Writable(), "the rebound solution still mapped the analyzer assembly in place");
+        Assert.Empty(MappedAnalyzers.Of(forked));
     }
 
     private static async Task EnsureBuiltAsync()

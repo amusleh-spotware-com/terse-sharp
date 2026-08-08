@@ -392,4 +392,48 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.True(Tokens(bounded) < 300, Report("read_text maxChars", bounded));
         Assert.True(bounded.Length < 1200, $"{bounded.Length} characters for a 500-character budget");
     }
+
+    [Fact]
+    public async Task SearchText_WithExclude_CostsStrictlyLessThanTheUnfilteredSearch()
+    {
+        var all = await server.CallAsync("search_text", new() { ["query"] = "namespace Fixture", ["glob"] = "**/*.cs" });
+        var kept = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "namespace Fixture",
+            ["glob"] = "**/*.cs",
+            ["exclude"] = "**/Views/**",
+        });
+
+        Assert.True(Tokens(kept) < Tokens(all), Report("search_text exclude", kept, all));
+        Assert.DoesNotContain("Views", kept, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithStamps_CostsNoMoreThanTwiceThePlainListing()
+    {
+        var plain = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs" });
+        var stamped = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["stamps"] = true });
+
+        Assert.True(Tokens(stamped) > Tokens(plain), Report("find_files stamps", stamped, plain));
+        Assert.True(Tokens(stamped) < Tokens(plain) * 2, Report("find_files stamps", stamped, plain));
+    }
+
+    [Fact]
+    public async Task ReadText_OnTheWidestFile_StaysWithinTheInlineableDefaultBudget()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "wide-lines.json" });
+
+        Assert.True(
+            text.Length <= 40960 + 4096,
+            $"{text.Length} characters — a default read must stay inlineable, not spill to a tool-results file");
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithAPath_CostsNoMoreThanTheUnscopedListing()
+    {
+        var everything = await server.CallAsync("changed_files", []);
+        var scoped = await server.CallAsync("changed_files", new() { ["path"] = "src" });
+
+        Assert.True(Tokens(scoped) <= Tokens(everything), Report("changed_files path", scoped, everything));
+    }
 }

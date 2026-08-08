@@ -27,20 +27,18 @@ public static class TextSearchService
         TextSearchRequest request,
         CancellationToken cancellationToken)
     {
-        var files = Matched(workspace, request.Glob).Where(IsSearchableFile).ToList();
+        var files = Kept([.. Matched(workspace, request.Glob).Where(IsSearchableFile)], request.Exclude);
 
         return await ScannedAsync(files, request, cancellationToken).ConfigureAwait(false);
     }
-
     public static async Task<string> SearchOutsideAsync(TextSearchRequest request, CancellationToken cancellationToken)
     {
         var candidates = Outside(request.Root ?? string.Empty, request.Glob);
 
         return candidates.IsOk
-            ? await ScannedAsync(candidates.Value!, request, cancellationToken).ConfigureAwait(false)
+            ? await ScannedAsync(Kept(candidates.Value!, request.Exclude), request, cancellationToken).ConfigureAwait(false)
             : candidates.Error!.Render();
     }
-
     private static async Task<string> ScannedAsync(
         List<WorkspacePath> files,
         TextSearchRequest request,
@@ -86,15 +84,13 @@ public static class TextSearchService
         return Result.Ok(matched);
     }
 
-    public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults)
+    public static string FindFiles(LoadedWorkspace workspace, string glob, int maxResults, bool stamps)
     {
         var files = Matched(workspace, glob);
         var response = new ResponseBuilder("find_files", glob);
-
         response.Summary(ResultCap.Shown(files.Count, maxResults), files.Count, "files", "a narrower glob= or maxResults=");
-
         foreach (var file in files.Capped(maxResults))
-            response.Line(file.RelativePath);
+            response.Line(stamps ? Stamped(file) : file.RelativePath);
 
         return response.ToString();
     }
@@ -495,5 +491,32 @@ public static class TextSearchService
             return Encoding.BigEndianUnicode.GetString(content[Utf16BigEndianBom.Length..]);
 
         return Encoding.UTF8.GetString(content.StartsWith(Utf8Bom) ? content[Utf8Bom.Length..] : content);
+    }
+
+    private static string Stamped(WorkspacePath file)
+    {
+        var stamp = FileStamp.Of(file.FullPath);
+
+        return stamp == FileStamp.Missing
+            ? string.Create(CultureInfo.InvariantCulture, $"{file.RelativePath}  MISSING")
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"{file.RelativePath}  {new DateTime(stamp.Ticks, DateTimeKind.Utc):yyyy-MM-ddTHH:mm:ssZ}  {stamp.Length}");
+    }
+
+    private static List<WorkspacePath> Kept(List<WorkspacePath> files, string? exclude)
+    {
+        if (exclude is not { Length: > 0 })
+            return files;
+
+        var matcher = FileGlob.Compile(exclude);
+        var kept = new List<WorkspacePath>(files.Count);
+        foreach (var file in files)
+        {
+            if (!matcher.MatchesRelative(file.RelativePath))
+                kept.Add(file);
+        }
+
+        return kept;
     }
 }

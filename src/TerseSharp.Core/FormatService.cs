@@ -196,7 +196,7 @@ public static class FormatService
 
     private static TerseError Empty(FixScope scope) => scope.ChangedOnly
         ? Errors.Invalid(
-            "no document under that scope was modified since the workspace loaded",
-            "drop changed=true to sweep the whole scope")
+            "no document under that scope was modified since this workspace started tracking changes",
+            "drop changed=true to sweep the whole scope, or pass path= to name the files yourself")
         : Errors.DocumentNotFound(scope.Path ?? "solution");
 }

@@ -210,7 +210,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         var reloaded = await ReloadAsync(target.SolutionPath, cancellationToken).ConfigureAwait(false);
 
         return second.Response
-            + (second.Locked ? StillLocked(operation) : Recovered(operation))
+            + (second.Locked ? StillLocked(operation, second.Response) : Recovered(operation))
             + (reloaded ? string.Empty : ReloadFailed);
     }
 
@@ -218,9 +218,14 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CultureInfo.InvariantCulture,
         $"\nNOTE the workspace held MSBuild file locks; it was unloaded, the {operation} retried, and the workspace reloaded. Symbol ids are unchanged; undo_last_change history was discarded.");
 
-    private static string StillLocked(string operation) => string.Create(
-    CultureInfo.InvariantCulture,
-    $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked, so something outside this server holds it. Analyzer and source-generator assemblies are loaded from a shadow copy under the temp directory and never map a project's own output, so this is not the workspace. Stop whatever else holds the file - this server is pid {Environment.ProcessId} - then try again.");
+    internal static string StillLocked(string operation, string output)
+    {
+        var holders = LockHolders.Describe(output);
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. The one holder ruled out is the analyzer and source-generator set, which is mapped from a shadow copy under the temp directory and never from a project's own output; everything else is still in play, including an MSBuild BuildHost this or an earlier terse load spawned out of this tree's own bin/. This server is pid {Environment.ProcessId}. {(holders.Length is 0 ? "The build named no holding process, so nothing below identifies one - list the holders yourself before stopping anything." : "Resolve each holder below before stopping it.")}{holders}");
+    }
 
     private static string NotRecovered(string operation) => string.Create(
         CultureInfo.InvariantCulture,

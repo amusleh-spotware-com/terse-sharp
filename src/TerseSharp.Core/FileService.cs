@@ -7,6 +7,8 @@ public static class FileService
 {
     public const int MaxResponseCharacters = 128 * 1024;
 
+    public const int DefaultResponseCharacters = 40 * 1024;
+
     private const int MaxNearMisses = 3;
 
     public static Task<Result<string>> ReadTextAsync(
@@ -88,17 +90,18 @@ public static class FileService
 
     private static Result<string> Rewrite(string before, EditRequest request) => request.Section is { Length: > 0 } section
         ? Section(before, section, request.NewText)
-        : Snippet(before, request.OldText, request.NewText);
+        : Snippet(before, request.OldText, request.NewText, request.Occurrence);
 
-    private static Result<string> Snippet(string before, string oldText, string newText)
+    private static Result<string> Snippet(string before, string oldText, string newText, int occurrence)
     {
         if (oldText.Length is 0)
             return Result.Fail<string>(Errors.Blank("oldText"));
 
-        var match = SnippetSearch.Find(before, oldText);
+        var match = SnippetSearch.Find(before, oldText, occurrence > 0 ? occurrence : 1);
+        var selected = occurrence > 0 ? match.Start >= 0 : match.IsUnique;
 
-        if (!match.IsUnique)
-            return Result.Fail<string>(NoMatch(before, oldText, match));
+        if (!selected)
+            return Result.Fail<string>(NoMatch(before, oldText, match, occurrence));
 
         var ending = LineEndings.Dominant(before);
 
@@ -140,13 +143,29 @@ public static class FileService
         return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose));
     }
 
-    private static TerseError NoMatch(string before, string oldText, SnippetMatch match) => match.Occurrences > 1
-        ? Errors.Invalid(
-            string.Create(CultureInfo.InvariantCulture, $"oldText matched {match.Occurrences} times, expected exactly 1"),
-            "include more surrounding text so the match is unique, or pass section= for a markdown heading")
-        : Errors.Invalid(
-            "oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)",
-            Nearest(before, oldText));
+    private static TerseError NoMatch(string before, string oldText, SnippetMatch match, int occurrence)
+    {
+        if (occurrence > 0)
+        {
+            return Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"occurrence={occurrence} does not exist: oldText matched {match.Occurrences} times"),
+                match.Occurrences is 0
+                    ? "drop occurrence= and fix oldText first; " + Nearest(before, oldText)
+                    : string.Create(CultureInfo.InvariantCulture, $"pass an occurrence between 1 and {match.Occurrences}"));
+        }
+
+        return match.Occurrences > 1
+            ? Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"oldText matched {match.Occurrences} times, expected exactly 1"),
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"pass occurrence=1..{match.Occurrences} to pick one, include more surrounding text so the match is unique, or pass section= for a markdown heading"))
+            : Errors.Invalid(
+                "oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)",
+                MatchesDedented(before, oldText)
+                    ? "it matches once indentation and blank lines are ignored, so it was pasted from a dedented, blank-stripped payload such as get_symbol_source - address a .cs member with replace_symbol_body or replace_symbol, and re-read anything else with read_text verbose=true"
+                    : Nearest(before, oldText));
+    }
 
     private static string Nearest(string before, string oldText) =>
         SnippetSearch.NearMisses(before, oldText, MaxNearMisses) is { Count: > 0 } hits
@@ -360,11 +379,11 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0);
 
-    public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = MaxResponseCharacters)
+    public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters)
     {
-        public int Budget => MaxChars > 0 ? MaxChars : MaxResponseCharacters;
+        public int Budget => MaxChars > 0 ? MaxChars : DefaultResponseCharacters;
 
         public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
     }
@@ -407,7 +426,9 @@ public static class FileService
         if (!SourceFile.IsCSharp(path) || DocumentLookup.Find(workspace, path) is not { } document)
             return null;
 
-        var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, Encoding.UTF8));
+        var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
+        var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, encoding));
         var options = new EditOptions("write_text", dryRun, allowErrors, verbose);
 
         return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
@@ -527,5 +548,25 @@ public static class FileService
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"startLine={range.Start} is past the last line (total={selection.TotalLines})"));
+    }
+
+    private static string Dedented(string text)
+    {
+        var builder = new StringBuilder(text.Length);
+        foreach (var line in text.AsSpan().EnumerateLines())
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.IsEmpty)
+                builder.Append(trimmed).Append('\n');
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool MatchesDedented(string before, string oldText)
+    {
+        var needle = Dedented(oldText);
+
+        return needle.Length is not 0 && Dedented(before).Contains(needle, StringComparison.Ordinal);
     }
 }

@@ -83,7 +83,9 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test` |
 | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
 | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
+| `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell |
 | `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC`; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
+| a search that keeps hitting a folder you do not want | `search_text(query, exclude: ".research/**")` | dropped after `glob=` has selected, so one call answers what two used to |
 | `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
 | `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
 | `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` | identical matching lines collapse to the first record plus `x<count>` |
@@ -93,6 +95,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
 | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
+| an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; an out-of-range value names the range it could have picked |
 | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
 | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` | an enum id takes enum members; `replace_symbol` and `delete_symbol` work on one too |
 | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` | appended to that file's namespace as one compile-gated edit — no whole-file rewrite, no forced text edit |
@@ -122,7 +125,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `Edit` a `.razor` file | `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` | element-addressed, formatting preserved, compile-gated through the Razor generator |
 | "is this `@bind` real" | `razor_bindings(path, validate: true)` | each `@bind`/`@on`/`@ref`/`asp-for` resolved against the component type |
 | "what breaks at render" | `razor_validate()` | unknown parameter, duplicate route, unregistered `@inject` — none of which the compiler reports |
-| `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included |
+| `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, and `path=` scopes it to one pathspec on a shared tree |
 | `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise |
 | `Bash: git diff` when you really need the hunks | `diff_text(path: …)` | the raw unified diff, bounded and workspace-relative - the most expensive answer here, so scope it |
 | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
@@ -134,7 +137,7 @@ A silent drop is the breach, even when the reason would have been valid.
 | `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
 | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
-| formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened |
+| formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
 | rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
 | `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
 | editing a `.csproj` by hand | `project_*` · `package_*` · `solution_*` | CPM-aware, containment-checked |
@@ -235,7 +238,9 @@ host says why. That tail is appended whenever no **error** was found, in either 
 `list_tests` that succeeded is untouched, whether or not it matched a name.
 
 **Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `path=` takes a file, a
-directory or a glob and `changed=true` limits it to files modified since the workspace loaded, so the
+directory or a glob and `changed=true` limits it to files modified since the workspace loaded — and
+that change set is carried across the unload-and-reload `build`/`run_tests` perform on a locked
+output, so an analyze after a build no longer answers `no document under that scope was modified` — so the
 end-of-task gate over a task's touched files is **one** call, not one per file; `sinceLast=true` reports
 only what appeared since the previous run of the same scope, plus what was fixed) ·
 `get_diagnostics` · `format` (whitespace; `verify=true` for a one-line verdict, `path=` takes a file, a directory or a glob) · `cleanup` (`fix=usings` by default; `fix=style|analyzers|all` applies the referenced analyzers' code fixes with `ids=` and `severity=` filters, reports `UNFIXED <id>` for what no fixer covers, and never rewrites generated code) · `clean` (deletes `bin`/`obj`, `dryRun=true` to preview, not covered by `undo_last_change`).
@@ -282,8 +287,10 @@ with `changed_files` (one line per file: path, `+added -deleted`, status; untrac
 `diff_symbols` to turn the hunks into declaration ids, then `get_symbol_source` on the two or three
 bodies you actually intend to read. `diff_text` returns the raw unified diff and is the last resort —
 scope it with `path=`. All three take `baseRef=` (empty compares the working tree against `HEAD`) and
-are scoped to the workspace root with git's own `--relative`, so a workspace nested inside a larger
-repository never reports a file outside it. `diff_symbols` tags a hunk `EXACT` only when it sits
+`path=`, and are scoped to the workspace root with git's own `--relative`, so a workspace nested
+inside a larger repository never reports a file outside it. On a tree shared with other sessions,
+`changed_files(path: "src")` is the difference between reading your own change set and reading
+everybody's. `diff_symbols` tags a hunk `EXACT` only when it sits
 inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
@@ -294,7 +301,12 @@ directory symlinks — the same set every index uses, so a nested agent worktree
 `read_text` also accepts an **absolute path outside every workspace root**, tagged
 `outside-workspace`, so comparing a file against another repo needs no second `load_workspace` and no
 `workspace=` even with several loaded; every writer still refuses to leave the workspace.
-`search_regex` anchors `^` and `$` to each line.
+`search_regex` anchors `^` and `$` to each line. Both searches take `exclude=`, a glob applied after
+`glob=` has selected, for the folder a positive glob cannot leave out. `find_files(stamps: true)`
+appends each file's UTC last-write time and byte length. `read_text` clips at **40 960** characters
+unless `maxChars` says otherwise (ceiling 131 072): the default is set so a whole-file read stays
+inline in your client rather than being spilled to a file that answers nothing, and the clip always
+names `next: startLine=`.
 
 **Build and test** — `build` · `clean` · `run_tests` · `rerun_failed` · `list_tests`.
 
@@ -333,7 +345,9 @@ directory symlinks — the same set every index uses, so a nested agent worktree
    write to get the full unified diff. **`dryRun: true` is never condensed** — there the diff *is* the
    answer.
    **Every caveat still prints in full**, condensed or not: the `errors=/warnings=` deltas, a rollback,
-   a new compile error, `0 files changed`, `compileGate=unavailable`, `workspace=stale`, `UNFIXED`,
+   a new compile error, `0 files changed` — which now also carries
+   `NOTE no change - the result is identical to what is already there`, so a no-op is never
+   byte-identical to a silent drop — `compileGate=unavailable`, `workspace=stale`, `UNFIXED`,
    `designerStale`, and the `NOT rewritten` list a XAML-aware rename leaves — so a short answer never
    hides something you must act on. A rename of a **Razor component** and a Razor edit whose compile
    gate could not run keep the whole diff, because the result itself carries a caveat. Do not pass
@@ -545,8 +559,13 @@ both; neither is ever handed to MSBuild as a path.
 When a locked output file blocks the build that `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` runs,
 the response says so (`WARNING a locked output file blocked the operation`) and, with a single
 workspace loaded, the server unloads it, retries and reloads, then reports which of the three happened
-in a `NOTE`. You do not need to `unload_workspace` by hand first; if the note says the output is
-**still** locked, something outside this server holds it.
+in a `NOTE`. You do not need to `unload_workspace` by hand first. When the note says the output is
+**still** locked it also lists every process the build named, one `holder pid=… <name> startedUtc=…`
+line each, classified as this terse server, an MSBuild or BuildHost — including one an *earlier*
+terse load spawned out of this tree's own `bin/` — a live `testhost` you should wait for rather than
+stop, a bare `dotnet` host, or a pid that is already gone. The only holder the note rules out is the
+analyzer and source-generator set, which is mapped from a shadow copy and never from a project's own
+output; read the `holder` lines before stopping anything.
 
 ## When a tool refuses
 

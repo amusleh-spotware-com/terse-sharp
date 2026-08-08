@@ -194,6 +194,8 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
 
     private const string Replaces = "Replaces Bash ";
 
+    private static readonly string[] Drivers = ["git", "dotnet", "msbuild"];
+
     private static string[] Shell(string description) =>
         description.StartsWith(Replaces, StringComparison.Ordinal)
             ? description[Replaces.Length..].Split('.')[0].Split(" and ", StringSplitOptions.TrimEntries)
@@ -207,10 +209,20 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
         var allowed = replaced
             .Where(command => !ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied)
             .ToArray();
+        var unknown = replaced
+            .Where(command => !Drivers.Contains(
+                command.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty,
+                StringComparer.Ordinal))
+            .ToArray();
 
         Assert.True(
             replaced.Length >= ToolCensus.MinShellReplacements,
             $"the enrolled shell-command set is a ratchet: {replaced.Length} < {ToolCensus.MinShellReplacements} - a description lost its 'Replaces Bash ' prefix and the tool is no longer census-gated");
+
+        Assert.True(
+            unknown.Length is 0,
+            "extracted from a 'Replaces Bash ' description but does not start with a known driver, so the census is reading prose rather than a command: "
+            + string.Join(", ", unknown));
 
         Assert.True(
             allowed.Length is 0,

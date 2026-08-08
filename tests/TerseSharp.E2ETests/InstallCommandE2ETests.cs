@@ -118,4 +118,44 @@ public sealed class InstallCommandE2ETests : IDisposable
                 || line.Contains("stop them and re-run", StringComparison.Ordinal),
             line);
     }
+
+    [Fact]
+    public async Task Call_AgainstTheBinaryUnderTest_AnswersTheToolItNamesForTheWorkspaceItWasGiven()
+    {
+        var output = await RunAsync(
+            "call",
+            "get_file_outline",
+            "--workspace",
+            Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+            "--json",
+            "{\"path\": \"src/Fixture.Trading/OrderService.cs\"}");
+
+        Assert.Contains("OrderService.Submit", output, StringComparison.Ordinal);
+        Assert.Contains("public bool Submit(Order order)", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Call_WithATheServerDoesNotAdvertise_NamesSomeThatItDoes()
+    {
+        var output = await RunAsync("call", "grep_everything");
+
+        Assert.Contains("ERROR InvalidArgument", output, StringComparison.Ordinal);
+        Assert.Contains("no tool is named 'grep_everything'", output, StringComparison.Ordinal);
+        Assert.Contains("remedy:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Call_WithoutARequiredArgument_NamesItRatherThanThrowing()
+    {
+        var output = await RunAsync(
+            "call",
+            "read_text",
+            "--workspace",
+            Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+
+        Assert.Contains("ERROR InvalidArgument", output, StringComparison.Ordinal);
+        Assert.Contains("missing required argument 'path'", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unhandled exception", output, StringComparison.Ordinal);
+    }
 }

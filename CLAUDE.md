@@ -88,8 +88,11 @@ spent arguing with this:
 
 So: **no claim about tool behaviour is made from the connected server.** A statement of the form "tool
 X does/does not Y" is proven by, in order of preference: (a) an E2E test against the freshly built
-`terse.dll`, (b) a hand-run `dotnet run --project src/TerseSharp.Server -- serve …` child over stdio,
-(c) current source read with `get_symbol_source`. **Say which one answered, and say the version** —
+`terse.dll`, (b) a hand-run
+`dotnet src/TerseSharp.Server/bin/<Configuration>/net10.0/terse.dll call <tool> --workspace <path> --json '{…}'`
+— one command, and `--workspace` is mandatory in practice because a probe that omits it answers about
+an auto-discovered solution rather than the one under test — (c) current source read with
+`get_symbol_source`. **Say which one answered, and say the version** —
 `workspace_status` and `doctor` both print it. "I called the tool and it did X" is evidence about the
 *installed* version only, and it is worthless the moment you have edited that code.
 

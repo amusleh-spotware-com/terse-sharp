@@ -103,7 +103,7 @@ public static class ToolGuard
 
     private static string? Replaced(string segment, string? cwd)
     {
-        var tokens = segment.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var tokens = Command(segment);
         var driver = Path.GetFileNameWithoutExtension(tokens.FirstOrDefault() ?? string.Empty);
 
         if (driver.Equals("msbuild", StringComparison.OrdinalIgnoreCase))
@@ -152,7 +152,7 @@ public static class ToolGuard
 
     private static bool IsTextRead(string segment)
     {
-        var first = segment.TrimStart().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+        var first = Command(segment).FirstOrDefault() ?? string.Empty;
 
         return TextCommands.Contains(Path.GetFileNameWithoutExtension(first), StringComparer.OrdinalIgnoreCase);
     }
@@ -160,6 +160,8 @@ public static class ToolGuard
     private static bool Covered(string text) => Tokens(text).Any(IsDotNet);
 
     private static readonly char[] Separators = [' ', '\t', '"', '\'', '=', ',', '(', ')', '\n', '\r'];
+
+    private static readonly char[] Wrappers = ['"', '\'', '`', '(', ')', '{', '}'];
 
     private static string[] Tokens(string text) =>
         text.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
@@ -334,5 +336,33 @@ public static class ToolGuard
         }
 
         return false;
+    }
+
+    private static string Bare(string token) => token.Trim(Wrappers);
+
+
+    private static bool IsAssignment(string token) =>
+        !token.StartsWith('-') && token.IndexOf('=', StringComparison.Ordinal) > 0;
+
+    private static string[] Command(string segment)
+    {
+        var opened = segment.Contains("$(", StringComparison.Ordinal)
+            ? segment.Replace("$(", " ", StringComparison.Ordinal)
+            : segment;
+        var tokens = opened.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var start = 0;
+
+        while (start < tokens.Length && (Bare(tokens[start]).Length is 0 || IsAssignment(Bare(tokens[start]))))
+            start++;
+
+        if (start >= tokens.Length)
+            return [];
+
+        var command = new string[tokens.Length - start];
+
+        for (var index = 0; index < command.Length; index++)
+            command[index] = Bare(tokens[start + index]);
+
+        return command;
     }
 }

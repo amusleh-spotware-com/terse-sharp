@@ -139,4 +139,46 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         return int.Parse(counter[..counter.IndexOf(' ')], CultureInfo.InvariantCulture);
     }
+
+    [Fact]
+    public async Task FindFiles_WithStamps_AppendsAUtcWriteTimeAndByteLengthPerFile()
+    {
+        var plain = await server.CallAsync("find_files", new() { ["glob"] = "*.csproj" });
+        var stamped = await server.CallAsync("find_files", new() { ["glob"] = "*.csproj", ["stamps"] = true });
+
+        Assert.DoesNotContain("Z  ", plain, StringComparison.Ordinal);
+        var line = Assert.Single(
+            stamped.Split('\n'),
+            candidate => candidate.Contains("Fixture.Trading.csproj", StringComparison.Ordinal));
+        var columns = line.Split("  ", StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.Equal(3, columns.Length);
+        Assert.EndsWith("Fixture.Trading.csproj", columns[0], StringComparison.Ordinal);
+        Assert.True(DateTime.TryParseExact(
+            columns[1],
+            "yyyy-MM-ddTHH:mm:ssZ",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out _));
+        Assert.True(int.TryParse(columns[2], NumberStyles.None, CultureInfo.InvariantCulture, out var bytes));
+        Assert.True(bytes > 0);
+    }
+
+    [Fact]
+    public async Task SearchText_WithExclude_DropsTheMatchesTheGlobCannotLeaveOut()
+    {
+        var all = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "**/*.cs" });
+        var kept = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "OrderService",
+            ["glob"] = "**/*.cs",
+            ["exclude"] = "**/OrderRouter.cs",
+        });
+
+        Assert.Contains("5 matches", all, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.cs", all, StringComparison.Ordinal);
+        Assert.Contains("3 matches", kept, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", kept, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderRouter.cs", kept, StringComparison.Ordinal);
+    }
 }

@@ -7,7 +7,8 @@ public readonly record struct TextSearchRequest(
     int MaxResults,
     int Context = 0,
     bool Unique = false,
-    string? Root = null)
+    string? Root = null,
+    string? Exclude = null)
 {
     public const int MaxContext = 5;
 

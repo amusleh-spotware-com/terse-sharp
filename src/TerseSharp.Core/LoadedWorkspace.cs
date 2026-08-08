@@ -27,6 +27,7 @@ public sealed class LoadedWorkspace : IDisposable
         Root = Path.GetDirectoryName(Path.GetFullPath(load.SolutionPath)) ?? load.SolutionPath;
         LastUsedUtc = DateTimeOffset.UtcNow;
         LoadedUtc = DateTimeOffset.UtcNow;
+        ChangedSinceUtc = seed.ChangedSinceUtc ?? LoadedUtc;
         Solution = Forked();
         dropped = seed.UndoNote;
         Sync = new WorkspaceSync(Root, seed.Generations);
@@ -52,6 +53,8 @@ public sealed class LoadedWorkspace : IDisposable
     public DateTimeOffset LastUsedUtc { get; private set; }
 
     public DateTimeOffset LoadedUtc { get; }
+
+    public DateTimeOffset ChangedSinceUtc { get; }
 
     public Solution Solution { get; private set; }
 

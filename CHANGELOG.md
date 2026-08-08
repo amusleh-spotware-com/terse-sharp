@@ -8,8 +8,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-08
+
+> **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
+> `read_text` now clips at 40 960 characters unless `maxChars` says otherwise — the old default of
+> 131 072 sat above what an agent client will inline, so a whole-file read of a large document was
+> spilled to a file and answered nothing. A clipped read names `next: startLine=` exactly as before,
+> and an explicit `maxChars` is honoured up to the unchanged 131 072 ceiling.
+
 ### Changed
 
+- **`read_text` clips at 40 960 characters by default instead of 131 072 — a response-format change.**
+  The old default sat above what an agent client will inline, so a whole-file read of a large document
+  was written to a `tool-results/*.json` on disk and answered nothing: `IMPROVEMENTS.md` at 102 KB cost
+  one persisted read plus four range reads to recover the same text. An unset `maxChars` now uses
+  `FileService.DefaultResponseCharacters` (40 960) and the clip names `next: startLine=` as it always
+  did; an explicit `maxChars` is still honoured up to the unchanged 131 072 ceiling. Raise it when you
+  genuinely need a large file whole. (I119)
+- **A mutating tool that changed nothing now says so.** `EditGate` emits
+  `NOTE no change - the result is identical to what is already there` whenever it produced 0 diffs, so
+  `0 files changed` is no longer byte-identical to the silent-drop failure. Covers every edit,
+  refactor, `write_text`, rename and format path. (I112)
+- **`changed_files` takes `path=`**, the same pathspec `diff_symbols` and `diff_text` accept, applied to
+  both `git diff` calls and to the untracked `ls-files`. On a tree shared with other sessions this is
+  the difference between reading your own change set and everybody's; the truncation steer now names
+  it. (I108)
+- **The still-locked build note names its holders instead of ruling out the workspace.** It used to
+  assert "this is not the workspace" — and in the observed case it was: an MSBuild `BuildHost` spawned
+  out of the tree's own `bin/` by an earlier terse load. The note now rules out only the shadow-copied
+  analyzer and generator set, and appends one `holder pid=<n> <name> startedUtc=<utc> - <kind>` line per
+  process the build named, classified as this terse server, an MSBuild or BuildHost, a live `testhost`
+  to wait for rather than stop, a bare `dotnet` host, or a pid already gone. (I109, I111)
+- **`analyze` / `format` / `cleanup` with `changed=true` keep their change set across the
+  unload-and-reload that `build` and `run_tests` perform on a locked output.** The change epoch moved
+  from `LoadedUtc` to a new `LoadedWorkspace.ChangedSinceUtc`, which `WorkspaceRegistry` carries across
+  an `Unload(reclaim: false)` and drops on a deliberate unload, so a fresh load still starts fresh.
+  Previously the first analyze after a build answered `no document under that scope was modified`,
+  which reads as "your files are clean". (I110)
 - `IMPROVEMENTS.md` is now two tables and nothing else — `## Open` (Finding, Tool, Proposed change,
   Expected saving, **Rejected**) and `## Closed` (Finding, Tool, Change, Outcome). The five per-task
   review narratives, the notes blocks and the separate "Known limitations" section are folded into
@@ -17,6 +52,53 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   by `BacklogShapeTests`, which fails on any extra heading at any level, on any non-blank line that is
   not a heading or a table row, on a missing column header, and on a row whose cell count does not
   match its own table's header.
+
+### Added
+
+- **`terse call <tool> --workspace <path> --json '{...}'`** — call one MCP tool of this binary from the
+  shell and print its response. A claim about a freshly built `terse` used to mean hand-writing four
+  JSON-RPC frames into a pipe, and a probe that skipped `--workspace` answered about an auto-discovered
+  solution instead of the one under test. The verb resolves the tool by its advertised name, builds the
+  same `ToolContext`, loads the named workspace explicitly, binds arguments by name, and answers an
+  unknown tool, unparsable `--json` or a missing required argument as a structured `ERROR` with a
+  `remedy:`. (I115)
+- **`find_files stamps=true`** appends each listed file's UTC last-write time and byte length, so
+  "when was this written, and how big is it?" no longer costs three shell calls. (I106)
+- **`search_text` and `search_regex` take `exclude=`**, a glob applied after `glob=` has selected, for
+  the folder a positive glob cannot leave out. Measured at ~900 of 1 500 tokens on one call. (I117)
+- **`edit_text` takes `occurrence=N`**, which picks the Nth match of a deliberately repeated `oldText`
+  instead of forcing you to lengthen the anchor on a file of near-identical rows. The ambiguous-match
+  remedy now offers `occurrence=1..N`, and an out-of-range value names the range it could have picked.
+  (I120)
+
+### Fixed
+
+- **A file another process holds open no longer aborts the whole workspace sync.** The drain's read is
+  `FileShare.Read`, so an editor save mid-drain threw and `DrainAsync` abandoned every path it had
+  taken, answering `ERROR Internal IOException`. Only the failing path is re-queued now; the rest of
+  the drain lands, and the next sync absorbs the re-queued file. (I105)
+- **`write_text` no longer stamps a UTF-8 byte-order mark onto a `.cs` file that had none.** The
+  compile-gated path built its `SourceText` with `Encoding.UTF8`, which carries a BOM; it now uses the
+  document's own encoding, falling back to `AtomicWrite.EncodingOf`, as `EditGate` already did. The
+  symptom was a phantom first-line diff on every `write_text` over an existing file. (I118)
+- **`edit_text` explains an `oldText` that only matches once indentation is ignored.** Pasting a
+  `get_symbol_source` payload back as an anchor could not work — that output is dedented and
+  blank-stripped — and the two texts look identical in a transcript. The 0-match remedy now detects the
+  case and steers to `replace_symbol_body` / `replace_symbol` / `read_text verbose=true`. (I107)
+- **The guard is no longer defeated by a quote, an env prefix or a sub-shell.** `"git" diff`,
+  `GIT_PAGER=cat git diff`, `(git status)`, `"dotnet" build` and `LC_ALL=C grep …` were all allowed
+  because the driver was read from the raw first token. Leading `NAME=value` assignments are skipped,
+  a `$(…)` command substitution is opened, and every token is stripped of quotes, backticks, parens
+  and braces before the driver is taken — so `$(git status)` and `FILES=$(git diff --name-only)` are
+  denied too;
+  `git log`/`commit`/`push` and `dotnet restore`/`pack` behind the same prefixes stay allowed. The
+  census also refuses a `Replaces Bash …` command that does not start with a known driver, so it can no
+  longer enrol prose. (I113)
+- **The E2E poll loops report what they observed.** `UpdateE2ETests` gave up after a hard-coded 600
+  attempts and said only that it gave up; both loops now run against a wall-clock budget and name the
+  attempt count, the elapsed time and the last response. The 17 MB `search_text` test waits for the file
+  to reach the workspace file index before asserting, and the `resx_set` entries test asserts the tool
+  reported a write before reading the file. (I121)
 
 ## [0.24.0] - 2026-08-07
 
@@ -1929,7 +2011,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.25.0
 [0.24.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.24.0
 [0.23.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.23.0
 [0.22.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.22.0

@@ -191,19 +191,22 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
     public async Task ResxSet_WithEntries_AddsSeveralKeysInOneCall()
     {
         var before = await File.ReadAllTextAsync(ScratchPath, TestContext.Current.CancellationToken);
-
         try
         {
-            await server.CallAsync("resx_set", new()
+            var text = await server.CallAsync("resx_set", new()
             {
                 ["path"] = Scratch,
                 ["entries"] = "Scratch_Alpha=A\nScratch_Beta=B",
             });
 
+            Assert.Contains("1 files changed", text, StringComparison.Ordinal);
+
             var after = await File.ReadAllTextAsync(ScratchPath, TestContext.Current.CancellationToken);
 
-            Assert.Contains("<value>A</value>", after, StringComparison.Ordinal);
-            Assert.Contains("<value>B</value>", after, StringComparison.Ordinal);
+            Assert.True(
+                after.Contains("<value>A</value>", StringComparison.Ordinal)
+                && after.Contains("<value>B</value>", StringComparison.Ordinal),
+                "resx_set reported a write the file does not carry; the tool answered: " + text);
         }
         finally
         {

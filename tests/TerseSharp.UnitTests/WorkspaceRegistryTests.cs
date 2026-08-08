@@ -358,4 +358,76 @@ public sealed class WorkspaceRegistryTests
             workspace.Solution.Projects,
             project => RazorGeneratedMap.Knows(project.Id));
     }
+
+    [Fact]
+    public async Task Unload_WithoutReclaim_CarriesTheChangeEpochIntoTheNextLoad()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        DateTimeOffset epoch;
+
+        using (var lease = registry.Resolve(null, null).Value!)
+            epoch = lease.Workspace.ChangedSinceUtc;
+
+        Assert.True(registry.Unload(Fixtures.SolutionPath, reclaim: false));
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var reloaded = registry.Resolve(null, null).Value!;
+
+        Assert.Equal(epoch, reloaded.Workspace.ChangedSinceUtc);
+        Assert.True(reloaded.Workspace.LoadedUtc > epoch);
+    }
+
+    [Fact]
+    public async Task Unload_WithReclaim_StartsTheNextLoadOnAFreshChangeEpoch()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        DateTimeOffset epoch;
+
+        using (var lease = registry.Resolve(null, null).Value!)
+            epoch = lease.Workspace.ChangedSinceUtc;
+
+        Assert.True(registry.Unload(Fixtures.SolutionPath));
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var reloaded = registry.Resolve(null, null).Value!;
+
+        Assert.True(reloaded.Workspace.ChangedSinceUtc > epoch);
+    }
+
+    [Fact]
+    public async Task DocumentScope_AfterALockDrivenReload_StillReportsAFileTouchedBeforeIt()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        string touched;
+
+        using (var lease = registry.Resolve(null, null).Value!)
+        {
+            touched = lease.Workspace.Solution.Projects
+                .SelectMany(project => project.Documents)
+                .First(document => document.FilePath is { Length: > 0 })
+                .FilePath!;
+        }
+
+        var stamp = File.GetLastWriteTimeUtc(touched);
+        File.SetLastWriteTimeUtc(touched, DateTime.UtcNow.AddSeconds(1));
+        try
+        {
+            Assert.True(registry.Unload(Fixtures.SolutionPath, reclaim: false));
+            await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+            using var reloaded = registry.Resolve(null, null).Value!;
+            var changed = DocumentScope.Select(reloaded.Workspace, null, changedOnly: true);
+
+            Assert.Contains(
+                changed,
+                id => string.Equals(reloaded.Workspace.Solution.GetDocument(id)?.FilePath, touched, StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.SetLastWriteTimeUtc(touched, stamp);
+        }
+    }
 }

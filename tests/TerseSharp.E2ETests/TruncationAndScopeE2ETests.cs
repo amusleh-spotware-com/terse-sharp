@@ -206,11 +206,16 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
     [Fact]
     public async Task Analyze_WithChanged_ScopesToTheModifiedFiles()
     {
-        var touched = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "Order.cs");
-        var written = File.GetLastWriteTimeUtc(touched);
+        var project = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading");
+        var touched = Path.Combine(project, "Order.cs");
+        var stamps = Directory
+            .EnumerateFiles(project, "*.cs", SearchOption.AllDirectories)
+            .ToDictionary(file => file, File.GetLastWriteTimeUtc, StringComparer.Ordinal);
+
+        foreach (var file in stamps.Keys)
+            File.SetLastWriteTimeUtc(file, DateTime.UnixEpoch);
 
         File.SetLastWriteTimeUtc(touched, DateTime.UtcNow);
-
         try
         {
             var text = await server.CallAsync("analyze", new() { ["changed"] = true, ["ids"] = "TERSE001" });
@@ -219,7 +224,8 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
         }
         finally
         {
-            File.SetLastWriteTimeUtc(touched, written);
+            foreach (var (file, stamp) in stamps)
+                File.SetLastWriteTimeUtc(file, stamp);
         }
     }
 

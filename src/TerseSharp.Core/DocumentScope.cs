@@ -21,14 +21,13 @@ public static class DocumentScope
 
         try
         {
-            return File.GetLastWriteTimeUtc(file) > workspace.LoadedUtc.UtcDateTime;
+            return File.GetLastWriteTimeUtc(file) > workspace.ChangedSinceUtc.UtcDateTime;
         }
         catch (IOException)
         {
             return false;
         }
     }
-
     private static DocumentId[] Targets(LoadedWorkspace workspace, string? path)
     {
         if (path is null)

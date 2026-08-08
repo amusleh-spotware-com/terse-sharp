@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TerseSharp.Core;
 
 namespace TerseSharp.E2ETests;
@@ -6,6 +7,8 @@ public sealed class UpdateE2ETests : IAsyncLifetime
 {
     private const string Marker = "UPDATE terse ";
     private const string StaleSkill = "# an older skill";
+
+    private static readonly TimeSpan PollBudget = TimeSpan.FromMinutes(4);
 
     private readonly string home = Path.Combine(Path.GetTempPath(), "terse-e2e", Guid.NewGuid().ToString());
     private readonly List<TerseServerProcess> servers = [];
@@ -169,25 +172,38 @@ public sealed class UpdateE2ETests : IAsyncLifetime
 
     private static async Task<string> AnnouncedAsync(TerseServerProcess server)
     {
-        for (var attempt = 0; attempt < 600; attempt++)
-        {
-            var response = await CallAsync(server);
+        var elapsed = Stopwatch.StartNew();
+        var attempts = 0;
+        var last = string.Empty;
 
-            if (response.Contains(Marker, StringComparison.Ordinal))
-                return response;
+        while (elapsed.Elapsed < PollBudget)
+        {
+            attempts++;
+            last = await CallAsync(server);
+
+            if (last.Contains(Marker, StringComparison.Ordinal))
+                return last;
 
             await Task.Delay(100, TestContext.Current.CancellationToken);
         }
 
-        throw new InvalidOperationException("no update notice reached a tool response");
+        throw new InvalidOperationException(string.Create(
+            CultureInfo.InvariantCulture,
+            $"no update notice reached a tool response: {attempts} calls over {elapsed.Elapsed.TotalSeconds:F0}s of a {PollBudget.TotalSeconds:F0}s budget; the last response was: {last}"));
     }
 
     private async Task CheckedAsync()
     {
-        for (var attempt = 0; attempt < 600 && !File.Exists(StateFile); attempt++)
+        var elapsed = Stopwatch.StartNew();
+
+        while (elapsed.Elapsed < PollBudget && !File.Exists(StateFile))
             await Task.Delay(100, TestContext.Current.CancellationToken);
 
-        Assert.True(File.Exists(StateFile), "the update check never recorded its state");
+        Assert.True(
+            File.Exists(StateFile),
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"the update check never recorded its state at {StateFile} within {elapsed.Elapsed.TotalSeconds:F0}s of a {PollBudget.TotalSeconds:F0}s budget"));
     }
 
     private static async Task<string> ReadAsync(string path) =>

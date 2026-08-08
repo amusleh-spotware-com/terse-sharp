@@ -36,6 +36,9 @@ public static class EditGate
 
         response.Summary(diffs.Length, diffs.Length, "files changed");
 
+        if (diffs.Length is 0)
+            response.Note("no change - the result is identical to what is already there");
+
         if (options.DryRun && !options.Verbose)
             response.Note("dryRun");
 

@@ -24,6 +24,7 @@ walks up from the current directory, finds your `.sln` / `.slnx` / `.slnf` / `.c
 terse install --client cursor   # not detected? pick one: claude-code | cursor | vscode | windsurf
 terse install --skill --guard   # teach your agent the tools, and block Read/Grep on C# (recommended)
 terse doctor                    # verify SDK, MSBuild, workspace load, client registration
+terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.cs"}'
 ```
 
 No IDE, no licence, no Node, no Python, no API key, and no network call to answer a question — the

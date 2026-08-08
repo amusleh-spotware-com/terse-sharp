@@ -3,6 +3,7 @@ namespace TerseSharp.Core;
 public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) : IDisposable
 {
     private readonly Dictionary<string, LoadedWorkspace> workspaces = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> carriedEpochs = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Lock map = new();
     private readonly int maxWorkspaces = maxWorkspaces;
@@ -58,6 +59,11 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         {
             if (!workspaces.Remove(full, out workspace))
                 return false;
+
+            if (reclaim)
+                carriedEpochs.Remove(full);
+            else
+                carriedEpochs[full] = workspace.ChangedSinceUtc;
         }
 
         FixerCatalog.Clear();
@@ -116,7 +122,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
     private async Task<LoadedWorkspace> AddAsync(string full, WorkspaceSeed seed, CancellationToken cancellationToken)
     {
-        var loaded = await WorkspaceLoader.LoadAsync(full, seed, cancellationToken).ConfigureAwait(false);
+        var loaded = await WorkspaceLoader.LoadAsync(full, seed with { ChangedSinceUtc = seed.ChangedSinceUtc ?? Carried(full) }, cancellationToken).ConfigureAwait(false);
         var evicted = Store(full, loaded);
 
         if (evicted.Length > 0)
@@ -129,6 +135,12 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
             workspace.Dispose();
 
         return loaded;
+    }
+
+    private DateTimeOffset? Carried(string full)
+    {
+        lock (map)
+            return carriedEpochs.Remove(full, out var epoch) ? epoch : null;
     }
 
     private static void Reclaim()
@@ -237,7 +249,8 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
             previous.Sync.Generations.Reloaded(),
             watch,
             previous.UndoNote(),
-            previous.Load.TargetFramework);
+            previous.Load.TargetFramework,
+            previous.ChangedSinceUtc);
     public async Task<WorkspaceLoadResult> RefreshAsync(LoadedWorkspace stale, CancellationToken cancellationToken) =>
         (await SwapAsync(Path.GetFullPath(stale.SolutionPath), stale, cancellationToken).ConfigureAwait(false)).Load; private async Task<LoadedWorkspace> SwapAsync(string full, LoadedWorkspace? stale, CancellationToken cancellationToken)
     {

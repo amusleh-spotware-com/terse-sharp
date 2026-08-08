@@ -397,4 +397,97 @@ public sealed class ToolGuardTests
             directory.Delete(true);
         }
     }
+
+    [Theory]
+    [InlineData("\"git\" diff")]
+    [InlineData("'git' status")]
+    [InlineData("GIT_PAGER=cat git diff")]
+    [InlineData("GIT_PAGER=cat GIT_CONFIG_NOSYSTEM=1 git status")]
+    [InlineData("(git status)")]
+    [InlineData("( git diff )")]
+    [InlineData("\"dotnet\" build")]
+    [InlineData("DOTNET_CLI_TELEMETRY_OPTOUT=1 dotnet test")]
+    [InlineData("(dotnet build)")]
+    [InlineData("\"grep\" -r Order src/App/OrderService.cs")]
+    [InlineData("LC_ALL=C grep -r Order src/App/OrderService.cs")]
+    public void Inspect_ForAReplacedCommandBehindAQuoteEnvPrefixOrSubShell_StillDenies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+
+    [Theory]
+    [InlineData("GIT_PAGER=cat git log -p")]
+    [InlineData("\"git\" commit -m \"diff status\"")]
+    [InlineData("(git push origin main)")]
+    [InlineData("DOTNET_CLI_TELEMETRY_OPTOUT=1 dotnet restore")]
+    [InlineData("\"dotnet\" pack src/App")]
+    public void Inspect_ForAnUnreplacedCommandBehindAQuoteEnvPrefixOrSubShell_StillAllows(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void LockHolders_ForThisProcess_NamesItAsTheServerRatherThanAnUnknownPid()
+    {
+        var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var described = LockHolders.Describe("MSB3027: Could not copy \"terse.dll\". The file is locked by: \"terse (" + pid + ")\"");
+
+        Assert.Contains("holder pid=" + pid, described, StringComparison.Ordinal);
+        Assert.Contains("this terse server", described, StringComparison.Ordinal);
+        Assert.Contains("startedUtc=", described, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LockHolders_ForAPidThatIsGone_SaysTheLockIsReleasedInsteadOfGuessing()
+    {
+        var described = LockHolders.Describe("The file is locked by: \"testhost (2147483646)\"");
+
+        Assert.Contains("holder pid=2147483646", described, StringComparison.Ordinal);
+        Assert.Contains("already gone", described, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LockHolders_WithNoPidInTheOutput_AddsNothing() =>
+        Assert.Equal(string.Empty, LockHolders.Describe("MSB3021: Unable to copy file, access is denied."));
+
+    [Theory]
+    [InlineData("src/Fixture.Trading/OrderService.cs(12,5): warning CA1822: mark as static")]
+    [InlineData("Microsoft.Build.Tasks.Core (17.0) could not be resolved")]
+    [InlineData("Restore (1) succeeded in 2.3s")]
+    public void LockHolders_ForTextThatMerelyLooksLikeAPid_AddsNothing(string output) =>
+            Assert.Equal(string.Empty, LockHolders.Describe(output));
+
+    [Theory]
+    [InlineData("$(git status)")]
+    [InlineData("X=$(git status --porcelain)")]
+    [InlineData("FILES=$(git diff --name-only)")]
+    [InlineData("$(dotnet build)")]
+    [InlineData("`git diff`")]
+    public void Inspect_ForAReplacedCommandInsideACommandSubstitution_StillDenies(string command) =>
+            Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+
+    [Theory]
+    [InlineData("$(git log -1 --format=%H)")]
+    [InlineData("SHA=$(git rev-parse HEAD)")]
+    [InlineData("$(dotnet restore)")]
+    public void Inspect_ForAnUnreplacedCommandInsideACommandSubstitution_StillAllows(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void StillLocked_WhenTheBuildNamedNoHolder_DoesNotPromiseAListBelow()
+    {
+        var note = Server.Tools.BuildTools.StillLocked("build", "MSB3021: Unable to copy file, access is denied.");
+
+        Assert.DoesNotContain("below before stopping it", note, StringComparison.Ordinal);
+        Assert.Contains("named no holding process", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("holder pid=", note, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StillLocked_WhenTheBuildNamedAHolder_PointsAtTheListItAppends()
+    {
+        var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var note = Server.Tools.BuildTools.StillLocked("run_tests", "The file is locked by: \"terse (" + pid + ")\"");
+
+        Assert.Contains("Resolve each holder below before stopping it.", note, StringComparison.Ordinal);
+        Assert.Contains("holder pid=" + pid, note, StringComparison.Ordinal);
+    }
 }

@@ -12,7 +12,7 @@ public sealed class FileTools(ToolContext context)
         [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
         [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
         [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
-        [Description("Maximum characters of file text returned, default 128000, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. Lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
+        [Description("Maximum characters of file text returned, default 40960 and at most 131072, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. The default is set so a whole-file read stays inline in the client instead of being spilled to a file that answers nothing; a clipped read names the line to continue from. Raise it on a file you truly need whole, lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
         [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
         [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
         [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
@@ -31,7 +31,7 @@ public sealed class FileTools(ToolContext context)
             cancellationToken);
 
     private static int Characters(int requested) =>
-        requested <= 0 ? FileService.MaxResponseCharacters : Math.Min(requested, FileService.MaxResponseCharacters);
+        requested <= 0 ? FileService.DefaultResponseCharacters : Math.Min(requested, FileService.MaxResponseCharacters);
 
     private Task<string> Read(
         string path,
@@ -83,16 +83,17 @@ public sealed class FileTools(ToolContext context)
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\". Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines. A successful edit answers in one line - the file name and changedLines; pass verbose=true for the diff.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\". Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. A successful edit answers in one line - the file name and changedLines; pass verbose=true for the diff.")]
     public Task<string> EditText(
         [Description("Path, absolute or workspace-relative.")] string path,
         [Description("Replacement text. With section=, this is the whole new section including its heading line.")] string newText,
-        [Description("Exact text to replace; must occur exactly once. Omit when section= is passed.")] string? oldText = null,
+        [Description("Exact text to replace; must occur exactly once unless occurrence= picks one. Omit when section= is passed.")] string? oldText = null,
         [Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed.")] string? section = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Allow editing a .cs file, bypassing the compile-gated symbol tools. Default false.")] bool force = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("1-based index of the oldText match to replace when it deliberately occurs more than once. Default 0, which still requires exactly one match.")] int occurrence = 0,
         CancellationToken cancellationToken = default) =>
         Guarded(
             workspace,
@@ -100,26 +101,27 @@ public sealed class FileTools(ToolContext context)
             async loaded => NavigationTools.Unwrap(await FileService.EditTextAsync(
                 loaded,
                 path,
-                new FileService.EditRequest(oldText ?? string.Empty, newText, section, dryRun, force, verbose),
+                new FileService.EditRequest(oldText ?? string.Empty, newText, section, dryRun, force, verbose, occurrence),
                 cancellationToken).ConfigureAwait(false)));
 
     [McpServerTool(Name = "find_files")]
-    [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded.")]
+    [Description("Locate files by glob under the workspace root. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell.")]
     public Task<string> FindFiles(
         [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
-        [Description("Alias for glob.")] string? pattern = null) =>
+        [Description("Alias for glob.")] string? pattern = null,
+        [Description("Append each listed file's UTC last-write time and byte length. Default false.")] bool stamps = false) =>
         (glob ?? pattern) is { Length: > 0 } matched
             ? context.WithWorkspace(
                 workspace,
                 null,
-                loaded => TextSearchService.FindFiles(loaded, matched, NavigationTools.Cap(maxResults, 100)),
+                loaded => TextSearchService.FindFiles(loaded, matched, NavigationTools.Cap(maxResults, 100), stamps),
                 semantic: false)
             : Task.FromResult(Errors.Blank("glob").Render());
 
     [McpServerTool(Name = "search_text")]
-    [Description("Literal text search across the workspace, or across any absolute directory with root=. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. context=N adds the surrounding lines so a hit needs no follow-up read, and unique=true collapses identical matching lines to one record with x<count>. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
+    [Description("Literal text search across the workspace, or across any absolute directory with root=. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. context=N adds the surrounding lines so a hit needs no follow-up read, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
     public Task<string> SearchText(
         [Description("Literal text to find.")] string? query = null,
         [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -129,11 +131,12 @@ public sealed class FileTools(ToolContext context)
         [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
         [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
         [Description("Alias for query.")] string? pattern = null,
+        [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false, context, unique, root), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false, context, unique, root, exclude), cancellationToken);
 
     [McpServerTool(Name = "search_regex")]
-    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line. context=N adds the surrounding lines so a hit needs no follow-up read, and unique=true collapses identical matching lines to one record with x<count>. Results are tagged HEURISTIC.")]
+    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line. context=N adds the surrounding lines so a hit needs no follow-up read, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
         [Description(".NET regular expression.")] string? query = null,
         [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -143,8 +146,9 @@ public sealed class FileTools(ToolContext context)
         [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
         [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
         [Description("Alias for query.")] string? pattern = null,
+        [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true, context, unique, root), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true, context, unique, root, exclude), cancellationToken);
 
     private Task<string> Search(TextQuery request, CancellationToken cancellationToken)
     {
@@ -158,7 +162,8 @@ public sealed class FileTools(ToolContext context)
             NavigationTools.Cap(request.MaxResults, 100),
             request.Context,
             request.Unique,
-            request.Root);
+            request.Root,
+            request.Exclude);
 
         return request.Root is { Length: > 0 }
             ? TextSearchService.SearchOutsideAsync(search, cancellationToken)
@@ -178,7 +183,8 @@ public sealed class FileTools(ToolContext context)
         bool Regex,
         int Context = 0,
         bool Unique = false,
-        string? Root = null);
+        string? Root = null,
+        string? Exclude = null);
 
     private Task<string> Guarded(string? workspace, string path, Func<LoadedWorkspace, Task<string>> action) =>
         context.RejectWrite() is { } rejection

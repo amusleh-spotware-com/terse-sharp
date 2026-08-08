@@ -255,4 +255,29 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             await File.WriteAllTextAsync(OrderServicePath, before, TestContext.Current.CancellationToken);
         }
     }
+
+    [Fact]
+    public async Task WriteText_WithTheContentTheFileAlreadyHas_SaysItChangedNothing()
+    {
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
+        var before = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var written = File.GetLastWriteTimeUtc(path);
+        try
+        {
+            var text = await server.CallAsync("write_text", new()
+            {
+                ["path"] = "src/Fixture.Trading/OrderService.cs",
+                ["content"] = before,
+                ["force"] = true,
+            });
+
+            Assert.Equal(before, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+            Assert.Contains("0 files changed", text, StringComparison.Ordinal);
+            Assert.Contains("no change - the result is identical to what is already there", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.SetLastWriteTimeUtc(path, written);
+        }
+    }
 }
