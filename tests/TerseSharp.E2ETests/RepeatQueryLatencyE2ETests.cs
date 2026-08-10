@@ -54,8 +54,10 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
     private static string Report(string tool, long[] timings) =>
         tool + " ms per call: " + string.Join(", ", timings.Select(elapsed => elapsed.ToString(CultureInfo.InvariantCulture)));
 
-    private static void Settled(string tool, long[] timings) => Assert.All(
-        timings[AfterWarmup..],
+    private static void Settled(string tool, long[] timings) => Settled(tool, timings, AfterWarmup);
+
+    private static void Settled(string tool, long[] timings, int warmup) => Assert.All(
+        timings[warmup..],
         elapsed => Assert.True(elapsed <= RepeatBudgetMs, Report(tool, timings)));
 
     [Fact]
@@ -68,9 +70,9 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
             TestContext.Current.CancellationToken);
         try
         {
-            var timings = new long[Repeats];
+            var timings = new long[RepositoryRepeats];
 
-            for (var index = 0; index < Repeats; index++)
+            for (var index = 0; index < RepositoryRepeats; index++)
             {
                 var stopwatch = Stopwatch.StartNew();
                 await probe.CallAsync(
@@ -80,7 +82,7 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
                 timings[index] = stopwatch.ElapsedMilliseconds;
             }
 
-            Settled("get_file_outline on TerseSharp.slnx", timings);
+            Settled("get_file_outline on TerseSharp.slnx", timings, AfterRepositoryWarmup);
         }
         finally
         {
@@ -89,4 +91,7 @@ public sealed class RepeatQueryLatencyE2ETests(TerseServerFixture server)
     }
 
     private const int AfterWarmup = 2;
+
+    private const int AfterRepositoryWarmup = 3;
+    private const int RepositoryRepeats = 6;
 }

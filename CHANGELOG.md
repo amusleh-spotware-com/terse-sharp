@@ -32,6 +32,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   consumes the lines its match spanned, so the other entries' hits on those lines are not reported
   and the count is short by them. Making the multi-query scan advance per line is a behaviour change
   and is tracked as an open backlog row rather than shipped unreviewed in this release.
+- `RepeatQueryLatencyE2ETests`' whole-repository case warms up for three calls instead of two and
+  takes six samples instead of five. A cold two-core Windows runner measured
+  `11354, 4444, 6515, 86, 22` ms: the property the test exists to prove holds decisively — the
+  settled calls are 86 ms and 22 ms against a 11 354 ms first call — but the third call is still
+  inside the compilation-realization tail on a 4-project solution, which the one-project fixture
+  never sees. The budget was widened where it was wrong rather than the run repeated until it passed.
 
 - **`fixtures/UnloadableSolution`** — one project that loads and one the solution names but that does
   not exist — and `LoadFailureE2ETests`, so the load-failure rendering has a fixture that can actually
