@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- `analyze changed=true` - the end-of-task shape - now names `gate` as the one-call form of the
+  four-call sweep it belongs to. `gate` shipped in 0.27.0 to collapse
+  `analyze` -> `format` -> `cleanup fix=all` -> `analyze`, and a one-week session scan then measured
+  **356 `analyze` calls and zero `gate` calls**: the tool existed and was never discovered. The skill's
+  Analyse section now leads with `gate` instead of listing it last (**I165**).
+- `SKILL.md` states the parallel-call rule: independent tool calls belong in one assistant message,
+  with the dependency carve-out spelled out. The same scan carried **17 567 tool calls and not one
+  parallel message**, while 5 989 sat in runs of three or more consecutive calls of the same tool
+  (**I166**).
+
 ### Changed
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**

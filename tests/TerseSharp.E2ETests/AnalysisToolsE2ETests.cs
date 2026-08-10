@@ -202,4 +202,30 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
 
         return int.Parse(end < 0 ? tail : tail[..end], CultureInfo.InvariantCulture);
     }
+
+    [Fact]
+    public async Task Analyze_WithChanged_NamesGateAsTheOneCallForm()
+    {
+        const string probe = "src/Fixture.Trading/TerseProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = probe,
+            ["content"] = "namespace TerseProbe;\n\npublic sealed record GateSteerProbe(int Value);\n",
+            ["force"] = true,
+        });
+
+        try
+        {
+            var scoped = await server.CallAsync("analyze", new() { ["changed"] = true, ["minSeverity"] = "info" });
+            var unscoped = await server.CallAsync("analyze", new() { ["path"] = probe, ["minSeverity"] = "info" });
+
+            Assert.Contains("gate runs this, format and cleanup fix=all as one call", scoped, StringComparison.Ordinal);
+            Assert.DoesNotContain("gate runs this", unscoped, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = probe, ["delete"] = true });
+        }
+    }
 }

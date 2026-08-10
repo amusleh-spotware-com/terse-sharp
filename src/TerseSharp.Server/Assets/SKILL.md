@@ -271,7 +271,15 @@ host says why. That tail is appended whenever no **error** was found, in either 
 `verbose=true` is always a superset: it adds the warnings, it never replaces the failure reason. A
 `list_tests` that succeeded is untouched, whether or not it matched a name.
 
-**Analyse** — `analyze` (compiler + analyzers + dead code, down to `info`; `path=` takes a file, a
+**Analyse — at the end of a task, call `gate` and stop there.** It runs `analyze` at `info`,
+`format`, `cleanup fix=all` and `analyze` again, in the order this project mandates, over the files
+changed since the workspace loaded, and answers **one verdict line**. That is the whole end-of-task
+sweep in one call instead of four, and it is the first thing to reach for — a measured week of this
+server's own sessions made 356 `analyze` calls and **zero** `gate` calls. Reach for the individual
+tools below only when you need one of them on its own, or when `gate` reports `FAILED` and you are
+fixing what it named.
+
+`analyze` (compiler + analyzers + dead code, down to `info`; `path=` takes a file, a
 directory or a glob and `changed=true` limits it to files modified since the workspace loaded — and
 that change set is carried across the unload-and-reload `build`/`run_tests` perform on a locked
 output, so an analyze after a build no longer answers `no document under that scope was modified` — so the
@@ -504,6 +512,19 @@ this workspace is read as text unchanged.
     an error. It appears once and never repeats in that session. After the user updates, the next
     `terse serve` rewrites the installed `SKILL.md` and the `terse guard` hook to match the new binary,
     so the skill you are reading always describes the binary you are talking to.
+
+13. **Independent calls go in one message.** If you intend to call several tools and there are no
+    dependencies between them, make all of the independent calls in parallel, in a single assistant
+    message, rather than one after another. Reading three files is three `get_symbol_source` calls
+    issued together; outlining four files is four `get_file_outline` calls issued together;
+    `changed_files` and `workspace_status` have nothing to do with each other and belong in the same
+    message. Prioritize calling tools simultaneously whenever the actions can be done in parallel.
+    **But when a call needs a value a previous call returns — a symbol id from an outline, a path
+    from `changed_files`, a `retryWith` token from a rollback — call them sequentially, and never
+    guess a parameter to make a call parallel.** A measured week of this server's own sessions
+    carried 17 567 tool calls and **not one** parallel message, while 5 989 of them sat in runs of
+    three or more consecutive calls of the same tool; at this server's median call latency that is
+    hours of wall clock nothing depended on.
 
 ## Localization (`.resx` / `.resw`)
 

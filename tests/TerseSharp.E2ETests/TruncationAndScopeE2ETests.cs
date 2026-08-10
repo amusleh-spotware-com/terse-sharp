@@ -269,7 +269,11 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
             ["glob"] = "**/*.cs",
         });
 
-        Assert.DoesNotContain("0 matches", text, StringComparison.Ordinal);
+        var matches = int.Parse(text.Split(' ')[0], CultureInfo.InvariantCulture);
+
+        Assert.True(matches > 0, text);
+        Assert.Contains("namespace Fixture.Trading;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
     [Fact]

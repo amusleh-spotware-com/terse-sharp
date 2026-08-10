@@ -192,6 +192,9 @@ public static class AnalysisService
             "minSeverity=, ids= or path=");
         response.Note("engines=" + string.Join("+", engines));
 
+        if (changed)
+            response.Note("gate runs this, format and cleanup fix=all as one call");
+
         if (sinceLast)
         {
             response.Note(delta.Baseline
