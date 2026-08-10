@@ -15,7 +15,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         var lines = text.Split('\n');
 
-        Assert.Equal("2/5 lines truncated", lines[0]);
+        Assert.Equal("2 lines", lines[0]);
         Assert.StartsWith("2: ", lines[1], StringComparison.Ordinal);
         Assert.Equal(3, lines.Length);
         Assert.DoesNotContain("3: ", text, StringComparison.Ordinal);

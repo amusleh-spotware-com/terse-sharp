@@ -24,7 +24,8 @@ public sealed class FileServiceTests
 
             Assert.True(result.IsOk, result.Error?.Message);
             Assert.Contains("4000: line 4000 ", result.Value!, StringComparison.Ordinal);
-            Assert.Contains("3/5000 lines truncated", result.Value!, StringComparison.Ordinal);
+            Assert.Contains("3 lines", result.Value!, StringComparison.Ordinal);
+            Assert.DoesNotContain("truncated", result.Value!, StringComparison.Ordinal);
             Assert.DoesNotContain("3999: ", result.Value!, StringComparison.Ordinal);
         }
         finally

@@ -278,7 +278,7 @@ public static class FileService
         var selection = Collect(text, range, new ReadFormat(request.Verbose, keepsBlanks));
         var response = new ResponseBuilder("read_text", path).Verbose(request.Verbose);
 
-        response.Summary(selection.CoveredLines, selection.TotalLines, "lines");
+        response.Summary(selection.CoveredLines, ReachableLines(selection), "lines");
 
         if (!request.Verbose && IsOutside(path))
             response.Note(OutsideMarker);
@@ -699,4 +699,7 @@ public static class FileService
 
         return Result.Ok(BatchResponse(path, before, after, failures, applied, edits.Count, request));
     }
+
+    private static int ReachableLines(LineSelection selection) =>
+        selection.NextLine is 0 ? selection.CoveredLines : selection.TotalLines;
 }

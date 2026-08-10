@@ -13,6 +13,8 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             ["tail"] = 2,
         });
 
+        Assert.StartsWith("2 lines", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
         Assert.Contains("OrderSubmitted", text, StringComparison.Ordinal);
         Assert.DoesNotContain("namespace Fixture.Trading", text, StringComparison.Ordinal);
         Assert.DoesNotContain("public enum OrderSide", text, StringComparison.Ordinal);
@@ -306,6 +308,8 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             ["maxChars"] = 200,
         });
 
+        Assert.StartsWith("1 lines", bounded, StringComparison.Ordinal);
+        Assert.DoesNotContain("truncated", bounded, StringComparison.Ordinal);
         Assert.Contains("line 3 was cut mid-way", bounded, StringComparison.Ordinal);
     }
 
@@ -329,5 +333,31 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.True(whole.Length > 3000, whole.Length.ToString(CultureInfo.InvariantCulture));
         Assert.True(bounded.Length < 600, bounded);
         Assert.Contains("was cut mid-way", bounded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithACallerChosenRange_CountsWhatArrivedInsteadOfClaimingTruncation()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["startLine"] = 2,
+            ["endLine"] = 3,
+        });
+
+        Assert.StartsWith("2 lines", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithACompleteSection_NeverCallsItTruncated()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "wide-sections.txt",
+            ["section"] = "## Wide",
+        });
+
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
     }
 }

@@ -8,7 +8,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
-## [0.28.0] - 2026-08-08
+### Fixed
+
+> **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
+> `read_text` no longer calls a read `truncated` that it never clipped.
+
+- `read_text` counted every bounded read against the **file's** line total, so a caller-chosen
+  `startLine`/`endLine`, a `tail`, and a complete `section=` were all labelled
+  `N/<file total> lines truncated` although nothing had been cut - measured on 1 771 of 2 320
+  responses (76.3 %) in a one-week session scan, and on the shipped 0.28.0 an explicit
+  `startLine=1 endLine=3` over a 237-line file answered `3/237 lines truncated`. The summary now
+  counts against the lines that arrived when nothing was clipped, and against the file total only
+  when the read was genuinely cut - so an unclipped read answers `3 lines`, and a clipped one still
+  answers `2/237 lines truncated`. The file total stays available on the
+  `next: startLine=N (total=T)` and past-the-end notes. This restores the invariant `SKILL.md`
+  already documented - a truncation count is always real, and a read your own range ended says
+  nothing (**I162**).
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
 > `changedLines` counts the lines that changed rather than the span between the first and the last

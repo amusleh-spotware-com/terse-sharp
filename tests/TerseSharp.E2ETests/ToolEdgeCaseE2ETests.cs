@@ -17,7 +17,9 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
             ["endLine"] = 3,
         });
 
-        Assert.StartsWith("0/5 lines", text, StringComparison.Ordinal);
+        Assert.StartsWith("0 lines", text, StringComparison.Ordinal);
+        Assert.Contains("(total=5)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
@@ -31,7 +33,9 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
             ["endLine"] = 9100,
         });
 
-        Assert.StartsWith("0/5 lines", text, StringComparison.Ordinal);
+        Assert.StartsWith("0 lines", text, StringComparison.Ordinal);
+        Assert.Contains("(total=5)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
