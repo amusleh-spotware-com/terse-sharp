@@ -173,7 +173,7 @@ public sealed class WorkspaceRegistryTests
         var workspace = registry.All()[0];
         var before = workspace.Solution;
 
-        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.Zero.Add(TimeSpan.FromTicks(1))));
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.Zero.Add(TimeSpan.FromTicks(1)), Unpressured));
         Assert.True(workspace.CompilationsDropped);
         Assert.NotSame(before, workspace.Solution);
     }
@@ -199,13 +199,15 @@ public sealed class WorkspaceRegistryTests
 
         await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
-        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
 
         registry.All()[0].Touch();
 
-        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1)));
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
     }
+
+    private const long Unpressured = 0;
 
     [Fact]
     public async Task DropIdleCompilations_UnderMemoryPressure_DropsOnlyOnceTheMinimumIdleHasPassed()

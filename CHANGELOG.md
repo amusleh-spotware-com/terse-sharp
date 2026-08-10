@@ -31,6 +31,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   it is not `ResolveAsync` and not the `WorkspaceSync` drain, which short-circuits on an empty
   pending set (**I161**).
 
+- `WorkspaceRegistryTests`' drop-counting tests pin the managed-heap figure they pass to
+  `DropIdleCompilations` instead of inheriting the process's. `Releasable` swaps the caller's idle
+  window for a **one-minute** minimum once the managed heap passes 2 GB, so a test asserting that a
+  1-tick window drops exactly one workspace silently depended on how much memory every other test in
+  the run happened to be holding. It went red on the macOS CI leg only, after this release added 29
+  unit tests. The pressure semantics themselves are unchanged and still covered by their own test.
 - `run_tests changed=true` shares **one** deadline across the projects it selects. `timeoutSeconds`
   is documented per call; running each selected project with the full timeout silently multiplied the
   ceiling by the number of projects, so eight projects turned a 600 s budget into 80 minutes. The
