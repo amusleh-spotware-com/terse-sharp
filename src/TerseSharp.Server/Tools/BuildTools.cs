@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Immutable;
 using System.Text;
 using ModelContextProtocol.Server;
 
@@ -27,7 +28,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                 ? Contained(target, project, resolved => BuildWithRecoveryAsync(
                     target, resolved, scope.Value, verbose, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
-        });
+        },
+        cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "clean")]
     [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
@@ -43,16 +45,20 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 
         return rejection is not null
             ? Task.FromResult(rejection)
-            : context.WithTargetAsync(workspace, project, target => CleanWithRecoveryAsync(
-                target, project, includeIntermediate, dryRun, verbose, cancellationToken));
+            : context.WithTargetAsync(
+                workspace,
+                project,
+                target => CleanWithRecoveryAsync(target, project, includeIntermediate, dryRun, verbose, cancellationToken),
+                cancellationToken: cancellationToken);
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; a test failure returns each failure's message, expected and actual values, and one source frame, and a build that failed under the run returns its error-severity diagnostics only, never its warnings. Pass verbose=true to get the full report on a green run, and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run the way they scope build, so noBuild=true against a Release tree tests the Release binaries.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; a test failure returns each failure's message, expected and actual values, and one source frame, and a build that failed under the run returns its error-severity diagnostics only, never its warnings. changed=true runs only the test projects that transitively reference a project you changed since the workspace loaded, and names both the projects it ran and the ones it skipped; it falls back to the whole solution, saying why, whenever it cannot reason about the change. Pass verbose=true to get the full report on a green run, and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run the way they scope build, so noBuild=true against a Release tree tests the Release binaries.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
         [Description("Project path; empty runs every test project.")] string? project = null,
+        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
         [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
@@ -62,32 +68,37 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) =>
-        context.WithTargetAsync(workspace, project, target =>
-        {
-            var selection = Selection(test, filter);
+        CancellationToken cancellationToken = default) => context.WithTargetAsync(
+            workspace,
+            project,
+            target =>
+            {
+                var selection = Selection(test, filter);
 
-            if (!selection.IsOk)
-                return Task.FromResult(selection.Error!.Render());
+                if (!selection.IsOk)
+                    return Task.FromResult(selection.Error!.Render());
 
-            var scope = Scoped(configuration, targetFramework, properties);
+                var scope = Scoped(configuration, targetFramework, properties);
 
-            if (!scope.IsOk)
-                return Task.FromResult(scope.Error!.Render());
+                if (!scope.IsOk)
+                    return Task.FromResult(scope.Error!.Render());
 
-            return Contained(target, project, resolved => RunAsync(
-                target,
-                new TestRunRequest(
-                    resolved ?? target.SolutionPath,
-                    selection.Value,
-                    noBuild,
-                    includePassed,
-                    slowest,
-                    Seconds(timeoutSeconds),
-                    verbose,
-                    scope.Value),
-                cancellationToken));
-        });
+                return Contained(target, project, resolved => SelectedAsync(
+                    target,
+                    new TestRunRequest(
+                        resolved ?? target.SolutionPath,
+                        selection.Value,
+                        noBuild,
+                        includePassed,
+                        slowest,
+                        Seconds(timeoutSeconds),
+                        verbose,
+                        scope.Value),
+                    resolved is null && changed,
+                    cancellationToken));
+            },
+            changed && string.IsNullOrWhiteSpace(project),
+            cancellationToken);
 
     [McpServerTool(Name = "rerun_failed")]
     [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
@@ -127,7 +138,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                         Remembered(memory.Scope, scope.Value)),
                     cancellationToken)
                 : Task.FromResult(scope.Error!.Render());
-        });
+        },
+        cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_tests")]
     [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build.")]
@@ -158,7 +170,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                     return new LockedRun(run.Response, run.Locked);
                 }, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
-        });
+        },
+        cancellationToken: cancellationToken);
 
     private Task<string> BuildWithRecoveryAsync(
         WorkspaceTarget target,
@@ -340,4 +353,43 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         requested.Configuration is { Length: > 0 } ? requested.Configuration : remembered.Configuration,
         requested.TargetFramework is { Length: > 0 } ? requested.TargetFramework : remembered.TargetFramework,
         requested.Properties is { Count: > 0 } ? requested.Properties : remembered.Properties);
+
+    private Task<string> SelectedAsync(
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        bool changed,
+        CancellationToken cancellationToken)
+    {
+        if (!changed)
+            return RunAsync(workspace, request, cancellationToken);
+
+        var tests = workspace.Tests;
+
+        return tests.IsFullRun
+            ? Noted(RunAsync(workspace, request, cancellationToken), FullRunNote(tests))
+            : Noted(
+                RunAsync(workspace, request with { Targets = tests.Run }, cancellationToken),
+                SelectedNote(workspace.Root, tests));
+    }
+
+    private static async Task<string> Noted(Task<string> run, string note)
+    {
+        var text = await run.ConfigureAwait(false);
+
+        return text + "\n" + note;
+    }
+
+    private static string FullRunNote(TestSelection tests) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"NOTE changed=true ran every test project - {tests.FullRunReason}");
+
+
+    private static string SelectedNote(string root, TestSelection tests) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"NOTE changed=true ran {Named(root, tests.Run)}; skipped {Named(root, tests.Skipped)}");
+
+
+    private static string Named(string root, ImmutableArray<string> projects) => projects.IsDefaultOrEmpty
+        ? "nothing"
+        : string.Join(", ", projects.Select(path => PositionFormat.Relative(root, path)));
 }

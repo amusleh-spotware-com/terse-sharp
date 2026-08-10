@@ -8,18 +8,18 @@ public static class Doctor
     {
         var target = workspace ?? Discovered();
         var lines = new List<string>
-{
-    SdkLine(),
-    Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
-    ClientLine(),
-    await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
-    await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
-    WatcherLine(),
-    ProcessLine(),
-};
+        {
+            SdkLine(),
+            Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
+            ClientLine(),
+            await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
+            await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
+            WatcherLine(),
+            ProcessLine(),
+        };
 
         lines.AddRange(await InstalledLinesAsync(Probed(target), cancellationToken).ConfigureAwait(false));
-        lines.Add(await WorkspaceLineAsync(target, cancellationToken).ConfigureAwait(false));
+        lines.AddRange(await WorkspaceLinesAsync(target, cancellationToken).ConfigureAwait(false));
 
         return string.Join("\n", lines);
     }
@@ -90,23 +90,6 @@ public static class Doctor
         [.. ClientRegistrar.Known().Where(target => ClientRegistrar.State(target) == state).Select(Describe)];
 
     private static string Describe(ClientTarget target) => target.Name + " -> " + target.ConfigPath;
-
-    private static async Task<string> WorkspaceLineAsync(string? workspace, CancellationToken cancellationToken)
-    {
-        var target = workspace ?? Discovered();
-
-        if (target is null)
-            return Check("workspace", "none discovered", false, "run terse from a directory containing a .sln or .csproj");
-
-        using var registry = new WorkspaceRegistry();
-        var result = await registry.LoadAsync(target, cancellationToken).ConfigureAwait(false);
-
-        return Check(
-            "workspace",
-            string.Create(CultureInfo.InvariantCulture, $"{target} projects={result.ProjectCount} elapsedMs={result.ElapsedMilliseconds} failures={result.Failures.Count}"),
-            result.ProjectCount > 0,
-            "check the solution loads with: dotnet build");
-    }
 
     private static string? Discovered() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
@@ -244,4 +227,42 @@ public static class Doctor
             return string.Create(CultureInfo.InvariantCulture, $"{name}#{process.Id}");
         }
     }
+
+    private const int LatencyCalls = 20;
+
+    private static async Task<string[]> WorkspaceLinesAsync(string? workspace, CancellationToken cancellationToken)
+    {
+        var target = workspace ?? Discovered();
+
+        if (target is null)
+            return [Check("workspace", "none discovered", false, "run terse from a directory containing a .sln or .csproj")];
+
+        using var context = new ToolContext(new WorkspaceRegistry(), readOnly: true);
+        var result = await context.Registry.LoadAsync(target, cancellationToken).ConfigureAwait(false);
+        var loaded = Check(
+            "workspace",
+            string.Create(CultureInfo.InvariantCulture, $"{target} projects={result.ProjectCount} elapsedMs={result.ElapsedMilliseconds} failures={result.Failures.Count}"),
+            result.ProjectCount > 0,
+            "check the solution loads with: dotnet build");
+
+        return result.ProjectCount > 0
+            ? [loaded, await LatencyLineAsync(context, cancellationToken).ConfigureAwait(false)]
+            : [loaded];
+    }
+
+    private static async Task<string> LatencyLineAsync(ToolContext context, CancellationToken cancellationToken)
+    {
+        var latency = await context.MeasureAsync(LatencyCalls, cancellationToken).ConfigureAwait(false);
+        var floor = latency.ResolveMs + latency.SyncMs;
+
+        return Check(
+            "latency",
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"calls={latency.Calls} resolveMs={latency.ResolveMs:F2} syncMs={latency.SyncMs:F2} actionMs={latency.ActionMs:F2}"),
+            floor < LatencyFloorMs,
+            "a per-call resolve+sync floor of a second or more is a workspace-resolution defect - report this line");
+    }
+
+    private const double LatencyFloorMs = 1000;
 }

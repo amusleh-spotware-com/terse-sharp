@@ -16,7 +16,7 @@ public sealed class TerseServerFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync() => server = await TerseServerProcess.StartAsync(
         FixtureRoot,
-        [ServerAssemblyPath(), "serve", "--workspace", Path.Combine(FixtureRoot, "FixtureSolution.slnx")],
+        [ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", Path.Combine(FixtureRoot, "FixtureSolution.slnx")],
         TestContext.Current.CancellationToken);
 
     public async ValueTask DisposeAsync()

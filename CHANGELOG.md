@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-08-10
+
 ### Added
 
 - `analyze changed=true` - the end-of-task shape - now names `gate` as the one-call form of the
@@ -20,7 +22,87 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   parallel message**, while 5 989 sat in runs of three or more consecutive calls of the same tool
   (**I166**).
 
+- `terse doctor` gains a **`latency`** line: it runs a 20-call loop over the real request path and
+  splits the per-call floor into `resolveMs` / `syncMs` / `actionMs`, so a latency claim is
+  attributed before anything is optimized. It fails above a 100 ms resolve+sync floor.
+  Measured on the freshly built 0.28.1-pre binary: `resolveMs=0.07 syncMs=0.14 actionMs=0.00` -
+  **0.21 ms**, flat between a 1-project fixture and this 4-project / 308-document solution. That
+  **refutes** the standing hypothesis behind the 1.1 s per-call floor seen in session transcripts:
+  it is not `ResolveAsync` and not the `WorkspaceSync` drain, which short-circuits on an empty
+  pending set (**I161**).
+
+- `run_tests changed=true` shares **one** deadline across the projects it selects. `timeoutSeconds`
+  is documented per call; running each selected project with the full timeout silently multiplied the
+  ceiling by the number of projects, so eight projects turned a 600 s budget into 80 minutes. The
+  loop now subtracts the elapsed time and stops when the budget is spent.
+- **The guard routes instead of only refusing.** A `PreToolUse` denial now also returns
+  `hookSpecificOutput.additionalContext` carrying the **complete replacement call, with the arguments
+  filled in from the denied command** - `Call this instead: get_file_outline path="src/App/Order.cs"`,
+  `changed_files`, `run_tests` - which Claude Code places beside the tool result. A
+  `permissionDecisionReason` string alone is the weakest documented lever: negated instructions
+  inverse-scale with model size (arXiv:2209.12711), adherence to an earlier-turn instruction decays
+  0.877 -> 0.707 over three turns (arXiv:2410.15553), and restating it recovers only 15-20 %
+  (arXiv:2505.06120) - measured here as 2 278 shell-text `Bash` calls surviving a guard that was
+  installed and current all week. The routing is chosen from the file kind, so a `.xaml` read is
+  routed to `xaml_outline` and a `.resx` read to `resx_get`, never to `get_file_outline`. The routing
+  dispatches on the **file kind**, the same axis the deny reason already used: an earlier revision
+  dispatched on the built-in's name, which made a `Grep` scoped to XAML route to `search_symbols`
+  while its own reason named `xaml_find`, and made a denied `cat Foo.cs` route to
+  `search_text query="cat Foo.cs"` - a call that returns nothing. Caught by the review round and
+  covered by a test asserting the routing never contradicts the reason it ships with (**I170**).
+- **`TERSE_GUARD_LOG=<path>` appends one JSON line per guard decision** - tool, verdict, routing,
+  reason, `cwd`, `session_id` and `transcript_path`. Whether the 2 278 shell-text calls were denied
+  and retried, allowed as out-of-workspace, never matched, or issued by a subagent that never saw the
+  parent's `CLAUDE.md` is **not knowable from a transcript**, and each cause needs a different fix.
+  The session and transcript fields are what split subagent traffic from the main thread. Opt-in and
+  best-effort: a malformed payload still produces one line, and a write failure never changes the
+  verdict (**I168**).
+- `run_tests` and `list_tests` relativise the child-process output they pass through. A failed test
+  run or listing rendered its error lines and its output tail with `root` hard-coded to
+  `string.Empty`, so every MSBuild and VSTest path came back absolute - part of the 227 835
+  characters of absolute path measured across `build`, `run_tests`, `workspace_status` and
+  `load_workspace` in one week. Those two paths now carry the workspace root, so a failure's paths
+  are workspace-relative and re-usable as arguments like every other record. The load-time MSBuild
+  diagnostics of `workspace_status` and `load_workspace` are **not** covered - they are grouped by a
+  parser that reads the absolute path - and are tracked as **I174** (**I163**).
+- **`changed_files root=` and `diff_text root=`** answer about any absolute directory instead of the
+  loaded workspace - a sibling worktree, another repository - tagged `outside-workspace`, exactly as
+  `search_text root=` already worked. One week of sessions carried **420 `git` calls**, 112 of them
+  `git -C <another worktree>`, precisely because the working tree of an unloaded directory had no
+  tool. Loading each worktree is not the answer: `load_workspace` was measured at p50 52 s and about
+  3 GB resident. `diff_symbols` deliberately does **not** take `root=` - mapping a hunk onto a
+  declaration needs that directory's Roslyn compilation - and refuses by naming the two tools that
+  can answer. The guard's `git status` and `git diff` deny reasons now name the `root=` form, so the
+  denial finally carries a replacement for a directory that is not loaded (**I167**).
+- **`run_tests changed=true`** runs only the test projects that transitively reference a project
+  changed since the workspace loaded, and names both the projects it ran and the ones it skipped.
+  `run_tests` was **15.99 h of the 34.5 h** of terse wall clock in a one-week scan - 751 calls,
+  p50 34 433 ms - and 101 of those ran the whole solution with no filter. Selection is at
+  **assembly** granularity, the level Microsoft ships TIA at, because static per-symbol selection is
+  measured unsafe under reflection. It is **opt-in and fail-safe**: it falls back to the whole
+  solution, naming the reason, when no document changed, when a changed file belongs to no project,
+  or when no test project depends on the change - so it never silently runs less than it should, and
+  the skipped set is always named. `project=` still outranks it. Each selected project runs into one
+  shared TRX directory, so the existing per-project breakdown merges unchanged (**I164**).
+
 ### Changed
+
+- **The `core` tool profile stays opt-in, and now says why.** Making it the default was implemented
+  and then **reverted inside this release** on the evidence of a new census gate,
+  `GuardProfileCoherenceE2ETests`: the guard names **33** tools the `core` subset does not advertise
+  - every `xaml_*`, `resx_*` and `razor_*`, plus `cleanup`, `format`, `clean`, `gate`, `list_tests`,
+  `rerun_failed`, `diff_text`, `rename_symbol` and `get_symbol`. The claim that a hidden tool "still
+  answers when called by name" is true of the **server** and unproven of the **client**: an agent can
+  only call what its tool list carries. Defaulting to `core` would therefore have made every guard
+  denial on a XAML, Blazor or localized codebase point at a tool the agent cannot reach - the
+  failure `CLAUDE.md` describes as "a guard that denies a command the server cannot answer", with the
+  arrow reversed. The README, NUGET README and `SKILL.md` now state that limitation instead of
+  claiming the profile hides nothing. Kept from the attempt: `ToolProfile.Resolve` takes the
+  environment value as an explicit parameter, so 9 unit tests cover profile resolution without
+  mutating process state; the E2E census fixture and `BuildWarningsE2ETests` start with
+  `--tools all`; and `ToolListDiscoveryCensusTests` fails any E2E class that reads `tools/list` from
+  a server it spawned without it - which immediately caught `BuildWarningsE2ETests`, whose build/test
+  family had already shrunk from four tools to two (**I160**).
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
 > `search_text` and `search_regex` tag the response `HEURISTIC` once instead of every record.
@@ -34,6 +116,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   answer both - `find_usages`, `xaml_*`, `resx_*`, `diff_symbols` - is unchanged (**I169**).
 
 ### Fixed
+
+> **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
+> `gate`'s `analyzed=N` counts the documents in scope, not the diagnostics found before the fix steps.
+
+- `gate` bound `analyzed=` to the **pre-fix diagnostic count**, so every clean scope answered
+  `clean  analyzed=0 fixed=0 remaining=0` - byte-identical to a gate that had run over nothing, and
+  read as exactly that twice in one session scan, including on an explicit `path=` naming a file
+  `analyze` was answering about at the same moment. `analyzed=` now counts the documents the gate
+  had in scope, so `analyzed=0` is unreachable and a clean verdict can never be mistaken for an
+  empty run. The scoping half of the report is refuted and recorded: an explicit `path=` **was**
+  gated, and a scope matching no document already answers `ERROR DocumentNotFound` /
+  `ERROR Invalid` with a remedy rather than a verdict - now locked by its own test (**I171**).
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
 > `read_text` no longer calls a read `truncated` that it never clipped.
@@ -2345,7 +2439,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.29.0
 [0.28.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.28.0
 [0.27.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.27.0
 [0.26.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.26.0

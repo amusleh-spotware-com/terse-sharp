@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace TerseSharp.Server;
 
 internal readonly record struct TestRunRequest(
@@ -8,7 +10,10 @@ internal readonly record struct TestRunRequest(
     int Slowest,
     TimeSpan Timeout,
     bool Verbose = false,
-    BuildScope Scope = default)
+    BuildScope Scope = default,
+    ImmutableArray<string> Targets = default)
 {
     public bool WantsDetail => Verbose || IncludePassed || Slowest > 0;
+
+    public ImmutableArray<string> Invocations => Targets.IsDefaultOrEmpty ? [Target] : Targets;
 }

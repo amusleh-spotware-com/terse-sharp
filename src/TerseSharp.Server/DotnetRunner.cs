@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Server;
@@ -53,17 +54,55 @@ public static partial class DotnetRunner
 
         try
         {
-            var run = await RunAsync(Arguments(request, results.FullName), workspace.Root, request.Timeout, cancellationToken)
-                .ConfigureAwait(false);
+            var run = await InvokeAsync(workspace, request, results.FullName, cancellationToken).ConfigureAwait(false);
             var report = Report(results, workspace.Root);
 
-            return new TestRunResult(RenderTest(run, report, request), report, Locked(run));
+            return new TestRunResult(RenderTest(run, report, request, workspace.Root), report, Locked(run));
         }
         finally
         {
             Discard(results);
         }
     }
+
+    private static async Task<ProcessRun> InvokeAsync(
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        string resultsDirectory,
+        CancellationToken cancellationToken)
+    {
+        var deadline = Stopwatch.StartNew();
+        var combined = default(ProcessRun);
+
+        foreach (var target in request.Invocations)
+        {
+            var left = request.Timeout - deadline.Elapsed;
+
+            if (left <= TimeSpan.Zero)
+                break;
+
+            var run = await RunAsync(
+                Arguments(request with { Target = target }, resultsDirectory),
+                workspace.Root,
+                left,
+                cancellationToken).ConfigureAwait(false);
+
+            combined = combined is null ? run : Merge(combined, run);
+
+            if (run.TimedOut)
+                break;
+        }
+
+        return combined ?? new ProcessRun(0, string.Empty, 0);
+    }
+
+    internal static ProcessRun Merge(ProcessRun first, ProcessRun next) => new(
+        first.ExitCode is 0 ? next.ExitCode : first.ExitCode,
+        first.Output + "\n" + next.Output,
+        first.ElapsedMilliseconds + next.ElapsedMilliseconds,
+        first.TimedOut || next.TimedOut,
+        first.StandardOutput + "\n" + next.StandardOutput,
+        first.StandardError + "\n" + next.StandardError);
 
     private static void Discard(DirectoryInfo results)
     {
@@ -135,10 +174,10 @@ public static partial class DotnetRunner
         response.Note("remedy: see the NOTE below; the operation is retried automatically when one workspace is loaded");
     }
 
-    private static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request)
+    private static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request, string root)
     {
         if (report.Total is 0 && run.ExitCode is not 0)
-            return RenderNoResults(request.Target, run, request.Verbose);
+            return RenderNoResults(request.Target, run, request.Verbose, root);
 
         if (IsGreen(run, report) && !request.WantsDetail)
             return QuietTest(report);
@@ -155,7 +194,7 @@ public static partial class DotnetRunner
 
         return response.ToString();
     }
-    internal static string RenderNoResults(string target, ProcessRun run, bool verbose)
+    internal static string RenderNoResults(string target, ProcessRun run, bool verbose, string root = "")
     {
         var response = new ResponseBuilder("run_tests", target).Verbose(verbose);
 
@@ -164,11 +203,11 @@ public static partial class DotnetRunner
             : string.Create(CultureInfo.InvariantCulture, $"FAILED exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}, no test results were produced"));
 
         AppendLockWarning(response, run);
-        AppendFailureOutput(response, run, reported: 0, verbose);
+        AppendFailureOutput(response, run, reported: 0, verbose, root);
 
         return response.ToString();
     }
-    internal static string RenderTestNames(string target, ProcessRun run, string? contains)
+    internal static string RenderTestNames(string target, ProcessRun run, string? contains, string root = "")
     {
         var names = TestNameList.Parse(run.Output, contains);
         var shown = Math.Min(names.Length, MaxTestNames);
@@ -181,7 +220,7 @@ public static partial class DotnetRunner
         for (var index = 0; index < shown; index++)
             response.Line(names[index]);
 
-        AppendFailureOutput(response, run, names.Length, verbose: false);
+        AppendFailureOutput(response, run, names.Length, verbose: false, root);
 
         return response.ToString();
     }
@@ -286,7 +325,7 @@ public static partial class DotnetRunner
         var run = await RunAsync(arguments, workspace.Root, timeout, cancellationToken)
             .ConfigureAwait(false);
 
-        return new BuildRun(RenderTestNames(target, run, contains), Locked(run));
+        return new BuildRun(RenderTestNames(target, run, contains, workspace.Root), Locked(run));
     }
 
     private static string QuietBuild(ProcessRun run, int warnings) => string.Create(
@@ -336,7 +375,7 @@ public static partial class DotnetRunner
 
         response.Note(string.Create(CultureInfo.InvariantCulture, $"warnings={diagnostics.Warnings.Length} hidden"));
     }
-    private static void AppendFailureOutput(ResponseBuilder response, ProcessRun run, int reported, bool verbose)
+    private static void AppendFailureOutput(ResponseBuilder response, ProcessRun run, int reported, bool verbose, string root)
     {
         if (reported > 0 || run.ExitCode is 0)
             return;
@@ -347,9 +386,9 @@ public static partial class DotnetRunner
         AppendHiddenWarnings(response, diagnostics, shown.Length);
 
         foreach (var line in shown)
-            response.Line(line);
+            response.Line(Relative(line, root));
 
-        AppendTail(response, run, diagnostics.Errors.Length, string.Empty);
+        AppendTail(response, run, diagnostics.Errors.Length, root);
     }
     private static int Parsed(BuildDiagnostics diagnostics) => diagnostics.Errors.Length + diagnostics.Warnings.Length;
 

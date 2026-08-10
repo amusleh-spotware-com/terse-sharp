@@ -17,7 +17,7 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
     public async ValueTask InitializeAsync() =>
         server = await TerseServerProcess.StartAsync(
             WarningRoot,
-            [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", Path.Combine(WarningRoot, "WarningSolution.slnx")],
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", Path.Combine(WarningRoot, "WarningSolution.slnx")],
             TestContext.Current.CancellationToken);
 
     public ValueTask DisposeAsync() => server.StopAsync();

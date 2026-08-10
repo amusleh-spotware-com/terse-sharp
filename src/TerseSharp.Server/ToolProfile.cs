@@ -34,9 +34,12 @@ public static class ToolProfile
         "analyze",
     };
 
-    public static IReadOnlySet<string>? Resolve(string? requested)
+    public static IReadOnlySet<string>? Resolve(string? requested) =>
+        Resolve(requested, Environment.GetEnvironmentVariable("TERSE_TOOLS"));
+
+    public static IReadOnlySet<string>? Resolve(string? requested, string? environment)
     {
-        var name = requested ?? Environment.GetEnvironmentVariable("TERSE_TOOLS");
+        var name = requested ?? environment;
 
         if (string.Equals(name, Core, StringComparison.OrdinalIgnoreCase))
             return CoreTools;

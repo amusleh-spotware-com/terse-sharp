@@ -30,7 +30,7 @@ walks up from the current directory, finds your `.sln` / `.slnx` / `.slnf` / `.c
 ```bash
 terse install --client cursor   # not detected? pick one: claude-code | cursor | vscode | windsurf
 terse install --skill --guard   # teach your agent the tools, and block Read/Grep on C# (recommended)
-terse doctor                    # verify SDK, MSBuild, workspace load, client registration
+terse doctor                    # verify SDK, MSBuild, workspace load, client registration, per-call latency
 terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.cs"}'
 ```
 
@@ -104,6 +104,17 @@ TerseSharp guard: Read on 'src/App/OrderService.cs' is C#/.NET source.
 Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outline or read_text.
 ```
 
+A denial is not only a prohibition. It also returns `additionalContext` — the **complete replacement
+call, with the arguments filled in from the command it just denied** — which Claude Code places
+beside the tool result: `Call this instead: get_file_outline path="src/App/OrderService.cs"`. A
+positive routing instruction at the moment the agent is about to fall back beats a negation, which is
+the weaker lever.
+
+Set `TERSE_GUARD_LOG=<path>` to append one JSON line per decision — tool, verdict, routing, reason,
+`cwd`, session and transcript path — so a later scan can tell a denied-and-retried command from one
+the guard never saw, and a subagent's call from the main thread's. It is opt-in, best-effort, and a
+write failure never changes the verdict.
+
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends, the shell text
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them, `dotnet build`/`test`/`format`/`clean`,
 `dotnet watch build`/`test` and `msbuild`, and the working-tree half of git — `git status` and
@@ -131,8 +142,10 @@ success that costs nothing — every mutating tool answers in one line per chang
 
 A full catalogue is attached to every request, and past a certain size that measurably costs
 tool-selection accuracy, so `terse serve --tools core` (or `TERSE_TOOLS=core`) advertises a 21-tool
-subset instead. It hides nothing: every other tool still answers when the agent calls it by name, and
-`workspace_status` reports which profile is running.
+subset instead. It stays **opt-in**: the server answers a hidden tool called by name, but an agent
+can only call what its client lists, and the `core` subset omits 33 tools the guard itself names as
+replacements — every `xaml_*`, `resx_*` and `razor_*` among them. Prefer it on a plain C# codebase,
+not on a XAML, Blazor or localized one. `workspace_status` reports which profile is running.
 
 | Group | Tools |
 |---|---|

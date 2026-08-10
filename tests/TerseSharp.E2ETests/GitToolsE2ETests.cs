@@ -168,6 +168,59 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task ChangedFiles_WithRoot_AnswersAboutThatDirectoryAndTagsItOutsideTheWorkspace()
+    {
+        var text = await server.CallAsync("changed_files", new() { ["root"] = TerseServerFixture.RepositoryRoot });
+
+        Assert.Contains("outside-workspace", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DiffText_WithRoot_TagsTheAnswerOutsideTheWorkspace()
+    {
+        var text = await server.CallAsync("diff_text", new()
+        {
+            ["root"] = TerseServerFixture.RepositoryRoot,
+            ["path"] = "src",
+            ["maxLines"] = 5,
+        });
+
+        Assert.Contains("outside-workspace", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithARelativeRoot_IsRefusedWithARemedy()
+    {
+        var text = await server.CallAsync("changed_files", new() { ["root"] = "../somewhere" });
+
+        Assert.Contains("is not an absolute path", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithARootThatDoesNotExist_IsRefusedWithARemedy()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "terse-no-such-directory-i167");
+
+        var text = await server.CallAsync("changed_files", new() { ["root"] = missing });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DiffSymbols_WithRoot_RefusesAndNamesTheTwoToolsThatCanAnswer()
+    {
+        var text = await server.CallAsync("diff_symbols", new() { ["root"] = TerseServerFixture.RepositoryRoot });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("changed_files root=", text, StringComparison.Ordinal);
+        Assert.Contains("diff_text root=", text, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe

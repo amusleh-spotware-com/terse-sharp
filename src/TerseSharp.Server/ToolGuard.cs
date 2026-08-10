@@ -1,9 +1,10 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TerseSharp.Server;
 
-public sealed record GuardVerdict(bool Denied, string Reason);
+public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null);
 
 public static class ToolGuard
 {
@@ -28,17 +29,23 @@ public static class ToolGuard
         _ => Allowed,
     };
 
-    public static string Render(GuardVerdict verdict) => verdict.Denied
-        ? new JsonObject
+    public static string Render(GuardVerdict verdict)
+    {
+        if (!verdict.Denied)
+            return "{}";
+
+        var hook = new JsonObject
         {
-            ["hookSpecificOutput"] = new JsonObject
-            {
-                ["hookEventName"] = "PreToolUse",
-                ["permissionDecision"] = "deny",
-                ["permissionDecisionReason"] = verdict.Reason,
-            },
-        }.ToJsonString()
-        : "{}";
+            ["hookEventName"] = "PreToolUse",
+            ["permissionDecision"] = "deny",
+            ["permissionDecisionReason"] = verdict.Reason,
+        };
+
+        if (verdict.Routing is { Length: > 0 } routing)
+            hook["additionalContext"] = "Call this instead: " + routing;
+
+        return new JsonObject { ["hookSpecificOutput"] = hook }.ToJsonString();
+    }
 
     public static async Task<int> RunAsync(TextReader input, TextWriter output, CancellationToken cancellationToken)
     {
@@ -46,6 +53,7 @@ public static class ToolGuard
         var verdict = Decide(payload);
 
         await output.WriteLineAsync(Render(verdict)).ConfigureAwait(false);
+        await LogAsync(payload, verdict, cancellationToken).ConfigureAwait(false);
 
         return 0;
     }
@@ -69,15 +77,16 @@ public static class ToolGuard
 
     private static readonly GuardVerdict Allowed = new(false, string.Empty);
 
-    private static GuardVerdict OnPath(string tool, string? path) =>
-        path is not null && Covered(path) ? new GuardVerdict(true, Reason(tool, path)) : Allowed;
+    private static GuardVerdict OnPath(string tool, string? path) => path is not null && Covered(path)
+        ? new GuardVerdict(true, Reason(tool, path), PathRouting(tool, path))
+        : Allowed;
 
     private static GuardVerdict OnGrep(JsonObject input)
     {
         var scope = string.Join(' ', new[] { Text(input, "glob"), Text(input, "path"), Text(input, "type") }.OfType<string>());
 
         return Covered(scope) || DotNetType(Text(input, "type"))
-            ? new GuardVerdict(true, Reason("Grep", scope.Trim()))
+            ? new GuardVerdict(true, Reason("Grep", scope.Trim()), GrepRouting(scope.Trim(), Text(input, "pattern")))
             : Allowed;
     }
 
@@ -92,10 +101,10 @@ public static class ToolGuard
         foreach (var segment in Segments(command))
         {
             if (Replaced(segment, cwd) is { } subcommand)
-                return new GuardVerdict(true, BuildReason(segment, subcommand));
+                return new GuardVerdict(true, BuildReason(segment, subcommand), BuildRouting(subcommand));
 
             if (Covered(segment) && IsTextRead(segment))
-                return new GuardVerdict(true, Reason("Bash", segment.Trim()));
+                return new GuardVerdict(true, Reason("Bash", segment.Trim()), BashRouting(segment.Trim()));
         }
 
         return Allowed;
@@ -143,8 +152,8 @@ public static class ToolGuard
         "format-analyzers" => "use cleanup fix=analyzers, or cleanup verify=true fix=analyzers for --verify-no-changes - that verifies exactly what this command checks",
         "format-style" => "use cleanup fix=style, or cleanup verify=true fix=style for --verify-no-changes - that verifies exactly what this command checks",
         "clean" => "use clean",
-        "status" => "use changed_files",
-        "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show",
+        "status" => "use changed_files, or changed_files root=<that directory> when it is not the loaded workspace",
+        "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show; for a directory that is not loaded, diff_text root=<that directory>",
         "ls-files" => "use find_files tracked=true",
         _ => "use run_tests, rerun_failed or list_tests",
     };
@@ -451,5 +460,139 @@ public static class ToolGuard
         }
 
         return true;
+    }
+
+    private static string Call(string tool, string name, string value) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{tool} {name}=\"{Trim(value)}\"");
+
+
+    private static string OutlineTool(string target) => target switch
+    {
+        var razor when IsRazor(razor) => "razor_outline",
+        var resource when IsResource(resource) => "resx_get",
+        var markup when IsMarkup(markup) => "xaml_outline",
+        var code when IsCSharp(code) => "get_file_outline",
+        _ => "read_text",
+    };
+
+
+    private static string EditTool(string target) => target switch
+    {
+        var razor when IsRazor(razor) => "razor_set_attribute",
+        var resource when IsResource(resource) => "resx_set",
+        var markup when IsMarkup(markup) => "xaml_set_property",
+        var code when IsCSharp(code) => "replace_symbol_body",
+        _ => "edit_text",
+    };
+
+
+    private static string PathRouting(string tool, string target) => tool switch
+    {
+        "Read" => Call(OutlineTool(target), "path", target),
+        "Glob" => Call("find_files", "glob", target),
+        _ => EditRouting(target),
+    };
+
+    private static string EditRouting(string target) => IsCSharp(target) && !IsRazor(target)
+        ? Call("get_file_outline", "path", target) + ", then replace_symbol_body symbolId=<a member it lists>"
+        : Call(EditTool(target), "path", target);
+
+
+    private static string SearchTool(string scope) => scope switch
+    {
+        var razor when IsRazor(razor) => "razor_find",
+        var resource when IsResource(resource) => "resx_find",
+        var markup when IsMarkup(markup) => "xaml_find",
+        _ => "search_text",
+    };
+
+
+    private static string GrepRouting(string scope, string? pattern) =>
+        Call(SearchTool(scope), "query", pattern is { Length: > 0 } text ? text : scope);
+
+    private static string BashRouting(string segment)
+    {
+        foreach (var token in Tokens(segment))
+        {
+            var bare = Bare(token);
+
+            if (Covered(bare))
+                return Call(OutlineTool(bare), "path", bare);
+        }
+
+        return Call("search_text", "query", segment);
+    }
+
+    private static string BuildRouting(string subcommand) => subcommand switch
+    {
+        "build" => "build",
+        "test" => "run_tests",
+        "clean" => "clean",
+        "format" => "format, then cleanup fix=all",
+        "format-analyzers" => "cleanup fix=analyzers",
+        "format-style" => "cleanup fix=style",
+        "status" => "changed_files",
+        "diff" => "diff_symbols",
+        "ls-files" => "find_files tracked=true",
+        _ => "run_tests",
+    };
+
+    internal static string Entry(string payload, GuardVerdict verdict)
+    {
+        var root = Parsed(payload);
+        var input = root["tool_input"] as JsonObject ?? [];
+
+        return new JsonObject
+        {
+            ["tool"] = Text(root, "tool_name"),
+            ["denied"] = verdict.Denied,
+            ["routing"] = verdict.Routing,
+            ["reason"] = verdict.Denied ? verdict.Reason : null,
+            ["cwd"] = Text(root, "cwd"),
+            ["session"] = Text(root, "session_id"),
+            ["transcript"] = Text(root, "transcript_path"),
+            ["command"] = Text(input, "command"),
+            ["path"] = Text(input, "file_path") ?? Text(input, "pattern"),
+        }.ToJsonString();
+    }
+
+    private static async Task LogAsync(string payload, GuardVerdict verdict, CancellationToken cancellationToken)
+    {
+        if (Environment.GetEnvironmentVariable("TERSE_GUARD_LOG") is not { Length: > 0 } path)
+            return;
+
+        try
+        {
+            var line = Encoding.UTF8.GetBytes(Entry(payload, verdict) + "\n");
+
+            await using var stream = new FileStream(
+                path,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.ReadWrite,
+                bufferSize: 4096,
+                FileOptions.Asynchronous);
+
+            await stream.WriteAsync(line, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static JsonObject Parsed(string payload)
+    {
+        try
+        {
+            return JsonNode.Parse(payload) as JsonObject ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 }

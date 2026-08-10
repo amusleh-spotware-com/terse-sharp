@@ -21,7 +21,7 @@ public sealed class ToolProfileE2ETests : IAsyncLifetime
     public async ValueTask DisposeAsync() => await server.StopAsync();
 
     [Fact]
-    public async Task ToolsList_AdvertisesExactlyTheCoreProfile()
+    public async Task ToolsList_WithCoreRequested_AdvertisesExactlyTheCoreProfile()
     {
         var advertised = (await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken))
             .Select(tool => tool.Name)

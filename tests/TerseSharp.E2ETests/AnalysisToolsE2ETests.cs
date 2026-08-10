@@ -211,7 +211,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         await server.CallAsync("write_text", new()
         {
             ["path"] = probe,
-            ["content"] = "namespace TerseProbe;\n\npublic sealed record GateSteerProbe(int Value);\n",
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed record GateSteerProbe(int Value);\n",
             ["force"] = true,
         });
 
@@ -225,7 +225,41 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         }
         finally
         {
-            await server.CallAsync("write_text", new() { ["path"] = probe, ["delete"] = true });
+            var removed = await server.CallAsync("write_text", new() { ["path"] = probe, ["delete"] = true, ["force"] = true });
+
+            Assert.DoesNotContain("ERROR", removed, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public async Task Gate_AnalyzedCountsTheDocumentsInScope_NotTheDiagnosticsItFound()
+    {
+        var clean = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["dryRun"] = true });
+        var findings = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["dryRun"] = true });
+        var glob = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/*.cs", ["dryRun"] = true });
+
+        Assert.Equal(1, Analyzed(clean));
+        Assert.Equal(1, Analyzed(findings));
+        Assert.True(Remaining(findings) > 0, findings);
+        Assert.True(Analyzed(glob) > 1, glob);
+    }
+
+    [Fact]
+    public async Task Gate_OverAScopeMatchingNoDocument_AnswersAnErrorWithARemedy()
+    {
+        var text = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/NoSuchDocument*.cs" });
+
+        Assert.StartsWith("ERROR ", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("analyzed=", text, StringComparison.Ordinal);
+    }
+
+    private static int Analyzed(string text)
+    {
+        var marker = text.IndexOf("analyzed=", StringComparison.Ordinal) + "analyzed=".Length;
+        var tail = text.AsSpan(marker);
+        var end = tail.IndexOfAny(" \r\n");
+
+        return int.Parse(end < 0 ? tail : tail[..end], CultureInfo.InvariantCulture);
     }
 }

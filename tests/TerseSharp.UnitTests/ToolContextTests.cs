@@ -115,4 +115,33 @@ public sealed class ToolContextTests
         Assert.True(registry.Unload(files.SolutionPath));
         Assert.Empty(workspace.Solution.Projects);
     }
+
+    [Fact]
+    public async Task MeasureAsync_OverALoadedWorkspace_SplitsThePerCallFloorIntoResolveSyncAndAction()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        var latency = await context.MeasureAsync(8, TestContext.Current.CancellationToken);
+
+        Assert.Equal(8, latency.Calls);
+        Assert.True(latency.ResolveMs is >= 0 and < 100, $"resolveMs={latency.ResolveMs}");
+        Assert.True(latency.SyncMs is >= 0 and < 100, $"syncMs={latency.SyncMs}");
+        Assert.True(latency.ActionMs >= 0, $"actionMs={latency.ActionMs}");
+    }
+
+    [Fact]
+    public async Task MeasureAsync_WithNothingLoaded_AnswersZeroWithoutThrowing()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+
+        var latency = await context.MeasureAsync(3, TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, latency.Calls);
+        Assert.Equal(0, latency.SyncMs);
+        Assert.Equal(0, latency.ActionMs);
+    }
 }

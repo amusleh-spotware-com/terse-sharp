@@ -98,7 +98,7 @@ public sealed class AnalysisTools(ToolContext context)
     }
 
     [McpServerTool(Name = "gate")]
-    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0'; anything else keeps the diagnostics that are still unfixed. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
+    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
     public Task<string> Gate(
         [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty gates the files modified since the workspace loaded.")] string? path = null,
         [Description("Gate every document instead of only the files modified since the workspace loaded. Ignored when path is passed. Default false.")] bool solution = false,

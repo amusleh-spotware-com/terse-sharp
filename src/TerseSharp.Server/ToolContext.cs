@@ -1,7 +1,10 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Server;
+
+public readonly record struct ToolLatency(int Calls, double ResolveMs, double SyncMs, double ActionMs);
 
 public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IReadOnlySet<string>? advertised = null) : IDisposable
 {
@@ -96,19 +99,45 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
     public async Task<string> WithTargetAsync(
         string? workspace,
         string? pathHint,
-        Func<WorkspaceTarget, Task<string>> action)
+        Func<WorkspaceTarget, Task<string>> action,
+        bool changed = false,
+        CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
 
         return await ToolBoundary.RunAsync(async () =>
         {
-            var target = Target(workspace, pathHint);
+            var target = await TargetAsync(workspace, pathHint, changed, cancellationToken).ConfigureAwait(false);
 
             return target.IsOk ? await action(target.Value!).ConfigureAwait(false) : target.Error!.Render();
         }).ConfigureAwait(false);
     }
 
-    private Result<WorkspaceTarget> Target(string? workspace, string? pathHint)
+    private async Task<Result<WorkspaceTarget>> TargetAsync(
+        string? workspace,
+        string? pathHint,
+        bool changed,
+        CancellationToken cancellationToken)
+    {
+        if (!changed)
+            return Target(workspace, pathHint, changed: false);
+
+        var resolved = Registry.Resolve(workspace, pathHint);
+
+        if (!resolved.IsOk)
+            return Result.Fail<WorkspaceTarget>(resolved.Error!);
+
+        var synced = await SyncedAsync(resolved.Value!, workspace, pathHint, cancellationToken).ConfigureAwait(false);
+
+        if (!synced.IsOk)
+            return Result.Fail<WorkspaceTarget>(synced.Error!);
+
+        using var lease = synced.Value!;
+
+        return Result.Ok(Described(lease.Workspace, changed: true));
+    }
+
+    private Result<WorkspaceTarget> Target(string? workspace, string? pathHint, bool changed)
     {
         var resolved = Registry.Resolve(workspace, pathHint);
 
@@ -117,11 +146,14 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
 
         using var lease = resolved.Value!;
 
-        return Result.Ok(new WorkspaceTarget(
-            lease.Workspace.SolutionPath,
-            lease.Workspace.Root,
-            ProjectPaths(lease.Workspace)));
+        return Result.Ok(Described(lease.Workspace, changed));
     }
+
+    private static WorkspaceTarget Described(LoadedWorkspace loaded, bool changed) => new(
+        loaded.SolutionPath,
+        loaded.Root,
+        ProjectPaths(loaded),
+        changed ? ChangedTestSelection.Select(loaded) : default);
 
     public void Dispose() => Registry.Dispose();
 
@@ -208,7 +240,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
         if (loaded.CompilationsRealized)
             return await action().ConfigureAwait(false);
 
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var stopwatch = Stopwatch.StartNew();
         var answer = await action().ConfigureAwait(false);
 
         return loaded.CompilationsRealized
@@ -219,4 +251,45 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
                 $"\ncompilations=realized in {stopwatch.ElapsedMilliseconds}ms (once per load, not per call)")
             : answer;
     }
+
+    public async Task<ToolLatency> MeasureAsync(int calls, CancellationToken cancellationToken)
+    {
+        (long Resolve, long Sync, long Action) total = default;
+
+        for (var call = 0; call < calls; call++)
+        {
+            var sample = await SampleAsync(cancellationToken).ConfigureAwait(false);
+
+            total = (total.Resolve + sample.Resolve, total.Sync + sample.Sync, total.Action + sample.Action);
+        }
+
+        return new ToolLatency(calls, Average(total.Resolve, calls), Average(total.Sync, calls), Average(total.Action, calls));
+    }
+
+    private async Task<(long Resolve, long Sync, long Action)> SampleAsync(CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var found = Registry.Resolve(null, null, semantic: true);
+        var resolve = stopwatch.ElapsedTicks;
+
+        if (!found.IsOk)
+            return (resolve, 0, 0);
+
+        stopwatch.Restart();
+        var synced = await SyncedAsync(found.Value!, null, null, cancellationToken).ConfigureAwait(false);
+        var sync = stopwatch.ElapsedTicks;
+
+        if (!synced.IsOk)
+            return (resolve, sync, 0);
+
+        using var lease = synced.Value!;
+
+        stopwatch.Restart();
+        _ = lease.Workspace.Solution.ProjectIds.Count;
+
+        return (resolve, sync, stopwatch.ElapsedTicks);
+    }
+
+    private static double Average(long ticks, int calls) =>
+        calls is 0 ? 0 : ticks * 1000d / (Stopwatch.Frequency * calls);
 }

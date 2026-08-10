@@ -573,4 +573,161 @@ public sealed class ToolGuardTests
         Assert.Contains("format verify=true", verdict.Reason, StringComparison.Ordinal);
         Assert.Contains("cleanup verify=true", verdict.Reason, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Render_ForADenial_CarriesTheCompleteReplacementCallAsAdditionalContext()
+    {
+        var text = ToolGuard.Render(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/OrderService.cs" }));
+
+        Assert.Contains("\"additionalContext\":", text, StringComparison.Ordinal);
+        Assert.Contains("Call this instead: get_file_outline path=\\u0022src/OrderService.cs\\u0022", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForAnAllowedCall_CarriesNoAdditionalContext()
+    {
+        var text = ToolGuard.Render(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "notes.txt" }));
+
+        Assert.DoesNotContain("additionalContext", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("dotnet build", "build")]
+    [InlineData("dotnet test", "run_tests")]
+    [InlineData("git status", "changed_files")]
+    [InlineData("git diff", "diff_symbols")]
+    public void Render_ForAReplacedShellCommand_RoutesToTheToolThatAnswersIt(string command, string expected)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(expected, verdict.Routing);
+    }
+
+    [Fact]
+    public void Render_ForAXamlRead_RoutesToTheXamlOutlineRatherThanTheCSharpOne()
+    {
+        var verdict = ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "Views/Main.xaml" });
+
+        Assert.Equal("xaml_outline path=\"Views/Main.xaml\"", verdict.Routing);
+    }
+
+    [Fact]
+    public void Entry_ForADeniedCall_RecordsTheVerdictRoutingSessionAndTranscript()
+    {
+        const string Payload = """
+            {
+              "tool_name": "Bash",
+              "cwd": "C:/repo",
+              "session_id": "s-1",
+              "transcript_path": "C:/t/s-1.jsonl",
+              "tool_input": { "command": "dotnet build" }
+            }
+            """;
+
+        var line = ToolGuard.Entry(Payload, ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build" }, Fixtures.RepositoryRoot));
+
+        Assert.Contains("\"tool\":\"Bash\"", line, StringComparison.Ordinal);
+        Assert.Contains("\"denied\":true", line, StringComparison.Ordinal);
+        Assert.Contains("\"routing\":\"build\"", line, StringComparison.Ordinal);
+        Assert.Contains("\"session\":\"s-1\"", line, StringComparison.Ordinal);
+        Assert.Contains("\"transcript\":\"C:/t/s-1.jsonl\"", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Entry_ForMalformedPayload_StillProducesOneLineRatherThanThrowing()
+    {
+        var line = ToolGuard.Entry("not json at all", new GuardVerdict(false, string.Empty));
+
+        Assert.Contains("\"denied\":false", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithTheDecisionLogOn_AppendsOneJsonLinePerDecision()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "terse-guard-log-" + Guid.NewGuid().ToString("N") + ".jsonl");
+
+        Environment.SetEnvironmentVariable("TERSE_GUARD_LOG", path);
+
+        try
+        {
+            await ToolGuard.RunAsync(
+                new StringReader("""{"tool_name":"Bash","tool_input":{"command":"dotnet build"}}"""),
+                new StringWriter(),
+                TestContext.Current.CancellationToken);
+
+            var lines = await File.ReadAllLinesAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.Single(lines);
+            Assert.Contains("\"tool\":\"Bash\"", lines[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TERSE_GUARD_LOG", null);
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WithNoDecisionLogConfigured_WritesNothing()
+    {
+        var output = new StringWriter();
+
+        Environment.SetEnvironmentVariable("TERSE_GUARD_LOG", null);
+
+        await ToolGuard.RunAsync(
+            new StringReader("""{"tool_name":"Read","tool_input":{"file_path":"notes.txt"}}"""),
+            output,
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal("{}", output.ToString().Trim());
+    }
+
+    [Theory]
+    [InlineData("cat src/App/OrderService.cs", "get_file_outline path=\"src/App/OrderService.cs\"")]
+    [InlineData("cat src/App/Strings.resx", "resx_get path=\"src/App/Strings.resx\"")]
+    [InlineData("head -n 5 Views/Main.xaml", "xaml_outline path=\"Views/Main.xaml\"")]
+    public void Routing_ForABashTextRead_NamesTheReaderForThatFileKind_NotASearchForTheCommandText(string command, string expected)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(expected, verdict.Routing);
+    }
+
+    [Fact]
+    public void Routing_ForAGrepTypedToXaml_NamesXamlFindRatherThanSearchSymbols()
+    {
+        var verdict = ToolGuard.Inspect("Grep", new JsonObject { ["type"] = "xaml", ["pattern"] = "Binding Path" });
+
+        Assert.Equal("xaml_find query=\"Binding Path\"", verdict.Routing);
+    }
+
+    [Fact]
+    public void Routing_ForAGrepOverCSharp_NamesSearchTextWhichAcceptsAnyPattern()
+    {
+        var verdict = ToolGuard.Inspect("Grep", new JsonObject { ["glob"] = "*.cs", ["pattern"] = "log.*Error" });
+
+        Assert.Equal("search_text query=\"log.*Error\"", verdict.Routing);
+    }
+
+    [Fact]
+    public void Routing_ForAnEditOfCSharp_NamesTheOutlineThenTheSymbolEditor_NotAPathOnlyCall()
+    {
+        var verdict = ToolGuard.Inspect("Edit", new JsonObject { ["file_path"] = "src/App/OrderService.cs" });
+
+        Assert.Equal(
+            "get_file_outline path=\"src/App/OrderService.cs\", then replace_symbol_body symbolId=<a member it lists>",
+            verdict.Routing);
+    }
+
+    [Fact]
+    public void Routing_NeverContradictsTheReasonItShipsWith()
+    {
+        var verdict = ToolGuard.Inspect("Grep", new JsonObject { ["type"] = "xaml", ["pattern"] = "Foo" });
+
+        Assert.DoesNotContain("search_symbols", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("search_symbols", verdict.Routing!, StringComparison.Ordinal);
+    }
 }

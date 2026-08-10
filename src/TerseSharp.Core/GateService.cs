@@ -11,6 +11,7 @@ public static class GateService
         GateRequest request,
         CancellationToken cancellationToken)
     {
+        var analyzed = Analyzed(workspace, request);
         var before = await FindingsAsync(workspace, request, cancellationToken).ConfigureAwait(false);
 
         if (!before.IsOk)
@@ -21,7 +22,7 @@ public static class GateService
         var after = await FindingsAsync(workspace, request, cancellationToken).ConfigureAwait(false);
 
         return after.IsOk
-            ? Result.Ok(Render(request, before.Value!, after.Value!, formatted, cleaned))
+            ? Result.Ok(Render(request, analyzed, before.Value!, after.Value!, formatted, cleaned))
             : Result.Fail<string>(after.Error!);
     }
 
@@ -50,6 +51,7 @@ public static class GateService
 
     private static string Render(
         GateRequest request,
+        int analyzed,
         string[] before,
         string[] after,
         Result<string> formatted,
@@ -61,7 +63,7 @@ public static class GateService
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"{(clean ? "clean" : "FAILED")}  analyzed={before.Length} fixed={Math.Max(before.Length - after.Length, 0)} remaining={after.Length}{(request.DryRun ? "  dryRun" : string.Empty)}"));
+            $"{(clean ? "clean" : "FAILED")}  analyzed={analyzed} fixed={Math.Max(before.Length - after.Length, 0)} remaining={after.Length}{(request.DryRun ? "  dryRun" : string.Empty)}"));
 
         if (clean && quiet && !request.Verbose)
             return response.ToString();
@@ -90,4 +92,9 @@ public static class GateService
         foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
             response.Note(step + ": " + line);
     }
+
+    private static int Analyzed(LoadedWorkspace workspace, GateRequest request) =>
+        request.Path is null && !request.Changed
+            ? DocumentScope.Editable(workspace).Count()
+            : DocumentScope.Select(workspace, request.Path, request.Changed).Length;
 }

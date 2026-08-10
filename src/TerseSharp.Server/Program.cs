@@ -14,7 +14,7 @@ var maxWorkspacesOption = new Option<int?>("--max-workspaces") { Description = "
 
 var idleMinutesOption = new Option<int?>("--idle-minutes") { Description = "Drop a workspace's Roslyn compilations after it has been idle this long, and return the memory. Default 15; 0 keeps them for the life of the process. TERSE_IDLE_MINUTES does the same. The next semantic call re-realizes what it needs." };
 
-var toolsOption = new Option<string?>("--tools") { Description = "Which tools to advertise: all (default) or core, a ~20-tool subset. Every other tool still answers when called by name; only the advertised list shrinks, which is the measured lever on tool-selection accuracy. TERSE_TOOLS does the same." };
+var toolsOption = new Option<string?>("--tools") { Description = "Which tools to advertise: core (default), a ~20-tool subset, or all. Every other tool still answers when called by name; only the advertised list shrinks, which is the measured lever on tool-selection accuracy. Pass all to advertise the whole surface. TERSE_TOOLS does the same, and an unrecognised value falls back to core." };
 
 var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption, maxWorkspacesOption, idleMinutesOption, toolsOption };
 var guard = new Command("guard", "Hook entry point: reads a Claude Code PreToolUse payload on stdin and denies built-in tools on C#/.NET source.");

@@ -277,4 +277,38 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("passed=3 failed=3 skipped=1 total=7", await RunAsync(new() { ["project"] = TestProject }), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task RunTests_WithChanged_WhenNoTestProjectDependsOnTheChange_RunsEverythingAndSaysWhy()
+    {
+        const string Probe = "src/Fixture.Trading/SelectionProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed record SelectionProbe(int Value);\n",
+            ["force"] = true,
+        });
+
+        try
+        {
+            var text = await RunAsync(new() { ["changed"] = true });
+
+            Assert.True(
+                text.Contains("NOTE changed=true ran every test project - no test project depends", StringComparison.Ordinal),
+                text);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task RunTests_WithChangedAndAnExplicitProject_RunsThatProjectWithoutSelecting()
+    {
+        var text = await RunAsync(new() { ["changed"] = true, ["project"] = TestProject });
+
+        Assert.DoesNotContain("NOTE changed=true", text, StringComparison.Ordinal);
+    }
 }

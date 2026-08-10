@@ -256,4 +256,76 @@ public sealed class DotnetRunnerTests
 
         Assert.Equal("  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms", DotnetRunner.PerProject(report));
     }
+
+    [Fact]
+    public void RenderNoResults_WithTheWorkspaceRoot_RelativisesTheOutputTailInsteadOfEchoingAbsolutePaths()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+        var absolute = Path.Combine(root, "tests", "OrderTests.cs");
+
+        var text = DotnetRunner.RenderNoResults("A.slnx", Failed("crashed while running " + absolute), verbose: false, root);
+
+        Assert.Contains(Path.Combine("tests", "OrderTests.cs"), text, StringComparison.Ordinal);
+        Assert.DoesNotContain(root, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderNoResults_WithNoRoot_LeavesTheOutputTailAlone()
+    {
+        var absolute = Path.Combine(Path.GetTempPath(), "repo", "tests", "OrderTests.cs");
+
+        var text = DotnetRunner.RenderNoResults("A.slnx", Failed("crashed while running " + absolute), verbose: false);
+
+        Assert.Contains(absolute, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTestNames_WithTheWorkspaceRoot_RelativisesTheFailureOutput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+        var absolute = Path.Combine(root, "src", "Trading.csproj");
+
+        var text = DotnetRunner.RenderTestNames("A.slnx", Failed("MSB1009: " + absolute), contains: null, root);
+
+        Assert.DoesNotContain(root, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Invocations_WithNoTargetsSelected_FallsBackToTheSingleTarget() =>
+        Assert.Equal(["A.slnx"], Request("A.slnx").Invocations);
+
+
+    [Fact]
+    public void Invocations_WithTargetsSelected_RunsExactlyThoseProjects() =>
+        Assert.Equal(["one.csproj", "two.csproj"], (Request("A.slnx") with { Targets = ["one.csproj", "two.csproj"] }).Invocations);
+
+    [Fact]
+    public void Merge_KeepsTheFirstNonZeroExitCode_SoAFailedProjectIsNeverReportedAsGreen()
+    {
+        var merged = DotnetRunner.Merge(new ProcessRun(0, "a", 10), new ProcessRun(3, "b", 20));
+
+        Assert.Equal(3, merged.ExitCode);
+    }
+
+    [Fact]
+    public void Merge_WhenTheFirstProjectFailed_DoesNotLetALaterGreenProjectClearIt()
+    {
+        var merged = DotnetRunner.Merge(new ProcessRun(3, "a", 10), new ProcessRun(0, "b", 20));
+
+        Assert.Equal(3, merged.ExitCode);
+    }
+
+    [Fact]
+    public void Merge_SumsElapsedAndOrsTheTimeoutAndKeepsBothOutputs()
+    {
+        var merged = DotnetRunner.Merge(new ProcessRun(0, "a", 10), new ProcessRun(0, "b", 20, TimedOut: true));
+
+        Assert.Equal(30, merged.ElapsedMilliseconds);
+        Assert.True(merged.TimedOut);
+        Assert.Contains("a", merged.Output, StringComparison.Ordinal);
+        Assert.Contains("b", merged.Output, StringComparison.Ordinal);
+    }
+
+    private static TestRunRequest Request(string target) =>
+        new(target, null, false, false, 0, TimeSpan.FromSeconds(60));
 }

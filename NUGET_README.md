@@ -23,7 +23,7 @@ walks up from the current directory, finds your `.sln` / `.slnx` / `.slnf` / `.c
 ```
 terse install --client cursor   # not detected? pick one: claude-code | cursor | vscode | windsurf
 terse install --skill --guard   # teach your agent the tools, and block Read/Grep on C# (recommended)
-terse doctor                    # verify SDK, MSBuild, workspace load, client registration
+terse doctor                    # verify SDK, MSBuild, workspace load, client registration, per-call latency
 terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.cs"}'
 ```
 
@@ -89,12 +89,19 @@ call, so a guard fault can never wedge a session; and you remove the guard by de
 `terse guard` entry from Claude Code's `settings.json`. Pair it with `--skill`, which ships Claude Code the skill that teaches the
 swaps — on any other agent, put the same rule in `AGENTS.md` or `.cursorrules`.
 
+A denial also returns `additionalContext` — the complete replacement call with the arguments filled
+in from the command it denied (`Call this instead: get_file_outline path="src/App/Order.cs"`) — so
+the agent is routed, not merely refused. Set `TERSE_GUARD_LOG=<path>` to append one JSON line per
+decision (tool, verdict, routing, reason, cwd, session, transcript), opt-in and best-effort; a write
+failure never changes the verdict.
+
 ## The tools
 
 `terse serve --tools core` (or `TERSE_TOOLS=core`) advertises a 21-tool subset instead of the full
 catalogue, which is attached to every request and past a certain size measurably costs tool-selection
-accuracy. It hides nothing: every other tool still answers when called by name, and `workspace_status`
-reports which profile is running.
+accuracy. It stays **opt-in**: the server answers a hidden tool called by name, but an agent can only
+call what its client lists, and the subset omits 33 tools the guard names as replacements — every
+`xaml_*`, `resx_*` and `razor_*` among them. `workspace_status` reports which profile is running.
 
 **87 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with

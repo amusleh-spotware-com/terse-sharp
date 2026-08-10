@@ -3,7 +3,11 @@ using System.Collections.Immutable;
 
 namespace TerseSharp.Core;
 
-public readonly record struct WorkspaceTarget(string SolutionPath, string Root, ImmutableArray<string> ProjectPaths = default)
+public readonly record struct WorkspaceTarget(
+    string SolutionPath,
+    string Root,
+    ImmutableArray<string> ProjectPaths = default,
+    TestSelection Tests = default)
 {
     private const int MaxSuggestions = 8;
 

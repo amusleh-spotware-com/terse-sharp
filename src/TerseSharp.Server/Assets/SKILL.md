@@ -90,7 +90,7 @@ tripwires — are the hard gate directly **below** the table.
 | re-running what broke | `rerun_failed` | replays the previous failures only |
 | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | `dotnet format whitespace` / an IDE inspection | `analyze` · `format` · `cleanup` | compiler + every referenced analyzer + dead code |
-| running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0` - and keeping only the diagnostics still unfixed |
+| running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0`, where `analyzed` counts the **documents** in scope - and keeping only the diagnostics still unfixed |
 | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
 | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
@@ -118,6 +118,10 @@ too and are covered by the same gate — including later in a compound command
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
 denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
 denial is not a reason to try a different spelling of the same shell command — call the tool.
+**The denial also hands you the answer**: a system reminder beside the tool result reads
+`Call this instead: <the complete call, with the arguments already filled in from what you tried>`.
+Run that call verbatim; it is chosen from the file kind, so a `.xaml` read routes to `xaml_outline`
+and a `.resx` read to `resx_get`, not to `get_file_outline`.
 
 `dotnet format` and `dotnet clean` are covered too, and the guard names the **exact** replacement per
 sub-command: `dotnet format analyzers` -> `cleanup fix=analyzers` (`cleanup verify=true fix=analyzers`
@@ -181,9 +185,11 @@ was evicted, not lost, and the next call naming it reloads it. The user can chan
 is making the server heavy, because a loaded workspace costs roughly 3 GB on a 148-project tree.
 **The server may be running a tool profile.** `terse serve --tools core` (or `TERSE_TOOLS=core`)
 advertises about twenty tools instead of all 87, because the full catalogue costs tokens on every
-request and measurably lowers tool-selection accuracy. It hides nothing: **every tool in this document
-still answers when you call it by name**, whether or not `tools/list` shows it. `workspace_status`
-prints `tools=core - N advertised` when a profile is active, so you can tell.
+request and measurably lowers tool-selection accuracy. It is **opt-in**, and the whole surface is the
+default. The server still answers a hidden tool called by name — but an agent can only call what its
+client lists, so treat the profile as narrowing what you can reach, not merely what you can see; the
+`core` subset omits 33 tools this guard names as replacements, including every `xaml_*`, `resx_*` and
+`razor_*`. `workspace_status` prints `tools=core - N advertised` when a profile is active.
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold - the first semantic call realizes them and pays for it once`, and the first
 semantic call that realizes them appends `compilations=realized in Nms (once per load, not per call)`.
@@ -289,7 +295,10 @@ only what appeared since the previous run of the same scope, plus what was fixed
 `gate` (the end-of-task sequence as one call: `analyze` at `info`, `format`, `cleanup fix=all`, then
 `analyze` again, over the files changed since the workspace loaded unless `path=` or `solution=true`
 says otherwise). `gate` answers **one verdict line** - `clean` or `FAILED` - and, when it is not clean, each step's
-own line plus the diagnostics that are still unfixed; never a diff. It condenses to that single line
+own line plus the diagnostics that are still unfixed; never a diff. **`analyzed=N` on that line counts
+the documents the gate had in scope, not the diagnostics it found**, so `analyzed=0` cannot happen and a
+clean verdict is never a gate that ran over nothing; a scope matching no document answers an `ERROR`
+naming it instead of a verdict. It condenses to that single line
 only when every step was genuinely quiet, so a `VERIFY_FAILED`, an `UNFIXED`, a rolled-back step or a
 file the run rewrote is always shown. Under `dryRun=true` a tree that **would** change answers
 `FAILED`, which is what a pre-push check is for. `dryRun=true` makes both write steps verify instead of write, so
@@ -346,7 +355,11 @@ plus the textual forms, with `composedLookups=` so an empty answer is never clai
 with `changed_files` (one line per file: path, `+added -deleted`, status; untracked included), then
 `diff_symbols` to turn the hunks into declaration ids, then `get_symbol_source` on the two or three
 bodies you actually intend to read. `diff_text` returns the raw unified diff and is the last resort —
-scope it with `path=`. All three take `baseRef=` (empty compares the working tree against `HEAD`) and
+scope it with `path=`. **`changed_files` and `diff_text` also take `root=`** - any absolute directory, answered without
+loading it and tagged `outside-workspace` - so a sibling worktree or another repository needs no
+second `load_workspace` and no `git -C` in `Bash`. `diff_symbols` deliberately does **not**: mapping a
+hunk onto a declaration needs that directory's Roslyn compilation, so it refuses and names the two
+tools that can answer. All three take `baseRef=` (empty compares the working tree against `HEAD`) and
 `path=`, and are scoped to the workspace root with git's own `--relative`, so a workspace nested
 inside a larger repository never reports a file outside it. On a tree shared with other sessions,
 `changed_files(path: "src")` is the difference between reading your own change set and reading
@@ -649,6 +662,7 @@ the test from that block — do not shell out to `dotnet test` for the stack tra
 | one project | `run_tests(project)` — a project **name** or a path to the `.csproj` |
 | one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
 | a raw VSTest expression | `run_tests(filter)` |
+| only the test projects your change can reach | `run_tests(changed: true)` — selects the test projects that transitively reference a project you changed since the workspace loaded, at **assembly** granularity, and names both what it ran and what it skipped. It falls back to the whole solution, saying why, whenever it cannot reason — nothing changed, a changed file belongs to no project, or no test project depends on the change — so it never silently runs less than it should. Ignored when `project=` is passed |
 | skip the rebuild | `run_tests(noBuild: true)` |
 | only what just failed | `rerun_failed` |
 | the slowest N | `run_tests(slowest: 10)` |
