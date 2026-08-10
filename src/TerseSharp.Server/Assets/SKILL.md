@@ -335,8 +335,8 @@ silently dropping the inner one.
 `project_create` · `project_properties` · `project_set_property` · `project_add_reference` ·
 `project_remove_reference` · `package_list` · `package_add` · `package_remove`.
 **"Which projects does this solution contain?" for a solution that is _not_ loaded** is
-`solution_projects(path: "fixtures/FixtureSolution/FixtureSolution.slnx")` — it reads the `.slnx`,
-`.sln` or `.slnf` directly and loads nothing, so writing a fixture-scoped test does not cost a
+`solution_projects(path: "fixtures/FixtureSolution/FixtureSolution.slnx")` — it reads the `.slnx` or
+`.sln` directly and loads nothing, so writing a fixture-scoped test does not cost a
 `load_workspace` that makes every later un-hinted call ambiguous. `list_projects` is the loaded-
 workspace answer and carries the language and document counts a file cannot know.
 
@@ -378,6 +378,9 @@ inside exactly one declaration; anything else is `HEURISTIC` with the raw line r
 answered in **one** pass over the same file set, every record tagged `q1`..`qN` by the position of its
 query in the array. The count stays *matching lines, at most one per line*: a line matching several
 queries is **one** record carrying every matching tag, comma-separated in query order (`q1,q3`).
+**Keep the entries line-local.** An entry that can match across a line break — a literal containing
+a newline, or `[\s\S]` / `(?s).` in a regex — consumes the lines its match spanned, so the other
+entries' hits on those lines are not reported and the count is short by them.
 `query` and `queries` combine, `query` first; an 11th entry is refused naming the
 cap rather than truncated, and a blank entry is refused rather than matching everything.
 `find_files` takes `glob`, and each accepts `pattern`

@@ -123,7 +123,6 @@ public static class SolutionFile
     {
         var extension when extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase) => true,
         var extension when extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) => true,
-        var extension when extension.Equals(".slnf", StringComparison.OrdinalIgnoreCase) => true,
         _ => false,
     };
 
@@ -132,15 +131,15 @@ public static class SolutionFile
         if (!IsSolutionFile(solutionPath))
         {
             return Result.Fail<string>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' is not a solution file"),
-                "pass a path ending in .slnx, .sln or .slnf"));
+                string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' is not a solution file this tool can read"),
+                "pass a path ending in .slnx or .sln; a .slnf solution filter is JSON and is not parsed yet, so it would answer 0 projects"));
         }
 
         if (!File.Exists(solutionPath))
         {
             return Result.Fail<string>(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' does not exist"),
-                "pass an existing .slnx, .sln or .slnf; a relative path is resolved against the server's working directory, so prefer an absolute one"));
+                "pass an existing .slnx or .sln; a relative path is resolved against the server's working directory, so prefer an absolute one"));
         }
 
         var projects = await ProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false);

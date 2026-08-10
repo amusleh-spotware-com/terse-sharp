@@ -27,6 +27,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   several queries is one record carrying every matching tag**, comma-separated in query order
   (`q1,q3`). Without that, a tag missing from a shared line would read as "this literal is absent
   here", which is the false negative the review round caught before release.
+  **Known limitation, documented on every surface:** keep the entries line-local. An entry that can
+  match across a line break — a literal containing a newline, or `[\s\S]` / `(?s).` in a regex —
+  consumes the lines its match spanned, so the other entries' hits on those lines are not reported
+  and the count is short by them. Making the multi-query scan advance per line is a behaviour change
+  and is tracked as an open backlog row rather than shipped unreviewed in this release.
 
 - **`fixtures/UnloadableSolution`** — one project that loads and one the solution names but that does
   not exist — and `LoadFailureE2ETests`, so the load-failure rendering has a fixture that can actually
@@ -50,13 +55,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `get_file_outline` 1 214 ms, `edit_text` 1 269 ms, `diff_text` 1 292 ms). The new line attributes
   the remaining floor to the phase that actually holds it, so the next optimization is aimed rather
   than guessed (**I172**).
-- **`solution_projects` takes `path=`** — a `.slnx`, `.sln` or `.slnf` read directly, loaded or not.
+- **`solution_projects` takes `path=`** — a `.slnx` or `.sln` read directly, loaded or not.
   "Which projects does this solution contain?" had no cheap answer for an unloaded solution:
   establishing that `FixtureSolution.slnx` holds **one** project — and therefore that a
   just-written E2E test could never pass — took a failing E2E test, a failing unit test and a
   throwaway diagnostic test. Loading the fixture as a second workspace is the alternative, and it
   makes every un-hinted call in the session ambiguous. A path that is not a solution file, or that
-  does not exist, is refused with a remedy rather than answering `0 projects`, and `list_projects`
+  does not exist, is refused with a remedy rather than answering `0 projects` — including a `.slnf`
+  solution filter, which is JSON and is not parsed yet, so it is refused by name instead of silently
+  answering `0 projects`. `list_projects`
   now names this tool for the unloaded case (**I178**). A relative `path=` is resolved against the
   server's working directory rather than a workspace, so the answer **names the file it actually
   read** — with the header suppressed on a condensed success, a caller could otherwise not tell which

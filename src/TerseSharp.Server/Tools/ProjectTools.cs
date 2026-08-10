@@ -6,10 +6,10 @@ namespace TerseSharp.Server.Tools;
 public sealed class ProjectTools(ToolContext context)
 {
     [McpServerTool(Name = "solution_projects")]
-    [Description("List the project paths recorded in the solution file itself (.slnx, .sln or .slnf), as opposed to what is currently loaded. path= reads a solution that is NOT loaded - a fixture, a .slnf subset, a sibling repository - so 'which projects does this solution contain' costs one call instead of a load_workspace that then makes every un-hinted call ambiguous; a relative path= is resolved against the server's working directory, not a workspace, so the answer names the file it actually read.")]
+    [Description("List the project paths recorded in the solution file itself (.slnx or .sln), as opposed to what is currently loaded. path= reads a solution that is NOT loaded - a fixture, a sibling repository - so 'which projects does this solution contain' costs one call instead of a load_workspace that then makes every un-hinted call ambiguous; a relative path= is resolved against the server's working directory, not a workspace, so the answer names the file it actually read. A .slnf solution filter is JSON and is not parsed yet: it is refused, never answered as 0 projects.")]
     public Task<string> SolutionProjects(
     [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Path to a .slnx, .sln or .slnf to read directly, loaded or not. Absolute is unambiguous; a relative path is resolved against the server's working directory. Empty reads the solution of the resolved workspace.")] string? path = null,
+    [Description("Path to a .slnx or .sln to read directly, loaded or not. Absolute is unambiguous; a relative path is resolved against the server's working directory. Empty reads the solution of the resolved workspace.")] string? path = null,
     CancellationToken cancellationToken = default) =>
     path is { Length: > 0 }
         ? Unloaded(path, cancellationToken)
