@@ -8,6 +8,108 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-08-10
+
+### Added
+
+- **`search_text` and `search_regex` take `queries=[...]`** — up to 10 literals or expressions
+  answered in **one** pass over the same file set, every record tagged `q1`..`qN` by the position of
+  its query in the array. `query` and `queries` combine, `query` first; an 11th entry is refused
+  naming the cap rather than truncated, and a blank entry is refused rather than matching everything.
+  This closes the last question a shell `grep` with an alternation still answered better: an
+  alternation returns one undifferentiated list, so the caller cannot tell which alternative produced
+  which record — the measured symptom was a single `search_text` for a shared id prefix answering
+  `60/82 matches truncated` with every record carrying the identical matched text, and a
+  `Bash: grep -n` fallback for the eight ids that were actually wanted (**I175**).
+  **No legend is echoed back**: `q1` is `queries[0]`, which the caller passed, so printing the map
+  would be ceremony. A single-entry `queries` answer is byte-identical to the `query` form.
+  The count line keeps its meaning — *matching lines, at most one per line* — so **a line matching
+  several queries is one record carrying every matching tag**, comma-separated in query order
+  (`q1,q3`). Without that, a tag missing from a shared line would read as "this literal is absent
+  here", which is the false negative the review round caught before release.
+
+- **`fixtures/UnloadableSolution`** — one project that loads and one the solution names but that does
+  not exist — and `LoadFailureE2ETests`, so the load-failure rendering has a fixture that can actually
+  fail it. No existing fixture reports a load failure: `BrokenSolution` loads cleanly and is broken at
+  *compile* time.
+- **`fixtures/SelectionSolution`** — one source project and two test projects, only one of which
+  references it — and `ChangedTestSelectionE2ETests`. The **positive** path of `run_tests changed=true`,
+  a selective run that genuinely skips a test project, had no end-to-end coverage: `FixtureSolution.slnx`
+  holds one project and does not include `Fixture.Trading.Tests`, so every fixture selection fell back
+  and the behaviour was covered only by five unit tests over a synthetic `AdhocWorkspace`. The new test
+  edits the source project, runs `changed=true`, and asserts `total=1` of the fixture's two tests with
+  the skipped project named; its control asserts `total=2` and the stated fallback reason when nothing
+  changed. Adding the second test project to `FixtureSolution.slnx` instead was rejected: it moves
+  `projects=1` to `projects=2` in five checked-in assertions plus the token budgets (**I173**).
+- **`terse doctor` prints a `phases:` line** — `widest=<file> outlineMs= gateMs= diffMs=` — timing a
+  **real** `get_file_outline`, a **real** `EditGate` dry-run compile gate and a **real** `git diff`
+  spawn against the widest `.cs` document of the loaded solution. I161's `latency:` line measured
+  workspace resolve+sync at **0.21 ms**, four orders of magnitude below the ~1.1 s per-call floor the
+  transcripts show, and the transcript minima split cleanly on whether a tool does Roslyn or
+  child-process work (`workspace_status` 9 ms and `find_files` 31 ms against `read_text` 1 118 ms,
+  `get_file_outline` 1 214 ms, `edit_text` 1 269 ms, `diff_text` 1 292 ms). The new line attributes
+  the remaining floor to the phase that actually holds it, so the next optimization is aimed rather
+  than guessed (**I172**).
+- **`solution_projects` takes `path=`** — a `.slnx`, `.sln` or `.slnf` read directly, loaded or not.
+  "Which projects does this solution contain?" had no cheap answer for an unloaded solution:
+  establishing that `FixtureSolution.slnx` holds **one** project — and therefore that a
+  just-written E2E test could never pass — took a failing E2E test, a failing unit test and a
+  throwaway diagnostic test. Loading the fixture as a second workspace is the alternative, and it
+  makes every un-hinted call in the session ambiguous. A path that is not a solution file, or that
+  does not exist, is refused with a remedy rather than answering `0 projects`, and `list_projects`
+  now names this tool for the unloaded case (**I178**). A relative `path=` is resolved against the
+  server's working directory rather than a workspace, so the answer **names the file it actually
+  read** — with the header suppressed on a condensed success, a caller could otherwise not tell which
+  of two same-named solutions answered. The echo reads `read  <path>`, not `outside-workspace`: the
+  tool performs no containment check and a fixture solution normally lives *inside* the repository,
+  so the tag would have been a claim the response cannot prove.
+- `SolutionFile` reads the solution asynchronously — `XDocument.LoadAsync` over an
+  `Asynchronous | SequentialScan` stream and `File.ReadAllLinesAsync` in place of `XDocument.Load`
+  and `File.ReadLines`, with the cancellation token threaded from `solution_projects`,
+  `solution_add_project` and `solution_remove_project`.
+
+### Fixed
+
+- **A qualified name whose member name saturated was refused, although the qualifier was exactly the
+  narrowing information needed.** `get_symbol_source symbolId=DotnetRunner.Report` answered
+  `name 'DotnetRunner.Report' matches more than 100 symbols, so it cannot be resolved safely` — for a
+  private method of a named class — because the saturation cap was applied to the raw member-name
+  search before the containing type was consulted, and the remedy then advised qualifying a name that
+  already was. `Type.Member` now falls back to the members of the types called `Type`, which cannot
+  saturate on a normal type name. A **bare** name that saturates is still refused, and the fallback
+  itself refuses rather than resolving from a truncated set when the *type* name saturates too
+  (**I176**).
+- **The load-time MSBuild failures and warnings were absolute** — 36 876 and 17 643 characters in a
+  measured week. `workspace_status verbose=true` and `load_workspace verbose=true` now print each
+  message with the workspace root stripped, and an unattributed failure's group key is stripped too,
+  so a failing project's path is re-usable as an argument like every other path in a response. I163
+  relativised the build and test passthrough and stopped here because `LoadFailureSummary.Group`
+  derives the project name from these strings: the stripping happens **after** grouping, and
+  `Group_AttributesTheSameProject_WhetherTheMessageIsAbsoluteOrAlreadyRelativised` records what the
+  check found — the parser reads the quoted `*proj` file name and is indifferent to the path shape,
+  so the ordering is belt-and-braces rather than load-bearing (**I174**). The stripping matches on a
+  **path boundary**: a root of `…/repo` leaves `…/repo2/App.csproj` alone instead of rewriting it to
+  `2/App.csproj`, which a plain `string.Replace` did and which the review round caught.
+- **`changedLines` was up to 27x too high on a large file.** A two-entry `edit_text` batch against
+  `CHANGELOG.md` reported `changedLines=2426` for a change git measures at `+89 -1`. Two edits far
+  apart leave a middle that the common prefix/suffix strip cannot shorten, its alignment matrix
+  exceeds the 2 000 000-cell ceiling, and the whole middle was then emitted as **one** block — so
+  both the count and the `verbose=true` hunk were wrong. Above the ceiling the diff now splits
+  recursively on a line that occurs exactly once on each side, nearest the middle, and aligns each
+  half; only a region with no such anchor, or more than 24 levels of splitting, still falls back to
+  the single block. Measured on a 3 000-line file with two one-line edits 2 495 lines apart:
+  **2 496 → 2**, and the diff carries two small hunks instead of one 2 496-line hunk. Under the
+  condensed success response that count is the *only* evidence the caller gets, which is why a wrong
+  one is a confident wrong answer (**I179**).
+- **A rollback whose only fault is a missing using directive now names the namespace.** When every
+  new error is `CS0246` or `CS0103` for a name the changed project resolves in exactly **one**
+  namespace, the `remedy:` reads `add: using System.Collections.Immutable; then replay the rejected
+  text with retryWith` (up to three namespaces, sorted). The candidate name is taken from the
+  diagnostic and then **verified** against the project's own declarations, so a name that resolves
+  nowhere, in two namespaces, or alongside a genuine regression produces no hint rather than a wrong
+  one. The using is never added automatically: it edits a region the caller did not address, and an
+  ambiguous type would make it a guess (**I177**).
+
 ## [0.29.0] - 2026-08-10
 
 ### Added
@@ -2445,7 +2547,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.30.0
 [0.29.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.29.0
 [0.28.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.28.0
 [0.27.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.27.0

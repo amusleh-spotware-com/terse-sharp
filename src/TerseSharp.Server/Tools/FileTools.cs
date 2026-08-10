@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
@@ -150,54 +151,90 @@ CancellationToken cancellationToken = default) =>
     : Task.FromResult(Errors.Blank("glob", "pattern", "query").Render());
 
     [McpServerTool(Name = "search_text")]
-    [Description("Literal text search across the workspace, or across any absolute directory with root=. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
+    [Description("Literal text search across the workspace, or across any absolute directory with root=. queries=[...] searches up to 10 literals in ONE pass over the same file set, tagging every record q1..qN by the position of the literal in queries=, which replaces one call per literal and the shell grep alternation that cannot say which alternative matched. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3), so a tag missing from a record really does mean that literal is absent from that line. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
     public Task<string> SearchText(
-        [Description("Literal text to find.")] string? query = null,
-        [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (100).")] int maxResults = 0,
-        [Description("Lines of surrounding context per hit, 0-5. Default 0, which returns the matching line only.")] int context = 0,
-        [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
-        [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
-        [Description("Alias for query.")] string? pattern = null,
-        [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
-        [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
-        CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly), cancellationToken);
+    [Description("Literal text to find.")] string? query = null,
+    [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Max results (100).")] int maxResults = 0,
+    [Description("Lines of surrounding context per hit, 0-5. Default 0, which returns the matching line only.")] int context = 0,
+    [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
+    [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
+    [Description("Alias for query.")] string? pattern = null,
+    [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
+    [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
+    [Description("Several literals answered in one pass over the same file set, at most 10. Every record is tagged q1..qN by the position of its literal here, so one call answers where are these N things and no legend is echoed back. A line matching several literals is ONE record tagged with all of them, comma-separated in query order. Combines with query, which is taken first; more than 10 entries is refused rather than truncated.")] string?[]? queries = null,
+    CancellationToken cancellationToken = default) =>
+    Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries), cancellationToken);
 
     [McpServerTool(Name = "search_regex")]
-    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC.")]
+    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. queries=[...] searches up to 10 expressions in ONE pass over the same file set, tagging every record q1..qN by the position of the expression in queries=, which is what an alternation cannot do: it returns one undifferentiated list. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
-        [Description(".NET regular expression.")] string? query = null,
-        [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (100).")] int maxResults = 0,
-        [Description("Lines of surrounding context per hit, 0-5. Default 0, which returns the matching line only.")] int context = 0,
-        [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
-        [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
-        [Description("Alias for query.")] string? pattern = null,
-        [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
-        [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
-        CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly), cancellationToken);
+    [Description(".NET regular expression.")] string? query = null,
+    [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Max results (100).")] int maxResults = 0,
+    [Description("Lines of surrounding context per hit, 0-5. Default 0, which returns the matching line only.")] int context = 0,
+    [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
+    [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
+    [Description("Alias for query.")] string? pattern = null,
+    [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
+    [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
+    [Description("Several expressions answered in one pass over the same file set, at most 10. Every record is tagged q1..qN by the position of its expression here, so the caller can tell which expression produced which record - which one alternation cannot. A line matching several expressions is ONE record tagged with all of them, comma-separated in query order. Combines with query, which is taken first; more than 10 entries is refused rather than truncated.")] string?[]? queries = null,
+    CancellationToken cancellationToken = default) =>
+    Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries), cancellationToken);
 
     private Task<string> Search(TextQuery request, CancellationToken cancellationToken)
     {
-        if (request.Text is not { Length: > 0 })
-            return Task.FromResult(Errors.Blank("query").Render());
+        var requested = Requested(request);
 
-        var search = new TextSearchRequest(
-            request.Text,
-            request.Glob ?? "*",
-            request.Regex,
-            NavigationTools.Cap(request.MaxResults, 100),
-            request.Context,
-            request.Unique,
-            request.Root,
-            request.Exclude,
-            request.MatchesOnly);
+        return requested.IsOk
+            ? Scanned(request, Scoped(request, requested.Value), cancellationToken)
+            : Task.FromResult(requested.Error!.Render());
+    }
 
-        return request.Root is { Length: > 0 }
+    private static Result<ImmutableArray<string>> Requested(TextQuery request)
+    {
+        var patterns = ImmutableArray.CreateBuilder<string>();
+
+        if (request.Text is { Length: > 0 } text)
+            patterns.Add(text);
+
+        foreach (var entry in request.Texts ?? [])
+        {
+            if (entry is not { Length: > 0 })
+                return Result.Fail<ImmutableArray<string>>(Errors.Invalid("'queries' carries a blank entry", "drop it, or pass the literal you meant to search for"));
+
+            patterns.Add(entry);
+        }
+
+        return Verified(patterns.DrainToImmutable());
+    }
+
+    private static Result<ImmutableArray<string>> Verified(ImmutableArray<string> patterns) => patterns switch
+    {
+        [] => Result.Fail<ImmutableArray<string>>(Errors.Blank("query", "pattern", "queries")),
+        { Length: > TextSearchRequest.MaxPatterns } => Result.Fail<ImmutableArray<string>>(Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"{patterns.Length} patterns were requested - query plus queries - more than the {TextSearchRequest.MaxPatterns} one pass answers"),
+            string.Create(CultureInfo.InvariantCulture, $"send at most {TextSearchRequest.MaxPatterns} per call, or narrow the file set with glob="))),
+        _ => Result.Ok(patterns),
+    };
+
+
+    private static TextSearchRequest Scoped(TextQuery request, ImmutableArray<string> patterns) => new(
+        patterns,
+        request.Glob ?? "*",
+        request.Regex,
+        NavigationTools.Cap(request.MaxResults, 100),
+        request.Context,
+        request.Unique,
+        request.Root,
+        request.Exclude,
+        request.MatchesOnly);
+
+
+    private Task<string> Scanned(TextQuery request, TextSearchRequest search, CancellationToken cancellationToken) =>
+        request.Root is { Length: > 0 }
             ? TextSearchService.SearchOutsideAsync(search, cancellationToken)
             : context.WithWorkspaceAsync(
                 request.Workspace,
@@ -205,19 +242,19 @@ CancellationToken cancellationToken = default) =>
                 loaded => TextSearchService.SearchAsync(loaded, search, cancellationToken),
                 semantic: false,
                 cancellationToken);
-    }
 
     private readonly record struct TextQuery(
-        string? Text,
-        string? Glob,
-        string? Workspace,
-        int MaxResults,
-        bool Regex,
-        int Context = 0,
-        bool Unique = false,
-        string? Root = null,
-        string? Exclude = null,
-        bool MatchesOnly = false);
+    string? Text,
+    string? Glob,
+    string? Workspace,
+    int MaxResults,
+    bool Regex,
+    int Context = 0,
+    bool Unique = false,
+    string? Root = null,
+    string? Exclude = null,
+    bool MatchesOnly = false,
+    IReadOnlyList<string?>? Texts = null);
 
     private Task<string> Guarded(
     string? workspace,

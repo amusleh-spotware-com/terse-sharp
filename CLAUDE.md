@@ -294,10 +294,15 @@ beat the one it splits, not merely be useful.
 4. Add the tool name to the `Exercised` set in `tests/TerseSharp.E2ETests/ToolCoverageE2ETests.cs` —
    two tests fail if the advertised list and that set diverge in either direction.
 5. One E2E test that asserts response **values** (never "did not throw") against
-   `fixtures/FixtureSolution`; `fixtures/BrokenSolution` exists for load-failure and diagnostics
-   paths, `fixtures/WarningSolution` for a build that succeeds with warnings, `fixtures/RazorSolution`
-   and `fixtures/GeneratorSolution` for Razor and analyzer/generator paths. Fixtures are intentionally
-   outside `TerseSharp.slnx`.
+   `fixtures/FixtureSolution`; `fixtures/BrokenSolution` **loads cleanly and is broken at compile
+   time**, so it serves the diagnostics paths and not the load-failure ones —
+   `fixtures/UnloadableSolution` is the one whose solution names a project that does not exist, and
+   it is the only fixture that makes `workspace_status` report `failures=`.
+   `fixtures/WarningSolution` is a build that succeeds with warnings, `fixtures/RazorSolution`
+   and `fixtures/GeneratorSolution` cover Razor and analyzer/generator paths, and
+   `fixtures/SelectionSolution` — one source project and **two** test projects, only one of which
+   references it — covers anything that must observe a *selective* run really skipping a project.
+   Fixtures are intentionally outside `TerseSharp.slnx`.
    `ToolRobustnessE2ETests` then covers the new tool automatically: it reads `tools/list` and calls
    every tool with garbage, empty and missing arguments, asserting a structured answer with a
    `remedy:` line and that nothing is written outside the workspace. A listing tool also belongs in

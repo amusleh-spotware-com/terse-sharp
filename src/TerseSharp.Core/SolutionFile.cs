@@ -7,10 +7,7 @@ public static class SolutionFile
     public static bool IsXml(string path) =>
         Path.GetExtension(path).Equals(".slnx", StringComparison.OrdinalIgnoreCase);
 
-    public static IReadOnlyList<string> Projects(string solutionPath) =>
-        IsXml(solutionPath) ? XmlProjects(solutionPath) : ClassicProjects(solutionPath);
-
-    public static async Task<Result<string>> AddProject(string solutionPath, string projectPath, bool dryRun, bool verbose)
+    public static async Task<Result<string>> AddProject(string solutionPath, string projectPath, bool dryRun, bool verbose, CancellationToken cancellationToken)
     {
         if (!IsXml(solutionPath))
             return Result.Fail<string>(Unsupported(solutionPath, "add"));
@@ -27,23 +24,23 @@ public static class SolutionFile
 
         var relative = Relative(solutionPath, projectPath);
 
-        if (Projects(solutionPath).Contains(relative, StringComparer.OrdinalIgnoreCase))
+        if ((await ProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false)).Contains(relative, StringComparer.OrdinalIgnoreCase))
             return Result.Fail<string>(Errors.Invalid($"'{relative}' is already in the solution", "nothing to add"));
 
-        var document = XDocument.Load(solutionPath);
+        var document = await LoadAsync(solutionPath, cancellationToken).ConfigureAwait(false);
 
         document.Root!.Add(new XElement("Project", new XAttribute("Path", relative)));
 
         return await Write(solutionPath, document, dryRun, verbose, "solution_add_project", relative).ConfigureAwait(false);
     }
 
-    public static async Task<Result<string>> RemoveProject(string solutionPath, string projectPath, bool dryRun, bool verbose)
+    public static async Task<Result<string>> RemoveProject(string solutionPath, string projectPath, bool dryRun, bool verbose, CancellationToken cancellationToken)
     {
         if (!IsXml(solutionPath))
             return Result.Fail<string>(Unsupported(solutionPath, "remove"));
 
         var relative = Relative(solutionPath, projectPath);
-        var document = XDocument.Load(solutionPath);
+        var document = await LoadAsync(solutionPath, cancellationToken).ConfigureAwait(false);
         var element = document.Descendants("Project").FirstOrDefault(candidate => Matches(candidate, relative));
 
         if (element is null)
@@ -104,18 +101,6 @@ public static class SolutionFile
 
     private static string Normalize(string path) => path.Replace('\\', '/').TrimStart('.', '/');
 
-    private static string[] XmlProjects(string solutionPath) =>
-        [.. XDocument.Load(solutionPath)
-            .Descendants("Project")
-            .Select(element => element.Attribute("Path")?.Value)
-            .OfType<string>()];
-
-    private static string[] ClassicProjects(string solutionPath) =>
-        [.. File.ReadLines(solutionPath)
-            .Where(line => line.StartsWith("Project(", StringComparison.Ordinal))
-            .Select(ClassicPath)
-            .OfType<string>()];
-
     private static string? ClassicPath(string line)
     {
         var text = line.AsSpan();
@@ -132,5 +117,84 @@ public static class SolutionFile
         }
 
         return null;
+    }
+
+    public static bool IsSolutionFile(ReadOnlySpan<char> path) => Path.GetExtension(path) switch
+    {
+        var extension when extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase) => true,
+        var extension when extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) => true,
+        var extension when extension.Equals(".slnf", StringComparison.OrdinalIgnoreCase) => true,
+        _ => false,
+    };
+
+    public static async Task<Result<string>> RenderAsync(string solutionPath, bool echoPath, CancellationToken cancellationToken)
+    {
+        if (!IsSolutionFile(solutionPath))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' is not a solution file"),
+                "pass a path ending in .slnx, .sln or .slnf"));
+        }
+
+        if (!File.Exists(solutionPath))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' does not exist"),
+                "pass an existing .slnx, .sln or .slnf; a relative path is resolved against the server's working directory, so prefer an absolute one"));
+        }
+
+        var projects = await ProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+        var response = new ResponseBuilder("solution_projects", solutionPath);
+
+        response.Summary(projects.Count, projects.Count, "projects");
+
+        if (echoPath)
+            response.Note("read  " + solutionPath);
+
+        foreach (var project in projects)
+            response.Line(project);
+
+        return Result.Ok(response.ToString());
+    }
+
+    public static async Task<IReadOnlyList<string>> ProjectsAsync(string solutionPath, CancellationToken cancellationToken) =>
+        IsXml(solutionPath)
+            ? await XmlProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false)
+            : await ClassicProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+
+    private static async Task<XDocument> LoadAsync(string solutionPath, CancellationToken cancellationToken)
+    {
+        var stream = new FileStream(
+            solutionPath,
+            new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.Read,
+                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+            });
+
+        await using (stream.ConfigureAwait(false))
+            return await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<string[]> XmlProjectsAsync(string solutionPath, CancellationToken cancellationToken)
+    {
+        var document = await LoadAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+
+        return [.. document
+        .Descendants("Project")
+        .Select(element => element.Attribute("Path")?.Value)
+        .OfType<string>()];
+    }
+
+    private static async Task<string[]> ClassicProjectsAsync(string solutionPath, CancellationToken cancellationToken)
+    {
+        var lines = await File.ReadAllLinesAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+
+        return [.. lines
+        .Where(line => line.StartsWith("Project(", StringComparison.Ordinal))
+        .Select(ClassicPath)
+        .OfType<string>()];
     }
 }

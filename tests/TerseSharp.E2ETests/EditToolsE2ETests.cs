@@ -399,4 +399,60 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Assert.Contains("overlap", text, StringComparison.Ordinal);
         Assert.DoesNotContain("1 files changed", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AddMember_RolledBackForAMissingUsing_NamesTheNamespaceToImport()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderBook",
+            ["declaration"] = "public ImmutableArray<string> TrackedTags() => [];",
+        });
+
+        Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
+        Assert.Contains("CS0246", text, StringComparison.Ordinal);
+        Assert.Contains("add: using System.Collections.Immutable;", text, StringComparison.Ordinal);
+        Assert.Contains("retryWith=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_RolledBackForARegressionWithNoImport_NamesNoImportItCannotProve()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderBook",
+            ["declaration"] = "public int Unresolvable() => NoSuchHelperAnywhere(1);",
+        });
+
+        Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("add: using", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_RolledBackForANameInTwoNamespaces_NamesNeitherRatherThanGuessing()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderBook",
+            ["declaration"] = "public DuplicatedName Ambiguous() => null!;",
+        });
+
+        Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
+        Assert.Contains("CS0246", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("add: using", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_RolledBackForAMissingUsingBesideARealRegression_NamesNoImport()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderBook",
+            ["declaration"] = "public ImmutableArray<int> Mixed() => NoSuchHelperAnywhere();",
+        });
+
+        Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
+        Assert.Contains("CS0246", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("add: using", text, StringComparison.Ordinal);
+    }
 }

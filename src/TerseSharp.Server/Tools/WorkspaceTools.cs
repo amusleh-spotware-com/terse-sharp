@@ -117,11 +117,11 @@ public sealed class WorkspaceTools(ToolContext context)
         cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects")]
-    [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=.")]
+    [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
     public Task<string> ListProjects(
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Keep only projects whose name contains this text.")] string? filter = null) =>
-        context.WithWorkspace(workspace, null, loaded => RenderProjects(loaded, filter));
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Keep only projects whose name contains this text.")] string? filter = null) =>
+    context.WithWorkspace(workspace, null, loaded => RenderProjects(loaded, filter));
 
     private static string? Discover() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
@@ -231,27 +231,29 @@ public sealed class WorkspaceTools(ToolContext context)
 
     private static void AppendLoadDiagnostics(ResponseBuilder response, WorkspaceLoadResult result, bool verbose)
     {
-        AppendFailures(response, result.Failures, verbose);
-        AppendWarnings(response, result.Warnings, verbose);
+        var root = Path.GetDirectoryName(result.SolutionPath) ?? string.Empty;
+
+        AppendFailures(response, result.Failures, root, verbose);
+        AppendWarnings(response, result.Warnings, root, verbose);
     }
 
-    private static void AppendFailures(ResponseBuilder response, IReadOnlyList<string> failures, bool verbose)
+    private static void AppendFailures(ResponseBuilder response, IReadOnlyList<string> failures, string root, bool verbose)
     {
         if (failures.Count is 0)
             return;
 
         if (!verbose)
         {
-            AppendFailedProjects(response, failures);
+            AppendFailedProjects(response, failures, root);
 
             return;
         }
 
         foreach (var failure in failures)
-            response.Line("FAILED " + failure);
+            response.Line("FAILED " + LoadFailureSummary.Relative(failure, root));
     }
 
-    private static void AppendFailedProjects(ResponseBuilder response, IReadOnlyList<string> failures)
+    private static void AppendFailedProjects(ResponseBuilder response, IReadOnlyList<string> failures, string root)
     {
         var groups = LoadFailureSummary.Group(failures);
         var shown = Math.Min(groups.Length, MaxFailureGroups);
@@ -264,14 +266,14 @@ public sealed class WorkspaceTools(ToolContext context)
         {
             response.Line(string.Create(
                 CultureInfo.InvariantCulture,
-                $"FAILED {groups[index].Project}  messages={groups[index].Count}"));
+                $"FAILED {LoadFailureSummary.Relative(groups[index].Project, root)}  messages={groups[index].Count}"));
         }
 
         if (groups.Length > shown)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"{groups.Length - shown} more project(s) not listed"));
     }
 
-    private static void AppendWarnings(ResponseBuilder response, IReadOnlyList<string> warnings, bool verbose)
+    private static void AppendWarnings(ResponseBuilder response, IReadOnlyList<string> warnings, string root, bool verbose)
     {
         if (warnings.Count is 0)
             return;
@@ -284,7 +286,7 @@ public sealed class WorkspaceTools(ToolContext context)
         }
 
         foreach (var warning in warnings)
-            response.Line("WARNING " + warning);
+            response.Line("WARNING " + LoadFailureSummary.Relative(warning, root));
     }
 
     private static string DescribeSync(WorkspaceSync sync) => string.Create(

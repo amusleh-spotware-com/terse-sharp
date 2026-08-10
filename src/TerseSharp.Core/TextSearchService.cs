@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -40,11 +41,11 @@ public static class TextSearchService
             : candidates.Error!.Render();
     }
     private static async Task<string> ScannedAsync(
-        List<WorkspacePath> files,
-        TextSearchRequest request,
-        CancellationToken cancellationToken)
+    List<WorkspacePath> files,
+    TextSearchRequest request,
+    CancellationToken cancellationToken)
     {
-        var matcher = TextMatcher.Create(request.Pattern, request.Regex);
+        var matcher = TextMatcher.Create(request.Patterns, request.Regex);
         var perFile = new FileHits[files.Count];
 
         await Parallel.ForEachAsync(
@@ -116,7 +117,7 @@ public static class TextSearchService
             total++;
 
             if (hits.Count < request.MaxResults)
-                hits.Add(Format(relativePath, span, match, ref tracker, request));
+                hits.Add(Format(relativePath, span, match, ref tracker, request, matcher));
 
             index = EndOfLine(span, match.At + Math.Max(match.Length - 1, 0)) + 1;
         }
@@ -131,7 +132,7 @@ public static class TextSearchService
         return offset < 0 ? match.At : match.At + offset;
     }
 
-    private static string Format(string relativePath, ReadOnlySpan<char> text, TextMatch match, ref LineTracker tracker, TextSearchRequest request)
+    private static string Format(string relativePath, ReadOnlySpan<char> text, TextMatch match, ref LineTracker tracker, TextSearchRequest request, TextMatcher matcher)
     {
         var at = Content(text, match);
 
@@ -141,9 +142,9 @@ public static class TextSearchService
         var end = EndOfLine(text, at);
         var matched = text.Slice(match.At, match.Length).Trim();
         var payload = request.MatchesOnly && matched.Length > 0 ? matched : text[start..end].Trim();
-        var hit = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{relativePath}:{tracker.Line}{RecordSeparator}{Shorten(payload)}");
+        var hit = request.SeveralPatterns
+            ? string.Create(CultureInfo.InvariantCulture, $"{relativePath}:{tracker.Line}{RecordSeparator}{Tagged(matcher, text[start..end], match.Query)}{RecordSeparator}{Shorten(payload)}")
+            : string.Create(CultureInfo.InvariantCulture, $"{relativePath}:{tracker.Line}{RecordSeparator}{Shorten(payload)}");
 
         return request.Around is 0 ? hit : hit + Around(text, new LineWindow(start, end, tracker.Line), request.Around);
     }
@@ -201,9 +202,9 @@ public static class TextSearchService
 
     private readonly record struct LineWindow(int Start, int End, int Line);
 
-    private readonly record struct TextMatch(int At, int Length);
+    private readonly record struct TextMatch(int At, int Length, int Query);
 
-    private static readonly TextMatch Missing = new(-1, 0);
+    private static readonly TextMatch Missing = new(-1, 0, 0);
     private static readonly SearchValues<char> Blank = SearchValues.Create(" \t\r\n\f\v");
 
     private static int EndOfLine(ReadOnlySpan<char> text, int at) =>
@@ -215,7 +216,7 @@ public static class TextSearchService
 
     private static string Render(TextSearchRequest request, FileHits[] perFile)
     {
-        var response = new ResponseBuilder(request.Tool, request.Pattern);
+        var response = new ResponseBuilder(request.Tool, Argument(request));
         var total = 0;
         var skipped = 0;
 
@@ -268,21 +269,7 @@ public static class TextSearchService
     {
         response.Summary(tally.Shown, tally.Total, "matches", "glob= or maxResults=");
 
-        if (records.Count > 0)
-            response.Note("HEURISTIC  text match");
-
-        if (request.Root is { Length: > 0 } root)
-            response.Note("outside-workspace  " + root);
-
-        if (records.Count < tally.Shown)
-        {
-            response.Note(string.Create(
-                CultureInfo.InvariantCulture,
-                $"unique: {records.Count} distinct line(s) collapsed from the {tally.Shown} shown; the x<count> on a record counts only what was shown"));
-        }
-
-        if (tally.Skipped > 0)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {tally.Skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));
+        Annotate(response, records.Count, request, tally);
 
         foreach (var record in records)
             response.Line(record);
@@ -328,27 +315,74 @@ public static class TextSearchService
         }
     }
 
-    private readonly record struct TextMatcher(string Pattern, Regex? Expression, byte[]? Needle)
+    private readonly record struct TextMatcher(ImmutableArray<string> Patterns, ImmutableArray<Regex> Expressions, ImmutableArray<byte[]> Needles)
     {
-        public static TextMatcher Create(string pattern, bool regex) => regex
-            ? new(pattern, Compile(pattern), null)
-            : new(pattern, null, Encoding.UTF8.GetBytes(pattern));
+        public static TextMatcher Create(ImmutableArray<string> patterns, bool regex) => regex
+            ? new(patterns, Compiled(patterns), [])
+            : new(patterns, [], Encoded(patterns));
 
-        public bool MayContain(ReadOnlySpan<byte> content) => Needle is null || content.IndexOf(Needle) >= 0;
+        public bool MayContain(ReadOnlySpan<byte> content)
+        {
+            if (Needles.IsEmpty)
+                return true;
+
+            foreach (var needle in Needles)
+            {
+                if (content.IndexOf(needle) >= 0)
+                    return true;
+            }
+
+            return false;
+        }
 
         public TextMatch Next(ReadOnlySpan<char> text, int from)
         {
-            if (Expression is null)
+            var best = Missing;
+
+            for (var query = 0; query < Patterns.Length; query++)
             {
-                return text[from..].IndexOf(Pattern, StringComparison.Ordinal) is var offset and >= 0
-                    ? new TextMatch(from + offset, Pattern.Length)
+                var found = Find(text, from, query);
+
+                if (found.At >= 0 && (best.At < 0 || found.At < best.At))
+                    best = found;
+            }
+
+            return best;
+        }
+
+        private TextMatch Find(ReadOnlySpan<char> text, int from, int query)
+        {
+            if (Expressions.IsEmpty)
+            {
+                return text[from..].IndexOf(Patterns[query], StringComparison.Ordinal) is var offset and >= 0
+                    ? new TextMatch(from + offset, Patterns[query].Length, query)
                     : Missing;
             }
 
-            foreach (var match in Expression.EnumerateMatches(text, from))
-                return new TextMatch(match.Index, match.Length);
+            foreach (var match in Expressions[query].EnumerateMatches(text, from))
+                return new TextMatch(match.Index, match.Length, query);
 
             return Missing;
+        }
+
+        private static ImmutableArray<Regex> Compiled(ImmutableArray<string> patterns)
+        {
+            var expressions = ImmutableArray.CreateBuilder<Regex>(patterns.Length);
+
+            foreach (var pattern in patterns)
+                expressions.Add(Compile(pattern));
+
+            return expressions.MoveToImmutable();
+        }
+
+        private static ImmutableArray<byte[]> Encoded(ImmutableArray<string> patterns)
+        {
+            var needles = ImmutableArray.CreateBuilder<byte[]>(patterns.Length);
+
+            foreach (var pattern in patterns)
+                needles.Add(Encoding.UTF8.GetBytes(pattern));
+
+            return needles.MoveToImmutable();
         }
 
         private static Regex Compile(string pattern)
@@ -362,6 +396,10 @@ public static class TextSearchService
                 return new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.Multiline, TimeSpan.FromSeconds(2));
             }
         }
+
+        public bool MatchesLine(ReadOnlySpan<char> line, int query) => Expressions.IsEmpty
+            ? line.IndexOf(Patterns[query], StringComparison.Ordinal) >= 0
+            : Expressions[query].IsMatch(line);
     }
 
     private static List<WorkspacePath> Matched(LoadedWorkspace workspace, string glob)
@@ -563,4 +601,64 @@ public static class TextSearchService
 
         return kept;
     }
+
+    private static readonly string[] QueryTags = ["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9", "q10"];
+
+    private static string Tag(int query) => query < QueryTags.Length
+        ? QueryTags[query]
+        : string.Create(CultureInfo.InvariantCulture, $"q{query + 1}");
+
+    private static string Argument(TextSearchRequest request) =>
+        request.SeveralPatterns ? string.Join(RecordSeparator, request.Patterns) : request.Pattern;
+
+    private static void Annotate(ResponseBuilder response, int records, TextSearchRequest request, SearchTally tally)
+    {
+        if (records > 0)
+            response.Note("HEURISTIC  text match");
+
+        if (request.Root is { Length: > 0 } root)
+            response.Note("outside-workspace  " + root);
+
+        if (records < tally.Shown)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"unique: {records} distinct line(s) collapsed from the {tally.Shown} shown; the x<count> on a record counts only what was shown"));
+        }
+
+        if (tally.Skipped > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {tally.Skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));
+    }
+
+    private static int Other(TextMatcher matcher, ReadOnlySpan<char> line, int first, int from)
+    {
+        for (var query = from; query < matcher.Patterns.Length; query++)
+        {
+            if (query != first && matcher.MatchesLine(line, query))
+                return query;
+        }
+
+        return -1;
+    }
+
+    private static string Combined(TextMatcher matcher, ReadOnlySpan<char> line, int first)
+    {
+        var builder = new StringBuilder(16);
+
+        for (var query = 0; query < matcher.Patterns.Length; query++)
+        {
+            if (query != first && !matcher.MatchesLine(line, query))
+                continue;
+
+            if (builder.Length > 0)
+                builder.Append(',');
+
+            builder.Append(Tag(query));
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Tagged(TextMatcher matcher, ReadOnlySpan<char> line, int first) =>
+        Other(matcher, line, first, 0) < 0 ? Tag(first) : Combined(matcher, line, first);
 }

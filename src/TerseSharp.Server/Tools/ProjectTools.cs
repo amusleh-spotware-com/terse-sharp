@@ -6,38 +6,44 @@ namespace TerseSharp.Server.Tools;
 public sealed class ProjectTools(ToolContext context)
 {
     [McpServerTool(Name = "solution_projects")]
-    [Description("List the project paths recorded in the solution file itself (.slnx, .sln or .slnf), as opposed to what is currently loaded.")]
-    public Task<string> SolutionProjects([Description("Workspace or worktree name.")] string? workspace = null) =>
-        context.WithWorkspace(workspace, null, loaded =>
-        {
-            var projects = SolutionFile.Projects(loaded.SolutionPath);
-            var response = new ResponseBuilder("solution_projects", loaded.SolutionPath);
+    [Description("List the project paths recorded in the solution file itself (.slnx, .sln or .slnf), as opposed to what is currently loaded. path= reads a solution that is NOT loaded - a fixture, a .slnf subset, a sibling repository - so 'which projects does this solution contain' costs one call instead of a load_workspace that then makes every un-hinted call ambiguous; a relative path= is resolved against the server's working directory, not a workspace, so the answer names the file it actually read.")]
+    public Task<string> SolutionProjects(
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Path to a .slnx, .sln or .slnf to read directly, loaded or not. Absolute is unambiguous; a relative path is resolved against the server's working directory. Empty reads the solution of the resolved workspace.")] string? path = null,
+    CancellationToken cancellationToken = default) =>
+    path is { Length: > 0 }
+        ? Unloaded(path, cancellationToken)
+        : context.WithWorkspaceAsync(
+            workspace,
+            null,
+            async loaded => NavigationTools.Unwrap(await SolutionFile.RenderAsync(loaded.SolutionPath, echoPath: false, cancellationToken).ConfigureAwait(false)),
+            semantic: false,
+            cancellationToken);
 
-            response.Summary(projects.Count, projects.Count, "projects");
-
-            foreach (var project in projects)
-                response.Line(project);
-
-            return response.ToString();
-        });
+    private static async Task<string> Unloaded(string path, CancellationToken cancellationToken) =>
+    NavigationTools.Unwrap(await SolutionFile
+        .RenderAsync(Path.GetFullPath(path), echoPath: true, cancellationToken)
+        .ConfigureAwait(false));
 
     [McpServerTool(Name = "solution_add_project")]
     [Description("Add an existing project to the .slnx solution, preserving the rest of the file. A successful edit answers in one line; pass verbose=true for the diff.")]
     public Task<string> SolutionAddProject(
-        [Description("Path to the .csproj to add.")] string project,
-        [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
-        [Description("Workspace or worktree name.")] string? workspace = null) =>
-        GuardedSolution(workspace, project, dryRun, loaded => SolutionFile.AddProject(loaded.SolutionPath, project, dryRun, verbose));
+    [Description("Path to the .csproj to add.")] string project,
+    [Description("Diff only, write nothing.")] bool dryRun = false,
+    [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default) =>
+    GuardedSolution(workspace, project, dryRun, loaded => SolutionFile.AddProject(loaded.SolutionPath, project, dryRun, verbose, cancellationToken));
 
     [McpServerTool(Name = "solution_remove_project")]
     [Description("Remove a project from the .slnx solution without deleting it from disk. A successful edit answers in one line; pass verbose=true for the diff.")]
     public Task<string> SolutionRemoveProject(
-        [Description("Path to the .csproj to remove.")] string project,
-        [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
-        [Description("Workspace or worktree name.")] string? workspace = null) =>
-        GuardedSolution(workspace, project, dryRun, loaded => SolutionFile.RemoveProject(loaded.SolutionPath, project, dryRun, verbose));
+    [Description("Path to the .csproj to remove.")] string project,
+    [Description("Diff only, write nothing.")] bool dryRun = false,
+    [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default) =>
+    GuardedSolution(workspace, project, dryRun, loaded => SolutionFile.RemoveProject(loaded.SolutionPath, project, dryRun, verbose, cancellationToken));
 
     [McpServerTool(Name = "project_create")]
     [Description("Create a new SDK-style .csproj. Use solution_add_project afterwards to put it in the solution.")]

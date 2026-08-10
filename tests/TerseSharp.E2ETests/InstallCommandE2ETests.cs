@@ -158,4 +158,23 @@ public sealed class InstallCommandE2ETests : IDisposable
         Assert.Contains("missing required argument 'path'", output, StringComparison.Ordinal);
         Assert.DoesNotContain("Unhandled exception", output, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Doctor_AttributesThePerCallFloorToTheOutlineTheCompileGateAndTheGitSpawn()
+    {
+        var output = await RunAsync("doctor", "--workspace", Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+
+        var line = output
+            .Split('\n')
+            .Single(candidate => candidate.StartsWith("OK   phases: ", StringComparison.Ordinal));
+
+        Assert.Contains("widest=src", line, StringComparison.Ordinal);
+        Assert.Contains(".cs ", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("obj", line, StringComparison.Ordinal);
+        Assert.DoesNotContain(".Designer.cs", line, StringComparison.Ordinal);
+        Assert.Contains("outlineMs=", line, StringComparison.Ordinal);
+        Assert.Contains("gateMs=", line, StringComparison.Ordinal);
+        Assert.Contains("diffMs=", line, StringComparison.Ordinal);
+        Assert.DoesNotContain("outlineMs=0.00", line, StringComparison.Ordinal);
+    }
 }

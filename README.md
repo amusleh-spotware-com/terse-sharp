@@ -30,7 +30,7 @@ walks up from the current directory, finds your `.sln` / `.slnx` / `.slnf` / `.c
 ```bash
 terse install --client cursor   # not detected? pick one: claude-code | cursor | vscode | windsurf
 terse install --skill --guard   # teach your agent the tools, and block Read/Grep on C# (recommended)
-terse doctor                    # verify SDK, MSBuild, workspace load, client registration, per-call latency
+terse doctor                    # verify SDK, MSBuild, workspace load, client registration, per-phase latency
 terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.cs"}'
 ```
 
@@ -74,6 +74,7 @@ adds one line to the next tool response. `TERSE_UPDATE=0` turns it off.
 | What's on this 2,000-line type? | `Read` → **~6,000 tok** | `get_type_outline` → **~450 tok** | **13×** |
 | Read a whole `.cs` file | `Read` → the entire text | `read_text` answers the **outline** unless you ask for the text | **3×** |
 | Who calls this method? | `Grep` + follow-ups → **~4,000 tok** | `find_usages` → **~200 tok** | **20×** |
+| Where are these 8 ids? | one `grep`/search **per literal** | `search_text queries=[…]` → one pass, records tagged `q1`..`qN` | **8 calls → 1** |
 | Rename across the solution | **~5,000 tok**, misses the interface | `rename_symbol` → **~150 tok**, correct | **30×** |
 | Why is the build red? | **~8,000 tok** of MSBuild spew | `build` → **~600 tok** | **13×** |
 | What did I just change? | `git diff` → the whole patch | `diff_symbols` → the changed **declarations** | **10×** |

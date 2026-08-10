@@ -1,3 +1,4 @@
+using System.Globalization;
 using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
@@ -119,5 +120,50 @@ public sealed class UnifiedDiffTests
 
         Assert.Equal(UnifiedDiff.Between("a.cs", before, after), report.Text);
         Assert.Equal(UnifiedDiff.ChangedLines(before, after), report.ChangedLines);
+    }
+
+    [Fact]
+    public void ChangedLines_ForTwoSmallEditsFarApartInALargeFile_CountsOnlyWhatChanged()
+    {
+        var before = Numbered(3000);
+        var after = before
+            .Replace("line 5\n", "line 5 changed\n", StringComparison.Ordinal)
+            .Replace("line 2500\n", "line 2500 changed\n", StringComparison.Ordinal);
+
+        var report = UnifiedDiff.Report("big.md", before, after);
+        var hunks = report.Text.Split('\n').Count(line => line.StartsWith("@@", StringComparison.Ordinal));
+
+        Assert.Equal(2, UnifiedDiff.ChangedLines(before, after));
+        Assert.Equal(2, report.ChangedLines);
+        Assert.Equal(2, hunks);
+        Assert.DoesNotContain("-line 1000", report.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ChangedLines_ForAPureInsertionIntoALargeFile_CountsTheInsertedLinesOnly()
+    {
+        var before = Numbered(3000);
+        var after = before.Replace("line 2900\n", "line 2900\ninserted a\ninserted b\n", StringComparison.Ordinal);
+
+        Assert.Equal(2, UnifiedDiff.ChangedLines(before, after));
+    }
+
+    private static string Numbered(int lines) => string.Join(
+        '\n',
+        Enumerable.Range(0, lines).Select(index => "line " + index.ToString(CultureInfo.InvariantCulture)));
+
+    [Fact]
+    public void Report_WhenAnInsertionShiftsTheLinesBeforeTheAnchor_KeepsTheBeforeAndAfterOffsetsApart()
+    {
+        var before = Numbered(3000);
+        var after = before
+            .Replace("line 5\n", "line 5\ninserted a\ninserted b\n", StringComparison.Ordinal)
+            .Replace("line 2500\n", "line 2500 changed\n", StringComparison.Ordinal);
+
+        var report = UnifiedDiff.Report("big.md", before, after);
+        var hunks = report.Text.Split('\n').Where(line => line.StartsWith("@@", StringComparison.Ordinal)).ToArray();
+
+        Assert.Equal(3, report.ChangedLines);
+        Assert.Equal(["@@ -7,0 +7,2 @@", "@@ -2501,1 +2503,1 @@"], hunks);
     }
 }

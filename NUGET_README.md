@@ -51,6 +51,7 @@ Prefer to configure MCP by hand:
 | What's on this 2,000-line type? | `Read` → **~6,000 tokens** | `get_type_outline` → **~450** | **13×** |
 | Read a whole `.cs` file | `Read` → the entire text | `read_text` answers the **outline** unless you ask for the text | **3×** |
 | Who calls this method? | `Grep` + follow-up reads → **~4,000** | `find_usages` → **~200** | **20×** |
+| Where are these 8 ids? | one `grep`/search **per literal** | `search_text queries=[…]` → one pass, records tagged `q1`..`qN` | **8 calls → 1** |
 | Rename it across the solution | ~5,000 tokens, **misses the interface** | `rename_symbol` → **~150**, correct | **30×** |
 | Why is the build red? | **~8,000 tokens** of MSBuild spew | `build` → **~600** | **13×** |
 | What did I just change? | `git diff` → the whole patch | `diff_symbols` → the changed declarations | **10×** |

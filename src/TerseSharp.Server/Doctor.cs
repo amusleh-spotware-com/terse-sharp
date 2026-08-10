@@ -245,9 +245,15 @@ public static class Doctor
             result.ProjectCount > 0,
             "check the solution loads with: dotnet build");
 
-        return result.ProjectCount > 0
-            ? [loaded, await LatencyLineAsync(context, cancellationToken).ConfigureAwait(false)]
-            : [loaded];
+        if (result.ProjectCount is 0)
+            return [loaded];
+
+        return
+        [
+            loaded,
+        await LatencyLineAsync(context, cancellationToken).ConfigureAwait(false),
+        await PhaseLineAsync(context, cancellationToken).ConfigureAwait(false),
+    ];
     }
 
     private static async Task<string> LatencyLineAsync(ToolContext context, CancellationToken cancellationToken)
@@ -264,5 +270,22 @@ public static class Doctor
             "a per-call resolve+sync floor of a second or more is a workspace-resolution defect - report this line");
     }
 
+    private static async Task<string> PhaseLineAsync(ToolContext context, CancellationToken cancellationToken)
+    {
+        var phases = await context.MeasurePhasesAsync(cancellationToken).ConfigureAwait(false);
+
+        if (phases.Document is not { Length: > 0 })
+            return Check("phases", "not measured - no C# document was reachable", false, "load a solution whose projects carry source, then re-run");
+
+        return Check(
+            "phases",
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"widest={phases.Document} outlineMs={phases.OutlineMs:F2} gateMs={phases.GateMs:F2} diffMs={phases.DiffMs:F2}"),
+            phases.GateMs < PhaseFloorMs,
+            "the compile gate, not workspace resolution, is where the per-call time goes - report this line with the solution size");
+    }
+
+    private const double PhaseFloorMs = 60_000;
     private const double LatencyFloorMs = 1000;
 }

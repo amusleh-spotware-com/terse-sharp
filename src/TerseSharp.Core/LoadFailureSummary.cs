@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace TerseSharp.Core;
 
 public readonly record struct LoadFailureGroup(string Project, int Count);
@@ -65,4 +67,46 @@ public static class LoadFailureSummary
 
         groups.Add(new LoadFailureGroup(project, 1));
     }
+
+    public static string Relative(string message, string root)
+    {
+        if (root is not { Length: > 0 } || !message.Contains(root, StringComparison.OrdinalIgnoreCase))
+            return message;
+
+        var builder = new StringBuilder(message.Length);
+        var at = Stripped(message.AsSpan(), root, builder);
+
+        return builder.Append(message.AsSpan(at)).ToString();
+    }
+
+    private static int Stripped(ReadOnlySpan<char> span, string root, StringBuilder builder)
+    {
+        var at = 0;
+
+        while (span[at..].IndexOf(root, StringComparison.OrdinalIgnoreCase) is var found and >= 0)
+        {
+            var after = at + found + root.Length;
+            var bounded = Bounded(span, after);
+
+            builder.Append(span[at..(bounded ? at + found : after)]);
+            at = bounded ? after + Separator(span, after) : after;
+        }
+
+        return at;
+    }
+
+    private static bool Bounded(ReadOnlySpan<char> span, int after) =>
+        after >= span.Length || IsSeparator(span[after]) || !IsPathCharacter(span[after]);
+
+
+    private static int Separator(ReadOnlySpan<char> span, int after) =>
+        after < span.Length && IsSeparator(span[after]) ? 1 : 0;
+
+
+    private static bool IsSeparator(char character) =>
+        character == Path.DirectorySeparatorChar || character == Path.AltDirectorySeparatorChar;
+
+
+    private static bool IsPathCharacter(char character) =>
+        char.IsLetterOrDigit(character) || character is '.' or '-' or '_' or '~' or ' ';
 }

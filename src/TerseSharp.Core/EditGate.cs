@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.Core;
@@ -6,11 +7,11 @@ namespace TerseSharp.Core;
 public static class EditGate
 {
     public static async Task<Result<string>> ApplyAsync(
-        LoadedWorkspace workspace,
-        Solution updated,
-        IReadOnlyList<DocumentId> changed,
-        EditOptions options,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    Solution updated,
+    IReadOnlyList<DocumentId> changed,
+    EditOptions options,
+    CancellationToken cancellationToken)
     {
         var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
         var diff = await DiffAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
@@ -23,7 +24,7 @@ public static class EditGate
             return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root));
 
         if (report is { NewErrors.Length: > 0 })
-            return Result.Fail<string>(Errors.CompileRegression(report.NewErrors));
+            return Result.Fail<string>(Errors.CompileRegression(report.NewErrors, report.Import));
 
         return await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false)
             ? Result.Ok(Render(options, diff, "applied", report, workspace.Root))
@@ -81,6 +82,9 @@ public static class EditGate
 
         foreach (var error in report.NewErrors)
             response.Note(error);
+
+        if (report.Import is { Length: > 0 } import)
+            response.Note("add: " + import);
     }
 
     private static string Describe(GateReport report, bool verbose) => verbose
@@ -107,25 +111,27 @@ public static class EditGate
     }
 
     private static async Task<GateReport> AnalyseAsync(
-        Solution before,
-        Solution after,
-        IReadOnlyList<DocumentId> changed,
-        string root,
-        CancellationToken cancellationToken)
+    Solution before,
+    Solution after,
+    IReadOnlyList<DocumentId> changed,
+    string root,
+    CancellationToken cancellationToken)
     {
         var projects = Affected(before, changed);
         var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
         var current = await TallyAsync(after, projects, root, cancellationToken).ConfigureAwait(false);
         var appeared = current.Errors.Where(entry => Appeared(baseline.Errors, entry)).Select(entry => entry.Key).ToArray();
         var arrived = Arrived(before, after, changed, root);
+        var regressions = appeared.Where(key => !Unresolvable(key, arrived, baseline.Errors)).Take(10).ToArray();
 
         return new GateReport(
-            [.. appeared.Where(key => !Unresolvable(key, arrived, baseline.Errors)).Take(10)],
+            regressions,
             [.. appeared.Where(key => Unresolvable(key, arrived, baseline.Errors)).Take(10)],
             current.ErrorCount,
             current.ErrorCount - baseline.ErrorCount,
             current.WarningCount,
-            current.WarningCount - baseline.WarningCount);
+            current.WarningCount - baseline.WarningCount,
+            await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false));
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -226,12 +232,13 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-        string[] NewErrors,
-        string[] Unresolved,
-        int Errors,
-        int ErrorDelta,
-        int Warnings,
-        int WarningDelta);
+    string[] NewErrors,
+    string[] Unresolved,
+    int Errors,
+    int ErrorDelta,
+    int Warnings,
+    int WarningDelta,
+    string? Import);
 
     private readonly record struct Tally(Dictionary<string, int> Errors, int ErrorCount, int WarningCount);
     private static string Compact(ResponseBuilder response, DocumentDiff[] diffs, string root)
@@ -309,4 +316,95 @@ public static class EditGate
             .FirstOrDefault(document => document.FilePath is { Length: > 0 } file
                 && SourceFile.IsCSharp(file)
                 && !GeneratedCode.IsGenerated(workspace.Root, file));
+
+    private const int MaxImportHints = 3;
+
+    private static bool IsMissingName(string key) =>
+        key.StartsWith("CS0246 ", StringComparison.Ordinal) || key.StartsWith("CS0103 ", StringComparison.Ordinal);
+
+    private static string? Quoted(string message)
+    {
+        var open = message.IndexOf('\'', StringComparison.Ordinal);
+        var close = open < 0 ? -1 : message.IndexOf('\'', open + 1);
+
+        if (close <= open + 1)
+            return null;
+
+        var name = message.AsSpan(open + 1, close - open - 1);
+        var generic = name.IndexOf('<');
+
+        return new string(generic < 0 ? name : name[..generic]);
+    }
+
+    private static async Task<string[]> NamespacesAsync(Project project, string name, CancellationToken cancellationToken)
+    {
+        var declarations = await SymbolFinder
+            .FindDeclarationsAsync(project, name, ignoreCase: false, SymbolFilter.Type, cancellationToken)
+            .ConfigureAwait(false);
+
+        return [.. declarations
+        .Where(symbol => symbol is { DeclaredAccessibility: Accessibility.Public, ContainingType: null, ContainingNamespace.IsGlobalNamespace: false })
+        .Select(symbol => symbol.ContainingNamespace.ToDisplayString())
+        .Distinct(StringComparer.Ordinal)];
+    }
+
+    private static async Task<string?> ImportHintAsync(
+    Solution after,
+    IReadOnlyList<DocumentId> changed,
+    string root,
+    string[] errors,
+    CancellationToken cancellationToken)
+    {
+        if (errors.Length is 0)
+            return null;
+
+        var spaces = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var error in errors)
+        {
+            if (!IsMissingName(error) || Quoted(error) is not { Length: > 0 } name)
+                return null;
+
+            if (Erroring(after, root, error, changed) is not { } project)
+                return null;
+
+            if (await NamespacesAsync(project, name, cancellationToken).ConfigureAwait(false) is not [var only])
+                return null;
+
+            spaces.Add(only);
+        }
+
+        return spaces.Count > MaxImportHints ? null : string.Join(' ', spaces.Select(space => "using " + space + ";"));
+    }
+
+    private static Project? Edited(Solution after, IReadOnlyList<DocumentId> changed)
+    {
+        foreach (var id in changed)
+        {
+            if (after.GetDocument(id)?.Project is { } project)
+                return project;
+        }
+
+        return null;
+    }
+
+    private static string? PathOf(string error)
+    {
+        var space = error.IndexOf(' ', StringComparison.Ordinal);
+        var colon = space < 0 ? -1 : error.IndexOf(": ", space, StringComparison.Ordinal);
+
+        return colon < 0 ? null : error[(space + 1)..colon];
+    }
+
+    private static Project? Erroring(Solution after, string root, string error, IReadOnlyList<DocumentId> changed)
+    {
+        if (PathOf(error) is { Length: > 0 } relative
+            && after.GetDocumentIdsWithFilePath(Path.Combine(root, relative)) is [var id, ..]
+            && after.GetDocument(id)?.Project is { } project)
+        {
+            return project;
+        }
+
+        return Edited(after, changed);
+    }
 }

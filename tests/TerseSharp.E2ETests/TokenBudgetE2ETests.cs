@@ -458,4 +458,57 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             Tokens(gated) < Tokens(analyzed) + Tokens(formatted) + Tokens(cleaned) + Tokens(analyzed),
             Report("gate", gated, analyzed + formatted + cleaned + analyzed));
     }
+
+    [Fact]
+    public async Task SearchText_WithSeveralSparseQueries_CostsLessThanOneCallPerQuery()
+    {
+        string[] literals = ["TotalVolume", "OrderRouter", "SplitHandler", "NullOrderRepository"];
+        var separate = 0;
+
+        foreach (var literal in literals)
+            separate += Tokens(await server.CallAsync("search_text", new() { ["query"] = literal, ["glob"] = "**/*.cs" }));
+
+        var batched = await server.CallAsync("search_text", new() { ["queries"] = literals, ["glob"] = "**/*.cs" });
+
+        Assert.True(
+            Tokens(batched) < separate,
+            Report("search_text queries", batched) + string.Create(CultureInfo.InvariantCulture, $" against {separate} tokens for {literals.Length} separate calls"));
+    }
+
+    [Fact]
+    public async Task SearchText_TaggingRecordsByQuery_CostsAtMostTwoTokensPerRecord()
+    {
+        var untagged = await server.CallAsync("search_text", new() { ["query"] = "namespace Fixture.Trading", ["glob"] = "**/*.cs" });
+        var tagged = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "namespace Fixture.Trading", "zzz-matches-nothing-anywhere" },
+            ["glob"] = "**/*.cs",
+        });
+
+        var records = untagged.Split('\n').Count(line => line.Contains(".cs:", StringComparison.Ordinal));
+
+        Assert.True(records > 10, Report("search_text untagged", untagged));
+        Assert.True(
+            Tokens(tagged) - Tokens(untagged) <= 2 * records,
+            Report("search_text tagged", tagged, untagged) + string.Create(CultureInfo.InvariantCulture, $" over {records} records"));
+    }
+
+    [Fact]
+    public async Task SearchText_WhenEveryRecordIsTaggedWithBothQueries_StaysWithinFourTokensPerRecord()
+    {
+        var untagged = await server.CallAsync("search_text", new() { ["query"] = "namespace Fixture.Trading", ["glob"] = "**/*.cs" });
+        var combined = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "namespace Fixture.Trading", "namespace" },
+            ["glob"] = "**/*.cs",
+        });
+
+        var records = untagged.Split('\n').Count(line => line.Contains(".cs:", StringComparison.Ordinal));
+        var doubled = combined.Split('\n').Count(line => line.Contains("  q1,q2  ", StringComparison.Ordinal));
+
+        Assert.True(doubled > 10, Report("search_text combined", combined));
+        Assert.True(
+            Tokens(combined) - Tokens(untagged) <= 4 * records,
+            Report("search_text combined", combined, untagged) + string.Create(CultureInfo.InvariantCulture, $" over {records} records, {doubled} of them q1,q2"));
+    }
 }

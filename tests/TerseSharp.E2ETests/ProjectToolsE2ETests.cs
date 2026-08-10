@@ -154,4 +154,58 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task SolutionProjects_WithAPathToAnUnloadedSolution_AnswersFromTheFileWithoutLoadingIt()
+    {
+        var unloaded = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "BrokenSolution", "BrokenSolution.slnx");
+
+        var text = await server.CallAsync("solution_projects", new() { ["path"] = unloaded });
+        var loaded = await server.CallAsync("list_workspaces", []);
+
+        Assert.Contains("Fixture.Broken", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fixture.Trading", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("BrokenSolution", loaded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SolutionProjects_WithAPathThatIsNotASolutionFile_IsRefusedWithARemedy()
+    {
+        var text = await server.CallAsync("solution_projects", new() { ["path"] = "appsettings.json" });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.Contains(".slnx", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SolutionProjects_WithAPathThatDoesNotExist_SaysSoInsteadOfAnsweringZero()
+    {
+        var text = await server.CallAsync("solution_projects", new() { ["path"] = "NoSuchSolution.slnx" });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("does not exist", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("find_files", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("loaded workspace", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 projects", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SolutionProjects_WithAPath_NamesTheFileItReadWithoutClaimingItIsOutsideTheWorkspace()
+    {
+        var outside = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "BrokenSolution", "BrokenSolution.slnx");
+        var inside = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+
+        var byOutsidePath = await server.CallAsync("solution_projects", new() { ["path"] = outside });
+        var byInsidePath = await server.CallAsync("solution_projects", new() { ["path"] = inside });
+        var byWorkspace = await server.CallAsync("solution_projects", []);
+
+        Assert.Contains("read  " + outside, byOutsidePath, StringComparison.Ordinal);
+        Assert.Contains("read  " + inside, byInsidePath, StringComparison.Ordinal);
+        Assert.DoesNotContain("outside-workspace", byInsidePath, StringComparison.Ordinal);
+        Assert.DoesNotContain("outside-workspace", byOutsidePath, StringComparison.Ordinal);
+        Assert.DoesNotContain("read  ", byWorkspace, StringComparison.Ordinal);
+    }
 }

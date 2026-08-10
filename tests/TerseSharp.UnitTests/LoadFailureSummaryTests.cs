@@ -81,4 +81,70 @@ public sealed class LoadFailureSummaryTests
     [Fact]
     public void ProjectOf_WithAProjectNameCarryingNoDirectory_ReturnsItUnchanged() =>
         Assert.Equal("Core.Mapper.csproj", LoadFailureSummary.ProjectOf("failed on 'Core.Mapper.csproj'").ToString());
+
+    [Fact]
+    public void Relative_StripsTheWorkspaceRootFromAFailureMessage()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+        var project = Path.Combine(root, "src", "App", "App.csproj");
+
+        var relative = LoadFailureSummary.Relative("Project file not found: '" + project + "'", root);
+
+        Assert.DoesNotContain(root, relative, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine("src", "App", "App.csproj"), relative, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Relative_LeavesAPathOutsideTheWorkspaceUntouched()
+    {
+        var message = "Project file not found: '" + Path.Combine(Path.GetTempPath(), "elsewhere", "App.csproj") + "'";
+
+        Assert.Equal(message, LoadFailureSummary.Relative(message, Path.Combine(Path.GetTempPath(), "repo")));
+    }
+
+    [Fact]
+    public void Group_AttributesTheSameProject_WhetherTheMessageIsAbsoluteOrAlreadyRelativised()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+        var absolute = "Project file not found: '" + Path.Combine(root, "src", "App", "App.csproj") + "'";
+
+        var grouped = LoadFailureSummary.Group([absolute]);
+        var afterRelativising = LoadFailureSummary.Group([LoadFailureSummary.Relative(absolute, root)]);
+
+        Assert.Equal("App.csproj", grouped[0].Project);
+        Assert.Equal("App.csproj", afterRelativising[0].Project);
+    }
+
+    [Fact]
+    public void Group_ForAnUnattributedFailure_KeepsTheRawTextSoRelativisingMustHappenAfterIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+        var unattributed = "MSB4236: The SDK could not be found under " + root;
+
+        var grouped = LoadFailureSummary.Group([unattributed]);
+
+        Assert.Equal(unattributed, grouped[0].Project);
+        Assert.DoesNotContain(root, LoadFailureSummary.Relative(grouped[0].Project, root), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Relative_LeavesASiblingDirectoryWhoseNameStartsWithTheRootIntact()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+        var sibling = Path.Combine(Path.GetTempPath(), "repo2", "App.csproj");
+        var message = "Project file not found: '" + sibling + "'";
+
+        var relative = LoadFailureSummary.Relative(message, root);
+
+        Assert.Equal(message, relative);
+        Assert.Contains(sibling, relative, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Relative_StripsARootThatEndsTheMessage()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "repo");
+
+        Assert.Equal("The SDK could not be found under ", LoadFailureSummary.Relative("The SDK could not be found under " + root, root));
+    }
 }

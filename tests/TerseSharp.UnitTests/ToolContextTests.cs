@@ -144,4 +144,50 @@ public sealed class ToolContextTests
         Assert.Equal(0, latency.SyncMs);
         Assert.Equal(0, latency.ActionMs);
     }
+
+    [Fact]
+    public async Task MeasurePhasesAsync_OverALoadedWorkspace_TimesTheOutlineTheCompileGateAndTheGitSpawnSeparately()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        var phases = await context.MeasurePhasesAsync(TestContext.Current.CancellationToken);
+
+        Assert.EndsWith(".cs", phases.Document, StringComparison.Ordinal);
+        Assert.False(Path.IsPathRooted(phases.Document), phases.Document);
+        Assert.True(phases.OutlineMs > 0, $"outlineMs={phases.OutlineMs}");
+        Assert.True(phases.GateMs > 0, $"gateMs={phases.GateMs}");
+        Assert.True(phases.DiffMs > 0, $"diffMs={phases.DiffMs}");
+    }
+
+    [Fact]
+    public async Task MeasurePhasesAsync_WithNothingLoaded_AnswersZeroWithoutThrowing()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+
+        var phases = await context.MeasurePhasesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(string.Empty, phases.Document);
+        Assert.Equal(0, phases.OutlineMs);
+        Assert.Equal(0, phases.GateMs);
+        Assert.Equal(0, phases.DiffMs);
+    }
+
+    [Fact]
+    public async Task MeasurePhasesAsync_WithTwoWorkspacesLoaded_AnswersNothingRatherThanAnUnmeasuredZero()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        var phases = await context.MeasurePhasesAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(string.Empty, phases.Document);
+        Assert.Equal(0, phases.OutlineMs);
+    }
 }

@@ -1,7 +1,9 @@
+using System.Collections.Immutable;
+
 namespace TerseSharp.Core;
 
 public readonly record struct TextSearchRequest(
-    string Pattern,
+    ImmutableArray<string> Patterns,
     string Glob,
     bool Regex,
     int MaxResults,
@@ -12,6 +14,12 @@ public readonly record struct TextSearchRequest(
     bool MatchesOnly = false)
 {
     public const int MaxContext = 5;
+
+    public const int MaxPatterns = 10;
+
+    public string Pattern => Patterns[0];
+
+    public bool SeveralPatterns => Patterns.Length > 1;
 
     public string Tool => Regex ? "search_regex" : "search_text";
 

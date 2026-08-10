@@ -38,6 +38,7 @@ tripwires — are the hard gate directly **below** the table.
 | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell |
 | `Bash: git ls-files` to tell a checked-in file from a scratch one | `find_files(glob, tracked: true)` | only the files git tracks, so build output and another session's untracked notes drop out; the bare `git ls-files` is denied by the guard, every flagged form is not |
 | `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC` once for the whole response, not per record - these two answer nothing else; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
+| `grep -n -e A -e B -e C` / one search per literal | `search_text(queries: ["I175", "I176", "I177"])` | up to 10 literals in **one** pass over the same file set; every record carries `q1`..`qN` for the position of its literal in `queries=`, which a regex alternation cannot tell you. A line matching several is **one** record tagged `q1,q3` in query order, so a tag absent from a record means that literal is absent from that line. No legend is echoed back — you passed the array |
 | a search that keeps hitting a folder you do not want | `search_text(query, exclude: ".research/**")` | dropped after `glob=` has selected, so one call answers what two used to |
 | `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
 | `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
@@ -333,6 +334,11 @@ silently dropping the inner one.
 **Projects** — `solution_projects` · `solution_add_project` · `solution_remove_project` ·
 `project_create` · `project_properties` · `project_set_property` · `project_add_reference` ·
 `project_remove_reference` · `package_list` · `package_add` · `package_remove`.
+**"Which projects does this solution contain?" for a solution that is _not_ loaded** is
+`solution_projects(path: "fixtures/FixtureSolution/FixtureSolution.slnx")` — it reads the `.slnx`,
+`.sln` or `.slnf` directly and loads nothing, so writing a fixture-scoped test does not cost a
+`load_workspace` that makes every later un-hinted call ambiguous. `list_projects` is the loaded-
+workspace answer and carries the language and document counts a file cannot know.
 
 **XAML** — `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_styles` ·
 `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` ·
@@ -368,7 +374,13 @@ cannot leave out. `diff_symbols` tags a hunk `EXACT` only when it sits
 inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.
 
 **Files** — `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex`.
-`search_text` and `search_regex` take `query`, `find_files` takes `glob`, and each accepts `pattern`
+`search_text` and `search_regex` take `query` — or `queries=[...]`, up to 10 literals or expressions
+answered in **one** pass over the same file set, every record tagged `q1`..`qN` by the position of its
+query in the array. The count stays *matching lines, at most one per line*: a line matching several
+queries is **one** record carrying every matching tag, comma-separated in query order (`q1,q3`).
+`query` and `queries` combine, `query` first; an 11th entry is refused naming the
+cap rather than truncated, and a blank entry is refused rather than matching everything.
+`find_files` takes `glob`, and each accepts `pattern`
 as an alias — `find_files` accepts `query` too — so the wrong name of the three is never a failed
 call. A parameter name **no** tool declares is refused before the call runs, naming every accepted
 spelling: an argument the server does not understand is never silently dropped, because a listing
@@ -462,6 +474,11 @@ this workspace is read as text unchanged.
    `replace_symbol_body` and `add_member` take `retryWith: "r3"` to replay exactly what was rejected —
    after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
    declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
+   **When every new error is just a missing import, the remedy names it**: a rollback whose errors are
+   all `CS0246`/`CS0103` for names the project resolves in exactly one namespace each answers
+   `remedy: add: using System.Collections.Immutable; then replay the rejected text with retryWith`.
+   Add the using with `edit_text force=true`, then `retryWith` — the using is never added for you,
+   because that would edit a region you did not address.
    **A token belongs to the workspace it was rejected in**: replaying it against another one - a
    sibling worktree where the same symbol id resolves - is refused naming both roots, instead of
    landing the held declaration in the wrong tree. Every diagnostic a rollback lists names its file
@@ -697,7 +714,9 @@ output; read the `holder` lines before stopping anything.
 
 Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest names;
 `AmbiguousSymbol` lists the candidates and says how many of the total it shows; `SaturatedName` means
-the name matched too many symbols to resolve safely — qualify it; `OutOfWorkspace` means the path
+the name matched too many symbols to resolve safely — and it is now reached only by a **bare** name:
+a `Type.Member` whose member name saturates is resolved through the members of the types called
+`Type`, so qualifying the name really is the fix the remedy names; `OutOfWorkspace` means the path
 escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
 no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
 parameter means the argument names were wrong, and the remedy lists the ones the tool declares; an

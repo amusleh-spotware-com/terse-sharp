@@ -292,4 +292,23 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
 
     private static double Average(long ticks, int calls) =>
         calls is 0 ? 0 : ticks * 1000d / (Stopwatch.Frequency * calls);
+
+    public async Task<PhaseLatency> MeasurePhasesAsync(CancellationToken cancellationToken)
+    {
+        var found = Registry.Resolve(null, null, semantic: true);
+
+        if (!found.IsOk)
+            return new PhaseLatency(string.Empty, 0, 0, 0);
+
+        var synced = await SyncedAsync(found.Value!, null, null, cancellationToken).ConfigureAwait(false);
+
+        if (!synced.IsOk)
+            return new PhaseLatency(string.Empty, 0, 0, 0);
+
+        using var lease = synced.Value!;
+
+        return await PhaseProbe.MeasureAsync(lease.Workspace, cancellationToken).ConfigureAwait(false);
+    }
 }
+
+public readonly record struct PhaseLatency(string Document, double OutlineMs, double GateMs, double DiffMs);

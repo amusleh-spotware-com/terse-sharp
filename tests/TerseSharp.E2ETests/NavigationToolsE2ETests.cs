@@ -519,4 +519,25 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("2 symbols", text, StringComparison.Ordinal);
         Assert.Contains("service.Submit(order)", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbolSource_ForAQualifiedNameWhoseMemberSaturates_ResolvesThroughTheContainingType()
+    {
+        var saturated = await server.CallAsync("search_symbols", new() { ["query"] = "Probe", ["maxResults"] = 200 });
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "ProbeHost.Probe" });
+
+        Assert.True(saturated.Split('\n').Count(line => line.Contains("Probe", StringComparison.Ordinal)) > 100, saturated);
+        Assert.DoesNotContain("SaturatedName", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("public static int Probe()", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForAnUnqualifiedNameThatSaturates_StillRefusesRatherThanGuessing()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Probe" });
+
+        Assert.Contains("matches more than 100 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
 }

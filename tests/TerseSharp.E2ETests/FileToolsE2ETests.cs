@@ -322,8 +322,6 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.All(records, record => Assert.NotEqual(string.Empty, Payload(record)));
     }
 
-    private const string Tag = "  HEURISTIC  ";
-
     private static bool Record(string line) => line.Contains(".cs:", StringComparison.Ordinal);
 
     private const string RecordSeparator = "  ";
@@ -370,5 +368,161 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         Assert.Single(records);
         Assert.Equal("public", Payload(records[0]).Split("  x")[0]);
+    }
+
+    [Fact]
+    public async Task SearchText_WithSeveralQueries_TagsEveryRecordWithTheQueryThatMatchedIt()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "TotalVolume", "namespace Fixture.Trading" },
+            ["glob"] = "src/Fixture.Trading/OrderBook.cs",
+        });
+
+        var lines = text.Split('\n');
+
+        Assert.Contains(lines, line => line.Contains("OrderBook.cs:33", StringComparison.Ordinal) && line.Contains("  q1  ", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.Contains("OrderBook.cs:1", StringComparison.Ordinal) && line.Contains("  q2  ", StringComparison.Ordinal));
+        Assert.DoesNotContain("q1=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithASingleQueriesEntry_IsByteIdenticalToTheQueryForm()
+    {
+        var batched = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "Order" },
+            ["glob"] = "*.cs",
+        });
+
+        var single = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Order",
+            ["glob"] = "*.cs",
+        });
+
+        Assert.Equal(single, batched);
+        Assert.DoesNotContain("q1=", batched, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithMoreQueriesThanOnePassAnswers_IsRefusedNamingTheCap()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = Enumerable.Range(0, 11).Select(index => index.ToString(CultureInfo.InvariantCulture)).ToArray(),
+        });
+
+        var withQuery = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "alpha",
+            ["queries"] = Enumerable.Range(0, 10).Select(index => index.ToString(CultureInfo.InvariantCulture)).ToArray(),
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("11 patterns were requested - query plus queries", text, StringComparison.Ordinal);
+        Assert.Contains("11 patterns were requested - query plus queries", withQuery, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchRegex_WithSeveralQueries_ReportsBothPatternsInOnePass()
+    {
+        var text = await server.CallAsync("search_regex", new()
+        {
+            ["queries"] = new[] { @"public\s+sealed\s+record", @"namespace\s+Fixture" },
+            ["glob"] = "src/Fixture.Trading/Order.cs",
+        });
+
+        Assert.Contains("  q1  ", text, StringComparison.Ordinal);
+        Assert.Contains("  q2  ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithABlankQueriesEntry_IsRefusedRatherThanSearchingEverything()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "OrderBook", "" },
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("blank entry", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_OnALargeFileWithTwoFarApartEdits_ReportsTheChangedLinesTheDiffShows()
+    {
+        const string Relative = "changed-lines-probe.txt";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, Relative);
+        var content = string.Join('\n', Enumerable.Range(0, 3000).Select(index => "line " + index.ToString(CultureInfo.InvariantCulture)));
+
+        try
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Relative, ["content"] = content });
+
+            var text = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Relative,
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object?> { ["oldText"] = "\nline 5\n", ["newText"] = "\nline 5 changed\n" },
+                new Dictionary<string, object?> { ["oldText"] = "\nline 2500\n", ["newText"] = "\nline 2500 changed\n" },
+                },
+            });
+
+            var reported = text.Split('\n').Single(line => line.Contains("changedLines=", StringComparison.Ordinal));
+
+            Assert.Equal("2", reported.Split("changedLines=", StringSplitOptions.None)[1].Split(' ')[0]);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task SearchText_WithTwoQueriesMatchingTheSameLine_TagsThatRecordWithBothInQueryOrder()
+    {
+        var separate = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "OrderService",
+            ["glob"] = "src/Fixture.Trading/OrderRouter.cs",
+        });
+
+        var batched = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "private readonly", "OrderService" },
+            ["glob"] = "src/Fixture.Trading/OrderRouter.cs",
+        });
+
+        var swapped = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "OrderService", "private readonly" },
+            ["glob"] = "src/Fixture.Trading/OrderRouter.cs",
+        });
+
+        var shared = batched.Split('\n').Single(line => line.Contains("OrderRouter.cs:5", StringComparison.Ordinal));
+        var sharedSwapped = swapped.Split('\n').Single(line => line.Contains("OrderRouter.cs:5", StringComparison.Ordinal));
+
+        Assert.Contains("OrderRouter.cs:5", separate, StringComparison.Ordinal);
+        Assert.Contains("  q1,q2  ", shared, StringComparison.Ordinal);
+        Assert.Contains("  q1,q2  ", sharedSwapped, StringComparison.Ordinal);
+        Assert.DoesNotContain("q2,q1", swapped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchRegex_WithTwoQueriesMatchingTheSameLine_TagsThatRecordWithBoth()
+    {
+        var text = await server.CallAsync("search_regex", new()
+        {
+            ["queries"] = new[] { @"public\s+sealed", @"class\s+OrderService" },
+            ["glob"] = "src/Fixture.Trading/OrderService.cs",
+        });
+
+        Assert.Contains("  q1,q2  ", text, StringComparison.Ordinal);
     }
 }

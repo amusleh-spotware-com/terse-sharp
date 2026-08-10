@@ -32,21 +32,20 @@ public static class SymbolLookup
     }
 
     private static async Task<Result<ISymbol>> ByNameAsync(
-        LoadedWorkspace workspace,
-        string text,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    string text,
+    CancellationToken cancellationToken)
     {
         if (SymbolReference.Parse(text) is not { } query)
-        {
-            return Result.Fail<ISymbol>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"'{text}' is neither a symbol id nor a name"),
-                "pass a documentation id such as M:Ns.Type.Member(Ns.Arg), or a name such as Type.Member"));
-        }
+            return Unparsed(text);
 
         var found = (await SymbolSearch.FindAsync(workspace, query.Member, null, null, NameCap + 1, cancellationToken).ConfigureAwait(false)).Ranked;
 
         if (found.Count > NameCap)
-            return Result.Fail<ISymbol>(Errors.SaturatedName(text, NameCap));
+        {
+            return await ByContainerAsync(workspace, text, query, cancellationToken).ConfigureAwait(false)
+                ?? Result.Fail<ISymbol>(Errors.SaturatedName(text, NameCap));
+        }
 
         var named = found.Where(symbol => string.Equals(symbol.Name, query.Member, StringComparison.Ordinal)).ToArray();
         var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
@@ -196,4 +195,33 @@ public static class SymbolLookup
     private static bool DeclaredIn(ISymbol symbol, string? filePath) =>
         filePath is { Length: > 0 } && symbol.DeclaringSyntaxReferences.Any(reference =>
             string.Equals(reference.SyntaxTree.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
+
+    private static Result<ISymbol> Unparsed(string text) => Result.Fail<ISymbol>(Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"'{text}' is neither a symbol id nor a name"),
+        "pass a documentation id such as M:Ns.Type.Member(Ns.Arg), or a name such as Type.Member"));
+
+    private static async Task<Result<ISymbol>?> ByContainerAsync(
+        LoadedWorkspace workspace,
+        string text,
+        SymbolQuery query,
+        CancellationToken cancellationToken)
+    {
+        if (query.ContainingType is not { Length: > 0 } qualifier)
+            return null;
+
+        var name = qualifier[(qualifier.LastIndexOf('.') + 1)..];
+        var types = (await SymbolSearch.FindAsync(workspace, name, null, null, NameCap + 1, cancellationToken).ConfigureAwait(false)).Ranked;
+
+        return types.Count > NameCap ? null : Scoped(text, Declared(types, name, query));
+    }
+
+    private static ISymbol[] Declared(IReadOnlyList<ISymbol> types, string name, SymbolQuery query) =>
+    [
+        .. types
+        .OfType<INamedTypeSymbol>()
+        .Where(type => string.Equals(type.Name, name, StringComparison.Ordinal))
+        .SelectMany(type => type.GetMembers(query.Member))
+        .Where(symbol => SymbolReference.Matches(symbol, query))
+        .DistinctBy(Describe, StringComparer.Ordinal),
+];
 }
