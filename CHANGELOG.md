@@ -8,6 +8,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+> **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**
+> `search_text` and `search_regex` tag the response `HEURISTIC` once instead of every record.
+
+- `search_text` and `search_regex` are documented to answer nothing but `HEURISTIC`, yet stamped
+  `  HEURISTIC  ` into **every** record - 13 629 occurrences across 1 151 calls in a one-week
+  session scan, on a tag that can only take one value. The tag is now a single note line and each
+  record is `path:line  <payload>`. A tag the caller cannot act on is paid for and not acted on:
+  the closest measured analogue, CrAM (arXiv:2406.11497), finds prompt-borne credibility labels
+  yield only marginal gains and sometimes a drop. `EXACT`/`HEURISTIC` on the tools that genuinely
+  answer both - `find_usages`, `xaml_*`, `resx_*`, `diff_symbols` - is unchanged (**I169**).
+
 ### Fixed
 
 > **Response-format change (MAJOR under this project's rules; on `0.x` the MINOR segment carries it).**

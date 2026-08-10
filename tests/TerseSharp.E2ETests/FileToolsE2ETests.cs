@@ -80,12 +80,16 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task SearchText_TagsResultsHeuristic()
+    public async Task SearchText_TagsTheResponseHeuristicOnceInsteadOfEveryRecord()
     {
-        var text = await server.CallAsync("search_text", new() { ["pattern"] = "MaxVolume", ["glob"] = "*.json" });
+        var text = await server.CallAsync("search_text", new() { ["pattern"] = "Order", ["glob"] = "*.cs" });
 
-        Assert.Contains("HEURISTIC", text, StringComparison.Ordinal);
-        Assert.Contains("appsettings.json", text, StringComparison.Ordinal);
+        var tagged = text.Split('\n').Count(line => line.Contains("HEURISTIC", StringComparison.Ordinal));
+        var records = text.Split('\n').Count(line => line.Contains(".cs:", StringComparison.Ordinal));
+
+        Assert.Equal(1, tagged);
+        Assert.True(records > 1, text);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -312,7 +316,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             ["maxResults"] = 200,
         });
 
-        var records = text.Split('\n').Where(line => line.Contains(Tag, StringComparison.Ordinal)).ToArray();
+        var records = text.Split('\n').Where(Record).ToArray();
 
         Assert.NotEmpty(records);
         Assert.All(records, record => Assert.NotEqual(string.Empty, Payload(record)));
@@ -320,8 +324,12 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
     private const string Tag = "  HEURISTIC  ";
 
+    private static bool Record(string line) => line.Contains(".cs:", StringComparison.Ordinal);
+
+    private const string RecordSeparator = "  ";
+
     private static string Payload(string record) =>
-        record[(record.IndexOf(Tag, StringComparison.Ordinal) + Tag.Length)..].Trim();
+        record[(record.IndexOf(RecordSeparator, StringComparison.Ordinal) + RecordSeparator.Length)..].Trim();
 
     [Fact]
     public async Task SearchRegex_WithMatchesOnly_PrintsTheMatchedSpanInsteadOfTheWholeLine()
@@ -339,7 +347,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             ["matchesOnly"] = true,
         });
 
-        var first = spans.Split('\n').First(line => line.Contains(Tag, StringComparison.Ordinal));
+        var first = spans.Split('\n').First(Record);
 
         Assert.Contains("record Order", spans, StringComparison.Ordinal);
         Assert.DoesNotContain("(", Payload(first), StringComparison.Ordinal);
@@ -358,7 +366,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             ["unique"] = true,
         });
 
-        var records = text.Split('\n').Where(line => line.Contains(Tag, StringComparison.Ordinal)).ToArray();
+        var records = text.Split('\n').Where(Record).ToArray();
 
         Assert.Single(records);
         Assert.Equal("public", Payload(records[0]).Split("  x")[0]);

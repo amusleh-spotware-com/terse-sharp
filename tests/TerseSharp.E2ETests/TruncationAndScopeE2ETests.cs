@@ -71,7 +71,7 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
             ["glob"] = "**/*.cs",
         });
 
-        Assert.Contains("  HEURISTIC  namespace Fixture.Trading;", byQuery, StringComparison.Ordinal);
+        Assert.Contains("OrderBook.cs:1  namespace Fixture.Trading;", byQuery, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", byQuery, StringComparison.Ordinal);
     }
 

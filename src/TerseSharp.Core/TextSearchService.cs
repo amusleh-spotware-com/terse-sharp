@@ -143,7 +143,7 @@ public static class TextSearchService
         var payload = request.MatchesOnly && matched.Length > 0 ? matched : text[start..end].Trim();
         var hit = string.Create(
             CultureInfo.InvariantCulture,
-            $"{relativePath}:{tracker.Line}  HEURISTIC  {Shorten(payload)}");
+            $"{relativePath}:{tracker.Line}{RecordSeparator}{Shorten(payload)}");
 
         return request.Around is 0 ? hit : hit + Around(text, new LineWindow(start, end, tracker.Line), request.Around);
     }
@@ -260,13 +260,16 @@ public static class TextSearchService
     }
 
     private static string Payload(string hit) =>
-        hit.IndexOf(HeuristicTag, StringComparison.Ordinal) is var at and >= 0 ? hit[(at + HeuristicTag.Length)..] : hit;
+    hit.IndexOf(RecordSeparator, StringComparison.Ordinal) is var at and >= 0 ? hit[(at + RecordSeparator.Length)..] : hit;
 
-    private const string HeuristicTag = "  HEURISTIC  ";
+    private const string RecordSeparator = "  ";
 
     private static string Write(ResponseBuilder response, List<string> records, TextSearchRequest request, SearchTally tally)
     {
         response.Summary(tally.Shown, tally.Total, "matches", "glob= or maxResults=");
+
+        if (records.Count > 0)
+            response.Note("HEURISTIC  text match");
 
         if (request.Root is { Length: > 0 } root)
             response.Note("outside-workspace  " + root);
