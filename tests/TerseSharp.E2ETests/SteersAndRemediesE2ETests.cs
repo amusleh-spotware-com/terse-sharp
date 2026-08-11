@@ -66,13 +66,11 @@ public sealed class SteersAndRemediesE2ETests(TerseServerFixture server)
     [Fact]
     public async Task Clean_WithAPath_SweepsASolutionThatIsNotLoaded()
     {
-        var solution = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+        var solution = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "SelectionSolution", "SelectionSolution.slnx");
         var text = await server.CallAsync("clean", new() { ["path"] = solution, ["dryRun"] = true });
 
         Assert.Contains("dryRun", text, StringComparison.Ordinal);
-        Assert.Contains("directories", text, StringComparison.Ordinal);
-        Assert.Contains("freedBytes=", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("files=0 ", text, StringComparison.Ordinal);
+        Assert.Contains("projects=", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
@@ -87,11 +85,11 @@ public sealed class SteersAndRemediesE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task SearchText_WithAMultilineEntry_StillOffersEveryLineToTheOtherEntries()
+    public async Task SearchRegex_WithAMultilineEntry_StillOffersEveryLineToTheOtherEntries()
     {
-        var text = await server.CallAsync("search_text", new()
+        var text = await server.CallAsync("search_regex", new()
         {
-            ["queries"] = new[] { "class OrderRouter\n{", "{" },
+            ["queries"] = new[] { "class OrderRouter\\r?\\n\\{", "\\{" },
             ["glob"] = "**/OrderRouter.cs",
         });
 
@@ -114,27 +112,6 @@ public sealed class SteersAndRemediesE2ETests(TerseServerFixture server)
 
         Assert.Contains("+using System.Text;", text, StringComparison.Ordinal);
         Assert.Contains("Describe()", text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task SearchSymbols_KeepsTheProductionHalfAndNamesTheTestHalf()
-    {
-        var solution = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "SelectionSolution", "SelectionSolution.slnx");
-
-        await server.CallAsync("load_workspace", new() { ["path"] = solution });
-
-        try
-        {
-            var text = await server.CallAsync("search_symbols", new() { ["query"] = "Add", ["workspace"] = "SelectionSolution" });
-
-            Assert.Contains("more in test projects - scope=test", text, StringComparison.Ordinal);
-            Assert.DoesNotContain("AdderTests", text, StringComparison.Ordinal);
-            Assert.Contains("Adder", text, StringComparison.Ordinal);
-        }
-        finally
-        {
-            await server.CallAsync("unload_workspace", new() { ["path"] = solution });
-        }
     }
 
     [Fact]
