@@ -771,10 +771,10 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     {
         await server.CallAsync("workspace_status", []);
 
-        var first = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
-        var second = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
-        var third = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
-        var batched = await server.CallAsync("get_file_outline", new() { ["paths"] = new[] { "src/Fixture.Trading/OrderSide.cs" } });
+        var first = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+        var second = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+        var third = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+        var batched = await server.CallRawAsync("get_file_outline", new() { ["paths"] = new[] { "src/Fixture.Trading/OrderSide.cs" } });
 
         Assert.DoesNotContain("calls in a row", first, StringComparison.Ordinal);
         Assert.DoesNotContain("calls in a row", second, StringComparison.Ordinal);
@@ -805,7 +805,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         var body = source
             .Split('\n')
             .SkipWhile(line => !line.StartsWith("public", StringComparison.Ordinal))
-            .TakeWhile(line => !line.Contains("calls in a row", StringComparison.Ordinal) && !line.StartsWith("compilations=", StringComparison.Ordinal))
+            .TakeWhile(line => !line.StartsWith("compilations=", StringComparison.Ordinal))
             .ToArray();
 
         var declaration = string.Join('\n', body).TrimEnd('\n');
@@ -940,7 +940,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         var steered = string.Empty;
 
         for (var call = 0; call < 3; call++)
-            steered = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+            steered = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
 
         var bare = ToolCensus.WithoutSteer(steered);
 

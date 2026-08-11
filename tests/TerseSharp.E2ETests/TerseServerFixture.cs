@@ -45,6 +45,9 @@ public sealed class TerseServerFixture : IAsyncLifetime
 
         return directory?.FullName ?? throw new InvalidOperationException("TerseSharp.slnx not found above the test binaries");
     }
+
+    public Task<string> CallRawAsync(string tool, Dictionary<string, object?> arguments) =>
+        Server.CallRawAsync(tool, arguments, TestContext.Current.CancellationToken);
 }
 
 [CollectionDefinition(nameof(TerseServerCollection))]

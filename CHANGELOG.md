@@ -79,7 +79,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   discovers the plural set from `tools/list` in both directions. This is the **single documented
   exception** to the one-line-success rule: a green `run_tests`, a `write_text` short form and an
   `edit_text` one-liner can now carry a second line, and `README.md`, `NUGET_README.md` and `SKILL.md`
-  all say so (I198).
+  all say so. Because the line depends on call history, two responses of the same tool are no longer
+  byte-comparable: the E2E harness's `CallAsync` strips it and `CallRawAsync` is what the three tests
+  that assert the steer itself use, so no other test can become order-dependent on it — two did, and
+  only on the macOS and ubuntu legs, where the test order differs (I198).
 - **`doctor` prints the running server's assembly path and the one-shot probe command**, and `SKILL.md`
   now teaches that a claim about tool *behaviour* is proven against a freshly built `terse.dll` with
   `dotnet <path> call <tool> --workspace <solution> --json '{...}'` — 3 s against 13 s for the

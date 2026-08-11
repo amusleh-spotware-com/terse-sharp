@@ -43,7 +43,10 @@ internal sealed class TerseServerProcess
         }
     }
 
-    public async Task<string> CallAsync(string tool, Dictionary<string, object?> arguments, CancellationToken cancellationToken)
+    public async Task<string> CallAsync(string tool, Dictionary<string, object?> arguments, CancellationToken cancellationToken) =>
+    ToolCensus.WithoutSteer(await CallRawAsync(tool, arguments, cancellationToken));
+
+    public async Task<string> CallRawAsync(string tool, Dictionary<string, object?> arguments, CancellationToken cancellationToken)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
