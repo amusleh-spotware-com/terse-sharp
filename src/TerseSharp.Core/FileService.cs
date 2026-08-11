@@ -11,21 +11,23 @@ public static class FileService
 
     private const int MaxNearMisses = 3;
 
-    public static Task<Result<string>> ReadTextAsync(
-        LoadedWorkspace workspace,
-        string path,
-        ReadRequest request,
-        CancellationToken cancellationToken)
+    public static async Task<Result<string>> ReadTextAsync(
+    LoadedWorkspace workspace,
+    string path,
+    ReadRequest request,
+    CancellationToken cancellationToken)
     {
         var resolved = Readable(workspace, path);
 
         if (!resolved.IsOk)
-            return Task.FromResult(Result.Fail<string>(resolved.Error!));
+            return Result.Fail<string>(resolved.Error!);
 
         var full = resolved.Value!;
         var label = PathBoundary.Contains(workspace.Root, full) ? path : Outside(full);
 
-        return PresentFileAsync(full, label, request, cancellationToken);
+        return File.Exists(full)
+            ? await PresentFileAsync(full, label, request, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(await MissingDocument.ReadAsync(workspace, label, cancellationToken).ConfigureAwait(false));
     }
 
     public static async Task<Result<string>> WriteTextAsync(

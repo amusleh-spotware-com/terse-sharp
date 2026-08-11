@@ -24,4 +24,12 @@ public static class UpdateSettings
         Environment.GetEnvironmentVariable("TERSE_UPDATE_URL") is { Length: > 0 } overridden
             ? overridden
             : UpdateCheck.DefaultEndpoint;
+
+    public static string Version()
+    {
+        var informational = Running();
+        var metadata = informational.IndexOf('+', StringComparison.Ordinal);
+
+        return metadata < 0 ? informational : informational[..metadata];
+    }
 }

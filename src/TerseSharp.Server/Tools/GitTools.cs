@@ -7,7 +7,7 @@ public sealed class GitTools(ToolContext context)
 {
     private const int MaxDiffLines = 400;
 
-    [McpServerTool(Name = "changed_files")]
+    [McpServerTool(Name = "changed_files", ReadOnly = true)]
     [Description("Replaces Bash git status and git diff --stat. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files, path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed.")]
     public Task<string> ChangedFiles(
         [Description("Commit, branch or range to compare against, e.g. main or HEAD~3. Empty compares the working tree against HEAD.")] string? baseRef = null,
@@ -26,7 +26,7 @@ public sealed class GitTools(ToolContext context)
                 semantic: false,
                 cancellationToken);
 
-    [McpServerTool(Name = "diff_symbols")]
+    [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
     [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
     public Task<string> DiffSymbols(
         [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
@@ -45,7 +45,7 @@ public sealed class GitTools(ToolContext context)
                 loaded => SymbolsAsync(loaded, baseRef, path, NavigationTools.Cap(maxResults, 200), cancellationToken),
                 cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "diff_text")]
+    [McpServerTool(Name = "diff_text", ReadOnly = true)]
     [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. It costs about one line of response per changed line, so bound it: path= scopes it to one file or pathspec and maxLines= caps it at 400 by default. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
     public Task<string> DiffText(
         [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,

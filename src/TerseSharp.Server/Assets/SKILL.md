@@ -26,6 +26,7 @@ tripwires — are the hard gate directly **below** the table.
 |---|---|---|
 | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
 | `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
+| `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id | answers `get_type_outline`'s member list plus a steer to one member, not the whole file's text; `verbose: true` opts back into the source |
 | `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
 | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` | all of them in one response; an id that does not resolve is reported `NOT_RESOLVED <id>`, never a failed call |
 | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
@@ -96,7 +97,7 @@ tripwires — are the hard gate directly **below** the table.
 | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
 | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
 | rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
-| `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks |
+| `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks; `path=` sweeps a `.slnx`/`.sln`/`.slnf`/project that is **not** loaded |
 | editing a `.csproj` by hand | `project_*` · `package_*` · `solution_*` | CPM-aware, containment-checked |
 
 ## 🚫 HARD GATE — take the tool from the table; the built-ins are the last resort
@@ -174,7 +175,9 @@ A silent drop is the breach, even when the reason would have been valid.
 ## The whole surface, by job
 
 **Workspace** — `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` ·
-`list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution.
+`list_projects`. Start with `workspace_status`; the server usually auto-discovers the solution, and
+its last line is `terse=<version>`, which is the one place the running binary names itself — read it
+before claiming what a tool does or does not do.
 `list_projects(filter: "Tests")` keeps only the projects whose name contains it, and the name it
 prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=`.
 `unload_workspace` is the one workspace tool addressed by the solution **path** rather than a name —
@@ -244,7 +247,9 @@ folded to one `FAILED <project>  messages=N` line per project under a `N load fa
 project(s)` header. `verbose=true` prints every message of both. So do not read a warning count as a
 broken workspace, and do not fall back to the built-ins over one.
 
-**Navigate** — `search_symbols` (`scope=src|test` keeps one half of the solution) · `get_symbol` · `get_file_outline` · `get_type_outline` ·
+**Navigate** — `search_symbols` (production declarations first; when the test half also matches, it
+is folded to one `N more in test projects - scope=test` line, and `scope=src|test` keeps one half
+outright) · `get_symbol` · `get_file_outline` · `get_type_outline` ·
 `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of`.
 A usage inside generated code is tagged `gen` rather than `src` — it is a real reference, but the file
 is regenerated, so never edit it.
@@ -313,12 +318,23 @@ whitespace formatter, which `dotnet format style` and `dotnet format analyzers` 
 `fix=analyzers` are exactly those two CI commands; `fix=all` and the default `fix=usings` are
 supersets and may name files CI accepts.
 
+**A missing path is answered, not just refused.** `get_file_outline` and `read_text` on a path named
+after a type the workspace declares elsewhere name the file that declares it, and `add_member path=`
+on a `.cs` file nobody has written yet names `write_text path=… force=true` — neither sends you to
+`find_files`, which cannot find a type that does not name its file.
+
 **Edit** — `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol`
 · `undo_last_change`. `add_member` and `replace_symbol` accept **several declarations in one call**,
 applied as a single compile-gated edit — so a set of members that reference each other needs no
 dependency ordering, and `replace_symbol` can split a member into overloads. On a member that is
 already expression-bodied, `replace_symbol_body` accepts a bare expression as well as `=> expr` and a
 statement block.
+
+**`usings=` lands the import in the same edit.** `replace_symbol_body`, `replace_symbol` and
+`add_member` take `usings: ["System.Collections.Immutable"]`, added to the file's using block —
+sorted System-first, one already present ignored — inside the **same** compile-gated write as the
+declaration. That is the answer to a `CS0246` rollback: pass the namespace instead of paying a
+rejected edit, an `edit_text force=true` on the file header and a `retryWith`.
 
 **`replace_symbol` also edits several files as one compile-gated edit.** Pass `symbolIds` and
 `declarations` — one declaration per symbol, paired positionally, at most 20, and more than one entry
@@ -335,8 +351,8 @@ silently dropping the inner one.
 `project_create` · `project_properties` · `project_set_property` · `project_add_reference` ·
 `project_remove_reference` · `package_list` · `package_add` · `package_remove`.
 **"Which projects does this solution contain?" for a solution that is _not_ loaded** is
-`solution_projects(path: "fixtures/FixtureSolution/FixtureSolution.slnx")` — it reads the `.slnx` or
-`.sln` directly and loads nothing, so writing a fixture-scoped test does not cost a
+`solution_projects(path: "fixtures/FixtureSolution/FixtureSolution.slnx")` — it reads the `.slnx`,
+`.sln` or `.slnf` directly and loads nothing, so writing a fixture-scoped test does not cost a
 `load_workspace` that makes every later un-hinted call ambiguous. `list_projects` is the loaded-
 workspace answer and carries the language and document counts a file cannot know.
 
@@ -378,9 +394,9 @@ inside exactly one declaration; anything else is `HEURISTIC` with the raw line r
 answered in **one** pass over the same file set, every record tagged `q1`..`qN` by the position of its
 query in the array. The count stays *matching lines, at most one per line*: a line matching several
 queries is **one** record carrying every matching tag, comma-separated in query order (`q1,q3`).
-**Keep the entries line-local.** An entry that can match across a line break — a literal containing
-a newline, or `[\s\S]` / `(?s).` in a regex — consumes the lines its match spanned, so the other
-entries' hits on those lines are not reported and the count is short by them.
+An entry that matches across a line break — a literal containing a newline, or `[\s\S]` / `(?s).` in
+a regex — is reported **once, at the line its text starts on**, and the scan resumes on the next
+line, so every other entry still sees the lines that match spanned.
 `query` and `queries` combine, `query` first; an 11th entry is refused naming the
 cap rather than truncated, and a blank entry is refused rather than matching everything.
 `find_files` takes `glob`, and each accepts `pattern`

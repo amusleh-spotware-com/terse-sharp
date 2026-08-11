@@ -8,15 +8,16 @@ public static class Doctor
     {
         var target = workspace ?? Discovered();
         var lines = new List<string>
-        {
-            SdkLine(),
-            Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
-            ClientLine(),
-            await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
-            await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
-            WatcherLine(),
-            ProcessLine(),
-        };
+    {
+        VersionLine(),
+        SdkLine(),
+        Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
+        ClientLine(),
+        await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
+        await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
+        WatcherLine(),
+        ProcessLine(),
+    };
 
         lines.AddRange(await InstalledLinesAsync(Probed(target), cancellationToken).ConfigureAwait(false));
         lines.AddRange(await WorkspaceLinesAsync(target, cancellationToken).ConfigureAwait(false));
@@ -288,4 +289,13 @@ public static class Doctor
 
     private const double PhaseFloorMs = 60_000;
     private const double LatencyFloorMs = 1000;
+
+    private static string VersionLine()
+    {
+        var version = UpdateSettings.Version();
+
+        return version.Length is 0
+            ? Check("version", "the running version could not be read", false, "reinstall the tool: dotnet tool update -g TerseSharp")
+            : Check("version", "terse " + version, true, string.Empty);
+    }
 }

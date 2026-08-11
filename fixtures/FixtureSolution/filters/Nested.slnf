@@ -1,0 +1,8 @@
+{
+  "solution": {
+    "path": "..\\FixtureSolution.slnx",
+    "projects": [
+      "src\\Fixture.Trading\\Fixture.Trading.csproj"
+    ]
+  }
+}

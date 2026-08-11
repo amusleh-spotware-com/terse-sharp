@@ -32,7 +32,7 @@ public sealed class WorkspaceTools(ToolContext context)
         return Render(context.Registry, result, verbose);
     });
 
-    [McpServerTool(Name = "list_workspaces")]
+    [McpServerTool(Name = "list_workspaces", ReadOnly = true)]
     [Description("List loaded workspaces with their git branch and worktree, so you can disambiguate several checkouts of one repo. The solution path is absolute here, because it is what unload_workspace takes.")]
     public Task<string> ListWorkspaces() =>
     ToolBoundary.RunAsync(async () =>
@@ -53,7 +53,7 @@ public sealed class WorkspaceTools(ToolContext context)
         return response.ToString();
     });
 
-    [McpServerTool(Name = "unload_workspace")]
+    [McpServerTool(Name = "unload_workspace", Destructive = true)]
     [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name - the absolute one list_workspaces prints, or the short one workspace_status and load_workspace print, which is resolved against every loaded root and refuses when two of them answer to it. Analyzer and source-generator assemblies are loaded from a shadow copy, so a project's own output is never mapped; any assembly that did end up mapped is still reported, because only restarting the server releases those.")]
     public Task<string> UnloadWorkspace(
     [Description("Solution or project path to unload.")] string? path = null,
@@ -104,7 +104,7 @@ public sealed class WorkspaceTools(ToolContext context)
             response.Line(assembly);
     }
 
-    [McpServerTool(Name = "workspace_status")]
+    [McpServerTool(Name = "workspace_status", ReadOnly = true)]
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when the server runs a tool profile - how many tools are advertised.")]
     public Task<string> WorkspaceStatus(
     [Description("Workspace or worktree name.")] string? workspace = null,
@@ -116,7 +116,7 @@ public sealed class WorkspaceTools(ToolContext context)
         loaded => RenderStatusAsync(loaded, verbose, context.Advertised, cancellationToken),
         cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "list_projects")]
+    [McpServerTool(Name = "list_projects", ReadOnly = true)]
     [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
     public Task<string> ListProjects(
     [Description("Workspace or worktree name.")] string? workspace = null,
@@ -147,6 +147,7 @@ public sealed class WorkspaceTools(ToolContext context)
             response.Note(workspace.Indexes.Describe());
 
         AppendLoadDiagnostics(response, workspace.Load, verbose);
+        response.Note(Version());
 
         return response.ToString();
     }
@@ -382,5 +383,12 @@ public sealed class WorkspaceTools(ToolContext context)
                 string.Create(CultureInfo.InvariantCulture, $"'{target}' names {matched.Count} loaded workspaces"),
                 "pass the absolute solution path; list_workspaces prints it in full for exactly this reason")),
         };
+    }
+
+    private static string Version()
+    {
+        var version = UpdateSettings.Version();
+
+        return version.Length is 0 ? "terse=unknown" : "terse=" + version;
     }
 }

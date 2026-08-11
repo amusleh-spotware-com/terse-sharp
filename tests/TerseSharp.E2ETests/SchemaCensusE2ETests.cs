@@ -68,4 +68,90 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
                 : [.. properties.EnumerateObject()
                 .Select(property => property.Name)
                 .Where(name => name.EndsWith("symbolId", StringComparison.Ordinal) || name.EndsWith("SymbolId", StringComparison.Ordinal))];
+
+    [Fact]
+    public async Task EveryAdvertisedTool_IsClassifiedAndCarriesTheAnnotationItsClassDeclares()
+    {
+        var surface = await Surface();
+        var advertised = surface.Select(tool => tool.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+        var classified = ToolCensus.ReadOnlyTools
+            .Concat(ToolCensus.DestructiveTools)
+            .Concat(ToolCensus.MutatingTools)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(advertised, classified);
+
+        var annotated = surface.Where(tool => tool.ProtocolTool.Annotations?.ReadOnlyHint is true).Select(tool => tool.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+        var destructive = surface.Where(tool => tool.ProtocolTool.Annotations?.DestructiveHint is true).Select(tool => tool.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+
+        Assert.Equal(ToolCensus.ReadOnlyTools.OrderBy(name => name, StringComparer.Ordinal).ToArray(), annotated);
+        Assert.Equal(ToolCensus.DestructiveTools.OrderBy(name => name, StringComparer.Ordinal).ToArray(), destructive);
+    }
+
+    [Fact]
+    public async Task NoMutatingTool_ClaimsToBeReadOnly()
+    {
+        var surface = await Surface();
+        var claimed = surface
+            .Where(tool => tool.ProtocolTool.Annotations?.ReadOnlyHint is true)
+            .Select(tool => tool.Name)
+            .Intersect(ToolCensus.MutatingTools.Concat(ToolCensus.DestructiveTools), StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(claimed.Length is 0, "mutating tools claiming readOnlyHint: " + string.Join(", ", claimed));
+        Assert.True(ToolCensus.ReadOnlyTools.Length >= 40, string.Create(CultureInfo.InvariantCulture, $"only {ToolCensus.ReadOnlyTools.Length} tools are classified read-only"));
+    }
+
+    [Fact]
+    public async Task EveryToolWithAPluralParameter_NamesItImperativelyInItsDescription()
+    {
+        var offenders = new List<string>();
+        var examined = 0;
+
+        foreach (var tool in await Surface())
+        {
+            foreach (var plural in Plurals(tool))
+            {
+                examined++;
+
+                if (!Names(tool.Description, plural))
+                    offenders.Add(tool.Name + "." + plural);
+            }
+        }
+
+        Assert.True(examined >= 5, string.Create(CultureInfo.InvariantCulture, $"the census found only {examined} plural parameters"));
+        Assert.True(offenders.Count is 0, "plural parameters not named imperatively: " + string.Join(", ", offenders));
+    }
+
+    private static bool Names(string? description, string plural) =>
+        description is { Length: > 0 } text
+        && text.Contains(plural, StringComparison.Ordinal)
+        && text.Contains("Replaces one call per", StringComparison.Ordinal);
+
+    private static string[] Plurals(McpClientTool tool)
+    {
+        if (!tool.JsonSchema.TryGetProperty("properties", out var properties))
+            return [];
+
+        var names = properties.EnumerateObject().Select(property => property.Name).ToArray();
+
+        return [.. names.Where(name => IsArray(properties, name) && Singular(name) is { } single && names.Contains(single, StringComparer.Ordinal))];
+    }
+
+    private static string? Singular(string plural) => plural switch
+    {
+        { Length: > 3 } when plural.EndsWith("ies", StringComparison.Ordinal) => plural[..^3] + "y",
+        { Length: > 1 } when plural.EndsWith('s') => plural[..^1],
+        _ => null,
+    };
+
+
+    private static bool IsArray(JsonElement properties, string name) =>
+    properties.TryGetProperty(name, out var property)
+    && property.TryGetProperty("type", out var type)
+    && (Declares(type) || type.ValueKind is JsonValueKind.Array && type.EnumerateArray().Any(Declares));
+
+    private static bool Declares(JsonElement type) =>
+        type.ValueKind is JsonValueKind.String && string.Equals(type.GetString(), "array", StringComparison.Ordinal);
 }

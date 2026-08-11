@@ -119,7 +119,7 @@ public static class TextSearchService
             if (hits.Count < request.MaxResults)
                 hits.Add(Format(relativePath, span, match, ref tracker, request, matcher));
 
-            index = EndOfLine(span, match.At + Math.Max(match.Length - 1, 0)) + 1;
+            index = EndOfLine(span, Resumed(match, request)) + 1;
         }
 
         return new FileHits(hits, total, 0);
@@ -661,4 +661,8 @@ public static class TextSearchService
 
     private static string Tagged(TextMatcher matcher, ReadOnlySpan<char> line, int first) =>
         Other(matcher, line, first, 0) < 0 ? Tag(first) : Combined(matcher, line, first);
+
+    private static int Resumed(TextMatch match, TextSearchRequest request) => request.SeveralPatterns
+        ? match.At
+        : match.At + Math.Max(match.Length - 1, 0);
 }

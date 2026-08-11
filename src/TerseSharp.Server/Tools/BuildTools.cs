@@ -31,20 +31,24 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         },
         cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "clean")]
-    [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
+    [McpServerTool(Name = "clean", Destructive = true)]
+    [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. path= cleans a solution or project that is NOT loaded - a fixture, a sibling repository - so reproducing a cold build needs no load and no shell. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
     public Task<string> Clean(
-        [Description("Project path; empty cleans every project under the workspace root.")] string? project = null,
-        [Description("Also delete obj, the intermediate output. Default true; false leaves obj as dotnet clean does.")] bool includeIntermediate = true,
-        [Description("List what would be deleted and delete nothing.")] bool dryRun = false,
-        [Description("List every directory, not just the counters.")] bool verbose = false,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default)
+    [Description("Project path; empty cleans every project under the workspace root.")] string? project = null,
+    [Description("Also delete obj, the intermediate output. Default true; false leaves obj as dotnet clean does.")] bool includeIntermediate = true,
+    [Description("List what would be deleted and delete nothing.")] bool dryRun = false,
+    [Description("List every directory, not just the counters.")] bool verbose = false,
+    [Description("Path to a .slnx, .sln, .slnf or project file that is not loaded. Its own directory is the root that is swept, so no workspace is loaded and nothing else is touched.")] string? path = null,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default)
     {
         var rejection = context.RejectWrite();
 
-        return rejection is not null
-            ? Task.FromResult(rejection)
+        if (rejection is not null)
+            return Task.FromResult(rejection);
+
+        return path is { Length: > 0 } unloaded
+            ? Task.FromResult(CleanUnloaded(unloaded, includeIntermediate, dryRun, verbose, cancellationToken))
             : context.WithTargetAsync(
                 workspace,
                 project,
@@ -392,4 +396,28 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     private static string Named(string root, ImmutableArray<string> projects) => projects.IsDefaultOrEmpty
         ? "nothing"
         : string.Join(", ", projects.Select(path => PositionFormat.Relative(root, path)));
+
+    private static string CleanUnloaded(string path, bool includeIntermediate, bool dryRun, bool verbose, CancellationToken cancellationToken)
+    {
+        var full = Path.GetFullPath(path);
+
+        if (!File.Exists(full))
+        {
+            return Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{path}' does not exist"),
+                "pass an existing .slnx, .sln, .slnf or project file, or drop path= to clean the loaded workspace").Render();
+        }
+
+        if (!SolutionFile.IsSolutionFile(full) && !SolutionFile.IsProjectFile(full))
+        {
+            return Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{path}' is not a solution or project file"),
+                "path= takes a .slnx, .sln, .slnf, .csproj, .fsproj or .vbproj that is not loaded").Render();
+        }
+
+        var target = new WorkspaceTarget(full, Path.GetDirectoryName(full)!);
+        var run = CleanService.Clean(target, null, includeIntermediate, dryRun, verbose, cancellationToken);
+
+        return run.IsOk ? run.Value!.Response : run.Error!.Render();
+    }
 }

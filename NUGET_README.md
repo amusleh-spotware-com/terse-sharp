@@ -124,6 +124,11 @@ success that costs nothing — every mutating tool answers in one line per chang
 | **Git** — replaces `git status`/`git diff` | `changed_files` · `diff_symbols` · `diff_text` |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
+Every read tool declares the MCP `readOnlyHint` annotation and every deleting tool declares
+`destructiveHint`, so a client that gates parallel dispatch on those hints — Claude Code does — can
+fan the reads out instead of running them one at a time. The build and test tools are deliberately
+left off that list: they run a build, and a build dispatched beside an edit is a race, not a saving.
+
 ## Markup and localization the compiler can't check
 
 TerseSharp holds the markup tree **and** the Roslyn compilation in one process, so it answers what no

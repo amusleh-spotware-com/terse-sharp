@@ -94,6 +94,12 @@ public static class SourceService
             return;
         }
 
+        if (await OutlinedAsync(workspace, resolved.Value!, format, cancellationToken).ConfigureAwait(false) is { } outlined)
+        {
+            response.Note(outlined);
+            return;
+        }
+
         var references = resolved.Value!.DeclaringSyntaxReferences;
 
         if (references.Length is 0)
@@ -104,5 +110,36 @@ public static class SourceService
 
         foreach (var reference in references)
             await AppendAsync(workspace.Root, response, reference, format, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<string?> OutlinedAsync(
+        LoadedWorkspace workspace,
+        ISymbol symbol,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        if (format.Verbose || symbol is not INamedTypeSymbol { TypeKind: not TypeKind.Delegate })
+            return null;
+
+        var outline = await OutlineService.TypeAsync(workspace, symbol, true, "short", cancellationToken).ConfigureAwait(false);
+
+        return outline.IsOk
+            ? outline.Value! + string.Create(
+                CultureInfo.InvariantCulture,
+                $"steer: get_symbol_source symbolId={symbol.Name}.Member for one member's source, verbose=true for the whole type")
+            : null;
+    }
+
+    public static async Task<Result<string>> OfSymbolAsync(
+        LoadedWorkspace workspace,
+        ISymbol symbol,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        var outlined = await OutlinedAsync(workspace, symbol, format, cancellationToken).ConfigureAwait(false);
+
+        return outlined is null
+            ? await OfSymbolAsync(workspace.Root, symbol, format, cancellationToken).ConfigureAwait(false)
+            : Result.Ok(outlined);
     }
 }

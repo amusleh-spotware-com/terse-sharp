@@ -8,6 +8,79 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-08-11
+
+> **Response formats changed.** `get_symbol_source` on a **type** id now answers `get_type_outline`'s
+> payload plus a steer instead of the type's source (`verbose=true` restores it), `search_symbols`
+> returns the production half plus one `N more in test projects - scope=test` line where it used to
+> interleave both halves, and `workspace_status` gains a trailing `terse=<version>` line. An agent
+> that parsed any of those three sees a different shape.
+
+### Added
+
+- **Every non-mutating tool declares `readOnlyHint`, and every deleting tool declares
+  `destructiveHint`.** All 87 `[McpServerTool]` attributes carried no MCP annotation, and Claude Code
+  gates parallel dispatch of MCP tools on `readOnlyHint`: a tool that omits it defaults to `false` and
+  is dispatched serially. 46 read tools now carry `ReadOnly = true` and 9 deleting tools carry
+  `Destructive = true`. `build`, `run_tests`, `rerun_failed`, `list_tests` and `gate` are deliberately
+  **not** read-only — they run a build, and a build dispatched concurrently with an edit is a race,
+  not a saving; `analyze` is not read-only either, because it records a per-scope diagnostic baseline
+  that `sinceLast=true` reads back, so two parallel calls of the same scope would race it.
+  Census-gated in both directions by
+  `SchemaCensusE2ETests.EveryAdvertisedTool_IsClassifiedAndCarriesTheAnnotationItsClassDeclares`,
+  which discovers every tool from `tools/list` and fails until it is classified read-only, destructive
+  or mutating in `ToolCensus`. (I191)
+- **`replace_symbol_body`, `replace_symbol` and `add_member` take `usings=`** — namespaces added to
+  the file's using block, sorted System-first, inside the **same** compile-gated edit as the
+  declaration. The commonest rollback class in this repo's own logs is a new body naming a type the
+  file does not import: it used to cost a rejected edit, an `edit_text force=true` on the header and a
+  `retryWith`. It is now one call. (I181)
+- **`clean` takes `path=`** — a `.slnx`, `.sln`, `.slnf` or project file that is **not** loaded, swept
+  from its own directory. Reproducing a cold build over a fixture no longer needs a `load_workspace`
+  that makes every later un-hinted call ambiguous, and no longer needs the `rm -rf` this repo's own
+  sessions kept falling back to. (I182)
+- **`workspace_status` ends with `terse=<version>`, and `doctor` opens with a `version:` line.** The
+  running binary is the installed tool, never the working tree, and until now nothing in the tool
+  surface said which version answered — three documented sessions were spent arguing with a binary
+  three releases old. (I183)
+
+### Changed
+
+- **`solution_projects` reads a `.slnf` solution filter.** The filter's `solution.projects[]` is
+  parsed with `JsonDocument`; a `.slnf` whose JSON is malformed is refused by name with a remedy
+  rather than answering `0 projects`. Each project is resolved against the directory of the filter's
+  own `solution.path` and normalized to `/`, because a `.slnf` stores Windows-separated text and
+  `Path.GetDirectoryName` is host-shaped: without that, the ubuntu and macOS legs answered a path
+  that does not exist. `.slnf` is a solution file to `IsSolutionFile` again, so the capability the
+  `path=` row claimed is real on all four advertised surfaces. (I190)
+- **`search_symbols` answers the production half first and folds the test half to one line.** A common
+  name used to return 21 records of which 20 were test declarations. The default now ranks `src` above
+  `test`, keeps the production declarations and appends `N more in test projects - scope=test`; when
+  only test projects match, they are still returned in full, and `scope=` is unchanged. Nothing is
+  hidden silently — the count is always named. (I185)
+- **`get_symbol_source` on a *type* id answers `get_type_outline`'s payload plus a steer**, instead of
+  the whole class's source: `symbolIds=["ProjectTools"]` returned 176 lines where 15 were wanted.
+  `verbose=true` opts back into the source, and a member id is unchanged. (I180)
+- **A missing path is answered, not just refused.** `get_file_outline` and `read_text` on a path named
+  after a type the workspace declares elsewhere now name the declaring file
+  (`'Errors' is declared in src/TerseSharp.Core/Result.cs`), and `add_member path=` on a `.cs` file
+  that does not exist yet names `write_text path=… force=true`. Neither sends the caller to
+  `find_files`, which cannot find a type that does not name its file. (I184, I187)
+- **Every plural parameter names itself imperatively in its tool description.** The position and mood
+  of the mention measurably predicts adoption — `symbolIds`, named as an imperative in sentence two,
+  reached 48 % of `get_symbol_source` calls, while `queries`, named as a statement of fact, sat at
+  2.6 %. `get_symbol_source`, `search_text`, `search_regex` and `replace_symbol` now all read
+  "Pass X to … . Replaces one call per …", census-gated by
+  `SchemaCensusE2ETests.EveryToolWithAPluralParameter_NamesItImperativelyInItsDescription`. (I197)
+
+### Fixed
+
+- **`search_text`/`search_regex` `queries=[...]` no longer swallow the lines a multi-line entry
+  spans.** The scan advanced past the end of the *match*, so the other entries' hits on the lines it
+  covered were never emitted and the count line was short by them. It now resumes at the end of the
+  line the match **starts** on, and a multi-line entry is reported once, at that line. The
+  "keep the entries line-local" caveat is removed from all six surfaces. (I189)
+
 ## [0.30.0] - 2026-08-10
 
 ### Added
@@ -2560,7 +2633,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.31.0
 [0.30.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.30.0
 [0.29.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.29.0
 [0.28.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.28.0

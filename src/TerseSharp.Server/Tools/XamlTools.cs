@@ -5,7 +5,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class XamlTools(ToolContext context)
 {
-    [McpServerTool(Name = "xaml_outline")]
+    [McpServerTool(Name = "xaml_outline", ReadOnly = true)]
     [Description("Element tree of a XAML file with x:Name, x:Key and line numbers, without the attributes. Use instead of Read on a .xaml file.")]
     public Task<string> XamlOutline(
         [Description("Path to the .xaml, .axaml or .paml file.")] string path,
@@ -15,28 +15,28 @@ public sealed class XamlTools(ToolContext context)
         context.WithWorkspace(workspace, path, loaded =>
             NavigationTools.Unwrap(XamlService.Outline(loaded, path, depth <= 0 ? 4 : depth, filter ?? "all")));
 
-    [McpServerTool(Name = "xaml_names")]
+    [McpServerTool(Name = "xaml_names", ReadOnly = true)]
     [Description("Every x:Name and x:Uid in a XAML file with its element type and location.")]
     public Task<string> XamlNames(
         [Description("Path to the XAML file.")] string path,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(XamlService.Names(loaded, path)));
 
-    [McpServerTool(Name = "xaml_resources")]
+    [McpServerTool(Name = "xaml_resources", ReadOnly = true)]
     [Description("Every x:Key resource declared in a XAML file with its type and location.")]
     public Task<string> XamlResources(
         [Description("Path to the XAML file.")] string path,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(XamlService.Resources(loaded, path)));
 
-    [McpServerTool(Name = "xaml_resolve")]
+    [McpServerTool(Name = "xaml_resolve", ReadOnly = true)]
     [Description("Where a StaticResource, DynamicResource or ThemeResource key is declared across every XAML file in the workspace, with each declaration's scope. Use instead of reading App.xaml and every merged dictionary.")]
     public Task<string> XamlResolve(
         [Description("The x:Key to resolve.")] string key,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         context.WithWorkspace(workspace, null, loaded => NavigationTools.Unwrap(XamlService.Resolve(loaded, key)));
 
-    [McpServerTool(Name = "xaml_bindings")]
+    [McpServerTool(Name = "xaml_bindings", ReadOnly = true)]
     [Description("Every binding expression in a XAML file - Binding, CompiledBinding and x:Bind - with the element and property it sits on. With validate=true each path is checked against the x:DataType or d:DataContext type resolved through Roslyn.")]
     public Task<string> XamlBindings(
         [Description("Path to the XAML file.")] string path,
@@ -53,7 +53,7 @@ public sealed class XamlTools(ToolContext context)
                 loaded => NavigationTools.Unwrap(XamlService.Bindings(loaded, path)),
                 cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "xaml_validate")]
+    [McpServerTool(Name = "xaml_validate", ReadOnly = true)]
     [Description("Check XAML for well-formedness, duplicate x:Key and x:Name, and resource references that resolve to no declaration anywhere in the workspace. Pass scope=solution to check every XAML file.")]
     public Task<string> XamlValidate(
         [Description("Path to the XAML file. Ignored when scope is solution.")] string? path = null,
@@ -75,7 +75,7 @@ public sealed class XamlTools(ToolContext context)
                 loaded => NavigationTools.Unwrap(XamlService.Validate(loaded, path ?? string.Empty)),
                 cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "xaml_codebehind")]
+    [McpServerTool(Name = "xaml_codebehind", ReadOnly = true)]
     [Description("The x:Class a XAML file binds to, and every event handler it names, with the element and event each sits on. Use instead of reading the .xaml.cs to find out what the markup wires up.")]
     public Task<string> XamlCodeBehind(
         [Description("Path to the XAML file.")] string path,
@@ -112,7 +112,7 @@ public sealed class XamlTools(ToolContext context)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
                 await XamlEditService.AddElement(loaded, path, target, markup, position ?? "last", dryRun, verbose).ConfigureAwait(false)));
 
-    [McpServerTool(Name = "xaml_remove_element")]
+    [McpServerTool(Name = "xaml_remove_element", Destructive = true)]
     [Description("Remove one XAML element and its children, addressed by its element path from xaml_outline, #Name or key=Key. Refuses an edit that would produce malformed XAML.")]
     public Task<string> XamlRemoveElement(
         [Description("Path to the XAML file.")] string path,
@@ -125,7 +125,7 @@ public sealed class XamlTools(ToolContext context)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
                 await XamlEditService.RemoveElement(loaded, path, target, dryRun, verbose).ConfigureAwait(false)));
 
-    [McpServerTool(Name = "xaml_styles")]
+    [McpServerTool(Name = "xaml_styles", ReadOnly = true)]
     [Description("Every Style, ControlTemplate and DataTemplate that targets an element type, keyed and implicit, with its BasedOn chain resolved. Answers \"why does this control look like that\" without reading Generic.xaml and every theme dictionary.")]
     public Task<string> XamlStyles(
         [Description("Element type, e.g. Button.")] string typeName,
@@ -134,7 +134,7 @@ public sealed class XamlTools(ToolContext context)
         context.WithWorkspace(workspace, null, loaded =>
             NavigationTools.Unwrap(XamlStyleGraph.Render(loaded.Indexes.Xaml(), typeName, NavigationTools.Cap(maxResults, 100))));
 
-    [McpServerTool(Name = "xaml_localization")]
+    [McpServerTool(Name = "xaml_localization", ReadOnly = true)]
     [Description("Every x:Uid in the workspace joined to the .resx/.resw entries that name it. A uid with no entry is reported UNRESOLVED rather than omitted, so an untranslated element is visible.")]
     public Task<string> XamlLocalization(
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -142,7 +142,7 @@ public sealed class XamlTools(ToolContext context)
         context.WithWorkspace(workspace, null, loaded =>
             NavigationTools.Unwrap(TerseSharp.Core.XamlLocalization.Render(loaded, NavigationTools.Cap(maxResults, 200))));
 
-    [McpServerTool(Name = "xaml_find")]
+    [McpServerTool(Name = "xaml_find", ReadOnly = true)]
     [Description("Find XAML elements across the workspace by element type, x:Name, resource key, x:Uid or binding text. Use instead of Grep over .xaml files.")]
     public Task<string> XamlFind(
         [Description("Value to look for.")] string query,

@@ -177,9 +177,12 @@ public static class SymbolEditService
     CancellationToken cancellationToken)
     {
         var planned = new PlannedEdit(target, replacements);
-        if (Identical(planned))
+
+        if (Identical(planned) && options.Usings.IsDefaultOrEmpty)
             return Result.Ok(Unchanged(options.Tool));
-        var swapped = await SwappedAsync(workspace.Solution, [planned], cancellationToken).ConfigureAwait(false);
+
+        var swapped = await SwappedAsync(workspace.Solution, [planned], options.Usings, cancellationToken).ConfigureAwait(false);
+
         return swapped.IsOk
             ? await EditGate.ApplyAsync(workspace, swapped.Value!, [target.Document.Id], options, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(swapped.Error!);
@@ -316,10 +319,10 @@ public static class SymbolEditService
     };
 
     private static SyntaxNode[] Rewritten(MemberDeclarationSyntax[] members, SyntaxNode original) =>
-    [
-        members[0].WithTriviaFrom(original),
-        .. members.Skip(1).Select(member => (SyntaxNode)Separated(member, NeedsBlankLine(member))),
-    ];
+[
+    members[0].WithTriviaFrom(original),
+    .. members.Skip(1).Select(member => (SyntaxNode)Separated(member, NeedsBlankLine(member))),
+];
 
     private static SyntaxNode? AsBlock(SyntaxNode node, string text) =>
             SyntaxFactory.ParseStatement(text) is BlockSyntax parsed && !parsed.ContainsDiagnostics
@@ -339,7 +342,7 @@ public static class SymbolEditService
         var document = DocumentLookup.Find(workspace, path);
 
         if (document is null)
-            return Result.Fail<string>(Errors.DocumentNotFound(path));
+            return Result.Fail<string>(MissingDocument.Write(workspace, path));
 
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
 
@@ -359,14 +362,15 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> RootedAsync(
-        LoadedWorkspace workspace,
-        Document document,
-        CompilationUnitSyntax unit,
-        EditOptions options,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    Document document,
+    CompilationUnitSyntax unit,
+    EditOptions options,
+    CancellationToken cancellationToken)
     {
         var annotated = unit.WithAdditionalAnnotations(Formatter.Annotation);
-        var formatted = await IndentedAsync(document.WithSyntaxRoot(annotated), cancellationToken).ConfigureAwait(false);
+        var withUsings = UsingDirectives.Ensured(annotated, options.Usings);
+        var formatted = await IndentedAsync(document.WithSyntaxRoot(withUsings), cancellationToken).ConfigureAwait(false);
         var updated = workspace.Solution.WithDocumentSyntaxRoot(document.Id, formatted);
 
         return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
@@ -446,18 +450,22 @@ public static class SymbolEditService
     private static SyntaxNode? Applied(SyntaxNode root, IReadOnlyList<PlannedEdit> planned)
     {
         var current = root.TrackNodes(planned.Select(edit => edit.Target.Node));
+
         foreach (var edit in planned)
         {
             if (current.GetCurrentNode(edit.Target.Node) is not { } node)
                 return null;
+
             current = current.ReplaceNode(node, edit.Nodes.Select(replacement => replacement.WithAdditionalAnnotations(Formatter.Annotation)));
         }
+
         return current;
     }
 
     private static async Task<Result<Solution>> SwappedAsync(
     Solution solution,
     IReadOnlyList<PlannedEdit> planned,
+    System.Collections.Immutable.ImmutableArray<string> usings,
     CancellationToken cancellationToken)
     {
         var document = planned[0].Target.Document;
@@ -473,7 +481,8 @@ public static class SymbolEditService
         if (Applied(root, planned) is not { } rewritten)
             return Result.Fail<Solution>(Overlapping(document.Name));
 
-        var formatted = await IndentedAsync(document.WithSyntaxRoot(rewritten), cancellationToken).ConfigureAwait(false);
+        var updated = UsingDirectives.Ensured(rewritten, usings);
+        var formatted = await IndentedAsync(document.WithSyntaxRoot(updated), cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(solution.WithDocumentSyntaxRoot(document.Id, formatted));
     }
@@ -511,21 +520,26 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> BatchedAsync(
-        LoadedWorkspace workspace,
-        PlannedEdit[] planned,
-        EditOptions options,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    PlannedEdit[] planned,
+    EditOptions options,
+    CancellationToken cancellationToken)
     {
         var solution = workspace.Solution;
         var changed = new List<DocumentId>(planned.Length);
-        foreach (var group in planned.Where(edit => !Identical(edit)).GroupBy(edit => edit.Target.Document.Id))
+        var imports = !options.Usings.IsDefaultOrEmpty;
+
+        foreach (var group in planned.Where(edit => imports || !Identical(edit)).GroupBy(edit => edit.Target.Document.Id))
         {
-            var swapped = await SwappedAsync(solution, [.. group], cancellationToken).ConfigureAwait(false);
+            var swapped = await SwappedAsync(solution, [.. group], options.Usings, cancellationToken).ConfigureAwait(false);
+
             if (!swapped.IsOk)
                 return Result.Fail<string>(swapped.Error!);
+
             solution = swapped.Value!;
             changed.Add(group.Key);
         }
+
         return changed.Count is 0
             ? Result.Ok(Unchanged(options.Tool))
             : await EditGate.ApplyAsync(workspace, solution, changed, options, cancellationToken).ConfigureAwait(false);

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Xml.Linq;
 
 namespace TerseSharp.Core;
@@ -55,8 +56,13 @@ public static class SolutionFile
         Normalize(element.Attribute("Path")?.Value ?? string.Empty)
             .Equals(Normalize(relative), StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsProjectFile(string path) =>
-        Path.GetExtension(path) is ".csproj" or ".fsproj" or ".vbproj";
+    public static bool IsProjectFile(ReadOnlySpan<char> path) => Path.GetExtension(path) switch
+    {
+        var extension when extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase) => true,
+        var extension when extension.Equals(".fsproj", StringComparison.OrdinalIgnoreCase) => true,
+        var extension when extension.Equals(".vbproj", StringComparison.OrdinalIgnoreCase) => true,
+        _ => false,
+    };
 
     private static async Task<Result<string>> Write(
         string solutionPath,
@@ -123,6 +129,7 @@ public static class SolutionFile
     {
         var extension when extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase) => true,
         var extension when extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) => true,
+        var extension when extension.Equals(".slnf", StringComparison.OrdinalIgnoreCase) => true,
         _ => false,
     };
 
@@ -132,17 +139,22 @@ public static class SolutionFile
         {
             return Result.Fail<string>(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' is not a solution file this tool can read"),
-                "pass a path ending in .slnx or .sln; a .slnf solution filter is JSON and is not parsed yet, so it would answer 0 projects"));
+                "pass a path ending in .slnx, .sln or .slnf"));
         }
 
         if (!File.Exists(solutionPath))
         {
             return Result.Fail<string>(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' does not exist"),
-                "pass an existing .slnx or .sln; a relative path is resolved against the server's working directory, so prefer an absolute one"));
+                "pass an existing .slnx, .sln or .slnf; a relative path is resolved against the server's working directory, so prefer an absolute one"));
         }
 
-        var projects = await ProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+        var read = await ReadProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+
+        if (!read.IsOk)
+            return Result.Fail<string>(read.Error!);
+
+        var projects = read.Value!;
         var response = new ResponseBuilder("solution_projects", solutionPath);
 
         response.Summary(projects.Count, projects.Count, "projects");
@@ -156,10 +168,12 @@ public static class SolutionFile
         return Result.Ok(response.ToString());
     }
 
-    public static async Task<IReadOnlyList<string>> ProjectsAsync(string solutionPath, CancellationToken cancellationToken) =>
-        IsXml(solutionPath)
-            ? await XmlProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false)
-            : await ClassicProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false);
+    public static async Task<IReadOnlyList<string>> ProjectsAsync(string solutionPath, CancellationToken cancellationToken) => (IsXml(solutionPath), IsFilter(solutionPath)) switch
+    {
+        (_, true) => await FilterProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false),
+        (true, _) => await XmlProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false),
+        _ => await ClassicProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false),
+    };
 
     private static async Task<XDocument> LoadAsync(string solutionPath, CancellationToken cancellationToken)
     {
@@ -196,4 +210,70 @@ public static class SolutionFile
         .Select(ClassicPath)
         .OfType<string>()];
     }
+
+    public static bool IsFilter(ReadOnlySpan<char> path) =>
+        Path.GetExtension(path).Equals(".slnf", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<string[]> FilterProjectsAsync(string solutionPath, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            solutionPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            StreamBuffer,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        using var document = await JsonDocument.ParseAsync(stream, default, cancellationToken).ConfigureAwait(false);
+
+        return Filtered(document.RootElement);
+    }
+
+    private static string[] Filtered(JsonElement root)
+    {
+        if (root.ValueKind is not JsonValueKind.Object || !root.TryGetProperty("solution", out var solution) || solution.ValueKind is not JsonValueKind.Object)
+            return [];
+
+        if (!solution.TryGetProperty("projects", out var projects) || projects.ValueKind is not JsonValueKind.Array)
+            return [];
+
+        var owner = solution.TryGetProperty("path", out var named) ? Owner(named.GetString()) : string.Empty;
+
+        return [.. projects
+        .EnumerateArray()
+        .Select(entry => entry.GetString())
+        .OfType<string>()
+        .Select(project => Joined(owner, project))];
+    }
+
+    private const int StreamBuffer = 4096;
+
+    private static async Task<Result<IReadOnlyList<string>>> ReadProjectsAsync(string solutionPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Result.Ok(await ProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false));
+        }
+        catch (JsonException malformed)
+        {
+            return Result.Fail<IReadOnlyList<string>>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{solutionPath}' is not the JSON a solution filter holds: {malformed.Message}"),
+                "a .slnf is written by dotnet sln; check the file, or pass the .slnx or .sln it filters"));
+        }
+    }
+
+    private static string Owner(string? solution)
+    {
+        var text = solution.AsSpan();
+        var cut = text.LastIndexOfAny('/', '\\');
+
+        return cut < 0 ? string.Empty : Slashed(text[..cut]);
+    }
+
+    private static string Joined(string owner, string project) =>
+        owner.Length is 0 ? Slashed(project.AsSpan()) : owner + "/" + Slashed(project.AsSpan());
+
+
+    private static string Slashed(ReadOnlySpan<char> path) =>
+        path.Contains('\\') ? path.ToString().Replace('\\', '/') : path.ToString();
 }

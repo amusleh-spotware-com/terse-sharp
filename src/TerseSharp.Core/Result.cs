@@ -114,4 +114,9 @@ public static class Errors
         TerseErrorCode.Internal,
         string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),
         "this is a server defect, not a bad call - the arguments were accepted and the failure happened afterwards; report it at https://github.com/amusleh-spotware-com/terse-sharp/issues, and retry only if the message names a transient cause such as a locked file");
+
+    public static TerseError DocumentNotFound(string path, string remedy) => new(
+        TerseErrorCode.DocumentNotFound,
+        string.Create(CultureInfo.InvariantCulture, $"'{path}' is not a document in the loaded workspace"),
+        remedy);
 }

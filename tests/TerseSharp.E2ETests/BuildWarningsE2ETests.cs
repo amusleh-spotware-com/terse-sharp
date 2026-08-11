@@ -163,7 +163,8 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
         var tests = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator", ["scope"] = "test" }, TestContext.Current.CancellationToken);
         var wrong = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator", ["scope"] = "production" }, TestContext.Current.CancellationToken);
 
-        Assert.Contains("CalculatorTests.cs", both, StringComparison.Ordinal);
+        Assert.Contains("more in test projects - scope=test", both, StringComparison.Ordinal);
+        Assert.DoesNotContain("CalculatorTests.cs", both, StringComparison.Ordinal);
         Assert.Contains(production, both, StringComparison.Ordinal);
         Assert.Contains(production, source, StringComparison.Ordinal);
         Assert.DoesNotContain("CalculatorTests.cs", source, StringComparison.Ordinal);

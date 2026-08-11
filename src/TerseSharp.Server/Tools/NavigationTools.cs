@@ -6,7 +6,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class NavigationTools(ToolContext context)
 {
-    [McpServerTool(Name = "search_symbols")]
+    [McpServerTool(Name = "search_symbols", ReadOnly = true)]
     [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. Use instead of Grep for anything that is a type or member.")]
     public Task<string> SearchSymbols(
         [Description("Name or CamelHump pattern.")] string query,
@@ -29,7 +29,7 @@ public sealed class NavigationTools(ToolContext context)
                 "pass scope=src, scope=test, or leave it empty to search both").Render());
     }
 
-    [McpServerTool(Name = "get_file_outline")]
+    [McpServerTool(Name = "get_file_outline", ReadOnly = true)]
     [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. parameterNames=false prints parameter types without their names, which is about an eighth of the response and still tells every overload apart.")]
     public Task<string> GetFileOutline(
     [Description("Path to the .cs file.")] string path,
@@ -43,7 +43,7 @@ public sealed class NavigationTools(ToolContext context)
         Unwrap(await OutlineService.FileAsync(loaded, path, signatures, ids ?? "short", usings, cancellationToken, parameterNames).ConfigureAwait(false)),
         cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "get_type_outline")]
+    [McpServerTool(Name = "get_type_outline", ReadOnly = true)]
     [Description("Every member of one type with signatures and line ranges, without the bodies. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetTypeOutline(
 [Description("Symbol id of the type.")] string? symbolId = null,
@@ -59,7 +59,7 @@ context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) 
     cancellationToken,
     path);
 
-    [McpServerTool(Name = "get_symbol")]
+    [McpServerTool(Name = "get_symbol", ReadOnly = true)]
     [Description("Signature, kind, accessibility, location and XML doc of one symbol. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetSymbol(
     [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
@@ -71,8 +71,8 @@ context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) 
     context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
         Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken, path);
 
-    [McpServerTool(Name = "get_symbol_source")]
-    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. Pass symbolIds to get several members in one response, each id that does not resolve reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
+    [McpServerTool(Name = "get_symbol_source", ReadOnly = true)]
+    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
     public Task<string> GetSymbolSource(
 [Description("Symbol id of the member.")] string? symbolId = null,
 [Description("Several symbol ids returned in one response. Replaces one call per member.")] string[]? symbolIds = null,
@@ -88,7 +88,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
     {
         [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
         [var only] => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
-            Unwrap(await SourceService.OfSymbolAsync(loaded.Root, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken, path),
+            Unwrap(await SourceService.OfSymbolAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken, path),
         _ => context.WithWorkspaceAsync(
             workspace,
             path,
@@ -104,7 +104,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         .. (many ?? []).Where(id => id is { Length: > 0 }),
     ];
 
-    [McpServerTool(Name = "find_usages")]
+    [McpServerTool(Name = "find_usages", ReadOnly = true)]
     [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded.")]
     public Task<string> FindUsages(
         [Description("Symbol id to find references for.")] string? symbolId = null,
@@ -116,7 +116,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
             ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
 
-    [McpServerTool(Name = "find_registrations")]
+    [McpServerTool(Name = "find_registrations", ReadOnly = true)]
     [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered.")]
     public Task<string> FindRegistrations(
         [Description("Type name to look for, e.g. IOrderRepository.")] string query,
@@ -127,7 +127,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
             RegistrationService.RegistrationsAsync(loaded, query, Cap(maxResults, 100), cancellationToken),
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "list_endpoints")]
+    [McpServerTool(Name = "list_endpoints", ReadOnly = true)]
     [Description("Every ASP.NET Core endpoint registration in the solution - MapGet, MapPost, MapControllers, MapHub and friends - with the member each sits in. Use instead of grepping Program.cs and every extension method it calls.")]
     public Task<string> ListEndpoints(
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -137,7 +137,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
             RegistrationService.EndpointsAsync(loaded, Cap(maxResults, 200), cancellationToken),
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "explore_symbol")]
+    [McpServerTool(Name = "explore_symbol", ReadOnly = true)]
     [Description("One call to orient on a symbol: signature, XML doc, location, how many usages it has in src and in tests, how many implementations, how many XAML sites, and the files it is used in. Replaces get_symbol + find_usages + find_implementations when you are learning what something is.")]
     public Task<string> ExploreSymbol(
         [Description("Symbol id or name.")] string? symbolId = null,
@@ -147,7 +147,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
             ExploreService.ExploreAsync(loaded, resolved, cancellationToken), cancellationToken);
 
-    [McpServerTool(Name = "impact_of")]
+    [McpServerTool(Name = "impact_of", ReadOnly = true)]
     [Description("The blast radius of changing a symbol: every file that references it with a src/test marker, every XAML site, and every project that would recompile. Use before a rename or a signature change.")]
     public Task<string> ImpactOf(
         [Description("Symbol id or name.")] string? symbolId = null,
@@ -158,7 +158,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
             ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), cancellationToken), cancellationToken);
 
-    [McpServerTool(Name = "find_implementations")]
+    [McpServerTool(Name = "find_implementations", ReadOnly = true)]
     [Description("Implementations of an interface or abstract member, and derived types of a base type.")]
     public Task<string> FindImplementations(
         [Description("Symbol id of the interface, abstract member or base type.")] string? symbolId = null,
@@ -169,7 +169,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
             ReferenceService.FindImplementationsAsync(loaded, resolved, Cap(maxResults, 100), cancellationToken), cancellationToken);
 
-    [McpServerTool(Name = "get_diagnostics")]
+    [McpServerTool(Name = "get_diagnostics", ReadOnly = true)]
     [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those.")]
     public Task<string> GetDiagnostics(
         [Description("File to scope to.")] string? path = null,
@@ -189,7 +189,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         int maxResults,
         CancellationToken cancellationToken)
     {
-        var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken).ConfigureAwait(false);
+        var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken, foldTests: true).ConfigureAwait(false);
         var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
         var declared = scope is "test" ? 0 : components.Count;
         var budget = ResultCap.Shown(declared + found.Total, maxResults);
@@ -201,6 +201,9 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
 
         if (!found.TotalIsExact)
             response.Note("WARNING total counts duplicate declarations across projects; narrow query= for an exact count");
+
+        if (found.Withheld > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{found.Withheld} more in test projects - scope=test"));
 
         foreach (var component in components.Take(shownComponents))
             response.Line(RazorUsageService.Describe(component));

@@ -5,7 +5,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class ProjectTools(ToolContext context)
 {
-    [McpServerTool(Name = "solution_projects")]
+    [McpServerTool(Name = "solution_projects", ReadOnly = true)]
     [Description("List the project paths recorded in the solution file itself (.slnx or .sln), as opposed to what is currently loaded. path= reads a solution that is NOT loaded - a fixture, a sibling repository - so 'which projects does this solution contain' costs one call instead of a load_workspace that then makes every un-hinted call ambiguous; a relative path= is resolved against the server's working directory, not a workspace, so the answer names the file it actually read. A .slnf solution filter is JSON and is not parsed yet: it is refused, never answered as 0 projects.")]
     public Task<string> SolutionProjects(
     [Description("Workspace or worktree name.")] string? workspace = null,
@@ -35,7 +35,7 @@ public sealed class ProjectTools(ToolContext context)
     CancellationToken cancellationToken = default) =>
     GuardedSolution(workspace, project, dryRun, loaded => SolutionFile.AddProject(loaded.SolutionPath, project, dryRun, verbose, cancellationToken));
 
-    [McpServerTool(Name = "solution_remove_project")]
+    [McpServerTool(Name = "solution_remove_project", Destructive = true)]
     [Description("Remove a project from the .slnx solution without deleting it from disk. A successful edit answers in one line; pass verbose=true for the diff.")]
     public Task<string> SolutionRemoveProject(
     [Description("Path to the .csproj to remove.")] string project,
@@ -57,7 +57,7 @@ public sealed class ProjectTools(ToolContext context)
         Guarded(workspace, project, dryRun, loaded =>
             ProjectFile.Create(Resolve(loaded, project), kind ?? "classlib", targetFramework, dryRun, verbose));
 
-    [McpServerTool(Name = "project_properties")]
+    [McpServerTool(Name = "project_properties", ReadOnly = true)]
     [Description("Read the MSBuild properties declared in a project file.")]
     public Task<string> ProjectProperties(
         [Description("Path to the .csproj.")] string project,
@@ -86,7 +86,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         Guarded(workspace, project, dryRun, loaded => ProjectFile.AddReference(Resolve(loaded, project), Resolve(loaded, target), dryRun, verbose));
 
-    [McpServerTool(Name = "project_remove_reference")]
+    [McpServerTool(Name = "project_remove_reference", Destructive = true)]
     [Description("Remove a ProjectReference from a project.")]
     public Task<string> ProjectRemoveReference(
         [Description("Path to the .csproj to modify.")] string project,
@@ -96,7 +96,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         Guarded(workspace, project, dryRun, loaded => ProjectFile.RemoveReference(Resolve(loaded, project), Resolve(loaded, target), dryRun, verbose));
 
-    [McpServerTool(Name = "package_list")]
+    [McpServerTool(Name = "package_list", ReadOnly = true)]
     [Description("List the package and project references declared in a project file.")]
     public Task<string> PackageList(
         [Description("Path to the .csproj.")] string project,
@@ -114,7 +114,7 @@ public sealed class ProjectTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null) =>
         Guarded(workspace, project, dryRun, loaded => ProjectFile.AddPackage(loaded.Root, Resolve(loaded, project), package, version, dryRun, verbose));
 
-    [McpServerTool(Name = "package_remove")]
+    [McpServerTool(Name = "package_remove", Destructive = true)]
     [Description("Remove a PackageReference from a project.")]
     public Task<string> PackageRemove(
         [Description("Path to the .csproj.")] string project,

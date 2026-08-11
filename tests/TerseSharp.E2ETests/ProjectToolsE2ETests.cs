@@ -180,13 +180,13 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task SolutionProjects_WithASolutionFilter_IsRefusedRatherThanAnsweringZeroProjects()
+    public async Task SolutionProjects_WithASolutionFilterThatDoesNotExist_SaysSoRatherThanAnsweringZeroProjects()
     {
         var text = await server.CallAsync("solution_projects", new() { ["path"] = "Filtered.slnf" });
 
         Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("is not a solution file this tool can read", text, StringComparison.Ordinal);
-        Assert.Contains(".slnf", text, StringComparison.Ordinal);
+        Assert.Contains("does not exist", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 projects", text, StringComparison.Ordinal);
         Assert.DoesNotContain("read  ", text, StringComparison.Ordinal);
     }
 

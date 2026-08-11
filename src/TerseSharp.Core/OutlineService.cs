@@ -18,7 +18,7 @@ public static class OutlineService
         var document = DocumentLookup.Find(workspace, path);
 
         if (document is null)
-            return Result.Fail<string>(Errors.DocumentNotFound(path));
+            return Result.Fail<string>(await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false));
 
         if (Rejected(ids) is { } refusal)
             return refusal;

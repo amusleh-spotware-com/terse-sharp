@@ -289,10 +289,11 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         var loud = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
 
         Assert.Contains("documents=", quiet, StringComparison.Ordinal);
+        Assert.Contains("terse=", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("gen=c", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("index=xaml(", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("lastUsedUtc=", quiet, StringComparison.Ordinal);
-        Assert.Equal(3, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Equal(4, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
         Assert.True(Tokens(quiet) * 2 < Tokens(loud), Report("workspace_status", quiet, loud));
         Assert.Contains("watch=", loud, StringComparison.Ordinal);
         Assert.Contains("gen=c", loud, StringComparison.Ordinal);

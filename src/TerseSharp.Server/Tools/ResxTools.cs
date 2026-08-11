@@ -5,7 +5,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class ResxTools(ToolContext context)
 {
-    [McpServerTool(Name = "resx_files")]
+    [McpServerTool(Name = "resx_files", ReadOnly = true)]
     [Description("Every .resx/.resw family in the workspace with its cultures, entry counts, missing translations and designer file. Use instead of Glob plus Read over resource files.")]
     public Task<string> ResxFiles(
         [Description("Optional path fragment to filter the families.")] string? filter = null,
@@ -14,7 +14,7 @@ public sealed class ResxTools(ToolContext context)
         context.WithWorkspace(workspace, null, loaded =>
             NavigationTools.Unwrap(ResxService.Files(loaded, filter, NavigationTools.Cap(maxResults, 100))));
 
-    [McpServerTool(Name = "resx_get")]
+    [McpServerTool(Name = "resx_get", ReadOnly = true)]
     [Description("Keys of one .resx family with their values per culture. A key missing from a culture is printed MISSING rather than omitted. Use instead of Read on a .resx file.")]
     public Task<string> ResxGet(
         [Description("Path to any file of the family, e.g. src/App/Strings.resx.")] string path,
@@ -33,7 +33,7 @@ public sealed class ResxTools(ToolContext context)
             values,
             NavigationTools.Cap(maxResults, 200))));
 
-    [McpServerTool(Name = "resx_find")]
+    [McpServerTool(Name = "resx_find", ReadOnly = true)]
     [Description("Search every .resx/.resw in the workspace by key, value or comment. Use instead of Grep over resource files.")]
     public Task<string> ResxFind(
         [Description("Text to look for.")] string query,
@@ -48,7 +48,7 @@ public sealed class ResxTools(ToolContext context)
             culture,
             NavigationTools.Cap(maxResults, 100))));
 
-    [McpServerTool(Name = "resx_usages")]
+    [McpServerTool(Name = "resx_usages", ReadOnly = true)]
     [Description("Every reference to a resource key: the generated designer property resolved through Roslyn (EXACT), plus GetString, localizer indexers, x:Uid and Razor literals (HEURISTIC). Reports composedLookups so 'no usages' is never claimed as proof when keys are built at runtime.")]
     public Task<string> ResxUsages(
         [Description("The resource key.")] string key,
@@ -78,7 +78,7 @@ public sealed class ResxTools(ToolContext context)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
                 await ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun, verbose).ConfigureAwait(false)));
 
-    [McpServerTool(Name = "resx_remove")]
+    [McpServerTool(Name = "resx_remove", Destructive = true)]
     [Description("Remove a key from one culture, or from every file of the family when culture is omitted. Refused while the key is still referenced - by the designer property through Roslyn or by a textual lookup - unless force=true. Not covered by undo_last_change.")]
     public Task<string> ResxRemove(
         [Description("Path to any file of the family.")] string path,
@@ -112,7 +112,7 @@ public sealed class ResxTools(ToolContext context)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
                 await ResxEditService.Rename(loaded, path, key, newKey, updateReferences, dryRun, verbose).ConfigureAwait(false)));
 
-    [McpServerTool(Name = "resx_validate")]
+    [McpServerTool(Name = "resx_validate", ReadOnly = true)]
     [Description("Lint the resource families: RESX001 missing translation, RESX002 placeholder mismatch, RESX003 unused key, RESX004 duplicate name, RESX005 orphan, RESX006 empty value, RESX007 trimmed whitespace, RESX008 unsorted, RESX009 stale designer. Answers 'which keys are untranslated' without reading a single file.")]
     public Task<string> ResxValidate(
         [Description("Optional path to one family; empty validates the whole workspace.")] string? path = null,

@@ -159,4 +159,31 @@ internal static class ToolCensus
     public static int Tokens(string text) => (text.Length + 3) / 4;
 
     public const int MinShellReplacements = 10;
+    public static readonly string[] ReadOnlyTools =
+    [
+        "changed_files", "diff_symbols", "diff_text",
+    "explore_symbol", "find_files", "find_implementations", "find_registrations", "find_usages",
+    "get_diagnostics", "get_file_outline", "get_symbol", "get_symbol_source", "get_type_outline",
+    "impact_of", "list_endpoints", "list_projects", "list_workspaces",
+    "package_list", "project_properties", "solution_projects",
+    "razor_bindings", "razor_codebehind", "razor_component", "razor_find", "razor_outline", "razor_validate",
+    "read_text", "resx_files", "resx_find", "resx_get", "resx_usages", "resx_validate",
+    "search_regex", "search_symbols", "search_text", "workspace_status",
+    "xaml_bindings", "xaml_codebehind", "xaml_find", "xaml_localization", "xaml_names",
+    "xaml_outline", "xaml_resolve", "xaml_resources", "xaml_styles", "xaml_validate",
+];
+    public static readonly string[] DestructiveTools =
+    [
+        "clean", "delete_symbol", "package_remove", "project_remove_reference", "razor_remove_element",
+    "resx_remove", "solution_remove_project", "unload_workspace", "xaml_remove_element",
+];
+    public static readonly string[] MutatingTools =
+    [
+        "add_member", "analyze", "build", "change_signature", "cleanup", "edit_text", "extract_interface",
+    "format", "gate", "list_tests", "load_workspace", "move_type_to_file", "move_type_to_namespace",
+    "package_add", "project_add_reference", "project_create", "project_set_property",
+    "razor_add_element", "razor_set_attribute", "razor_set_directive", "rename_symbol",
+    "replace_symbol", "replace_symbol_body", "rerun_failed", "resx_rename", "resx_set", "run_tests",
+    "solution_add_project", "undo_last_change", "write_text", "xaml_add_element", "xaml_set_property",
+];
 }

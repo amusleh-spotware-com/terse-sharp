@@ -5,7 +5,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class RazorTools(ToolContext context)
 {
-    [McpServerTool(Name = "razor_outline")]
+    [McpServerTool(Name = "razor_outline", ReadOnly = true)]
     [Description("Directives, components and @code members of a .razor or .cshtml file, each component resolved to its type. Plain HTML elements are hidden unless elements=true. Use instead of Read on a Razor file.")]
     public Task<string> RazorOutline(
         [Description("Path to the .razor or .cshtml file.")] string path,
@@ -20,7 +20,7 @@ public sealed class RazorTools(ToolContext context)
                 await RazorService.OutlineAsync(loaded, path, elements, NavigationTools.Cap(maxResults, 200), cancellationToken).ConfigureAwait(false)),
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "razor_component")]
+    [McpServerTool(Name = "razor_component", ReadOnly = true)]
     [Description("How to use a Blazor component: every [Parameter] and [CascadingParameter] with its type, which are [EditorRequired], the routes it declares, and where it comes from - source or a referenced package.")]
     public Task<string> RazorComponent(
         [Description("Component name, e.g. Card or MudBlazor.MudButton.")] string name,
@@ -33,7 +33,7 @@ public sealed class RazorTools(ToolContext context)
                 await RazorService.ComponentAsync(loaded, name, cancellationToken).ConfigureAwait(false)),
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "razor_find")]
+    [McpServerTool(Name = "razor_find", ReadOnly = true)]
     [Description("Find components, elements, attributes, directives, expressions or routes across every Razor file in the workspace. Use instead of Grep on .razor or .cshtml.")]
     public Task<string> RazorFind(
         [Description("Text to find.")] string query,
@@ -43,7 +43,7 @@ public sealed class RazorTools(ToolContext context)
         context.WithWorkspace(workspace, null, loaded => NavigationTools.Unwrap(
             RazorService.Find(loaded, query, kind ?? "component", NavigationTools.Cap(maxResults, 100))));
 
-    [McpServerTool(Name = "razor_bindings")]
+    [McpServerTool(Name = "razor_bindings", ReadOnly = true)]
     [Description("Every @bind, @on event handler, @ref and asp-for in a Razor file. With validate=true each one is resolved against the component's own type through Roslyn and reported EXACT, NO_SETTER, UNRESOLVED or UNRESOLVED_CONTEXT.")]
     public Task<string> RazorBindings(
         [Description("Path to the .razor or .cshtml file.")] string path,
@@ -57,7 +57,7 @@ public sealed class RazorTools(ToolContext context)
                 await RazorBindingService.BindingsAsync(loaded, path, validate, cancellationToken).ConfigureAwait(false)),
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "razor_codebehind")]
+    [McpServerTool(Name = "razor_codebehind", ReadOnly = true)]
     [Description("The four collocated files of one component - the .razor, its .razor.cs partial, its .razor.css scoped styles and its .razor.js module - plus the _Imports chain and the members declared in @code.")]
     public Task<string> RazorCodeBehind(
         [Description("Path to the .razor or .cshtml file.")] string path,
@@ -70,7 +70,7 @@ public sealed class RazorTools(ToolContext context)
                 await RazorService.CodeBehindAsync(loaded, path, cancellationToken).ConfigureAwait(false)),
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "razor_validate")]
+    [McpServerTool(Name = "razor_validate", ReadOnly = true)]
     [Description("Report Razor faults the compiler does not catch: unknown component, unknown or missing [Parameter], a @bind with no setter, a route parameter with no property, duplicate @page routes, a bad @ref, an orphan .razor.css, an unregistered @inject, and markup that will not parse.")]
     public Task<string> RazorValidate(
         [Description("Path to the Razor file. Ignored when scope is solution.")] string? path = null,
@@ -148,7 +148,7 @@ public sealed class RazorTools(ToolContext context)
                         cancellationToken).ConfigureAwait(false)),
                 cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "razor_remove_element")]
+    [McpServerTool(Name = "razor_remove_element", Destructive = true)]
     [Description("Remove one element and its children, addressed by the path razor_outline prints or by #ref. Compile-gated through the Razor generator.")]
     public Task<string> RazorRemoveElement(
         [Description("Path to the Razor file.")] string path,
