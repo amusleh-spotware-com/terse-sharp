@@ -32,6 +32,34 @@ version is **derived** in P6. Nothing else in this command takes input from the 
   `.claude/worktrees/agent-*`.
 - A `Co-Authored-By:` trailer in any commit message.
 - Weakening, skipping or deleting a test to make a suite go green.
+- **Spawning the review agent, committing, tagging, pushing or releasing while any row is still in
+  `## Open`.** See the gate directly below — it is the one gate this command cannot trade away.
+
+---
+
+# 🚫 HARD GATE — no review, no commit, no push, no release until `## Open` is empty
+
+P1 finishing every open row is a **precondition** of P7–P10, not a phase that runs alongside them.
+Before `code-review-gate`, before the R2a reviewer spawn, before `git add`, before `git commit`,
+before `git tag`, before `git push`, and before every retry of those after a CI failure, answer:
+
+> **"Does `read_text IMPROVEMENTS.md section="## Open"` still show a row table?"**
+
+If yes → **do not review, do not spawn, do not stage, do not push.** Return to **P1**, take the
+remaining rows in table order, finish them, then re-ask. There is no partial-run exit: not "the
+remaining rows are small", not "I'll ship what's done and open a follow-up", not "the reviewer can
+look at the finished half while I work", not "CI is already running". A review round spent on a
+change set that is still growing is a wasted round — every fix after it is unreviewed — and a push
+that leaves rows open makes the release notes claim work that did not ship.
+
+The only rows that may exist in `## Open` at P7 are the ones **P5 itself created** from this run's own
+tool-usage review. Those are the next run's work by construction (P5 says so) and are exempt — they
+must be identifiable as such: P5 records the ids it added, and the P7 check compares against that
+list. **Any id not on it blocks the push.**
+
+If a Ledger row genuinely cannot ship, it does not stay open — it closes as a **measured decision**
+into `## Known limitations` with the evidence that closes it (P1 step 6b). Closing is how a row
+leaves; leaving it open is a failed run.
 
 ---
 
@@ -203,6 +231,13 @@ legitimate only when it names what was checked and why each of the five came bac
 
 ## P7 — Review gate, then commit and push
 
+0. **The `## Open` gate, first, before anything else in this phase.**
+   `read_text IMPROVEMENTS.md section="## Open"`. Every id it still lists must be on the list P5
+   recorded as created by this run's own review. If **any** other id is there — a Ledger row not
+   implemented, not shipped, not closed into `## Known limitations` — **stop this phase**, return to
+   **P1**, finish those rows, re-run **P2 → P3 → P4**, and re-enter P7 from this step. Do not spawn
+   the reviewer, do not stage, do not commit. Re-run this check before **every** re-entry to P7
+   after a P8 CI-failure fix, because a fix round can reopen a row.
 1. **`code-review-gate` over the full change set**, per the skill: R0 ledger → R1 requirement
    conformance → R2 cold read → R3 the thirteen specialist passes → R4 prove-or-drop every candidate
    → R5 severity → R6 report → R7 fix → R8 exit criteria.
