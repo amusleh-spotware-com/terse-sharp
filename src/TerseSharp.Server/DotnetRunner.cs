@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Server;
@@ -46,18 +45,19 @@ public static partial class DotnetRunner
         exitCode is not 0 && LockedOutput().IsMatch(output);
 
     internal static async Task<TestRunResult> TestAsync(
-        WorkspaceTarget workspace,
-        TestRunRequest request,
-        CancellationToken cancellationToken)
+    WorkspaceTarget workspace,
+    TestRunRequest request,
+    CancellationToken cancellationToken)
     {
         var results = Directory.CreateTempSubdirectory("terse-tests-");
 
         try
         {
-            var run = await InvokeAsync(workspace, request, results.FullName, cancellationToken).ConfigureAwait(false);
+            var (run, missing) = await InvokeAsync(workspace, request, results.FullName, cancellationToken).ConfigureAwait(false);
             var report = Report(results, workspace.Root);
+            var response = RenderTest(run, report, request, workspace.Root);
 
-            return new TestRunResult(RenderTest(run, report, request, workspace.Root), report, Locked(run));
+            return new TestRunResult(TimedOut(response, missing, request.Invocations.Length), report, Locked(run));
         }
         finally
         {
@@ -65,35 +65,51 @@ public static partial class DotnetRunner
         }
     }
 
-    private static async Task<ProcessRun> InvokeAsync(
-        WorkspaceTarget workspace,
-        TestRunRequest request,
-        string resultsDirectory,
-        CancellationToken cancellationToken)
+    private static string TimedOut(string response, List<string> missing, int invocations) => missing.Count is 0
+    ? response
+    : string.Create(
+        CultureInfo.InvariantCulture,
+        $"{response}\nWARNING {Stopped(missing, invocations)}: {string.Join(", ", missing)}");
+
+    private static string Stopped(List<string> missing, int invocations) => invocations is 1
+        ? "this run timed out and produced no results"
+        : string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first timeout; {missing.Count} of {invocations} project(s) produced no results");
+
+    private static async Task<(ProcessRun Run, List<string> Missing)> InvokeAsync(
+    WorkspaceTarget workspace,
+    TestRunRequest request,
+    string resultsDirectory,
+    CancellationToken cancellationToken)
     {
-        var deadline = Stopwatch.StartNew();
         var combined = default(ProcessRun);
+        var missing = new List<string>();
+        var stopped = false;
 
         foreach (var target in request.Invocations)
         {
-            var left = request.Timeout - deadline.Elapsed;
+            if (stopped)
+            {
+                missing.Add(Path.GetFileNameWithoutExtension(target));
 
-            if (left <= TimeSpan.Zero)
-                break;
+                continue;
+            }
 
             var run = await RunAsync(
                 Arguments(request with { Target = target }, resultsDirectory),
                 workspace.Root,
-                left,
+                request.Timeout,
                 cancellationToken).ConfigureAwait(false);
 
             combined = combined is null ? run : Merge(combined, run);
 
-            if (run.TimedOut)
-                break;
+            if (!run.TimedOut)
+                continue;
+
+            missing.Add(Path.GetFileNameWithoutExtension(target));
+            stopped = true;
         }
 
-        return combined ?? new ProcessRun(0, string.Empty, 0);
+        return (combined ?? new ProcessRun(0, string.Empty, 0), missing);
     }
 
     internal static ProcessRun Merge(ProcessRun first, ProcessRun next) => new(

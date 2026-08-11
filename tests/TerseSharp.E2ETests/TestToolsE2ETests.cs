@@ -179,11 +179,11 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RunTests_GreenRun_StaysTiny()
     {
-        var text = await RunAsync(new()
+        var text = ToolCensus.WithoutSteer(await RunAsync(new()
         {
             ["project"] = TestProject,
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
-        });
+        }));
 
         Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
         Assert.Contains("passed=1 skipped=0 total=1", text, StringComparison.Ordinal);

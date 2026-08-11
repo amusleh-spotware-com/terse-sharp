@@ -125,7 +125,7 @@ public sealed class EditTools(ToolContext context)
             (_, { Length: > 0 } file) when declaration is { Length: > 0 } => AddToFile(workspace, file, declaration, options, cancellationToken, heldRoot),
             (_, { Length: > 0 }) => Task.FromResult(Errors.Blank("declaration").Render()),
             _ => Supplied(workspace, typeSymbolId, declaration, "declaration", (loaded, resolved) => SymbolEditService.AddMemberAsync(
-                loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration]), heldRoot),
+                loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration]), heldRoot, typesOnly: true),
         };
 
     private Task<string> AddToFile(
@@ -181,12 +181,13 @@ public sealed class EditTools(ToolContext context)
     new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings]);
 
     private Task<string> Guarded(
-        string? workspace,
-        string? symbolId,
-        Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
-        CancellationToken cancellationToken,
-        Carry carry = default,
-        string? heldRoot = null)
+    string? workspace,
+    string? symbolId,
+    Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
+    CancellationToken cancellationToken,
+    Carry carry = default,
+    string? heldRoot = null,
+    bool typesOnly = false)
     {
         var rejection = context.RejectWrite();
 
@@ -197,20 +198,22 @@ public sealed class EditTools(ToolContext context)
                 symbolId,
                 async (loaded, resolved) => Carried(await action(loaded, resolved).ConfigureAwait(false), carry, loaded.Root),
                 cancellationToken,
-                guard: loaded => Elsewhere(heldRoot, loaded.Root));
+                guard: loaded => Elsewhere(heldRoot, loaded.Root),
+                typesOnly: typesOnly);
     }
 
     private Task<string> Supplied(
-        string? workspace,
-        string? symbolId,
-        string text,
-        string name,
-        Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
-        CancellationToken cancellationToken,
-        Carry carry = default,
-        string? heldRoot = null) => text is { Length: > 0 }
-        ? Guarded(workspace, symbolId, action, cancellationToken, carry, heldRoot)
-        : Task.FromResult(Errors.Blank(name).Render());
+    string? workspace,
+    string? symbolId,
+    string text,
+    string name,
+    Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
+    CancellationToken cancellationToken,
+    Carry carry = default,
+    string? heldRoot = null,
+    bool typesOnly = false) => text is { Length: > 0 }
+    ? Guarded(workspace, symbolId, action, cancellationToken, carry, heldRoot, typesOnly)
+    : Task.FromResult(Errors.Blank(name).Render());
 
     private Task<string> Batched(
         string? workspace,

@@ -296,6 +296,20 @@ public static class Doctor
 
         return version.Length is 0
             ? Check("version", "the running version could not be read", false, "reinstall the tool: dotnet tool update -g TerseSharp")
-            : Check("version", "terse " + version, true, string.Empty);
+            : Check("version", string.Create(CultureInfo.InvariantCulture, $"terse {version}  {AssemblyLine()}"), true, string.Empty);
     }
+
+    private static string AssemblyLine()
+    {
+        var host = Environment.ProcessPath;
+        var apphost = host is { Length: > 0 } && !IsMuxer(host);
+        var assembly = apphost ? host! : System.Reflection.Assembly.GetEntryAssembly()?.Location ?? string.Empty;
+
+        return assembly.Length is 0
+            ? "assembly=unknown"
+            : string.Create(CultureInfo.InvariantCulture, $"assembly={assembly}  probe: {(apphost ? string.Empty : "dotnet ")}\"{assembly}\" call <tool> --workspace <solution> --json '{{...}}'");
+    }
+
+    private static bool IsMuxer(string host) =>
+        Path.GetFileNameWithoutExtension(host.AsSpan()).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
 }

@@ -412,8 +412,11 @@ public static class SymbolEditService
     {
         if (Shared(found) is { } refusal)
             return Result.Fail<PlannedEdit>(refusal);
+
         var target = Promoted(found);
-        var parsed = MemberDeclaration.ParseAll(declaration);
+        var column = target.Node.GetLocation().GetLineSpan().StartLinePosition.Character;
+        var parsed = MemberDeclaration.ParseAll(MemberDeclaration.Reindented(declaration, column));
+
         return parsed.IsOk
             ? Result.Ok(new PlannedEdit(target, Rewritten(parsed.Value!, target.Node)))
             : Result.Fail<PlannedEdit>(parsed.Error!);

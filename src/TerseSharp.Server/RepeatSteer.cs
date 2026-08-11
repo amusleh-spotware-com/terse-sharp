@@ -1,0 +1,74 @@
+using System.Collections.Frozen;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+
+namespace TerseSharp.Server;
+
+public static class RepeatSteer
+{
+    public const int Threshold = 3;
+
+    public static readonly FrozenDictionary<string, string> Plural = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["read_text"] = "paths",
+        ["get_file_outline"] = "paths",
+        ["diff_text"] = "paths",
+        ["get_symbol_source"] = "symbolIds",
+        ["replace_symbol"] = "symbolIds",
+        ["search_text"] = "queries",
+        ["search_regex"] = "queries",
+        ["run_tests"] = "projects",
+        ["write_text"] = "files",
+        ["edit_text"] = "edits",
+    }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    private static readonly Lock Gate = new();
+
+    private static string last = string.Empty;
+    private static int run;
+
+    public static McpRequestFilter<CallToolRequestParams, CallToolResult> Filter() =>
+    next => async (request, cancellationToken) =>
+    {
+        var result = await next(request, cancellationToken).ConfigureAwait(false);
+
+        if (request.Params?.Name is { Length: > 0 } tool && Steer(tool, Batched(request.Params, tool)) is { } note)
+            result.Content.Add(new TextContentBlock { Text = note });
+
+        return result;
+    };
+
+    private static bool Batched(CallToolRequestParams parameters, string tool) =>
+        Plural.TryGetValue(tool, out var plural)
+        && parameters.Arguments is { } arguments
+        && arguments.ContainsKey(plural);
+
+    public static string? Steer(string tool, bool batched = false)
+    {
+        var count = Counted(tool);
+
+        return !batched && count >= Threshold && Plural.TryGetValue(tool, out var plural)
+            ? string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - pass {plural}=[...] for the rest")
+            : null;
+    }
+
+    public static void Forget()
+    {
+        lock (Gate)
+        {
+            last = string.Empty;
+            run = 0;
+        }
+    }
+
+    private static int Counted(string tool)
+    {
+        lock (Gate)
+        {
+            run = string.Equals(last, tool, StringComparison.Ordinal) ? run + 1 : 1;
+            last = tool;
+
+            return run;
+        }
+    }
+}

@@ -21,12 +21,13 @@ internal sealed class TerseServerProcess
     public McpClient Client => client;
 
     public static async Task<TerseServerProcess> StartAsync(
-        string workingDirectory,
-        IEnumerable<string> arguments,
-        IReadOnlyDictionary<string, string> environment,
-        CancellationToken cancellationToken)
+    string workingDirectory,
+    IEnumerable<string> arguments,
+    IReadOnlyDictionary<string, string> environment,
+    CancellationToken cancellationToken)
     {
         var launched = arguments.ToArray();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
@@ -36,13 +37,26 @@ internal sealed class TerseServerProcess
         {
             return await ConnectAsync(workingDirectory, launched, environment, cancellationToken);
         }
+        finally
+        {
+            E2ETelemetry.Started(stopwatch.ElapsedTicks);
+        }
     }
 
     public async Task<string> CallAsync(string tool, Dictionary<string, object?> arguments, CancellationToken cancellationToken)
     {
-        var result = await client.CallToolAsync(tool, arguments, cancellationToken: cancellationToken);
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
+        try
+        {
+            var result = await client.CallToolAsync(tool, arguments, cancellationToken: cancellationToken);
+
+            return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
+        }
+        finally
+        {
+            E2ETelemetry.Called(stopwatch.ElapsedTicks);
+        }
     }
 
     public async ValueTask StopAsync()

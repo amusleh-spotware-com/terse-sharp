@@ -3,6 +3,8 @@ using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server;
 
+public readonly record struct ToolSurface(IReadOnlySet<string>? Advertised, bool MarkupDerived);
+
 public static class ToolProfile
 {
     public const string Core = "core";
@@ -34,31 +36,44 @@ public static class ToolProfile
         "analyze",
     };
 
-    public static IReadOnlySet<string>? Resolve(string? requested) =>
+    public static ToolSurface Resolve(string? requested) =>
         Resolve(requested, Environment.GetEnvironmentVariable("TERSE_TOOLS"));
 
-    public static IReadOnlySet<string>? Resolve(string? requested, string? environment)
+    public static ToolSurface Resolve(string? requested, string? environment)
     {
         var name = requested ?? environment;
 
+        if (string.IsNullOrEmpty(name))
+            return new(null, MarkupDerived: true);
+
         if (string.Equals(name, Core, StringComparison.OrdinalIgnoreCase))
-            return CoreTools;
+            return new(CoreTools, MarkupDerived: false);
 
-        if (name is { Length: > 0 } && !string.Equals(name, All, StringComparison.OrdinalIgnoreCase))
-        {
-            Console.Error.WriteLine(string.Create(
-                CultureInfo.InvariantCulture,
-                $"terse: --tools '{name}' is not a profile; advertising every tool. Use core or all."));
-        }
+        if (string.Equals(name, All, StringComparison.OrdinalIgnoreCase))
+            return new(null, MarkupDerived: false);
 
-        return null;
+        Console.Error.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"terse: --tools '{name}' is not a profile; advertising the families this workspace holds. Use core or all."));
+
+        return new(null, MarkupDerived: true);
     }
 
-    public static string? Describe(IReadOnlySet<string>? advertised) => advertised is null
-    ? null
-    : string.Create(
-        CultureInfo.InvariantCulture,
-        $"tools={Core} - {advertised.Count} advertised; every other tool still answers when called by name");
+    public static string? Describe(ToolSurface surface, WorkspaceMarkup markup)
+    {
+        if (surface.Advertised is { } advertised)
+        {
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"tools={Core} - {advertised.Count} advertised; every other tool still answers when called by name");
+        }
+
+        return surface.MarkupDerived && !markup.Complete
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"tools={markup.Hidden()} hidden - this workspace holds no such file; every other tool still answers when called by name")
+            : null;
+    }
 
     public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> Filter(IReadOnlySet<string> advertised) =>
         next => async (request, cancellationToken) =>
@@ -69,4 +84,30 @@ public static class ToolProfile
 
             return listed;
         };
+
+    public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> MarkupFilter(ToolContext context) =>
+    next => async (request, cancellationToken) =>
+    {
+        var listed = await next(request, cancellationToken).ConfigureAwait(false);
+        var served = await context.ServedAsync(cancellationToken).ConfigureAwait(false);
+
+        listed.Tools = [.. listed.Tools.Where(tool => served.Serves(tool.Name))];
+
+        return listed;
+    };
+
+    public static WorkspaceMarkup Served(WorkspaceRegistry registry)
+    {
+        var loaded = registry.All();
+
+        if (loaded.Count is 0)
+            return WorkspaceMarkup.Every;
+
+        var served = default(WorkspaceMarkup);
+
+        foreach (var workspace in loaded)
+            served = served.Union(workspace.Indexes.MarkupFamilies());
+
+        return served;
+    }
 }

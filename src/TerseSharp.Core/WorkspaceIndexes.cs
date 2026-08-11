@@ -28,8 +28,8 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
         Documents.Load(fullPath, ParsedDocumentCache.MarkupFactor, XamlDocument.Load);
 
     public string Describe() => string.Create(
-        CultureInfo.InvariantCulture,
-        $"index=xaml({Counters(xaml)} files={Size(xaml.Current?.FileCount)}) resx({Counters(resx)} families={Size(resx.Current?.Families.Count)}) code({Counters(registrations)} calls={Size(registrations.Current?.Count)}) razor({Counters(razor)} files={Size(razor.Current?.FileCount)}) paths({Counters(paths)} files={Size(paths.Current?.Count)}) documents={Documents.Count}/{ParsedDocumentCache.MaxDocuments} parses={Documents.Parses}");
+    CultureInfo.InvariantCulture,
+    $"index=xaml({Counters(xaml)} files={Size(xaml.Current?.FileCount)}) resx({Counters(resx)} families={Size(resx.Current?.Families.Count)}) code({Counters(registrations)} calls={Size(registrations.Current?.Count)}) razor({Counters(razor)} files={Size(razor.Current?.FileCount)}) paths({Counters(paths)} files={Size(paths.Current?.Count)}) markup({Counters(markup)}) documents={Documents.Count}/{ParsedDocumentCache.MaxDocuments} parses={Documents.Parses}");
 
     public void Dispose()
     {
@@ -38,6 +38,7 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
         registrations.Dispose();
         razor.Dispose();
         paths.Dispose();
+        markup.Dispose();
     }
     private IndexKey Key(ChangeKind kind) => new(sync.Generation(kind), Trusted);
 
@@ -70,6 +71,11 @@ public sealed class WorkspaceIndexes(string root, WorkspaceSync sync) : IDisposa
 
         sync.Bumped(ChangeKind.Files);
     }
+
+    public WorkspaceMarkup MarkupFamilies() =>
+    markup.Get(new IndexKey(sync.Generation(ChangeKind.Files), Watching), _ => new MarkupIndex(WorkspaceMarkup.Of(Paths()))).Families;
+
+    private readonly IndexSlot<MarkupIndex> markup = new();
 }
 
 internal sealed class IndexSlot<TIndex> : IDisposable

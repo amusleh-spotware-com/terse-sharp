@@ -155,7 +155,8 @@ public sealed class InstallCommandE2ETests : IDisposable
             Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
 
         Assert.Contains("ERROR InvalidArgument", output, StringComparison.Ordinal);
-        Assert.Contains("missing required argument 'path'", output, StringComparison.Ordinal);
+        Assert.Contains("'path' is required", output, StringComparison.Ordinal);
+        Assert.Contains("spelled path or paths", output, StringComparison.Ordinal);
         Assert.DoesNotContain("Unhandled exception", output, StringComparison.Ordinal);
     }
 
@@ -176,5 +177,55 @@ public sealed class InstallCommandE2ETests : IDisposable
         Assert.Contains("gateMs=", line, StringComparison.Ordinal);
         Assert.Contains("diffMs=", line, StringComparison.Ordinal);
         Assert.DoesNotContain("outlineMs=0.00", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Doctor_NamesTheRunningAssemblyAndTheOneShotProbeCommand()
+    {
+        var output = await RunAsync("doctor", "--workspace", Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+        var assembly = output
+            .Split('\n')
+            .Select(line => line.IndexOf("assembly=", StringComparison.Ordinal) is var start and >= 0 ? line[(start + 9)..] : null)
+            .FirstOrDefault(value => value is { Length: > 0 });
+
+        Assert.NotNull(assembly);
+        Assert.StartsWith(TerseServerFixture.ServerAssemblyPath(), assembly, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("call <tool> --workspace <solution> --json", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Doctor_FromTheApphost_PrintsAProbeCommandThatDoesNotGoThroughTheMuxer()
+    {
+        var apphost = Apphost();
+
+        Assert.True(File.Exists(apphost), "the apphost is missing: " + apphost);
+
+        var start = new ProcessStartInfo(apphost)
+        {
+            WorkingDirectory = TerseServerFixture.FixtureRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        start.ArgumentList.Add("doctor");
+        start.ArgumentList.Add("--workspace");
+        start.ArgumentList.Add(Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+        start.Environment["TERSE_HOME"] = home;
+        start.Environment["CLAUDE_CONFIG_DIR"] = ConfigDirectory;
+
+        var output = await ReadAsync(start);
+
+        Assert.Contains("assembly=" + apphost, output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("probe: dotnet ", output, StringComparison.Ordinal);
+        Assert.Contains("call <tool> --workspace <solution> --json", output, StringComparison.Ordinal);
+    }
+
+    private static string Apphost()
+    {
+        var assembly = TerseServerFixture.ServerAssemblyPath();
+
+        return OperatingSystem.IsWindows()
+            ? Path.ChangeExtension(assembly, ".exe")
+            : Path.Combine(Path.GetDirectoryName(assembly)!, Path.GetFileNameWithoutExtension(assembly));
     }
 }

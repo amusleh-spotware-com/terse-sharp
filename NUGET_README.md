@@ -98,15 +98,28 @@ failure never changes the verdict.
 
 ## The tools
 
-`terse serve --tools core` (or `TERSE_TOOLS=core`) advertises a 21-tool subset instead of the full
-catalogue, which is attached to every request and past a certain size measurably costs tool-selection
-accuracy. It stays **opt-in**: the server answers a hidden tool called by name, but an agent can only
-call what its client lists, and the subset omits 33 tools the guard names as replacements — every
-`xaml_*`, `resx_*` and `razor_*` among them. `workspace_status` reports which profile is running.
+The full catalogue is attached to every request, and past a certain size that measurably costs
+tool-selection accuracy — so **the advertised set is derived from what the solution actually
+contains**. A tree with no `.xaml`/`.axaml` is not offered the 13 `xaml_*` tools, one with no
+`.razor`/`.cshtml` is not offered the 10 `razor_*`, one with no `.resx`/`.resw` is not offered the 8
+`resx_*`; measured on a plain C# solution that is **56 tools instead of 87, 16 962 tokens instead of
+22 193 (-23.6 %)** on every request. Loading a second solution that does hold them re-advertises the
+families through `notifications/tools/list_changed`, and a hidden tool still answers when called by
+name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything regardless;
+`--tools core` still narrows to a 21-tool subset. `workspace_status` names whatever is hidden.
 
 **87 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with
 `verbose=true` for the diff and `dryRun=true` to preview it. Any caveat prints in full.
+
+**Ten of them take a plural.** `read_text paths=`, `get_file_outline paths=`, `diff_text paths=`,
+`get_symbol_source symbolIds=`, `replace_symbol symbolIds=`, `search_text`/`search_regex queries=`,
+`run_tests projects=`, `write_text files=` and `edit_text edits=` each answer in one call what used to
+cost one call per item — and `write_text files=` puts every `.cs` file it writes through **one**
+compile gate, so a type and the consumer it breaks land together. From the third consecutive call of
+the same tool the response gains **one** extra line naming the plural parameter to use instead — the
+single documented exception to "a success is one line", worth about 12 tokens, emitted only once the
+repetition has already proved itself and never when the call already passed the plural.
 
 | Group | Tools |
 | --- | --- |

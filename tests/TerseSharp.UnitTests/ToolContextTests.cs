@@ -190,4 +190,43 @@ public sealed class ToolContextTests
         Assert.Equal(string.Empty, phases.Document);
         Assert.Equal(0, phases.OutlineMs);
     }
+
+    [Fact]
+    public async Task AnnounceAsync_WhenTheServedFamiliesChanged_TellsTheClientTheToolListMoved()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false, new ToolSurface(null, MarkupDerived: true));
+        var announced = 0;
+
+        context.ToolsChanged = _ =>
+        {
+            announced++;
+
+            return Task.CompletedTask;
+        };
+
+        await context.AnnounceAsync(default, TestContext.Current.CancellationToken);
+        await context.AnnounceAsync(context.Served(), TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, announced);
+    }
+
+    [Fact]
+    public async Task AnnounceAsync_WhenTheSurfaceIsNotDerivedFromTheWorkspace_SaysNothing()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false, new ToolSurface(null, MarkupDerived: false));
+        var announced = 0;
+
+        context.ToolsChanged = _ =>
+        {
+            announced++;
+
+            return Task.CompletedTask;
+        };
+
+        await context.AnnounceAsync(default, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, announced);
+    }
 }

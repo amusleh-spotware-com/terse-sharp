@@ -8,6 +8,110 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-08-11
+
+### Changed
+
+- The advertised `tools/list` payload no longer carries the MCP SDK's serializer noise: a `"default": null`
+  is dropped and a two-arm `["string", "null"]` type union is collapsed to its single real type, including
+  inside an array parameter's `items`. Measured over the 87-tool surface, the payload fell from **23 613 to
+  22 193 tokens (-1 420, -6.0 %)** on every request of every session, with no description reworded.
+  Non-null defaults (`false`, `0`, `600`) are kept, and every parameter still binds an explicit `null`.
+  Locked by `SchemaCensusE2ETests.NoAdvertisedSchema_CarriesANullDefaultOrANullTypeArm` and
+  `TokenBudgetE2ETests.TheAdvertisedToolPayload_StaysWithinItsBudget` (I200).
+- **BREAKING — the advertised tool set is now derived from the loaded workspace's own file kinds.**
+  A solution holding no `.xaml`/`.axaml` no longer advertises the 13 `xaml_*` tools, one holding no
+  `.razor`/`.cshtml` no longer advertises the 10 `razor_*`, and one holding no `.resx`/`.resw` no
+  longer advertises the 8 `resx_*`. Measured on `fixtures/SelectionSolution`: **56 tools and 16 962
+  tokens instead of 87 and 22 193 (-23.6 %)** on every request. Loading a second solution that does
+  hold them re-advertises those families and sends `notifications/tools/list_changed`; a hidden tool
+  still answers when called by name, and `workspace_status` prints `tools=<families> hidden`.
+  `--tools all` / `TERSE_TOOLS=all` opts out and advertises everything, `--tools core` is unchanged,
+  and an unrecognized `--tools` value now falls back to the derived surface rather than to everything.
+  Locked by `MarkupProfileE2ETests` (I201).
+- **`SKILL.md` enumerates the tool surface once, not twice.** The swap table and *The whole surface,
+  by job* are merged into one job-keyed table carrying the replaced built-in as a column, so every
+  tool appears in exactly one row; what is left of the second section is the behaviour a table cannot
+  carry. The predicted 3 500-4 000 token saving is **refuted by measurement** — the two sections' bulk
+  was non-duplicated behavioural prose, not a repeated enumeration, so the merge is size-neutral
+  (68 971 -> 68 999 bytes, of which I201 added ~330). The durable value is the single enumeration plus
+  two new census gates: `DocsCoverageE2ETests.TheShippedSkill_StaysWithinItsTokenBudget` caps the file
+  at 17 600 tokens and `…EnumeratesEveryToolExactlyOnceInOneTable` fails when a tool no table row
+  names (I202).
+
+### Added
+
+- **`read_text paths=[...]`** — up to 10 files in one response, each under its own path line with its
+  own count and continuation note; a path that does not resolve is reported inline as `NOT_FOUND`
+  instead of failing the call, and `maxChars` is a budget shared across the batch that names the entry
+  it clipped. `path` is now optional and combines with `paths`, taken first. Measured over 1 538
+  transcripts, `read_text` cost **667** adjacent same-tool round trips, 82.5 % of them independent and
+  78 % spanning more than one file (I192).
+- **`edit_text` entries may carry their own `path`** — one call now edits several files, grouped by
+  file, one write and one answer line per file, at most 10 entries per file and 25 in total. Half of
+  the 946 measured `edit_text` round-trip pairs spanned more than one file and could not be fused by
+  the same-file `edits=` that already shipped (I193).
+- **`write_text files=[{path,content}]`** — up to 10 files in one call, and **every `.cs` document
+  among them goes through one compile gate**, so a type and the consumer it breaks land together
+  instead of the first write being rolled back on its own. `path` is now optional; passing `files`
+  together with a top-level `path`, `content` or `delete` is refused rather than silently dropping one
+  (I194).
+- **`run_tests projects=[...]`** — several test projects in one call, sharing one results directory and
+  answering one merged verdict line. The timeout is now **per project** rather than a budget the batch
+  shares, and any project that timed out is named in a `WARNING` instead of the merged run being
+  reported as passed. At most 10 projects per call, refused by name, and the batch stops at the first
+  timeout and names every project that produced no results - a single-invocation run says
+  `this run timed out and produced no results` rather than claiming a batch it never had.
+  `changed=true` is bounded the same way:
+  when the change reaches more than 10 test projects it runs the whole solution once and says so,
+  rather than paying a per-project timeout over an unbounded list (I195).
+- **`diff_text paths=[...]` and `get_file_outline paths=[...]`** — both were measured 100 % multi-file.
+  `diff_text` hands every entry to the same `git diff` as its own pathspec; `get_file_outline` renders
+  one group per path and reports an unresolved path inline as `NOT_FOUND` (I196).
+- **`get_file_outline contains=` and `get_type_outline contains=`** — keep only the members whose name
+  matches, printed under their declaring type with an `N of M members` line so the omission is never
+  silent (I206).
+- **A same-tool repeat steer.** From the **third** consecutive call of one tool, the response gains one
+  line — `3 read_text calls in a row - pass paths=[...] for the rest` — naming the plural parameter
+  that tool actually declares, and nothing when it declares none or when the call already used it.
+  The counter resets on any different tool. Census-gated by
+  `SchemaCensusE2ETests.EveryToolWithAPluralParameter_IsKnownToTheRepeatSteerAndNoOtherIs`, which
+  discovers the plural set from `tools/list` in both directions. This is the **single documented
+  exception** to the one-line-success rule: a green `run_tests`, a `write_text` short form and an
+  `edit_text` one-liner can now carry a second line, and `README.md`, `NUGET_README.md` and `SKILL.md`
+  all say so (I198).
+- **`doctor` prints the running server's assembly path and the one-shot probe command**, and `SKILL.md`
+  now teaches that a claim about tool *behaviour* is proven against a freshly built `terse.dll` with
+  `dotnet <path> call <tool> --workspace <solution> --json '{...}'` — 3 s against 13 s for the
+  narrowest filtered E2E run (I205).
+- **The E2E suite attributes its own wall clock.** `TerseServerProcess` counts server starts, start
+  time, tool calls and call time, and reports them on process exit and from
+  `BacklogClosureE2ETests.TheSuiteAttributesItsOwnWallClockToServerStartsAndToolCalls`, so the 884 s
+  that `TerseSharp.E2ETests` costs is measured before anything is optimized (I186).
+
+### Fixed
+
+- **A `typeSymbolId` now resolves against types only.** `add_member`, `extract_interface`,
+  `move_type_to_file` and `move_type_to_namespace` take a *containing type*, so a name that matches one
+  type and five properties no longer answers `AmbiguousSymbol`; a name that matches no type at all says
+  so and counts the non-type matches instead of hiding them (I204).
+- **`replace_symbol` no longer re-indents a declaration read back from `get_symbol_source`.** The read
+  dedents, the write landed the dedented text, and the continuation lines of an expression-bodied
+  member ended up shifted left — invisible to `format`, to `analyze` and to the build, and caught only
+  by a human reading the diff. The declaration text is now re-indented to the target's column before it
+  is parsed, with the interior of every multi-line literal left untouched — in **every** member of a
+  multi-member declaration, because the skip-set is built by tokenizing the whole declaration rather
+  than only its first member (I188).
+- **`terse call --json` binds camelCase arguments.** The one-shot probe deserialized with default,
+  case-sensitive options, so `{"files":[{"path":…,"content":…}]}` — the casing the advertised schema
+  and every example use — answered `'files' entry 1 carries no path` on a call that was correct.
+- **`doctor` names the right assembly on Linux and macOS, and prints a probe command that runs.** The
+  host check compared against `dotnet.exe`, so on any non-Windows runner it printed the muxer's path;
+  and the command was prefixed with `dotnet` unconditionally, so under the apphost - which is what a
+  `dotnet tool install -g` shim is, on every OS - the printed command died with
+  `BadImageFormatException`. `InstallCommandE2ETests` now drives `doctor` through the apphost as well
+  as through the muxer.
+
 ## [0.31.0] - 2026-08-11
 
 > **Response formats changed.** `get_symbol_source` on a **type** id now answers `get_type_outline`'s
@@ -2633,7 +2737,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.32.0
 [0.31.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.31.0
 [0.30.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.30.0
 [0.29.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.29.0

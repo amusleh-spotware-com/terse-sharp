@@ -154,4 +154,65 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
 
     private static bool Declares(JsonElement type) =>
         type.ValueKind is JsonValueKind.String && string.Equals(type.GetString(), "array", StringComparison.Ordinal);
+
+    [Fact]
+    public async Task NoAdvertisedSchema_CarriesANullDefaultOrANullTypeArm()
+    {
+        var surface = await Surface();
+        var noisy = surface.Where(tool => Noisy(tool.JsonSchema)).Select(tool => tool.Name).ToArray();
+        var payload = surface.Sum(tool => tool.JsonSchema.GetRawText().Length);
+
+        Assert.True(noisy.Length is 0, "schemas still carrying serializer noise: " + string.Join(", ", noisy));
+        Assert.True(payload > 20000, string.Create(CultureInfo.InvariantCulture, $"only {payload} characters of schema were examined"));
+    }
+
+    private static bool Noisy(JsonElement node) => node.ValueKind switch
+    {
+        JsonValueKind.Object => node.EnumerateObject().Any(NoisyProperty),
+        JsonValueKind.Array => node.EnumerateArray().Any(Noisy),
+        _ => false,
+    };
+
+
+    private static bool NoisyProperty(JsonProperty property) =>
+        property.Value.ValueKind is JsonValueKind.Null && property.NameEquals("default")
+        || property.NameEquals("type") && HasNullArm(property.Value)
+        || Noisy(property.Value);
+
+
+    private static bool HasNullArm(JsonElement type) =>
+        type.ValueKind is JsonValueKind.Array
+        && type.EnumerateArray().Any(arm => string.Equals(arm.GetString(), "null", StringComparison.Ordinal));
+
+    [Fact]
+    public async Task EveryToolWithAPluralParameter_IsKnownToTheRepeatSteerAndNoOtherIs()
+    {
+        var declared = new SortedDictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var tool in await Surface())
+        {
+            if (Plurals(tool) is [var plural, ..])
+                declared[tool.Name] = plural;
+        }
+
+        var known = new SortedDictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var entry in TerseSharp.Server.RepeatSteer.Plural)
+        {
+            if (Has(await Surface(), entry.Key, entry.Value))
+                known[entry.Key] = entry.Value;
+        }
+
+        Assert.True(declared.Count >= 5, string.Create(CultureInfo.InvariantCulture, $"the census found only {declared.Count} plural parameters"));
+
+        var missing = declared.Keys.Where(name => !TerseSharp.Server.RepeatSteer.Plural.ContainsKey(name)).ToArray();
+        var unknown = TerseSharp.Server.RepeatSteer.Plural.Keys.Where(name => !known.ContainsKey(name)).ToArray();
+
+        Assert.True(missing.Length is 0, "tools with a plural parameter the repeat steer does not know: " + string.Join(", ", missing));
+        Assert.True(unknown.Length is 0, "repeat-steer entries naming a parameter no advertised tool declares: " + string.Join(", ", unknown));
+    }
+
+    private static bool Has(IList<McpClientTool> surface, string tool, string parameter) =>
+        surface.FirstOrDefault(entry => string.Equals(entry.Name, tool, StringComparison.Ordinal)) is { } found
+        && Has(found, parameter);
 }

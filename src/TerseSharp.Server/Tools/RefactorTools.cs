@@ -17,7 +17,7 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Alias for typeSymbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.ExtractInterfaceAsync(
-            loaded, resolved, interfaceName, Options("extract_interface", dryRun, verbose), cancellationToken), cancellationToken);
+            loaded, resolved, interfaceName, Options("extract_interface", dryRun, verbose), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_file")]
     [Description("Move a type out of a shared file into its own file named after it, keeping the usings and namespace. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
@@ -29,7 +29,7 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Alias for typeSymbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToFileAsync(
-            loaded, resolved, Options("move_type_to_file", dryRun, verbose), cancellationToken), cancellationToken);
+            loaded, resolved, Options("move_type_to_file", dryRun, verbose), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_namespace")]
     [Description("Change the namespace declared in the file containing a type. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
@@ -42,7 +42,7 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Alias for typeSymbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToNamespaceAsync(
-            loaded, resolved, targetNamespace, Options("move_type_to_namespace", dryRun, verbose), cancellationToken), cancellationToken);
+            loaded, resolved, targetNamespace, Options("move_type_to_namespace", dryRun, verbose), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "change_signature")]
     [Description("Replace a method's parameter list. The compile gate reports every call site the change breaks, so run it with dryRun first. A successful change answers in one line per changed file; pass verbose=true for the diff.")]
@@ -84,16 +84,17 @@ public sealed class RefactorTools(ToolContext context)
         new(tool, dryRun, AllowErrors: false, verbose);
 
     private Task<string> Guarded(
-        string? workspace,
-        string? symbolId,
-        Func<LoadedWorkspace, ISymbol, Task<Result<string>>> action,
-        CancellationToken cancellationToken)
+    string? workspace,
+    string? symbolId,
+    Func<LoadedWorkspace, ISymbol, Task<Result<string>>> action,
+    CancellationToken cancellationToken,
+    bool typesOnly = false)
     {
         var rejection = context.RejectWrite();
 
         return rejection is not null
             ? Task.FromResult(rejection)
             : context.WithSymbolAsync(workspace, symbolId, async (loaded, resolved) =>
-                NavigationTools.Unwrap(await action(loaded, resolved).ConfigureAwait(false)), cancellationToken);
+                NavigationTools.Unwrap(await action(loaded, resolved).ConfigureAwait(false)), cancellationToken, typesOnly: typesOnly);
     }
 }

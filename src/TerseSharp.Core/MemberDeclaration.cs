@@ -84,4 +84,58 @@ public static class MemberDeclaration
     private static TerseError NotEnumMembers() => Errors.Invalid(
         "the declaration did not parse as enum members",
         "pass one or more enum member names, e.g. 'Internal' or 'Internal = 3, Retry'");
+
+    public static string Reindented(string declaration, int column) =>
+    column <= 0 || !Dedented(declaration) ? declaration : Shifted(declaration, column, Continued(declaration));
+
+    private static string Shifted(string declaration, int column, HashSet<int> continued)
+    {
+        var lines = declaration.Split('\n');
+        var builder = new System.Text.StringBuilder(declaration.Length + (column * lines.Length));
+
+        for (var line = 0; line < lines.Length; line++)
+        {
+            if (line > 0)
+                builder.Append('\n');
+
+            if (line > 0 && lines[line].Trim().Length > 0 && !continued.Contains(line))
+                builder.Append(' ', column);
+
+            builder.Append(lines[line]);
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool Dedented(string declaration)
+    {
+        var lines = declaration.Split('\n');
+
+        return lines.Length > 1
+            && lines[0].Length > 0
+            && !char.IsWhiteSpace(lines[0][0])
+            && Array.Exists(lines[1..], line => line.Trim().Length > 0);
+    }
+
+    private static HashSet<int> Continued(string declaration)
+    {
+        var inside = new HashSet<int>();
+        var text = Microsoft.CodeAnalysis.Text.SourceText.From(declaration);
+
+        foreach (var token in SyntaxFactory.ParseTokens(declaration))
+            Span(inside, text, token);
+
+        return inside;
+    }
+
+    private static void Span(HashSet<int> inside, Microsoft.CodeAnalysis.Text.SourceText text, SyntaxToken token)
+    {
+        if (!token.Text.Contains('\n', StringComparison.Ordinal))
+            return;
+
+        var span = text.Lines.GetLinePositionSpan(token.Span);
+
+        for (var line = span.Start.Line + 1; line <= span.End.Line; line++)
+            inside.Add(line);
+    }
 }

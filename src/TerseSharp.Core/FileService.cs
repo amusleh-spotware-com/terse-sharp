@@ -591,7 +591,9 @@ public static class FileService
         return needle.Length is not 0 && Dedented(before).Contains(needle, StringComparison.Ordinal);
     }
 
-    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0);
+    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0, string? Path = null);
+
+    public readonly record struct TextEditGroup(string Path, IReadOnlyList<TextEdit> Edits);
 
     private static async Task<Result<(string Full, string Before)>> OpenedAsync(
         LoadedWorkspace workspace,
@@ -704,4 +706,135 @@ public static class FileService
 
     private static int ReachableLines(LineSelection selection) =>
         selection.NextLine is 0 ? selection.CoveredLines : selection.TotalLines;
+
+    public static async Task<Result<string>> EditTextGroupedAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<TextEditGroup> groups,
+        EditRequest request,
+        CancellationToken cancellationToken)
+    {
+        var rendered = new List<string>(groups.Count);
+
+        foreach (var group in groups)
+        {
+            var answer = await EditTextBatchAsync(workspace, group.Path, group.Edits, request, cancellationToken).ConfigureAwait(false);
+
+            rendered.Add(answer.IsOk ? answer.Value! : answer.Error!.Render());
+        }
+
+        return Result.Ok(string.Join('\n', rendered));
+    }
+
+    public readonly record struct FileWrite(string Path, string Content);
+
+    private readonly record struct PendingWrite(
+        string Path,
+        string Full,
+        string Before,
+        string After,
+        Microsoft.CodeAnalysis.DocumentId? Document);
+
+    private static async Task<Result<PendingWrite>> PreparedAsync(
+        LoadedWorkspace workspace,
+        FileWrite file,
+        bool force,
+        CancellationToken cancellationToken)
+    {
+        var resolved = PathGuard.Resolve(workspace, file.Path);
+
+        if (!resolved.IsOk)
+            return Result.Fail<PendingWrite>(resolved.Error!);
+
+        var full = resolved.Value!;
+
+        if (SourceFile.Reject(file.Path, full, force) is { } refusal)
+            return Result.Fail<PendingWrite>(refusal.Error!);
+
+        var exists = File.Exists(full);
+        var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
+        var after = LineEndings.Adopt(file.Content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
+        var document = SourceFile.IsCSharp(file.Path) ? DocumentLookup.Find(workspace, file.Path) : null;
+
+        return Result.Ok(new PendingWrite(file.Path, full, before, after, document?.Id));
+    }
+
+    private static async Task<Result<string>?> GateManyAsync(
+        LoadedWorkspace workspace,
+        List<PendingWrite> pending,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var documents = pending.FindAll(entry => entry.Document is not null);
+
+        if (documents.Count is 0)
+            return null;
+
+        var updated = workspace.Solution;
+        var ids = new List<Microsoft.CodeAnalysis.DocumentId>(documents.Count);
+
+        foreach (var entry in documents)
+        {
+            var document = workspace.Solution.GetDocument(entry.Document)!;
+            var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+            var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
+
+            updated = updated.WithDocumentText(entry.Document!, SourceText.From(entry.After, encoding));
+            ids.Add(entry.Document!);
+        }
+
+        return await EditGate.ApplyAsync(workspace, updated, ids, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task<Result<string>> WriteTextManyAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<FileWrite> files,
+        bool dryRun,
+        bool force,
+        bool allowErrors,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var pending = new List<PendingWrite>(files.Count);
+
+        foreach (var file in files)
+        {
+            var prepared = await PreparedAsync(workspace, file, force, cancellationToken).ConfigureAwait(false);
+
+            if (!prepared.IsOk)
+                return Result.Fail<string>(prepared.Error!);
+
+            pending.Add(prepared.Value);
+        }
+
+        var gated = await GateManyAsync(workspace, pending, new EditOptions("write_text", dryRun, allowErrors, verbose), cancellationToken).ConfigureAwait(false);
+
+        if (gated is { IsOk: false })
+            return gated.Value;
+
+        var rendered = new List<string>(pending.Count);
+
+        if (gated is { } applied)
+            rendered.Add(applied.Value!);
+
+        foreach (var entry in pending)
+            rendered.Add(await PlainAsync(workspace, entry, dryRun, verbose, cancellationToken).ConfigureAwait(false));
+
+        return Result.Ok(string.Join('\n', rendered.FindAll(line => line.Length > 0)));
+    }
+
+    private static async Task<string> PlainAsync(
+        LoadedWorkspace workspace,
+        PendingWrite entry,
+        bool dryRun,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        if (entry.Document is not null)
+            return string.Empty;
+
+        if (!dryRun)
+            await WriteAsync(workspace, entry.Full, entry.After, cancellationToken).ConfigureAwait(false);
+
+        return DiffResponse("write_text", entry.Path, entry.Before, entry.After, dryRun, verbose);
+    }
 }

@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server;
 
@@ -16,12 +18,13 @@ public static class McpHost
     CancellationToken cancellationToken)
     {
         var builder = Host.CreateApplicationBuilder();
-        var advertised = ToolProfile.Resolve(tools);
+        var surface = ToolProfile.Resolve(tools);
+        var context = new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch), readOnly, surface);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
-        builder.Services.AddSingleton(_ => new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch), readOnly, advertised));
+        builder.Services.AddSingleton(_ => context);
         builder.Services.AddSingleton<LastTestRun>();
         builder.Services
             .AddMcpServer()
@@ -30,12 +33,19 @@ public static class McpHost
             .WithRequestFilters(filters =>
             {
                 filters.AddCallToolFilter(ToolArgumentFilter.Structured);
+                filters.AddCallToolFilter(RepeatSteer.Filter());
+                filters.AddListToolsFilter(SchemaCompactor.Filter());
 
-                if (advertised is not null)
+                if (surface.Advertised is { } advertised)
                     filters.AddListToolsFilter(ToolProfile.Filter(advertised));
+
+                if (surface.MarkupDerived)
+                    filters.AddListToolsFilter(ToolProfile.MarkupFilter(context));
             });
 
         var host = builder.Build();
+
+        context.ToolsChanged = token => Announce(host.Services, token);
 
         Preload(host.Services, workspace, cancellationToken);
         BeginMaintenance(cancellationToken);
@@ -124,4 +134,8 @@ public static class McpHost
 
     private static void BeginSweep(CancellationToken cancellationToken) =>
         _ = Task.Run(ShadowCopyAnalyzerLoader.Sweep, cancellationToken);
+
+    private static Task Announce(IServiceProvider services, CancellationToken cancellationToken) =>
+        services.GetRequiredService<McpServer>()
+            .SendNotificationAsync(NotificationMethods.ToolListChangedNotification, cancellationToken);
 }

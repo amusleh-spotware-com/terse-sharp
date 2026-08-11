@@ -130,10 +130,10 @@ public sealed class WorkspaceIndexesTests : IDisposable
 
     [Fact]
     public void Describe_BeforeAnythingIsBuilt_ReportsNoSizes() =>
-        Assert.Contains(
-            "index=xaml(hit=0 miss=0 files=-) resx(hit=0 miss=0 families=-) code(hit=0 miss=0 calls=-) razor(hit=0 miss=0 files=-) paths(hit=0 miss=0 files=-) documents=0/128 parses=0",
-            Open().Indexes.Describe(),
-            StringComparison.Ordinal);
+    Assert.Contains(
+        "index=xaml(hit=0 miss=0 files=-) resx(hit=0 miss=0 families=-) code(hit=0 miss=0 calls=-) razor(hit=0 miss=0 files=-) paths(hit=0 miss=0 files=-) markup(hit=0 miss=0) documents=0/128 parses=0",
+        Open().Indexes.Describe(),
+        StringComparison.Ordinal);
 
     [Fact]
     public async Task Xaml_SurvivesACodeChangeAndRebuildsAfterAMarkupChange()

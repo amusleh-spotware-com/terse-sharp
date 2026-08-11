@@ -57,52 +57,55 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; a test failure returns each failure's message, expected and actual values, and one source frame, and a build that failed under the run returns its error-severity diagnostics only, never its warnings. changed=true runs only the test projects that transitively reference a project you changed since the workspace loaded, and names both the projects it ran and the ones it skipped; it falls back to the whole solution, saying why, whenever it cannot reason about the change. Pass verbose=true to get the full report on a green run, and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run the way they scope build, so noBuild=true against a Release tree tests the Release binaries.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs - so a passing suite costs almost nothing; a test failure returns each failure's message, expected and actual values, and one source frame, and a build that failed under the run returns its error-severity diagnostics only, never its warnings. Pass projects to run several test projects in ONE call. Replaces one call per project: they share one results directory and answer one merged verdict line with a per-project total, the timeout applies to each project rather than to the batch, and any project that timed out is named instead of the merged run being reported as passed. changed=true runs only the test projects that transitively reference a project you changed since the workspace loaded, and names both the projects it ran and the ones it skipped; it falls back to the whole solution, saying why, whenever it cannot reason about the change. Pass verbose=true to get the full report on a green run, and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run the way they scope build, so noBuild=true against a Release tree tests the Release binaries.")]
     public Task<string> RunTests(
-        [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
-        [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
-        [Description("Project path; empty runs every test project.")] string? project = null,
-        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
-        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
-        [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
-        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
-        [Description("Run existing binaries; skip the build.")] bool noBuild = false,
-        [Description("List passing tests too.")] bool includePassed = false,
-        [Description("List the N slowest tests.")] int slowest = 0,
-        [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
-        [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) => context.WithTargetAsync(
-            workspace,
-            project,
-            target =>
-            {
-                var selection = Selection(test, filter);
+    [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
+    [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
+    [Description("Project path; empty runs every test project.")] string? project = null,
+    [Description("Several test projects run in one call, at most 10, each a project name or a path to its .csproj. Replaces one call per project: one results directory, one merged verdict line, a per-project timeout. Cannot be combined with project=.")] string?[]? projects = null,
+    [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
+    [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
+    [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
+    [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
+    [Description("Run existing binaries; skip the build.")] bool noBuild = false,
+    [Description("List passing tests too.")] bool includePassed = false,
+    [Description("List the N slowest tests.")] int slowest = 0,
+    [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
+    [Description("Timeout seconds, 1-3600 (600). With projects=, it is the budget for each project rather than for the batch.")] int timeoutSeconds = 600,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default) => context.WithTargetAsync(
+        workspace,
+        project,
+        target =>
+        {
+            var selection = Selection(test, filter);
 
-                if (!selection.IsOk)
-                    return Task.FromResult(selection.Error!.Render());
+            if (!selection.IsOk)
+                return Task.FromResult(selection.Error!.Render());
 
-                var scope = Scoped(configuration, targetFramework, properties);
+            var scope = Scoped(configuration, targetFramework, properties);
 
-                if (!scope.IsOk)
-                    return Task.FromResult(scope.Error!.Render());
+            if (!scope.IsOk)
+                return Task.FromResult(scope.Error!.Render());
 
-                return Contained(target, project, resolved => SelectedAsync(
-                    target,
-                    new TestRunRequest(
-                        resolved ?? target.SolutionPath,
-                        selection.Value,
-                        noBuild,
-                        includePassed,
-                        slowest,
-                        Seconds(timeoutSeconds),
-                        verbose,
-                        scope.Value),
-                    resolved is null && changed,
-                    cancellationToken));
-            },
-            changed && string.IsNullOrWhiteSpace(project),
-            cancellationToken);
+            return TestedAsync(
+                target,
+                project,
+                projects,
+                new TestRunRequest(
+                    target.SolutionPath,
+                    selection.Value,
+                    noBuild,
+                    includePassed,
+                    slowest,
+                    Seconds(timeoutSeconds),
+                    verbose,
+                    scope.Value),
+                changed,
+                cancellationToken);
+        },
+        changed && string.IsNullOrWhiteSpace(project) && projects is not { Length: > 0 },
+        cancellationToken);
 
     [McpServerTool(Name = "rerun_failed")]
     [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
@@ -359,22 +362,29 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         requested.Properties is { Count: > 0 } ? requested.Properties : remembered.Properties);
 
     private Task<string> SelectedAsync(
-        WorkspaceTarget workspace,
-        TestRunRequest request,
-        bool changed,
-        CancellationToken cancellationToken)
+    WorkspaceTarget workspace,
+    TestRunRequest request,
+    bool changed,
+    CancellationToken cancellationToken)
     {
         if (!changed)
             return RunAsync(workspace, request, cancellationToken);
 
         var tests = workspace.Tests;
 
-        return tests.IsFullRun
-            ? Noted(RunAsync(workspace, request, cancellationToken), FullRunNote(tests))
-            : Noted(
-                RunAsync(workspace, request with { Targets = tests.Run }, cancellationToken),
-                SelectedNote(workspace.Root, tests));
+        if (tests.IsFullRun)
+            return Noted(RunAsync(workspace, request, cancellationToken), FullRunNote(tests));
+
+        return Crowded(tests)
+            ? Noted(RunAsync(workspace, request, cancellationToken), CrowdedNote(tests))
+            : Noted(RunAsync(workspace, request with { Targets = tests.Run }, cancellationToken), SelectedNote(workspace.Root, tests));
     }
+
+    internal static bool Crowded(TestSelection tests) => !tests.IsFullRun && tests.Run.Length > MaxBatchedProjects;
+
+    internal static string CrowdedNote(TestSelection tests) => string.Create(
+    CultureInfo.InvariantCulture,
+    $"NOTE the change reaches {tests.Run.Length} test projects, more than the {MaxBatchedProjects} a selective run bounds, so the whole solution was run once instead - the timeout applies per invocation");
 
     private static async Task<string> Noted(Task<string> run, string note)
     {
@@ -419,5 +429,65 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         var run = CleanService.Clean(target, null, includeIntermediate, dryRun, verbose, cancellationToken);
 
         return run.IsOk ? run.Value!.Response : run.Error!.Render();
+    }
+
+    private static Result<ImmutableArray<string>> ResolvedProjects(WorkspaceTarget workspace, string?[] projects)
+    {
+        if (projects.Length > MaxBatchedProjects)
+        {
+            return Result.Fail<ImmutableArray<string>>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"projects carried {projects.Length} entries, at most {MaxBatchedProjects} run in one call"),
+                string.Create(CultureInfo.InvariantCulture, $"send at most {MaxBatchedProjects} per call - the timeout applies to each project, so a longer batch has no bound")));
+        }
+
+        var resolved = ImmutableArray.CreateBuilder<string>();
+
+        foreach (var entry in projects)
+        {
+            if (entry is not { Length: > 0 })
+                return Result.Fail<ImmutableArray<string>>(Errors.Invalid("'projects' carries a blank entry", "drop it, or name the project you meant to run"));
+
+            var found = workspace.ResolveProject(entry);
+
+            if (!found.IsOk)
+                return Result.Fail<ImmutableArray<string>>(found.Error!);
+
+            resolved.Add(found.Value!);
+        }
+
+        return Result.Ok(resolved.DrainToImmutable());
+    }
+
+    internal const int MaxBatchedProjects = 10;
+
+    private Task<string> TestedAsync(
+        WorkspaceTarget target,
+        string? project,
+        string?[]? projects,
+        TestRunRequest request,
+        bool changed,
+        CancellationToken cancellationToken)
+    {
+        if (projects is not { Length: > 0 } named)
+        {
+            return Contained(target, project, resolved => SelectedAsync(
+                target,
+                request with { Target = resolved ?? target.SolutionPath },
+                resolved is null && changed,
+                cancellationToken));
+        }
+
+        if (project is { Length: > 0 })
+        {
+            return Task.FromResult(Errors.Invalid(
+                "projects= was passed together with project=, and one of them would have been silently dropped",
+                "pass every project in projects=, or the single one in project=").Render());
+        }
+
+        var resolved = ResolvedProjects(target, named);
+
+        return resolved.IsOk
+            ? RunAsync(target, request with { Target = target.SolutionPath, Targets = resolved.Value }, cancellationToken)
+            : Task.FromResult(resolved.Error!.Render());
     }
 }

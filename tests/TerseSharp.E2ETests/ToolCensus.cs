@@ -186,4 +186,8 @@ internal static class ToolCensus
     "replace_symbol", "replace_symbol_body", "rerun_failed", "resx_rename", "resx_set", "run_tests",
     "solution_add_project", "undo_last_change", "write_text", "xaml_add_element", "xaml_set_property",
 ];
+
+    public static string WithoutSteer(string text) => string.Join(
+        '\n',
+        text.Split('\n').Where(line => !line.Contains(" calls in a row - pass ", StringComparison.Ordinal)));
 }

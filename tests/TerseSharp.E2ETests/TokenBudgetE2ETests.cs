@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -512,4 +513,18 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             Tokens(combined) - Tokens(untagged) <= 4 * records,
             Report("search_text combined", combined, untagged) + string.Create(CultureInfo.InvariantCulture, $" over {records} records, {doubled} of them q1,q2"));
     }
+
+    [Fact]
+    public async Task TheAdvertisedToolPayload_StaysWithinItsBudget()
+    {
+        var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var characters = surface.Sum(tool => tool.Name.Length + (tool.Description?.Length ?? 0) + tool.JsonSchema.GetRawText().Length);
+        var tokens = (characters + 3) / 4;
+
+        Assert.True(
+            tokens <= AdvertisedPayloadBudget,
+            string.Create(CultureInfo.InvariantCulture, $"tools/list costs {tokens} tokens over {surface.Count} tools, budget {AdvertisedPayloadBudget}"));
+    }
+
+    private const int AdvertisedPayloadBudget = 23400;
 }

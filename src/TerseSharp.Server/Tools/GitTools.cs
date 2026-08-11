@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
@@ -46,22 +47,35 @@ public sealed class GitTools(ToolContext context)
                 cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "diff_text", ReadOnly = true)]
-    [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. It costs about one line of response per changed line, so bound it: path= scopes it to one file or pathspec and maxLines= caps it at 400 by default. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
+    [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. Pass paths to diff up to 10 files in ONE call. Replaces one call per file: every entry is handed to the same git invocation as its own pathspec, so the answer is one unified diff already labelled per file. It costs about one line of response per changed line, so bound it: path= and paths= scope it and maxLines= caps it at 400 by default. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
     public Task<string> DiffText(
-        [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
-        [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
-        [Description("Max diff lines returned (400).")] int maxLines = 0,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
-        CancellationToken cancellationToken = default) =>
-        root is { Length: > 0 }
-            ? OutsideAsync(root, full => TextAsync(full, baseRef, path, NavigationTools.Cap(maxLines, MaxDiffLines), full, cancellationToken))
+    [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
+    [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
+    [Description("Several paths or pathspecs answered in one diff, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
+    [Description("Max diff lines returned (400).")] int maxLines = 0,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
+    CancellationToken cancellationToken = default)
+    {
+        var combined = paths is { Length: > 0 } || path is { Length: > 0 }
+            ? PluralPaths.Combine(path, paths, "paths")
+            : Result.Ok(ImmutableArray<string>.Empty);
+
+        if (!combined.IsOk)
+            return Task.FromResult(combined.Error!.Render());
+
+        var scoped = combined.Value;
+        var hint = path ?? (scoped.IsDefaultOrEmpty ? null : scoped[0]);
+
+        return root is { Length: > 0 }
+            ? OutsideAsync(root, full => TextAsync(full, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), full, cancellationToken))
             : context.WithWorkspaceAsync(
                 workspace,
-                path,
-                loaded => TextAsync(loaded.Root, baseRef, path, NavigationTools.Cap(maxLines, MaxDiffLines), null, cancellationToken),
+                hint,
+                loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, cancellationToken),
                 semantic: false,
                 cancellationToken);
+    }
 
     private static async Task<string> ListAsync(
         string root,
@@ -130,16 +144,16 @@ public sealed class GitTools(ToolContext context)
     }
 
     private static async Task<string> TextAsync(
-        string root,
-        string? baseRef,
-        string? path,
-        int maxLines,
-        string? outside,
-        CancellationToken cancellationToken)
+    string root,
+    string? baseRef,
+    IReadOnlyList<string> paths,
+    int maxLines,
+    string? outside,
+    CancellationToken cancellationToken)
     {
         var diff = await GitRunner.ReadAsync(
             root,
-            Arguments(["diff", "--no-color"], baseRef, path),
+            Arguments(["diff", "--no-color"], baseRef, paths),
             cancellationToken).ConfigureAwait(false);
 
         if (!diff.IsOk)
@@ -156,9 +170,9 @@ public sealed class GitTools(ToolContext context)
                 lines.Add(new string(line));
         }
 
-        var response = new ResponseBuilder("diff_text", path ?? string.Empty);
+        var response = new ResponseBuilder("diff_text", paths.Count is 0 ? string.Empty : string.Join(" ", paths));
 
-        response.Summary(lines.Count, total, "lines", "path= or maxLines=");
+        response.Summary(lines.Count, total, "lines", "path=, paths= or maxLines=");
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
@@ -169,15 +183,22 @@ public sealed class GitTools(ToolContext context)
         return response.ToString();
     }
 
-    private static string[] Arguments(IReadOnlyList<string> command, string? baseRef, string? path)
+    private static string[] Arguments(IReadOnlyList<string> command, string? baseRef, string? path) =>
+    Arguments(command, baseRef, path is { Length: > 0 } pathspec ? [pathspec] : []);
+
+    private static string[] Arguments(IReadOnlyList<string> command, string? baseRef, IReadOnlyList<string> paths)
     {
-        var arguments = new List<string>(command.Count + 7) { "--no-optional-locks" };
+        var arguments = new List<string>(command.Count + 7 + paths.Count) { "--no-optional-locks" };
 
         arguments.AddRange(command);
         arguments.AddRange(["--no-renames", "--no-ext-diff", "--relative"]);
         arguments.Add(baseRef is { Length: > 0 } reference ? reference : "HEAD");
         arguments.Add("--");
-        arguments.Add(path is { Length: > 0 } pathspec ? pathspec : ".");
+
+        if (paths.Count is 0)
+            arguments.Add(".");
+        else
+            arguments.AddRange(paths);
 
         return [.. arguments];
     }

@@ -14,10 +14,11 @@ public static class SymbolLookup
     ResolveAsync(workspace, symbolId, null, cancellationToken);
 
     public static async Task<Result<ISymbol>> ResolveAsync(
-        LoadedWorkspace workspace,
-        string symbolId,
-        string? path,
-        CancellationToken cancellationToken)
+    LoadedWorkspace workspace,
+    string symbolId,
+    string? path,
+    CancellationToken cancellationToken,
+    bool typesOnly = false)
     {
         var requested = SymbolReference.Unescaped(symbolId);
 
@@ -25,16 +26,20 @@ public static class SymbolLookup
             return await ByIdAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
 
         if (path is not { Length: > 0 } scope)
-            return await ByNameAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+            return await ByNameAsync(workspace, requested, typesOnly, cancellationToken).ConfigureAwait(false);
 
-        return await InFileAsync(workspace, requested, scope, cancellationToken).ConfigureAwait(false)
-            ?? await ByNameAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+        return Typed(await InFileAsync(workspace, requested, scope, cancellationToken).ConfigureAwait(false), typesOnly)
+            ?? await ByNameAsync(workspace, requested, typesOnly, cancellationToken).ConfigureAwait(false);
     }
 
+    private static Result<ISymbol>? Typed(Result<ISymbol>? found, bool typesOnly) =>
+        typesOnly && found is { IsOk: true, Value: not INamedTypeSymbol } ? null : found;
+
     private static async Task<Result<ISymbol>> ByNameAsync(
-    LoadedWorkspace workspace,
-    string text,
-    CancellationToken cancellationToken)
+LoadedWorkspace workspace,
+string text,
+bool typesOnly,
+CancellationToken cancellationToken)
     {
         if (SymbolReference.Parse(text) is not { } query)
             return Unparsed(text);
@@ -50,8 +55,19 @@ public static class SymbolLookup
         var named = found.Where(symbol => string.Equals(symbol.Name, query.Member, StringComparison.Ordinal)).ToArray();
         var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
 
-        return Chosen(text, matches, found);
+        if (!typesOnly)
+            return Chosen(text, matches, found);
+
+        var types = matches.Where(symbol => symbol is INamedTypeSymbol).ToArray();
+
+        return OnlyTypes(text, types, matches.Length - types.Length) ?? Chosen(text, types, found);
     }
+
+    private static Result<ISymbol>? OnlyTypes(string text, ISymbol[] types, int dropped) => types.Length is 0 && dropped > 0
+        ? Result.Fail<ISymbol>(Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"'{text}' names no type, and this parameter takes a containing type; {dropped} non-type symbol(s) also match this name"),
+            "name the type that declares them, or take its documentation id from search_symbols kind=class"))
+        : null;
 
     private static Result<ISymbol> Chosen(string text, ISymbol[] matches, IReadOnlyList<ISymbol> found) => matches switch
     {

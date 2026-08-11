@@ -143,7 +143,7 @@ internal static class ToolCall
     {
         try
         {
-            return Result.Ok(value.Deserialize(parameter.ParameterType));
+            return Result.Ok(value.Deserialize(parameter.ParameterType, CaseInsensitive));
         }
         catch (JsonException exception)
         {
@@ -152,6 +152,8 @@ internal static class ToolCall
                 "check the type of that argument"));
         }
     }
+
+    private static readonly JsonSerializerOptions CaseInsensitive = new(JsonSerializerDefaults.Web);
 
     private static async Task<string> Text(object? result) => result switch
     {

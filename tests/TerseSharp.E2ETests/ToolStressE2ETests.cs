@@ -82,7 +82,7 @@ public sealed class ToolStressE2ETests(TerseServerFixture server)
             "get_file_outline",
             new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" }));
 
-        Assert.Single(answers.Distinct(StringComparer.Ordinal));
+        Assert.Single(answers.Select(ToolCensus.WithoutSteer).Distinct(StringComparer.Ordinal));
         Assert.All(answers, answer => Assert.Contains("OrderBook  class", answer, StringComparison.Ordinal));
     }
 

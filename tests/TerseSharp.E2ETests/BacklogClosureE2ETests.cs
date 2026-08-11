@@ -360,4 +360,616 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithSeveralPaths_AnswersThemAllInOneResponseUnderTheirOwnPathLines()
+    {
+        string[] paths = ["wide-lines.json", "src/Fixture.Trading/Views/OrderView.xaml", "src/Fixture.Trading/Pages/Index.cshtml"];
+        var batched = await server.CallAsync("read_text", new() { ["paths"] = paths, ["maxLines"] = 5 });
+        var separate = 0;
+
+        foreach (var path in paths)
+            separate += ToolCensus.Tokens(await server.CallAsync("read_text", new() { ["path"] = path, ["maxLines"] = 5 }));
+
+        Assert.StartsWith("3 files", batched, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOT_FOUND", batched, StringComparison.Ordinal);
+        Assert.All(paths, path => Assert.Contains(path, batched, StringComparison.Ordinal));
+        Assert.True(
+            ToolCensus.Tokens(batched) <= separate + 40,
+            string.Create(CultureInfo.InvariantCulture, $"batched={ToolCensus.Tokens(batched)} separate={separate}\n{batched}"));
+    }
+
+    [Fact]
+    public async Task ReadText_WithAPathThatDoesNotResolve_ReportsItInlineInsteadOfFailingTheCall()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "wide-lines.json", "no/such/file.json" },
+            ["maxLines"] = 3,
+        });
+
+        Assert.StartsWith("2 files", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_FOUND no/such/file.json", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.Contains("\"first\": \"short\"", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithABlankPathEntryOrTooMany_IsRefusedByNameRatherThanTruncated()
+    {
+        var blank = await server.CallAsync("read_text", new() { ["paths"] = new[] { "package.json", "" } });
+        var many = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "package.json",
+            ["paths"] = Enumerable.Repeat("package.json", 10).ToArray(),
+        });
+
+        Assert.Contains("'paths' carries a blank entry", blank, StringComparison.Ordinal);
+        Assert.Contains("11 paths were requested", many, StringComparison.Ordinal);
+        Assert.Contains("remedy:", many, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithSeveralPaths_SharesOneMaxCharsBudgetAndNamesTheEntryItClipped()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "wide-lines.json", "package.json" },
+            ["maxChars"] = 200,
+        });
+
+        Assert.Contains("the shared maxChars budget ran out at", text, StringComparison.Ordinal);
+        Assert.Contains("wide-lines.json", text, StringComparison.Ordinal);
+        Assert.True(text.Length < 2000, string.Create(CultureInfo.InvariantCulture, $"{text.Length} characters for a 200-character budget"));
+    }
+
+    [Fact]
+    public async Task ReadText_WithNeitherPathNorPaths_NamesBothInsteadOfReadingNothing()
+    {
+        var text = await server.CallAsync("read_text", []);
+
+        Assert.Contains("path", text, StringComparison.Ordinal);
+        Assert.Contains("paths", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithAPathPerEntry_EditsSeveralFilesInOneCallAndAnswersOneLinePerFile()
+    {
+        var first = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "multi-a.json");
+        var second = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "multi-b.json");
+
+        await File.WriteAllTextAsync(first, "{ \"probe\": 1 }", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(second, "{ \"probe\": 1 }", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = "src/Fixture.Trading/multi-a.json",
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object?> { ["oldText"] = "1", ["newText"] = "2" },
+                new Dictionary<string, object?> { ["oldText"] = "1", ["newText"] = "3", ["path"] = "src/Fixture.Trading/multi-b.json" },
+                },
+            });
+
+            Assert.Equal(
+                "multi-a.json  changedLines=1  edits=1/1\nmulti-b.json  changedLines=1  edits=1/1",
+                text);
+
+            Assert.Equal("{ \"probe\": 2 }", await File.ReadAllTextAsync(first, TestContext.Current.CancellationToken));
+            Assert.Equal("{ \"probe\": 3 }", await File.ReadAllTextAsync(second, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithMoreEntriesThanOneCallTakes_IsRefusedByName()
+    {
+        var many = Enumerable
+            .Range(0, 26)
+            .Select(index => new Dictionary<string, object?> { ["oldText"] = "1", ["newText"] = index.ToString(CultureInfo.InvariantCulture) })
+            .ToArray();
+
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/multi-a.json",
+            ["edits"] = many,
+        });
+
+        Assert.Contains("26 entries, at most 25 are applied in one call", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithMoreEntriesForOneFileThanOneWriteTakes_NamesTheFile()
+    {
+        var many = Enumerable
+            .Range(0, 11)
+            .Select(index => new Dictionary<string, object?>
+            {
+                ["oldText"] = "1",
+                ["newText"] = index.ToString(CultureInfo.InvariantCulture),
+                ["path"] = "src/Fixture.Trading/multi-b.json",
+            })
+            .ToArray();
+
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/multi-a.json",
+            ["edits"] = many,
+        });
+
+        Assert.Contains("11 entries for src/Fixture.Trading/multi-b.json", text, StringComparison.Ordinal);
+        Assert.Contains("at most 10 per file", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WithSeveralFiles_WritesThemAllAndAnswersOneLinePerFile()
+    {
+        var first = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "batch-a.json");
+        var second = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "batch-b.json");
+
+        try
+        {
+            var text = await server.CallAsync("write_text", new()
+            {
+                ["files"] = new object[]
+                {
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/batch-a.json", ["content"] = "{ \"a\": 1 }" },
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/batch-b.json", ["content"] = "{ \"b\": 2 }" },
+                },
+            });
+
+            Assert.Equal("batch-a.json  changedLines=1\nbatch-b.json  changedLines=1", text);
+            Assert.Equal("{ \"a\": 1 }", await File.ReadAllTextAsync(first, TestContext.Current.CancellationToken));
+            Assert.Equal("{ \"b\": 2 }", await File.ReadAllTextAsync(second, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_WithTwoInterdependentCSharpFiles_LandsThemUnderOneCompileGate()
+    {
+        var callee = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "GateCallee.cs");
+        var caller = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "GateCaller.cs");
+
+        try
+        {
+            var text = await server.CallAsync("write_text", new()
+            {
+                ["force"] = true,
+                ["files"] = new object[]
+                {
+                new Dictionary<string, object?>
+                {
+                    ["path"] = "src/Fixture.Trading/GateCaller.cs",
+                    ["content"] = "namespace Fixture.Trading;\n\npublic static class GateCaller\n{\n    public static int Call() => GateCallee.Answer();\n}\n",
+                },
+                new Dictionary<string, object?>
+                {
+                    ["path"] = "src/Fixture.Trading/GateCallee.cs",
+                    ["content"] = "namespace Fixture.Trading;\n\npublic static class GateCallee\n{\n    public static int Answer() => 42;\n}\n",
+                },
+                },
+            });
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("GateCaller.cs", text, StringComparison.Ordinal);
+            Assert.Contains("GateCallee.cs", text, StringComparison.Ordinal);
+            Assert.True(File.Exists(callee));
+            Assert.True(File.Exists(caller));
+        }
+        finally
+        {
+            File.Delete(callee);
+            File.Delete(caller);
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_WithFilesAndATopLevelPath_IsRefusedRatherThanDroppingOne()
+    {
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/batch-a.json",
+            ["files"] = new object[] { new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/batch-b.json", ["content"] = "{}" } },
+        });
+
+        Assert.Contains("would have been silently dropped", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WithNeitherPathNorFiles_NamesBoth()
+    {
+        var text = await server.CallAsync("write_text", []);
+
+        Assert.Contains("path", text, StringComparison.Ordinal);
+        Assert.Contains("files", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithSeveralProjects_RunsThemAllUnderOneVerdictLine()
+    {
+        var once = await server.CallAsync("run_tests", new()
+        {
+            ["project"] = "Fixture.Trading.Tests",
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes",
+            ["timeoutSeconds"] = 300,
+        });
+
+        var twice = await server.CallAsync("run_tests", new()
+        {
+            ["projects"] = new[] { "Fixture.Trading.Tests", "Fixture.Trading.Tests" },
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes",
+            ["timeoutSeconds"] = 300,
+        });
+
+        Assert.StartsWith("run_tests PASSED", once, StringComparison.Ordinal);
+        Assert.StartsWith("run_tests PASSED", twice, StringComparison.Ordinal);
+        Assert.Contains("total=2", once, StringComparison.Ordinal);
+        Assert.Contains("total=4", twice, StringComparison.Ordinal);
+        Assert.DoesNotContain("timed out", twice, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithProjectsAndProject_IsRefusedRatherThanDroppingOne()
+    {
+        var text = await server.CallAsync("run_tests", new()
+        {
+            ["project"] = "Fixture.Trading.Tests",
+            ["projects"] = new[] { "Fixture.Trading.Tests" },
+        });
+
+        Assert.Contains("would have been silently dropped", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithAProjectNameThatMatchesNothing_NamesTheClosestInsteadOfRunningNothing()
+    {
+        var text = await server.CallAsync("run_tests", new() { ["projects"] = new[] { "Fixture.Trading.Tests", "Nope.Tests" } });
+
+        Assert.Contains("ProjectNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithABlankProjectEntry_IsRefusedByName()
+    {
+        var text = await server.CallAsync("run_tests", new() { ["projects"] = new[] { "Fixture.Trading.Tests", "" } });
+
+        Assert.Contains("'projects' carries a blank entry", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithSeveralPaths_OutlinesThemAllInOneResponse()
+    {
+        string[] paths = ["src/Fixture.Trading/OrderService.cs", "src/Fixture.Trading/OrderBook.cs", "src/Fixture.Trading/OrderSide.cs"];
+        var batched = await server.CallAsync("get_file_outline", new() { ["paths"] = paths });
+        var separate = 0;
+
+        foreach (var path in paths)
+            separate += ToolCensus.Tokens(await server.CallAsync("get_file_outline", new() { ["path"] = path }));
+
+        Assert.StartsWith("3 files", batched, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOT_FOUND", batched, StringComparison.Ordinal);
+        Assert.All(paths, path => Assert.Contains(path, batched, StringComparison.Ordinal));
+        Assert.True(
+            ToolCensus.Tokens(batched) <= separate + (20 * paths.Length),
+            string.Create(CultureInfo.InvariantCulture, $"batched={ToolCensus.Tokens(batched)} separate={separate} over {paths.Length} files"));
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithAPathThatDoesNotResolve_ReportsItInlineInsteadOfFailingTheCall()
+    {
+        var text = await server.CallAsync("get_file_outline", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/OrderSide.cs", "src/Fixture.Trading/NoSuchType.cs" },
+        });
+
+        Assert.StartsWith("2 files", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_FOUND src/Fixture.Trading/NoSuchType.cs", text, StringComparison.Ordinal);
+        Assert.Contains("OrderSide", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithContains_KeepsTheMatchingMembersAndSaysHowManyItDropped()
+    {
+        var whole = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+        var filtered = await server.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["contains"] = "Total",
+        });
+
+        Assert.Contains("TotalVolume", filtered, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderBook.Add", filtered, StringComparison.Ordinal);
+        Assert.Contains(" of ", filtered, StringComparison.Ordinal);
+        Assert.Contains(" members", filtered, StringComparison.Ordinal);
+        Assert.True(
+            ToolCensus.Tokens(filtered) * 2 < ToolCensus.Tokens(whole),
+            string.Create(CultureInfo.InvariantCulture, $"filtered={ToolCensus.Tokens(filtered)} whole={ToolCensus.Tokens(whole)}\n{filtered}"));
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithContains_KeepsTheMatchingMembersOnly()
+    {
+        var text = await server.CallAsync("get_type_outline", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.OrderBook",
+            ["contains"] = "Total",
+        });
+
+        Assert.Contains("TotalVolume", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderBook.Add", text, StringComparison.Ordinal);
+        Assert.Contains(" members", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DiffText_WithSeveralPaths_ScopesOneDiffToThemAll()
+    {
+        var scoped = await server.CallAsync("diff_text", new()
+        {
+            ["paths"] = new[] { "src", "tests" },
+            ["baseRef"] = "HEAD",
+            ["maxLines"] = 20,
+        });
+
+        var refused = await server.CallAsync("diff_text", new() { ["paths"] = new[] { "src", "" } });
+
+        Assert.DoesNotContain("ERROR", scoped, StringComparison.Ordinal);
+        Assert.Contains("lines", scoped, StringComparison.Ordinal);
+        Assert.Contains("'paths' carries a blank entry", refused, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithANameThatIsBothATypeAndAMember_ResolvesTheTypeInsteadOfRefusing()
+    {
+        var added = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "OrderSide",
+            ["declaration"] = "Hold",
+            ["dryRun"] = true,
+        });
+
+        var read = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderSide" });
+
+        Assert.DoesNotContain("AmbiguousSymbol", added, StringComparison.Ordinal);
+        Assert.Contains("Hold", added, StringComparison.Ordinal);
+        Assert.Contains("AmbiguousSymbol", read, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithANameNoTypeCarries_SaysSoAndCountsTheNonTypeMatches()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "Flip",
+            ["declaration"] = "public int Extra { get; }",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("names no type", text, StringComparison.Ordinal);
+        Assert.Contains("non-type symbol(s) also match this name", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AThirdConsecutiveCallOfTheSameTool_CarriesTheSteerThatNamesItsPluralParameter()
+    {
+        await server.CallAsync("workspace_status", []);
+
+        var first = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+        var second = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+        var third = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+        var batched = await server.CallAsync("get_file_outline", new() { ["paths"] = new[] { "src/Fixture.Trading/OrderSide.cs" } });
+
+        Assert.DoesNotContain("calls in a row", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("calls in a row", second, StringComparison.Ordinal);
+        Assert.Contains("3 get_file_outline calls in a row - pass paths=[...] for the rest", third, StringComparison.Ordinal);
+        Assert.DoesNotContain("calls in a row", batched, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheSuiteAttributesItsOwnWallClockToServerStartsAndToolCalls()
+    {
+        await server.CallAsync("workspace_status", []);
+
+        var report = E2ETelemetry.Report();
+
+        TestContext.Current.TestOutputHelper?.WriteLine(report);
+
+        Assert.Contains("starts=", report, StringComparison.Ordinal);
+        Assert.Contains("startMs=", report, StringComparison.Ordinal);
+        Assert.Contains("callMs=", report, StringComparison.Ordinal);
+        Assert.True(E2ETelemetry.Starts > 0, report);
+        Assert.True(E2ETelemetry.Calls > 0, report);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithADeclarationReadBackFromGetSymbolSource_ChangesNothing()
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderBook.For" });
+        var body = source
+            .Split('\n')
+            .SkipWhile(line => !line.StartsWith("public", StringComparison.Ordinal))
+            .TakeWhile(line => !line.Contains("calls in a row", StringComparison.Ordinal) && !line.StartsWith("compilations=", StringComparison.Ordinal))
+            .ToArray();
+
+        var declaration = string.Join('\n', body).TrimEnd('\n');
+
+        var diff = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderBook.For",
+            ["declaration"] = declaration,
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("public IReadOnlyList<Order> For", declaration, StringComparison.Ordinal);
+        Assert.Contains("\n    bySymbol.TryGetValue", declaration, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", diff, StringComparison.Ordinal);
+        Assert.DoesNotContain("@@", diff, StringComparison.Ordinal);
+        Assert.Contains("0 files changed", diff, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WithTwoExistingDocuments_RunsOneCompileGateOverBothInsteadOfOnePerFile()
+    {
+        var caller = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs", ["verbose"] = true });
+
+        Assert.DoesNotContain("ERROR", caller, StringComparison.Ordinal);
+
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["dryRun"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object?>
+            {
+                ["path"] = "src/Fixture.Trading/SideHolder.cs",
+                ["content"] = "namespace Fixture.Trading;\n\npublic sealed class SideHolder\n{\n    public OrderSide OrderSide { get; init; }\n\n    public OrderSide Flip() => OrderSide is OrderSide.Buy ? OrderSide.Sell : OrderSide.Buy;\n\n    public string Describe() => SideNames.Of(OrderSide);\n}\n",
+            },
+            new Dictionary<string, object?>
+            {
+                ["path"] = "src/Fixture.Trading/OrderSide.cs",
+                ["content"] = "namespace Fixture.Trading;\n\npublic enum OrderSide\n{\n    Buy,\n    Sell,\n}\n\npublic static class SideNames\n{\n    public static string Of(OrderSide side) => side.ToString();\n}\n",
+            },
+            },
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("SideHolder.cs", text, StringComparison.Ordinal);
+        Assert.Contains("OrderSide.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WhenOneFileOfTheBatchBreaksTheBuild_RollsBackTheWholeBatch()
+    {
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["dryRun"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object?>
+            {
+                ["path"] = "src/Fixture.Trading/SideHolder.cs",
+                ["content"] = "namespace Fixture.Trading;\n\npublic sealed class SideHolder\n{\n    public OrderSide OrderSide { get; init; }\n\n    public string Describe() => NothingDeclaresThis.Of(OrderSide);\n}\n",
+            },
+            },
+        });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("SideHolder.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithMoreProjectsThanOneCallTakes_IsRefusedByName()
+    {
+        var text = await server.CallAsync("run_tests", new()
+        {
+            ["projects"] = Enumerable.Repeat("Fixture.Trading.Tests", 11).ToArray(),
+        });
+
+        Assert.Contains("11 entries, at most 10 run in one call", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WithAnEmptyContentEntry_IsRefusedExactlyLikeTheSingleFileWrite()
+    {
+        var batch = await server.CallAsync("write_text", new()
+        {
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/batch-a.json", ["content"] = "{}" },
+            new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Fixture.Trading.csproj", ["content"] = "" },
+            },
+        });
+
+        var allowed = await server.CallAsync("write_text", new()
+        {
+            ["allowEmpty"] = true,
+            ["dryRun"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Fixture.Trading.csproj", ["content"] = "" },
+            },
+        });
+
+        Assert.Contains("entry 2", batch, StringComparison.Ordinal);
+        Assert.Contains("is empty, which would truncate the file", batch, StringComparison.Ordinal);
+        Assert.Contains("allowEmpty=true", batch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", allowed, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "batch-a.json")));
+    }
+
+    [Fact]
+    public async Task ReadText_WhenEveryPathFitsTheBudget_DoesNotClaimItRanOut()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "wide-lines.json", "src/Fixture.Trading/Views/OrderView.xaml" },
+            ["maxLines"] = 2,
+        });
+
+        Assert.StartsWith("2 files", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOT_FOUND", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("FAILED", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("the shared maxChars budget ran out", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASteeredResponse_StaysWithinItsBudgetWithTheSteerCounted()
+    {
+        await server.CallAsync("workspace_status", []);
+
+        var steered = string.Empty;
+
+        for (var call = 0; call < 3; call++)
+            steered = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+
+        var bare = ToolCensus.WithoutSteer(steered);
+
+        Assert.Contains("calls in a row", steered, StringComparison.Ordinal);
+        Assert.True(
+            ToolCensus.Tokens(steered) - ToolCensus.Tokens(bare) <= 20,
+            string.Create(CultureInfo.InvariantCulture, $"the steer cost {ToolCensus.Tokens(steered) - ToolCensus.Tokens(bare)} tokens\n{steered}"));
+        Assert.True(ToolCensus.Tokens(steered) <= ToolCensus.GlobalTokenCap, steered);
+    }
+
+    [Fact]
+    public async Task RunTests_WhenTheFirstProjectTimesOut_StopsTheBatchAndNamesWhatProducedNoResults()
+    {
+        var batch = await server.CallAsync("run_tests", new()
+        {
+            ["projects"] = new[] { "Fixture.Trading.Tests", "Fixture.Trading.Tests" },
+            ["timeoutSeconds"] = 1,
+        });
+
+        var alone = await server.CallAsync("run_tests", new()
+        {
+            ["project"] = "Fixture.Trading.Tests",
+            ["timeoutSeconds"] = 1,
+        });
+
+        Assert.DoesNotContain("run_tests PASSED", batch, StringComparison.Ordinal);
+        Assert.Contains("the batch stopped at the first timeout; 2 of 2 project(s) produced no results", batch, StringComparison.Ordinal);
+        Assert.Contains("Fixture.Trading.Tests", batch, StringComparison.Ordinal);
+        Assert.DoesNotContain("batch", alone, StringComparison.Ordinal);
+        Assert.Contains("this run timed out and produced no results", alone, StringComparison.Ordinal);
+    }
 }

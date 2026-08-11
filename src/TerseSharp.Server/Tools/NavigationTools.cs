@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -30,21 +31,30 @@ public sealed class NavigationTools(ToolContext context)
     }
 
     [McpServerTool(Name = "get_file_outline", ReadOnly = true)]
-    [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. parameterNames=false prints parameter types without their names, which is about an eighth of the response and still tells every overload apart.")]
+    [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. Pass paths to outline up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line and a path that does not resolve is reported inline as NOT_FOUND instead of failing the call. contains= keeps only the members whose name matches and prints 'N of M members' under the type, so the omission is never silent. parameterNames=false prints parameter types without their names, which is about an eighth of the response and still tells every overload apart.")]
     public Task<string> GetFileOutline(
-    [Description("Path to the .cs file.")] string path,
-    [Description("Include member signatures. false gives ids and line ranges only, ~40% cheaper.")] bool signatures = true,
-    [Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Also list the file's own using directives, so a new member's header can be written without reading source.")] bool usings = false,
-    [Description("Print parameter names alongside their types. Default true; false keeps the types and drops the names.")] bool parameterNames = true,
-    CancellationToken cancellationToken = default) =>
-    context.WithWorkspaceAsync(workspace, path, async loaded =>
-        Unwrap(await OutlineService.FileAsync(loaded, path, signatures, ids ?? "short", usings, cancellationToken, parameterNames).ConfigureAwait(false)),
-        cancellationToken: cancellationToken);
+[Description("Path to the .cs file.")] string? path = null,
+[Description("Several .cs files outlined in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
+[Description("Include member signatures. false gives ids and line ranges only, ~40% cheaper.")] bool signatures = true,
+[Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
+[Description("Workspace or worktree name.")] string? workspace = null,
+[Description("Also list the file's own using directives, so a new member's header can be written without reading source.")] bool usings = false,
+[Description("Print parameter names alongside their types. Default true; false keeps the types and drops the names.")] bool parameterNames = true,
+[Description("Keep only the members whose name contains this text, case-insensitively, printed under their declaring type with an 'N of M members' line so nothing is dropped silently.")] string? contains = null,
+CancellationToken cancellationToken = default)
+    {
+        var combined = PluralPaths.Combine(path, paths, "paths");
+
+        if (!combined.IsOk)
+            return Task.FromResult(combined.Error!.Render());
+
+        return combined.Value is [var single]
+            ? OutlinedAsync(single, signatures, ids, usings, parameterNames, contains, workspace, cancellationToken)
+            : OutlinedManyAsync(combined.Value, signatures, ids, usings, parameterNames, contains, workspace, cancellationToken);
+    }
 
     [McpServerTool(Name = "get_type_outline", ReadOnly = true)]
-    [Description("Every member of one type with signatures and line ranges, without the bodies. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
+    [Description("Every member of one type with signatures and line ranges, without the bodies. contains= keeps only the members whose name matches and prints 'N of M members' so the omission is never silent. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetTypeOutline(
 [Description("Symbol id of the type.")] string? symbolId = null,
 [Description("Include member signatures. false gives ids and line ranges only.")] bool signatures = true,
@@ -53,9 +63,10 @@ public sealed class NavigationTools(ToolContext context)
 [Description("Alias for symbolId.")] string? symbol = null,
 [Description("Print parameter names alongside their types. Default true; false keeps the types and drops the names.")] bool parameterNames = true,
 [Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
+[Description("Keep only the members whose name contains this text, case-insensitively, with an 'N of M members' line so nothing is dropped silently.")] string? contains = null,
 CancellationToken cancellationToken = default) =>
 context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) =>
-    Unwrap(await OutlineService.TypeAsync(loaded, resolved, signatures, ids ?? "short", cancellationToken, parameterNames).ConfigureAwait(false)),
+    Unwrap(await OutlineService.TypeAsync(loaded, resolved, signatures, ids ?? "short", cancellationToken, parameterNames, contains).ConfigureAwait(false)),
     cancellationToken,
     path);
 
@@ -237,4 +248,48 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
             CultureInfo.InvariantCulture,
             $"{SymbolFormat.Location(workspace.Root, symbol)}  EXACT  {SymbolId.From(symbol)}  {detail}");
     }
+
+    private Task<string> OutlinedAsync(
+        string path,
+        bool signatures,
+        string? ids,
+        bool usings,
+        bool parameterNames,
+        string? contains,
+        string? workspace,
+        CancellationToken cancellationToken) =>
+        context.WithWorkspaceAsync(
+            workspace,
+            path,
+            async loaded => Unwrap(await OutlineService.FileAsync(
+                loaded, path, signatures, ids ?? "short", usings, cancellationToken, parameterNames, contains).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
+
+    private async Task<string> OutlinedManyAsync(
+    ImmutableArray<string> paths,
+    bool signatures,
+    string? ids,
+    bool usings,
+    bool parameterNames,
+    string? contains,
+    string? workspace,
+    CancellationToken cancellationToken)
+    {
+        var response = new ResponseBuilder("get_file_outline", string.Empty);
+
+        response.Summary(paths.Length, paths.Length, "files");
+
+        foreach (var path in paths)
+        {
+            var answer = await OutlinedAsync(path, signatures, ids, usings, parameterNames, contains, workspace, cancellationToken).ConfigureAwait(false);
+
+            response.Line(Outlined(path, answer));
+        }
+
+        return response.ToString();
+    }
+
+    private static string Outlined(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)
+        ? string.Create(CultureInfo.InvariantCulture, $"{(answer.Contains("DocumentNotFound", StringComparison.Ordinal) ? "NOT_FOUND" : "FAILED")} {path}\n{answer}")
+        : string.Create(CultureInfo.InvariantCulture, $"{path}\n{answer}");
 }

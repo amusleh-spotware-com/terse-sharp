@@ -4,11 +4,14 @@ public sealed class ToolListDiscoveryCensusTests
 {
     private const int MinimumDiscoveringFiles = 9;
 
-    private static readonly string[] Exempt =
-    [
-        "ToolProfileE2ETests.cs",
-        "ToolListDiscoveryCensusTests.cs",
-    ];
+    private static readonly ToolExemption[] Exempt =
+[
+    new("ToolProfileE2ETests.cs", "it exists to assert what --tools core advertises, so seeing the narrowed list is its whole subject"),
+    new("ToolListDiscoveryCensusTests.cs", "it reads the other files' source text and never calls the server itself"),
+    new("MarkupProfileE2ETests.cs", "it exists to assert the surface a solution holding no .xaml, .razor or .resx advertises, so seeing the narrowed list is its whole subject"),
+];
+
+    private const int MaxDiscoveryExemptions = 3;
 
     [Fact]
     public async Task EveryTestThatDiscoversFromToolsList_SeesTheWholeSurfaceAndNotJustTheCoreProfile()
@@ -24,6 +27,8 @@ public sealed class ToolListDiscoveryCensusTests
         }
 
         Assert.True(discovering.Count >= MinimumDiscoveringFiles, $"discovering={discovering.Count}");
+        Assert.True(Exempt.Length <= MaxDiscoveryExemptions, $"the exemption set grew to {Exempt.Length}");
+        Assert.All(Exempt, entry => Assert.False(string.IsNullOrWhiteSpace(entry.Reason), entry.Tool));
         Assert.Empty(shrunk);
     }
 
@@ -32,7 +37,7 @@ public sealed class ToolListDiscoveryCensusTests
 
     private static void Route(string name, string text, List<string> discovering, List<string> shrunk)
     {
-        if (!text.Contains("ListToolsAsync", StringComparison.Ordinal) || Exempt.Contains(name, StringComparer.Ordinal))
+        if (!text.Contains("ListToolsAsync", StringComparison.Ordinal) || Array.Exists(Exempt, entry => string.Equals(entry.Tool, name, StringComparison.Ordinal)))
             return;
 
         discovering.Add(name);

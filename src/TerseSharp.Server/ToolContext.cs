@@ -6,7 +6,7 @@ namespace TerseSharp.Server;
 
 public readonly record struct ToolLatency(int Calls, double ResolveMs, double SyncMs, double ActionMs);
 
-public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IReadOnlySet<string>? advertised = null) : IDisposable
+public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolSurface surface = default) : IDisposable
 {
     private Task ready = Task.CompletedTask;
 
@@ -14,24 +14,33 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
 
     public bool ReadOnly { get; } = readOnly;
 
-    public IReadOnlySet<string>? Advertised { get; } = advertised;
+    public ToolSurface Surface { get; } = surface;
+
+    public Func<CancellationToken, Task>? ToolsChanged { get; set; }
 
     public string? PreloadFailure { get; private set; }
 
-    public void BeginPreload(string target, CancellationToken cancellationToken) =>
+    public void BeginPreload(string target, CancellationToken cancellationToken)
+    {
+        var before = Served();
+
         Preload(Task.Run(() => Registry.LoadAsync(target, cancellationToken), cancellationToken));
+
+        _ = AnnouncedAsync(before, cancellationToken);
+    }
 
     public Task ReadyAsync() => ready;
 
     internal void Preload(Task load) => ready = ObserveAsync(load);
 
     public async Task<string> WithSymbolAsync(
-        string? workspace,
-        string? symbolId,
-        Func<LoadedWorkspace, ISymbol, Task<string>> action,
-        CancellationToken cancellationToken,
-        string? path = null,
-        Func<LoadedWorkspace, string?>? guard = null)
+    string? workspace,
+    string? symbolId,
+    Func<LoadedWorkspace, ISymbol, Task<string>> action,
+    CancellationToken cancellationToken,
+    string? path = null,
+    Func<LoadedWorkspace, string?>? guard = null,
+    bool typesOnly = false)
     {
         if (symbolId is not { Length: > 0 } requested)
             return Errors.Blank("symbolId", "symbol").Render();
@@ -52,7 +61,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
 
             return await AttributedAsync(lease.Workspace, async () =>
             {
-                var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, path, cancellationToken).ConfigureAwait(false);
+                var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, path, cancellationToken, typesOnly).ConfigureAwait(false);
 
                 return symbol.IsOk
                     ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)
@@ -308,6 +317,37 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, IRead
         using var lease = synced.Value!;
 
         return await PhaseProbe.MeasureAsync(lease.Workspace, cancellationToken).ConfigureAwait(false);
+    }
+
+    public WorkspaceMarkup Served() => ToolProfile.Served(Registry);
+
+    public async Task AnnounceAsync(WorkspaceMarkup before, CancellationToken cancellationToken)
+    {
+        if (!Surface.MarkupDerived || ToolsChanged is not { } notify || Served() == before)
+            return;
+
+        await notify(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<WorkspaceMarkup> ServedAsync(CancellationToken cancellationToken)
+    {
+        await ready.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        return Served();
+    }
+
+    private async Task AnnouncedAsync(WorkspaceMarkup before, CancellationToken cancellationToken)
+    {
+        await ReadyAsync().ConfigureAwait(false);
+
+        try
+        {
+            await AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Console.Error.WriteLine("terse: tools/list_changed could not be sent: " + exception.Message);
+        }
     }
 }
 
