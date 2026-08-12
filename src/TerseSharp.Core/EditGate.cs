@@ -49,6 +49,9 @@ public static class EditGate
         if (report is not null)
             Announce(response, report, options.Verbose || options.DryRun);
 
+        if (!options.DryRun && report is { NewErrors.Length: 0 } && GateCoverage.Once() is { } coverage)
+            response.Note(coverage);
+
         if (condensed)
             return Compact(response, diffs, root);
 

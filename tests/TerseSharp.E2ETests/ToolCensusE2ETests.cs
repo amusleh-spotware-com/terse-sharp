@@ -1,6 +1,8 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Server;
 using TerseSharp.Server;
 
 namespace TerseSharp.E2ETests;
@@ -288,4 +290,57 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
             "the similar-by-design set may only shrink");
         Assert.DoesNotContain(ToolCensus.SimilarByDesignPairs, pair => pair.Reason.Length is 0);
     }
+
+    [Fact]
+    public async Task EveryAdvertisedSchema_DeclaresExactlyTheParametersItsToolMethodDeclares()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var methods = ToolMethods();
+        var divergent = new List<string>();
+
+        foreach (var tool in tools.Where(candidate => methods.ContainsKey(candidate.Name)))
+        {
+            var advertised = Properties(tool.JsonSchema);
+            var declared = Parameters(methods[tool.Name]);
+
+            if (!advertised.SetEquals(declared))
+                divergent.Add(tool.Name + " advertises [" + Listed(advertised) + "] but declares [" + Listed(declared) + "]");
+        }
+
+        Assert.True(methods.Count >= 50, "the reflected tool-method set went vacuous: " + methods.Count);
+        Assert.True(
+            divergent.Count is 0,
+            "the advertised schema and the reflected parameters must stay equal, or terse call refuses a different set from the server: "
+            + string.Join(" | ", divergent));
+    }
+
+    private static Dictionary<string, MethodInfo> ToolMethods()
+    {
+        var methods = new Dictionary<string, MethodInfo>(StringComparer.Ordinal);
+
+        foreach (var type in typeof(ToolGuard).Assembly.GetTypes().Where(candidate => candidate.GetCustomAttribute<McpServerToolTypeAttribute>() is not null))
+        {
+            foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
+            {
+                if (method.GetCustomAttribute<McpServerToolAttribute>()?.Name is { Length: > 0 } name)
+                    methods[name] = method;
+            }
+        }
+
+        return methods;
+    }
+
+    private static HashSet<string> Properties(JsonElement schema) =>
+        schema.TryGetProperty("properties", out var properties) && properties.ValueKind is JsonValueKind.Object
+            ? [.. properties.EnumerateObject().Select(property => property.Name)]
+            : [];
+
+
+    private static HashSet<string> Parameters(MethodInfo method) =>
+        [.. method.GetParameters()
+        .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
+        .Select(parameter => parameter.Name!)];
+
+
+    private static string Listed(IEnumerable<string> names) => string.Join(", ", names.Order(StringComparer.Ordinal));
 }

@@ -2,8 +2,11 @@
 
 namespace TerseSharp.E2ETests;
 
+[Collection(nameof(TerseServerCollection))]
 public sealed class BuildWarningsE2ETests : IAsyncLifetime
 {
+    private const string SourceProject = "Fixture.Warning";
+
     private static readonly string[] DeliberateWarningCodes = ["CS0169", "CS0414", "CS0219"];
 
     private static readonly string WarningRoot =
@@ -25,7 +28,7 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
     [Fact]
     public async Task Build_WhenTheSolutionCompilesWithWarnings_AnswersInOneLineAndNamesNone()
     {
-        var text = await RebuiltAsync([]);
+        var text = await RebuiltAsync(new() { ["project"] = SourceProject });
 
         Assert.StartsWith("build ok  errors=0 warnings=3", text, StringComparison.Ordinal);
         Assert.DoesNotContain("\n", text, StringComparison.Ordinal);
@@ -38,7 +41,7 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
     [Fact]
     public async Task Build_WhenVerboseIsAsked_ListsEveryWarningTheCompilerReported()
     {
-        var text = await RebuiltAsync(new() { ["verbose"] = true });
+        var text = await RebuiltAsync(new() { ["project"] = SourceProject, ["verbose"] = true });
 
         Assert.Contains("CS0169", text, StringComparison.Ordinal);
         Assert.Contains("CS0414", text, StringComparison.Ordinal);
@@ -173,5 +176,16 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
         Assert.True(source.Length < both.Length, source);
         Assert.Contains("ERROR InvalidArgument", wrong, StringComparison.Ordinal);
         Assert.Contains("scope=src, scope=test", wrong, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Build_AfterAFailedBuildOfTheWholeSolution_StillReportsOnlyTheWarningsOfTheProjectItWasScopedTo()
+    {
+        await RebuiltAsync(new() { ["properties"] = new[] { "TreatWarningsAsErrors=true" } });
+
+        var text = await RebuiltAsync(new() { ["project"] = SourceProject });
+
+        Assert.StartsWith("build ok  errors=0 warnings=3", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", text, StringComparison.Ordinal);
     }
 }

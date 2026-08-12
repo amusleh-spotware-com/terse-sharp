@@ -1028,4 +1028,168 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.Contains(" members - narrow with contains=", text, StringComparison.Ordinal);
         Assert.DoesNotContain("symbolIds=[", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task WorkspaceStatus_WithVerbose_CarriesTheDoctorSelfChecksSoDiagnosingTheServerNeedsNoShellOut()
+    {
+        var quiet = await server.CallAsync("workspace_status", []);
+        var loud = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
+        var lines = loud.TrimEnd().Split('\n');
+        var version = Array.FindIndex(lines, line => line.StartsWith("terse=", StringComparison.Ordinal));
+
+        foreach (var check in new[] { "roslyn:", "assets:", "guard coverage:", "phases:" })
+        {
+            Assert.Contains(check, loud, StringComparison.Ordinal);
+            Assert.DoesNotContain(check, quiet, StringComparison.Ordinal);
+            Assert.InRange(Array.FindIndex(lines, line => line.Contains(check, StringComparison.Ordinal)), 0, version - 1);
+        }
+
+        Assert.Contains("widest=", loud, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithSectionAndAPlace_WritesInsideTheSectionInsteadOfReplacingIt()
+    {
+        var full = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "section-probe.md");
+
+        await File.WriteAllTextAsync(full, "# Title\n\n## Open\n\n- first\n\n## Closed\n\n- done\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            await server.CallAsync("edit_text", new()
+            {
+                ["path"] = "src/Fixture.Trading/section-probe.md",
+                ["section"] = "## Open",
+                ["place"] = "append",
+                ["newText"] = "- last",
+            });
+
+            await server.CallAsync("edit_text", new()
+            {
+                ["path"] = "src/Fixture.Trading/section-probe.md",
+                ["section"] = "## Open",
+                ["place"] = "prepend",
+                ["newText"] = "- zero",
+            });
+
+            var after = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                "# Title\n\n## Open\n- zero\n\n- first\n- last\n\n## Closed\n\n- done\n",
+                after.ReplaceLineEndings("\n"));
+        }
+        finally
+        {
+            File.Delete(full);
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithAPlaceThatIsNotAPlacementOrWithoutASection_IsRefusedRatherThanSilentlyReplacing()
+    {
+        var unknown = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "wide-sections.txt",
+            ["section"] = "## Open",
+            ["place"] = "after",
+            ["newText"] = "x",
+            ["dryRun"] = true,
+        });
+
+        var loose = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "wide-sections.txt",
+            ["place"] = "append",
+            ["newText"] = "x",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("place=after is not a placement", unknown, StringComparison.Ordinal);
+        Assert.Contains("place=append or place=prepend", unknown, StringComparison.Ordinal);
+        Assert.Contains("place was passed without a section", loose, StringComparison.Ordinal);
+        Assert.Contains("remedy:", loose, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_OnACSharpFileThatIsNotADocument_ParsesItFromTextInsteadOfRefusing()
+    {
+        var full = Path.Combine(TerseServerFixture.FixtureRoot, "outline-probe.cs");
+
+        await File.WriteAllTextAsync(
+            full,
+            "namespace Probe;\n\npublic sealed class Detached\n{\n    public int Answer() => 42;\n}\n",
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("get_file_outline", new() { ["path"] = "outline-probe.cs" });
+
+            Assert.Contains("Detached.Answer", text, StringComparison.Ordinal);
+            Assert.Contains("HEURISTIC parsed from the file's own text", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(full);
+        }
+    }
+
+    [Fact]
+    public async Task TheFirstCompileGatedEdit_NamesWhatTheGateDidNotCheckAndNeverRepeatsIt()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: true, TestContext.Current.CancellationToken);
+
+        var first = await solution.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "OrderService.Submit",
+            ["body"] = "return order.Volume > 0 && repository.Submit(order);",
+        });
+
+        var second = await solution.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "OrderService.Submit",
+            ["body"] = "return order.Volume >= 1 && repository.Submit(order);",
+        });
+
+        Assert.Contains("gate=semantic", first, StringComparison.Ordinal);
+        Assert.Contains("run build once before you push, not after every edit", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("gate=semantic", second, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithATopLevelPlaceAndEdits_IsRefusedRatherThanDroppingThePlacement()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "wide-sections.txt",
+            ["place"] = "append",
+            ["edits"] = new object[]
+            {
+            new Dictionary<string, object?> { ["oldText"] = "a", ["newText"] = "b" },
+            },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("top-level oldText, newText, section or place", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AVerboseWorkspaceStatus_DoesNotConsumeTheGateNoticeTheNextEditOwes()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: true, TestContext.Current.CancellationToken);
+
+        var status = await solution.CallAsync("workspace_status", new() { ["verbose"] = true });
+
+        var edited = await solution.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "OrderService.Submit",
+            ["body"] = "return order.Volume > 0 && repository.Submit(order);",
+        });
+
+        Assert.Contains("phases:", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("gate=semantic", status, StringComparison.Ordinal);
+        Assert.Contains("gate=semantic", edited, StringComparison.Ordinal);
+    }
 }

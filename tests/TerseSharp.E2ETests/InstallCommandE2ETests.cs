@@ -267,4 +267,20 @@ public sealed class InstallCommandE2ETests : IDisposable
 
         return double.Parse(end < 0 ? line[start..] : line[start..end], CultureInfo.InvariantCulture);
     }
+
+    [Fact]
+    public async Task Call_WithAnArgumentTheToolDoesNotDeclare_RefusesItExactlyAsTheServerWould()
+    {
+        var output = await RunAsync(
+            "call",
+            "analyze",
+            "--workspace",
+            Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+            "--json",
+            "{\"severity\": \"info\"}");
+
+        Assert.Contains("ERROR InvalidArgument", output, StringComparison.Ordinal);
+        Assert.Contains("analyze rejected the call: unrecognized severity", output, StringComparison.Ordinal);
+        Assert.Contains("minSeverity", output, StringComparison.Ordinal);
+    }
 }

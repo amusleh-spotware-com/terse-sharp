@@ -19,7 +19,7 @@ string? contains = null)
         var document = DocumentLookup.Find(workspace, path);
 
         if (document is null)
-            return Result.Fail<string>(await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false));
+            return await FromDiskAsync(workspace, path, signatures, ids, usings, parameterNames, contains, cancellationToken).ConfigureAwait(false);
 
         if (Rejected(ids) is { } refusal)
             return refusal;
@@ -299,5 +299,31 @@ string? contains = null)
         return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
             ? note
             : Render("get_file_outline", path, declarations, model, format));
+    }
+
+    private const string ParsedFromText = "HEURISTIC parsed from the file's own text - it is not a document of this solution, so the members come from syntax and not from the compilation";
+
+    private static async Task<Result<string>> FromDiskAsync(
+        LoadedWorkspace workspace,
+        string path,
+        bool signatures,
+        string ids,
+        bool usings,
+        bool parameterNames,
+        string? contains,
+        CancellationToken cancellationToken)
+    {
+        var resolved = PathGuard.Resolve(workspace.Root, path);
+
+        if (!resolved.IsOk)
+            return Result.Fail<string>(resolved.Error!);
+
+        if (!SourceFile.IsCSharp(path) || !File.Exists(resolved.Value!))
+            return Result.Fail<string>(await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false));
+
+        var text = await File.ReadAllTextAsync(resolved.Value!, cancellationToken).ConfigureAwait(false);
+        var outline = FromText(path, text, signatures, ids, usings, parameterNames, contains);
+
+        return outline.IsOk ? Result.Ok(outline.Value! + "\n" + ParsedFromText) : outline;
     }
 }

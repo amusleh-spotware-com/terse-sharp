@@ -28,12 +28,14 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | Job | Instead of | Use | Why |
 |---|---|---|---|
 | **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do |
+| **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` | the four self-check lines an agent acts on, in-server and without the ~40 s shell-out: `roslyn` (the SDK's Roslyn against the one terse carries — the check that explains a dead Razor generator), `assets`, `guard coverage`, and `phases` measured on the loaded workspace |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` | lists every solution and project under a directory without loading one; auto-discovery only walks *up* from the working directory |
 | **Workspace** | — | `load_workspace` | one call per solution; `targetFramework:` picks the framework every semantic tool answers from, `reload: true` forces a re-read you should almost never need |
 | **Workspace** | — | `list_workspaces` | every loaded solution with its git branch and worktree, and the absolute path `unload_workspace` takes |
 | **Workspace** | — | `unload_workspace(path)` | releases the MSBuild file locks; addressed by the solution **path**, not a worktree name (`workspace=` is an alias for `path=`) |
 | **Workspace** | — | `list_projects(filter)` | name, language, document count; the name it prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=` |
 | **Navigate** | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
+| **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` | a path inside the workspace root that belongs to no project — a fixture tree kept outside the solution — is **parsed from its own text**, not refused, and the answer ends `HEURISTIC parsed from the file's own text`. Outside the root it is still refused |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` | up to 10 in one response, each under its own path line; an unresolved path is reported inline as `NOT_FOUND`, never a failed call |
 | **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too, and an unfiltered outline of 25+ members ends with `104 members - narrow with contains=`, because an outline never truncates and so never earned the truncation steer |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
@@ -71,6 +73,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | **Files** | `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
+| **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line — so a heading occurring 28 times cannot be matched wrongly. Only with `section=`; supply your own blank lines |
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(path, edits: [{oldText, newText, path}, …])` | an entry may name its own `path`; entries are grouped by file, applied as one write each, and answered one line per changed file. At most 10 per file and 25 in total |
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` | up to 10 in one call, and every `.cs` document among them shares **one** compile gate — so a type and the consumer it breaks land together instead of the first write being rolled back alone |
@@ -468,8 +471,11 @@ that answers nothing, and the clip always names `next: startLine=`.
    separate `analyze` afterwards. A `dryRun` that *would* be rolled back says
    `WARNING … would be rolled back` and names the errors; a `(+0)` delta alone is **not** proof the
    edit is safe.
-5. **Edits are compile-gated.** An edit introducing a new compile error is rolled back and the error
-   returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
+5. **Edits are compile-gated — but the gate is the semantic model, not an emit.** `errors=0 (+0)`
+   does **not** cover emit-time or source-generator errors, so `build` is worth one call **before you
+   push, not after every edit**; the first *applied* gated edit of a process says so once as
+   `gate=semantic …`.
+   An edit introducing a new compile error is rolled back and the error returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
    **A rollback keeps your text**: the error ends `retryWith=r3`, and `replace_symbol`,
    `replace_symbol_body` and `add_member` take `retryWith: "r3"` to replay exactly what was rejected —
    after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
@@ -771,3 +777,7 @@ solution rather than the one under test. `doctor` prints the running server's as
 exact command shape on its `version` line, so the path never has to be guessed, and
 `workspace_status` prints `terse=<version>` — read one of them before saying what a tool does or does
 not do. The probe costs about 3 s against 13 s for the narrowest filtered E2E run.
+
+The probe binds `--json` through the **same argument filter the stdio client goes through**, so an
+argument the server would refuse is refused there too, instead of being dropped silently and proving
+a call no client can make.

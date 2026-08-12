@@ -2,6 +2,7 @@ using System.Diagnostics;
 
 namespace TerseSharp.E2ETests;
 
+[Collection(nameof(TerseServerCollection))]
 public sealed class ProjectFileIntegrityE2ETests : IAsyncLifetime
 {
     private TerseTempSolution solution = null!;

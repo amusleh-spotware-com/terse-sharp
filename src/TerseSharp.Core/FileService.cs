@@ -90,9 +90,15 @@ public static class FileService
             : Result.Fail<string>(rewritten.Error!);
     }
 
-    private static Result<string> Rewrite(string before, EditRequest request) => request.Section is { Length: > 0 } section
-        ? Section(before, section, request.NewText)
-        : Snippet(before, request.OldText, request.NewText, request.Occurrence);
+    private static Result<string> Rewrite(string before, EditRequest request)
+    {
+        if (Misplaced(request) is { } misplaced)
+            return Result.Fail<string>(misplaced);
+
+        return request.Section is { Length: > 0 } section
+            ? Section(before, section, request.NewText, request.Place)
+            : Snippet(before, request.OldText, request.NewText, request.Occurrence);
+    }
 
     private static Result<string> Snippet(string before, string oldText, string newText, int occurrence)
     {
@@ -113,7 +119,7 @@ public static class FileService
             before.AsSpan(match.Start + match.Length)));
     }
 
-    private static Result<string> Section(string before, string heading, string newText)
+    private static Result<string> Section(string before, string heading, string newText, string? place)
     {
         var located = DocumentOutline.Locate(DocumentOutline.Headings(before), heading);
 
@@ -122,12 +128,11 @@ public static class FileService
 
         var ending = LineEndings.Dominant(before);
         var lines = before.ReplaceLineEndings(ending).Split(ending);
-        var section = located.Value!;
-        var tail = lines.Skip(section.EndLine);
+        var (keep, resume) = Placed(lines, located.Value!, place);
 
-        return Result.Ok(string.Join(ending, lines.Take(section.StartLine - 1)
+        return Result.Ok(string.Join(ending, lines.Take(keep)
             .Concat(LineEndings.Adopt(newText, ending).Split(ending))
-            .Concat(tail)));
+            .Concat(lines.Skip(resume))));
     }
 
     private static async Task<Result<string>> ApplyAsync(
@@ -399,7 +404,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters)
     {
@@ -592,7 +597,7 @@ public static class FileService
         return needle.Length is not 0 && Dedented(before).Contains(needle, StringComparison.Ordinal);
     }
 
-    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0, string? Path = null);
+    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0, string? Path = null, string? Place = null);
 
     public readonly record struct TextEditGroup(string Path, IReadOnlyList<TextEdit> Edits);
 
@@ -630,7 +635,8 @@ public static class FileService
         request.DryRun,
         request.Force,
         request.Verbose,
-        edit.Occurrence);
+        edit.Occurrence,
+        edit.Place);
 
     private static string BatchResponse(
         string path,
@@ -853,4 +859,35 @@ public static class FileService
     }
 
     public static string Sized(long bytes) => string.Create(CultureInfo.InvariantCulture, $"bytes={bytes}");
+
+    private static (int Keep, int Resume) Placed(string[] lines, DocumentSection section, string? place)
+    {
+        if (place is Prepend)
+            return (section.StartLine, section.StartLine);
+
+        if (place is not Append)
+            return (section.StartLine - 1, section.EndLine);
+
+        var last = section.EndLine;
+
+        while (last > section.StartLine && string.IsNullOrWhiteSpace(lines[last - 1]))
+            last--;
+
+        return (last, last);
+    }
+
+    private static TerseError? Misplaced(EditRequest request) => (request.Place, request.Section) switch
+    {
+        (null or "", _) => null,
+        (not (Append or Prepend), _) => Errors.Invalid(
+            "place=" + request.Place + " is not a placement",
+            "pass place=append or place=prepend, or omit place to replace the whole section"),
+        (_, { Length: > 0 }) => null,
+        _ => Errors.Invalid(
+            "place was passed without a section, so there is no section to write inside",
+            "pass the section too, e.g. section=\"## Commands\" place=append, or anchor the edit with oldText"),
+    };
+
+    private const string Append = "append";
+    private const string Prepend = "prepend";
 }

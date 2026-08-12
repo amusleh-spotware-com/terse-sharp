@@ -102,6 +102,9 @@ internal static class ToolCall
 
     private static Result<object?[]> Bind(MethodInfo method, JsonObject arguments, CancellationToken cancellationToken)
     {
+        if (Unrecognized(method, arguments) is { } unknown)
+            return Result.Fail<object?[]>(unknown);
+
         var parameters = method.GetParameters();
         var bound = new object?[parameters.Length];
 
@@ -180,5 +183,18 @@ internal static class ToolCall
         }
 
         return methods;
+    }
+
+    private static TerseError? Unrecognized(MethodInfo method, JsonObject arguments)
+    {
+        var declared = method.GetParameters()
+            .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
+            .ToArray();
+
+        return ToolArgumentFilter.Unrecognized(
+            method.GetCustomAttribute<McpServerToolAttribute>()?.Name,
+            arguments.Select(argument => argument.Key),
+            () => [.. declared.Where(parameter => !parameter.HasDefaultValue).Select(parameter => parameter.Name!)],
+            [.. declared.Select(parameter => parameter.Name!)]);
     }
 }

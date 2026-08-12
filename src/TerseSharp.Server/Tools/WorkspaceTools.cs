@@ -115,16 +115,16 @@ CancellationToken cancellationToken = default) =>
     }
 
     [McpServerTool(Name = "workspace_status", ReadOnly = true)]
-    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised.")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. verbose=true adds the server's own doctor self-checks, so diagnosing terse needs no shell-out.")]
     public Task<string> WorkspaceStatus(
-[Description("Workspace or worktree name.")] string? workspace = null,
-[Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
-CancellationToken cancellationToken = default) =>
-context.WithWorkspaceAsync(
-    workspace,
-    null,
-    loaded => RenderStatusAsync(loaded, verbose, context.Surface, context.Served(), cancellationToken),
-    cancellationToken: cancellationToken);
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("List the MSBuild warnings the load reported, and the roslyn, assets, guard coverage and phases self-checks. Default false.")] bool verbose = false,
+    CancellationToken cancellationToken = default) =>
+    context.WithWorkspaceAsync(
+        workspace,
+        null,
+        loaded => RenderStatusAsync(loaded, verbose, context.Surface, context.Served(), cancellationToken),
+        cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]
     [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
@@ -161,6 +161,7 @@ context.WithWorkspaceAsync(
             response.Note(workspace.Indexes.Describe());
 
         AppendLoadDiagnostics(response, workspace.Load, verbose);
+        await AppendSelfChecksAsync(response, workspace, verbose, cancellationToken).ConfigureAwait(false);
         response.Note(Version());
 
         return response.ToString();
@@ -405,5 +406,14 @@ context.WithWorkspaceAsync(
         var version = UpdateSettings.Version();
 
         return version.Length is 0 ? "terse=unknown" : "terse=" + version;
+    }
+
+    private static async Task AppendSelfChecksAsync(ResponseBuilder response, LoadedWorkspace workspace, bool verbose, CancellationToken cancellationToken)
+    {
+        if (!verbose)
+            return;
+
+        foreach (var check in await Doctor.SelfChecksAsync(workspace, cancellationToken).ConfigureAwait(false))
+            response.Note(check);
     }
 }

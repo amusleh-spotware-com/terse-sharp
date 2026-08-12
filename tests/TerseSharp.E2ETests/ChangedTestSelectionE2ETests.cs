@@ -1,5 +1,6 @@
 namespace TerseSharp.E2ETests;
 
+[Collection(nameof(TerseServerCollection))]
 public sealed class ChangedTestSelectionE2ETests
 {
     private static readonly string SelectionRoot =

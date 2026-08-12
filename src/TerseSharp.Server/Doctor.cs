@@ -275,21 +275,8 @@ public static class Doctor
             "a per-call resolve+sync floor of a second or more is a workspace-resolution defect - report this line");
     }
 
-    private static async Task<string> PhaseLineAsync(ToolContext context, CancellationToken cancellationToken)
-    {
-        var phases = await context.MeasurePhasesAsync(cancellationToken).ConfigureAwait(false);
-
-        if (phases.Document is not { Length: > 0 })
-            return Check("phases", "not measured - no C# document was reachable", false, "load a solution whose projects carry source, then re-run");
-
-        return Check(
-            "phases",
-            string.Create(
-                CultureInfo.InvariantCulture,
-                $"widest={phases.Document} realizeMs={phases.RealizeMs:F2} outlineMs={phases.OutlineMs:F2} gateMs={phases.GateMs:F2} diffMs={phases.DiffMs:F2}"),
-            phases.OutlineMs < PhaseFloorMs && phases.GateMs < PhaseFloorMs,
-            "realizeMs is paid once per load and again after an idle drop; outlineMs and gateMs are the per-call path - report this line with the solution size");
-    }
+    private static async Task<string> PhaseLineAsync(ToolContext context, CancellationToken cancellationToken) =>
+        PhaseLine(await context.MeasurePhasesAsync(cancellationToken).ConfigureAwait(false));
 
     private const double PhaseFloorMs = 60_000;
     private const double LatencyFloorMs = 1000;
@@ -362,4 +349,56 @@ public static class Doctor
             coverage.Complete,
             "this tree still lets a measured breach class through: install the hook with terse install --guard, and check the directory is at or under a .sln/.slnx/.slnf/.csproj, which is what scopes the git rows");
     }
+
+    private static string PhaseLine(PhaseLatency phases)
+    {
+        if (phases.Document is not { Length: > 0 })
+            return Check("phases", "not measured - no C# document was reachable", false, "load a solution whose projects carry source, then re-run");
+
+        return Check(
+            "phases",
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"widest={phases.Document} realizeMs={phases.RealizeMs:F2} outlineMs={phases.OutlineMs:F2} gateMs={phases.GateMs:F2} diffMs={phases.DiffMs:F2}"),
+            phases.OutlineMs < PhaseFloorMs && phases.GateMs < PhaseFloorMs,
+            "realizeMs is paid once per load and again after an idle drop; outlineMs and gateMs are the per-call path - report this line with the solution size");
+    }
+
+    public static async Task<string[]> SelfChecksAsync(LoadedWorkspace workspace, CancellationToken cancellationToken) =>
+    [
+        Guarded("roslyn", RoslynLine),
+        await GuardedAsync("assets", () => AssetsLineAsync(cancellationToken)).ConfigureAwait(false),
+        Guarded("guard coverage", () => GuardCoverageLine(workspace.SolutionPath)),
+        await GuardedAsync("phases", async () => PhaseLine(await PhaseProbe.MeasureAsync(workspace, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false),
+    ];
+
+    private static string Guarded(string name, Func<string> check)
+    {
+        try
+        {
+            return check();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Failed(name, exception);
+        }
+    }
+
+    private static async Task<string> GuardedAsync(string name, Func<Task<string>> check)
+    {
+        try
+        {
+            return await check().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Failed(name, exception);
+        }
+    }
+
+    private static string Failed(string name, Exception exception) => Check(
+        name,
+        string.Create(CultureInfo.InvariantCulture, $"the check itself failed - {exception.GetType().Name}: {exception.Message}"),
+        false,
+        "run terse doctor for the full report; the rest of this status is unaffected");
 }

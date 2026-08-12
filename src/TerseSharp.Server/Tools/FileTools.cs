@@ -121,31 +121,32 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\". Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. A successful edit answers in one line per changed file - the file name and changedLines; pass verbose=true for the diff.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. A successful edit answers in one line per changed file - the file name and changedLines; pass verbose=true for the diff.")]
     public Task<string> EditText(
-[Description("Path, absolute or workspace-relative. With edits=, the default target of every entry that carries no path of its own.")] string path,
-[Description("Replacement text. With section=, this is the whole new section including its heading line. Omit it when edits= carries the edits.")] string? newText = null,
-[Description("Exact text to replace; must occur exactly once unless occurrence= picks one. Omit when section= is passed.")] string? oldText = null,
-[Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed.")] string? section = null,
-[Description("Diff only, write nothing.")] bool dryRun = false,
-[Description("Allow editing a .cs file, bypassing the compile-gated symbol tools. Default false.")] bool force = false,
-[Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
-[Description("Workspace or worktree name.")] string? workspace = null,
-[Description("1-based index of the oldText match to replace when it deliberately occurs more than once. Default 0, which still requires exactly one match.")] int occurrence = 0,
-[Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence and path. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total.")] FileService.TextEdit[]? edits = null,
-CancellationToken cancellationToken = default) =>
-Guarded(
-    workspace,
-    path,
-    loaded => EditedAsync(
-        loaded,
+    [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry that carries no path of its own.")] string path,
+    [Description("Replacement text. With section=, the whole new section including its heading line, unless place= writes inside it. Omit it when edits= carries the edits.")] string? newText = null,
+    [Description("Exact text to replace; must occur exactly once unless occurrence= picks one. Omit when section= is passed.")] string? oldText = null,
+    [Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed. With place=, written inside instead of replaced.")] string? section = null,
+    [Description("Diff only, write nothing.")] bool dryRun = false,
+    [Description("Allow editing a .cs file, bypassing the compile-gated symbol tools. Default false.")] bool force = false,
+    [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    [Description("1-based index of the oldText match to replace when it deliberately occurs more than once. Default 0, which still requires exactly one match.")] int occurrence = 0,
+    [Description("With section=, lowercase: append writes after its last non-blank line, prepend directly under its heading. Empty replaces the section.")] string? place = null,
+    [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place and path. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total.")] FileService.TextEdit[]? edits = null,
+    CancellationToken cancellationToken = default) =>
+    Guarded(
+        workspace,
         path,
-        new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence),
-        newText,
-        edits,
-        cancellationToken),
-    TouchesCSharp(path, edits),
-    cancellationToken);
+        loaded => EditedAsync(
+            loaded,
+            path,
+            new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place),
+            newText,
+            edits,
+            cancellationToken),
+        TouchesCSharp(path, edits),
+        cancellationToken);
 
     [McpServerTool(Name = "find_files", ReadOnly = true)]
     [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell.")]
@@ -372,10 +373,10 @@ CancellationToken cancellationToken)
                 : NavigationTools.Unwrap(await FileService.EditTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false));
         }
 
-        if (newText is not null || request.OldText is { Length: > 0 } || request.Section is { Length: > 0 })
+        if (newText is not null || request.OldText is { Length: > 0 } || request.Section is { Length: > 0 } || request.Place is { Length: > 0 })
         {
             return Errors.Invalid(
-                "edits= was passed together with a top-level oldText, newText or section, and the top-level edit would have been silently dropped",
+                "edits= was passed together with a top-level oldText, newText, section or place, and the top-level edit would have been silently dropped",
                 "put every edit in edits=, or send the single edit without edits=").Render();
         }
 

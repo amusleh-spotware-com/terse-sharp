@@ -529,7 +529,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             string.Create(CultureInfo.InvariantCulture, $"tools/list costs {tokens} tokens over {surface.Count} tools, budget {AdvertisedPayloadBudget}"));
     }
 
-    private const int AdvertisedPayloadBudget = 24200;
+    private const int AdvertisedPayloadBudget = 24400;
 
     [Fact]
     public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()

@@ -8,6 +8,107 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-08-12
+
+### Added
+
+- **`workspace_status verbose=true` carries the server's own self-checks, so diagnosing terse needs
+  no `terse doctor` shell-out.** Four lines join the verbose response, in `doctor`'s own
+  `OK`/`FAIL <name>: <detail>` shape and directly above the trailing `terse=<version>`: `roslyn`
+  (the selected SDK's Roslyn against the one this build carries — the check that explains a dead
+  Razor generator), `assets` (skill and guard install state), `guard coverage` (which measured breach
+  class this tree still lets through) and `phases` (`widest=`, `realizeMs`, `outlineMs`, `gateMs`,
+  `diffMs` measured on the loaded workspace, which costs a `git diff --stat` spawn and a dry-run
+  compile gate - about 0.9 s warm and 3.5 s cold on this repository's own solution). A self-check
+  that throws - no `git` on `PATH`, a hand-edited client settings file - reports its own
+  `FAIL <name>: the check itself failed` line and never replaces the whole status with an error.
+  Diagnosing the server was the one class of question
+  this repository's own hard gate forced to the shell: three ~40 s `Bash` shell-outs in the previous
+  release-shaped run. The default response is unchanged — no self-check line is emitted without
+  `verbose=true`. Gated by
+  `BacklogClosureE2ETests.WorkspaceStatus_WithVerbose_CarriesTheDoctorSelfChecksSoDiagnosingTheServerNeedsNoShellOut`.
+  Closes **I228**.
+
+- **`edit_text section=` can now write INSIDE a section, not only replace it.** One new parameter,
+  `place`: `append` inserts `newText` after the section's last non-blank line, `prepend` directly
+  under its heading line, and anything else — an unknown value, or a `place` with no `section` — is
+  refused by name rather than quietly falling back to a whole-section replace. It is one parameter
+  and not two booleans precisely so "both at once" cannot be expressed. Adding a changelog entry or a
+  backlog row had to be anchored on `### Added` instead — 14 such edits in the previous
+  release-shaped run, one of which answered `oldText matched 28 times` and needed `occurrence=1`.
+  `edits=[…]` entries take `place` too, and a top-level `place` passed *beside* `edits=` is refused
+  by the same guard that already refused a top-level `oldText`/`newText`/`section`, rather than being
+  dropped without a word. Gated by
+  `BacklogClosureE2ETests.EditText_WithSectionAndAPlace_WritesInsideTheSectionInsteadOfReplacingIt`
+  `…EditText_WithAPlaceThatIsNotAPlacementOrWithoutASection_IsRefusedRatherThanSilentlyReplacing`
+  and `…EditText_WithATopLevelPlaceAndEdits_IsRefusedRatherThanDroppingThePlacement`.
+  Closes **I230**.
+
+- **`get_file_outline` parses a `.cs` file that is not a document of the loaded solution instead of
+  refusing it.** A path under the workspace root that exists on disk but belongs to no project - the
+  `fixtures/**` tree here is deliberately outside `TerseSharp.slnx` - answered `DocumentNotFound` and
+  cost one error plus one `read_text` per occurrence, three in the previous run, although
+  `OutlineService.FromText` already parsed exactly that shape for `ref=`. It now falls through to
+  that parse and appends `HEURISTIC parsed from the file's own text`, so the caller knows the members
+  came from syntax rather than from the compilation. Containment is unchanged: a path outside the
+  workspace root is still refused. Gated by
+  `BacklogClosureE2ETests.GetFileOutline_OnACSharpFileThatIsNotADocument_ParsesItFromTextInsteadOfRefusing`.
+  Closes **I231**.
+
+- **`BuildWarningsE2ETests` no longer depends on what ran before it, or beside it.** Four spurious
+  failures were observed across three full-suite runs — one `warnings=5` against its asserted 3, and
+  three `CS0169` assertions failing behind 133 s builds — while every one of them passed in
+  isolation. Two independent causes: the count assertions built the **whole solution**, so the number
+  depended on whether the test project happened to be up to date, and the class was the only
+  build-heavy E2E class **outside** `TerseServerCollection`, so its `dotnet build` ran concurrently
+  with every other class's. The counting builds are now scoped to `project=Fixture.Warning`, whose
+  three deliberate warnings all live in one touched file, and it — together with the other five E2E
+  classes that spawn a build and were still outside the collection — joins `TerseServerCollection`,
+  so no two fixture builds overlap. That second half is itself census-gated now:
+  `E2ECollectionCensusTests` discovers every E2E class that calls `build`, `run_tests`, `list_tests`
+  or `clean` from source and fails on one that is not in the collection. Gated by
+  `BuildWarningsE2ETests.Build_AfterAFailedBuildOfTheWholeSolution_StillReportsOnlyTheWarningsOfTheProjectItWasScopedTo`,
+  which runs the failing whole-solution build first and asserts the scoped one still answers
+  `warnings=3`. Closes **I232**.
+
+- **The first compile-gated edit of a server process names what the gate did not check.** One line,
+  once, never repeated: `gate=semantic - errors=0 means the semantic model is clean; emit-time and
+  source-generator errors are NOT checked, so run build once before you push, not after every edit`.
+  The previous release-shaped run made **31 `build` calls at ~5.6 s each**, about three minutes,
+  almost all of them confirming what a `errors=0 (+0)` edit had already proved — the gap a build
+  really closes is the emit path, and nothing said so. The notice is a caveat about the gate's own
+  coverage, so it prints in the condensed success response as well; a rejected edit does not spend
+  it, and neither does a `dryRun` - which matters because `workspace_status verbose=true` runs a
+  dry-run gate of its own and would otherwise have eaten the one notice the next real edit owes.
+  Gated by
+  `BacklogClosureE2ETests.TheFirstCompileGatedEdit_NamesWhatTheGateDidNotCheckAndNeverRepeatsIt`,
+  `…AVerboseWorkspaceStatus_DoesNotConsumeTheGateNoticeTheNextEditOwes` and `GateCoverageTests`.
+  Closes **I233**.
+
+- **Three token budgets moved, and the numbers are recorded so the ratchet still bites.** The
+  advertised `tools/list` payload goes 24 200 -> 24 400 (measured 24 330 over 88 tools), the
+  markup-narrowed surface 19 000 -> 19 150 (measured 19 091 over 57), and `SKILL.md` 19 200 -> 19 600
+  (measured 19 570). The growth is `edit_text`'s `place` parameter plus the skill rows that teach the
+  five changes above; by I224's measured break-even — ~255 tokens of `tools/list` costs 1.51 M
+  base-input-equivalent tokens across 508 sessions against 46 817 BIE per removed API turn — 130
+  tokens breaks even at about 17 calls per 508 sessions, and the previous run alone made 14 anchored
+  `### Added` edits and 3 `terse doctor` shell-outs. Each budget is set just above its measurement,
+  not padded.
+
+### Fixed
+
+- **The one-shot `terse call` probe refuses exactly what the MCP client would.** It bound `--json`
+  by parameter name and silently dropped every key no parameter matched, so
+  `call analyze --json '{"severity":"info"}'` answered a successful analysis while the server itself
+  refused the same call with `ERROR InvalidArgument: unrecognized severity`. The probe is the arbiter
+  this repository's own hard gate names for a claim about tool behaviour, so a probe more permissive
+  than the server is a confident wrong answer. Both paths now share one
+  `ToolArgumentFilter.Unrecognized`, which names the unknown arguments and lists what the tool
+  declares. Gated by
+  `InstallCommandE2ETests.Call_WithAnArgumentTheToolDoesNotDeclare_RefusesItExactlyAsTheServerWould`.
+  Closes **I229**.
+
+
 ## [0.34.0] - 2026-08-12
 
 ### Changed
@@ -3071,7 +3172,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.35.0
 [0.34.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.34.0
 [0.33.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.33.0
 [0.32.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.32.0

@@ -192,16 +192,25 @@ internal static class ToolArgumentFilter
     private static TerseError? Unrecognized(RequestContext<CallToolRequestParams> request)
     {
         var schema = Schema(request);
-        var accepted = Accepted(schema);
-        if (accepted.Length is 0 || request.Params?.Arguments is not { Count: > 0 } supplied)
+
+        return request.Params?.Arguments is not { Count: > 0 } supplied
+            ? null
+            : Unrecognized(request.Params?.Name, supplied.Keys, () => Required(schema), Accepted(schema));
+    }
+
+    public static TerseError? Unrecognized(string? tool, IEnumerable<string> supplied, Func<string[]> required, string[] accepted)
+    {
+        if (accepted.Length is 0)
             return null;
-        var unknown = supplied.Keys
+
+        var unknown = supplied
             .Where(name => !name.StartsWith('_') && !accepted.Contains(name, StringComparer.Ordinal))
             .ToArray();
+
         return unknown.Length is 0
             ? null
             : Errors.Invalid(
-                request.Params?.Name + " rejected the call: unrecognized " + string.Join(", ", unknown),
-                Remedy(Required(schema), accepted) + ToolExamples.Suffix(request.Params?.Name));
+                tool + " rejected the call: unrecognized " + string.Join(", ", unknown),
+                Remedy(required(), accepted) + ToolExamples.Suffix(tool));
     }
 }

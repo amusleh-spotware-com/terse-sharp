@@ -71,7 +71,9 @@ terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.
 
 No IDE, no licence, no Node, no Python, no API key, and no network call to answer a question — the
 only request it ever makes is one `HEAD` to GitHub's `releases/latest`, at most once a day, to tell
-you an update exists. `TERSE_UPDATE=0` turns that off.
+you an update exists. `TERSE_UPDATE=0` turns that off. From inside an agent session,
+`workspace_status verbose=true` answers `doctor`'s four actionable checks — `roslyn`, `assets`,
+`guard coverage`, `phases` — without leaving the MCP.
 
 Prefer to configure MCP by hand:
 
@@ -144,8 +146,8 @@ The full catalogue is attached to every request, and past a certain size that me
 tool-selection accuracy — so **the advertised set is derived from what the solution actually
 contains**. A tree with no `.xaml`/`.axaml` is not offered the 13 `xaml_*` tools, one with no
 `.razor`/`.cshtml` is not offered the 10 `razor_*`, one with no `.resx`/`.resw` is not offered the 8
-`resx_*`; measured on a plain C# solution that is **56 tools instead of 87, 16 962 tokens instead of
-22 193 (-23.6 %)** on every request. Loading a second solution that does hold them re-advertises the
+`resx_*`; measured on a plain C# solution that is **57 tools instead of 88, 19 091 tokens instead of
+24 330 (-21.5 %)** on every request. Loading a second solution that does hold them re-advertises the
 families through `notifications/tools/list_changed`, and a hidden tool still answers when called by
 name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything regardless;
 `--tools core` still narrows to a 21-tool subset. `workspace_status` names whatever is hidden.

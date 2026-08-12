@@ -82,7 +82,9 @@ terse doctor                    # verify SDK, MSBuild, workspace load, client re
 terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.cs"}'
 ```
 
-No IDE, no licence, no Node, no Python, no API key, and no network call to answer a question.
+No IDE, no licence, no Node, no Python, no API key, and no network call to answer a question. From
+inside an agent session, `workspace_status verbose=true` answers `doctor`'s four actionable checks —
+`roslyn`, `assets`, `guard coverage`, `phases` — without leaving the MCP.
 
 <details>
 <summary>Configure MCP by hand, build from source, Unity, updates</summary>
@@ -202,8 +204,8 @@ A full catalogue is attached to every request, and past a certain size that meas
 tool-selection accuracy — so **the advertised set is derived from what the solution actually
 contains**. A tree with no `.xaml`/`.axaml` is not offered the 13 `xaml_*` tools, one with no
 `.razor`/`.cshtml` is not offered the 10 `razor_*`, one with no `.resx`/`.resw` is not offered the 8
-`resx_*`; measured on a plain C# solution that is **57 tools instead of 88, 18 833 tokens instead of
-24 073 (-21.8 %)** on every request. Loading a second solution that does hold them re-advertises the
+`resx_*`; measured on a plain C# solution that is **57 tools instead of 88, 19 091 tokens instead of
+24 330 (-21.5 %)** on every request. Loading a second solution that does hold them re-advertises the
 families through `notifications/tools/list_changed`, and a hidden tool still answers when called by
 name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything regardless;
 `--tools core` still narrows to a 21-tool subset. `workspace_status` names whatever is hidden.
