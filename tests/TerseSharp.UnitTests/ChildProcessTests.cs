@@ -26,11 +26,14 @@ public sealed class ChildProcessTests
         var inherited = Environment.GetEnvironmentVariables()
             .Keys
             .Cast<string>()
-            .Count(name => !LocatorVariables.Contains(name, StringComparer.OrdinalIgnoreCase));
+            .Where(name => !LocatorVariables.Contains(name, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
 
         var start = ChildProcess.StartInfo("dotnet", [], AppContext.BaseDirectory);
+        var stillSet = inherited.Where(name => Environment.GetEnvironmentVariable(name) is not null).ToArray();
 
-        Assert.Equal(inherited, start.Environment.Count);
+        Assert.True(stillSet.Length > 0, "this process carries no environment, so the test proves nothing");
+        Assert.All(stillSet, name => Assert.True(start.Environment.ContainsKey(name), name + " was dropped from the child's environment"));
     }
 
     [Fact]

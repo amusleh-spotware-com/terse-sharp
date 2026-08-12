@@ -76,6 +76,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   which runs the failing whole-solution build first and asserts the scoped one still answers
   `warnings=3`. Closes **I232**.
 
+- **`ChildProcessTests.StartInfo_ForEveryOtherVariable_LeavesItInherited` no longer races any test
+  that sets an environment variable.** It counted the process's environment, built a
+  `ProcessStartInfo`, and asserted the two counts equal — so a variable set or cleared by a
+  concurrently running test between the two reads failed it. Observed once on the ubuntu leg of run
+  31636905773 as `Expected: 126 / Actual: 127`, a pre-existing race that this release's scheduling
+  change happened to expose. It now asserts the property under test — every non-locator variable
+  that is still set reaches the child — instead of a count, which is immune to a concurrent addition
+  or removal in either direction.
+
 - **The first compile-gated edit of a server process names what the gate did not check.** One line,
   once, never repeated: `gate=semantic - errors=0 means the semantic model is clean; emit-time and
   source-generator errors are NOT checked, so run build once before you push, not after every edit`.
