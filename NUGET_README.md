@@ -10,6 +10,48 @@ symbols. **87 tools. One install. No IDE, no licence, no language server.**
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/)
 
+## 4.6M tokens saved in one week — measured, not marketed
+
+**508 Claude Code sessions**, one developer, one week, one **31,000-file** C# solution — replayed
+from the raw transcripts. Every one of the **6,045 TerseSharp calls** was re-priced against the
+built-in it replaced: `Read` against the **real file on disk**, `Grep` against a **real `ripgrep` run
+of the same query**, `build` / `run_tests` / `git diff` against **3,767 real `dotnet` and `git`
+invocations** mined from those same logs.
+
+| | tokens |
+| --- | --- |
+| What the 6,045 TerseSharp calls actually cost | **2.41M** |
+| What `Read` / `Grep` / `Bash` would have cost for the same answers | **6.97M** |
+| **Burned for nothing, had it not been installed** | **4.56M — 2.9× the entire bill** |
+
+**Then it compounds.** In those same sessions every token put into context was re-sent **33×**
+(4.41B cache-read against 132.6M cache-write). 4.56M tokens never injected are **~150M tokens never
+re-read**.
+
+| The call | Built-in would cost | TerseSharp cost | |
+| --- | ---: | ---: | ---: |
+| `find_implementations` × 72 | 192k tok | 4k tok | **44.9×** |
+| `find_usages` × 274 | 1.26M tok | 111k tok | **11.4×** |
+| ranged `read_text` × 446 | 1.59M tok | 308k tok | **5.2×** |
+| `get_file_outline` × 162 | 402k tok | 112k tok | **3.6×** |
+| `search_symbols` × 520 | 860k tok | 272k tok | **3.2×** |
+| `get_symbol_source` × 630 | 1.26M tok | 405k tok | **3.1×** |
+| `build` × 165 | 32k tok | 10k tok | **3.1×** |
+| whole-file `read_text` × 930 | 1.04M tok | 881k tok | 1.2× |
+| `run_tests` × 393 | 80k tok | 66k tok | 1.2× |
+
+**The floor.** Push every assumption *against* TerseSharp — ranged reads priced as a perfect
+`Read offset/limit`, searches priced at the **median** grep output instead of the mean — and the
+saving is still **2.09M tokens, 1.9×**. `analyze`, `search_text`, every edit tool and the whole
+`.resx` / XAML / Razor surface were scored **zero**, and no grep→`Read` follow-up chain was charged
+to the built-ins, so the real number is above both figures. `diff_symbols` (13 calls) and
+`list_tests` (3) cost **more** than the raw command — measured, logged, not hidden.
+
+**The fallback rate is the real result.** Across the whole week the agent reached for a built-in
+**5 times with `Grep`, 11 with `Edit`** — and 55 of its 88 `Read` calls were PNG screenshots, which
+no C# tool replaces. An agent that distrusts its MCP server falls back to the shell and spends *more*
+than with no server at all; this one didn't.
+
 ## Install
 
 ```
