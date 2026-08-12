@@ -2,7 +2,6 @@
 
 namespace TerseSharp.E2ETests;
 
-[Collection(nameof(TerseServerCollection))]
 public sealed class AnalyzerLockE2ETests : IAsyncLifetime
 {
     private TerseServerProcess server = null!;

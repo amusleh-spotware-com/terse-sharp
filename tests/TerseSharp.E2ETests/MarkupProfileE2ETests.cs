@@ -4,7 +4,6 @@ using TerseSharp.Server;
 
 namespace TerseSharp.E2ETests;
 
-[Collection(nameof(TerseServerCollection))]
 public sealed class MarkupProfileE2ETests : IAsyncLifetime
 {
     private static readonly string Root =

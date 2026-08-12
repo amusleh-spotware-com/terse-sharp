@@ -161,6 +161,9 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
     public async Task SearchSymbols_WithScope_KeepsOnlyThatHalfOfTheSolution()
     {
         var production = Path.Combine("Fixture.Warning", "Calculator.cs");
+
+        await LoadedWholeAsync();
+
         var both = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator" }, TestContext.Current.CancellationToken);
         var source = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator", ["scope"] = "src" }, TestContext.Current.CancellationToken);
         var tests = await server.CallAsync("search_symbols", new() { ["query"] = "Calculator", ["scope"] = "test" }, TestContext.Current.CancellationToken);
@@ -176,6 +179,16 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
         Assert.True(source.Length < both.Length, source);
         Assert.Contains("ERROR InvalidArgument", wrong, StringComparison.Ordinal);
         Assert.Contains("scope=src, scope=test", wrong, StringComparison.Ordinal);
+    }
+
+    private async Task LoadedWholeAsync()
+    {
+        await server.CallAsync("build", [], TestContext.Current.CancellationToken);
+
+        await server.CallAsync(
+            "load_workspace",
+            new() { ["path"] = Path.Combine(WarningRoot, "WarningSolution.slnx"), ["reload"] = true },
+            TestContext.Current.CancellationToken);
     }
 
     [Fact]

@@ -1,6 +1,5 @@
 namespace TerseSharp.E2ETests;
 
-[Collection(nameof(TerseServerCollection))]
 public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
 {
     private TerseServerProcess server = null!;

@@ -62,11 +62,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   depended on whether the test project happened to be up to date, and the class was the only
   build-heavy E2E class **outside** `TerseServerCollection`, so its `dotnet build` ran concurrently
   with every other class's. The counting builds are now scoped to `project=Fixture.Warning`, whose
-  three deliberate warnings all live in one touched file, and it — together with the other five E2E
-  classes that spawn a build and were still outside the collection — joins `TerseServerCollection`,
-  so no two fixture builds overlap. That second half is itself census-gated now:
-  `E2ECollectionCensusTests` discovers every E2E class that calls `build`, `run_tests`, `list_tests`
-  or `clean` from source and fails on one that is not in the collection. Gated by
+  three deliberate warnings all live in one touched file — and because that scoping stops building
+  the fixture's test project, the one test that needs both halves loaded now builds the whole
+  solution and reloads before it searches. The class also joins `TerseServerCollection`, so its
+  builds no longer overlap the thirty-five classes already in it. Extending that membership to the
+  other five build-heavy E2E classes was **tried and reverted**: run 31634146607 went red on ubuntu
+  and windows, `ChangedTestSelectionE2ETests` falling back to the whole solution (`total=2` against
+  its asserted `total=1`), and all five are green outside the collection. That is recorded as a
+  reasoned, ratcheted exclusion set in `E2ECollectionCensusTests`, which discovers every E2E class
+  that calls `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` from source and fails on
+  one that is neither in the collection nor excluded with a written reason. Gated by
   `BuildWarningsE2ETests.Build_AfterAFailedBuildOfTheWholeSolution_StillReportsOnlyTheWarningsOfTheProjectItWasScopedTo`,
   which runs the failing whole-solution build first and asserts the scoped one still answers
   `warnings=3`. Closes **I232**.
