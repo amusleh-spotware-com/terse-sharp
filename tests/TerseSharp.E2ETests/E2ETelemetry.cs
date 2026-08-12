@@ -9,7 +9,34 @@ internal static class E2ETelemetry
     private static long calls;
     private static long callTicks;
 
-    static E2ETelemetry() => AppDomain.CurrentDomain.ProcessExit += (_, _) => Console.Error.WriteLine(Report());
+    static E2ETelemetry() => AppDomain.CurrentDomain.ProcessExit += (_, _) => Emit(Report());
+
+    private static void Emit(string report)
+    {
+        var directory = Environment.GetEnvironmentVariable("TERSE_RESULTS_DIRECTORY");
+
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+        {
+            Console.Error.WriteLine(report);
+
+            return;
+        }
+
+        var name = "terse-notes-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ".txt";
+
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, name), report);
+        }
+        catch (IOException)
+        {
+            Console.Error.WriteLine(report);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine(report);
+        }
+    }
 
     public static long Starts => Volatile.Read(ref starts);
 

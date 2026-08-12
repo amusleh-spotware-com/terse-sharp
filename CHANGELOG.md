@@ -8,6 +8,75 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-08-12
+
+### Added
+
+- `run_tests` now sets `TERSE_RESULTS_DIRECTORY` on the `dotnet test` process, and `verbose=true`
+  returns whatever the run wrote to `$TERSE_RESULTS_DIRECTORY/terse-notes*.txt` under a `run notes:`
+  heading, bounded to 20 lines. This is the only channel that survives a **green** run: measured this
+  release, a marker written from the test host's own `ProcessExit` — exactly the way `E2ETelemetry`
+  wrote its attribution line — never reaches `run_tests`' captured output at any verbosity, because
+  the runner captures test-host console output per test. `E2ETelemetry` now writes through the
+  channel, so the four numbers it produces (`starts`, `startMs`, `calls`, `callMs`) are readable
+  through the tool that runs the suite instead of costing a `dotnet test` shell-out, which is a
+  breach. It stays behind `verbose=true`, because the one-line green verdict is a hard gate. Locked by
+  `TestToolsE2ETests.RunTests_GreenAndVerbose_ShowsWhatTheTestHostPrinted` and the control
+  `…RunTests_GreenWithoutVerbose_HidesWhatTheTestHostPrinted`. Closes **I210**.
+
+- `replace_symbol add=["private static bool Same(…) => …"]` appends **new** members to the type that
+  contains the replaced member, inside the same compile-gated edit. A body that calls a helper written
+  in the same breath was the single most frequent rollback in this repository's own session log — 35
+  `CompileRegression` rejections in one release, 8 in one run — and every one of them cost the same
+  three calls: rejected edit, `add_member` for the callee, `retryWith`. It is now **one**. Every target
+  of the call must share one containing type (a batch spanning two is refused naming both, rather than
+  guessing), a call that replaces that containing type itself is refused, a container that cannot hold
+  members — an enum, nested or not — is refused by name instead of being walked past to the enclosing
+  class, and — like `usings=` — `add=`
+  is not held by a `retryWith` token, so pass it again on the retry. Locked by
+  `EditToolsE2ETests.ReplaceSymbol_WithAdd_LandsTheNewHelperInTheSameCompileGatedEdit`,
+  `…ReplaceSymbol_WithAdd_WritesBothMembersInOneEdit`,
+  `…ReplaceSymbol_WithAddAcrossTwoTypes_IsRefusedRatherThanGuessingTheContainer`,
+  `…ReplaceSymbol_WithAddOnTheTypeItself_IsRefused`,
+  `…ReplaceSymbol_WithAddOnAnEnumMember_IsRefusedNamingTheEnum`,
+  `…ReplaceSymbol_WithAddInsideANestedEnum_IsRefusedInsteadOfAppendingToTheOuterClass` and the control
+  `…ReplaceSymbol_WithoutAdd_IsStillRolledBackForTheHelperThatDoesNotExistYet`. Closes **I209**.
+
+- `read_text bytes=true` ends the answer with the file's byte length as `bytes=N` — on every shape the
+  tool returns (text, heading map, `section=`, and the outline a whole `.cs` read answers with) and
+  once per entry of a `paths=` batch — an **empty** file answers `bytes=0` rather than omitting the
+  line, because a parameter that is silently ignored is the confidently-wrong answer this server
+  refuses. "How big is this file?" was the last question in this repo's own
+  sessions that fell out to the shell: measuring `SKILL.md` across a rewrite cost **4** `Bash` calls
+  (`wc -c` ×3 plus `git show HEAD:<path> | wc -c`). It is opt-in because a byte count is noise on the
+  reads that want lines. `find_files stamps=true` already answered the same number without reading the
+  file, and takes a **concrete path** as readily as a glob — now stated in `SKILL.md` and locked by a
+  test, because that is the cheaper of the two calls. Closes **I208**.
+
+### Changed
+
+- **Response format.** A `CompileRegression` whose only new errors are a missing import now names the
+  one-call recovery instead of the three-call one. The remedy read
+  `add: using System.Collections.Immutable; then replay the rejected text with retryWith`, which is a
+  rejected edit plus an `edit_text force=true` on the file header plus a `retryWith`; it now reads
+  `retry with usings=["System.Collections.Immutable"] and the retryWith token below, which lands the
+  import in the same compile-gated edit`, and the `dryRun` note that used to read `add: using X;` now
+  reads `retry with usings=["X"]` — it named a parameter `replace_symbol` also declares, with an
+  entirely different meaning, which is the interface-design defect this project refuses to answer with
+  prose. The `usings=` parameter it names has existed on
+  `replace_symbol_body`, `replace_symbol` and `add_member` since 0.28.0 and was never mentioned by the
+  error that most needs it — measured at 2 calls saved per occurrence, on the commonest rollback class
+  after callee-after-caller. A `dryRun` that *would* be rolled back names the same parameter without
+  a token, because nothing was rejected there and there is nothing to replay. Locked by
+  `EditToolsE2ETests.AddMember_RolledBackForAMissingUsing_NamesTheUsingsParameterAndTheRetryToken` and
+  `…AddMember_DryRunForAMissingUsing_NamesTheUsingsParameterItWouldNeed`. Closes **I207**.
+- Three token ratchets moved by the two new parameters, after the descriptions were cut back twice:
+  the advertised `tools/list` payload budget 23 400 → 23 450 (**+26 measured**), the markup-narrowed
+  surface 18 100 → 18 200, and `SKILL.md` 18 200 → 18 450. The first drafts cost **238** tokens on
+  every request and **468** in every agent's context; what shipped costs 26 and ~250. The budgets are
+  regression detectors, so they move only by what a genuinely wider surface costs — and the trimming
+  pass is the reason the number is small.
+
 ## [0.32.0] - 2026-08-11
 
 ### Changed
@@ -2740,7 +2809,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.33.0
 [0.32.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.32.0
 [0.31.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.31.0
 [0.30.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.30.0

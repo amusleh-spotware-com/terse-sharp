@@ -8,13 +8,14 @@ internal static class ChildProcess
         ["MSBUILD_EXE_PATH", "MSBuildExtensionsPath", "MSBuildSDKsPath"];
 
     public static async Task<ProcessRun> RunAsync(
-        string fileName,
-        IReadOnlyList<string> arguments,
-        string workingDirectory,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
+            string fileName,
+            IReadOnlyList<string> arguments,
+            string workingDirectory,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyList<KeyValuePair<string, string>>? environment = null)
     {
-        var start = StartInfo(fileName, arguments, workingDirectory);
+        var start = StartInfo(fileName, arguments, workingDirectory, environment);
         var stopwatch = Stopwatch.StartNew();
         using var process = Started(start, fileName);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -93,7 +94,11 @@ internal static class ChildProcess
             TimedOut: true);
     }
 
-    internal static ProcessStartInfo StartInfo(string fileName, IReadOnlyList<string> arguments, string workingDirectory)
+    internal static ProcessStartInfo StartInfo(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            string workingDirectory,
+            IReadOnlyList<KeyValuePair<string, string>>? environment = null)
     {
         var start = new ProcessStartInfo(fileName)
         {
@@ -109,6 +114,9 @@ internal static class ChildProcess
 
         foreach (var variable in RegisteredMsBuildVariables)
             start.Environment.Remove(variable);
+
+        foreach (var entry in environment ?? [])
+            start.Environment[entry.Key] = entry.Value;
 
         return start;
     }

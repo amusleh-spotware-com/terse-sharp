@@ -9,18 +9,19 @@ public sealed class FileTools(ToolContext context)
     [McpServerTool(Name = "read_text", ReadOnly = true)]
     [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
-[Description("Path, absolute or workspace-relative.")] string? path = null,
-[Description("Several files answered in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
-[Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
-[Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
-[Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
-[Description("Maximum characters of file text returned, default 40960 and at most 131072, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. With paths= it is the budget for the whole batch. The default is set so a whole-file read stays inline in the client instead of being spilled to a file that answers nothing; a clipped read names the line to continue from. Raise it on a file you truly need whole, lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
-[Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
-[Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
-[Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
-[Description("Return the file verbatim - every line numbered, blank lines and trailing whitespace kept. On a .cs path this is also the opt-in that returns the text instead of the outline. Default false.")] bool verbose = false,
-[Description("Workspace or worktree name.")] string? workspace = null,
-CancellationToken cancellationToken = default)
+    [Description("Path, absolute or workspace-relative.")] string? path = null,
+    [Description("Several files answered in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
+    [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
+    [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
+    [Description("Maximum lines returned, default 2000. The response is truncated, never refused.")] int maxLines = 0,
+    [Description("Maximum characters of file text returned, default 40960 and at most 131072, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. With paths= it is the budget for the whole batch. The default is set so a whole-file read stays inline in the client instead of being spilled to a file that answers nothing; a clipped read names the line to continue from. Raise it on a file you truly need whole, lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
+    [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
+    [Description("End the answer with the file's byte length as bytes=N, on every shape read_text returns and once per paths= entry. find_files stamps=true answers the same number without reading the file. Default false.")] bool bytes = false,
+    [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
+    [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
+    [Description("Return the file verbatim - every line numbered, blank lines and trailing whitespace kept. On a .cs path this is also the opt-in that returns the text instead of the outline. Default false.")] bool verbose = false,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default)
     {
         var combined = PluralPaths.Combine(path, paths, "paths");
 
@@ -32,7 +33,8 @@ CancellationToken cancellationToken = default)
             headings,
             section,
             verbose,
-            Math.Max(0, tail));
+            Math.Max(0, tail),
+            bytes);
 
         var whole = WholeRead(startLine, endLine, tail, maxLines, maxChars, section, headings, verbose);
 

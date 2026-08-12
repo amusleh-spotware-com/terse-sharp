@@ -236,20 +236,27 @@ IReadOnlySet<string> overloaded)
         + " get_symbol_source symbolId=<an id above> for one member, get_symbol_source symbolIds=[...] for several, read_text verbose=true for the raw text.";
 
     public static async Task<Result<string>> SteeredAsync(
-        LoadedWorkspace workspace,
-        string path,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            string path,
+            long? bytes,
+            CancellationToken cancellationToken)
     {
         var outline = await FileAsync(workspace, path, signatures: true, "short", usings: false, cancellationToken).ConfigureAwait(false);
-        return outline.IsOk ? Result.Ok(outline.Value! + "\n" + TextSteer) : outline;
+
+        if (!outline.IsOk)
+            return outline;
+
+        return Result.Ok(bytes is { } length
+            ? outline.Value! + "\n" + TextSteer + "\n" + FileService.Sized(length)
+            : outline.Value! + "\n" + TextSteer);
     }
 
     public static Task<Result<string>> OrTextAsync(
-        LoadedWorkspace workspace,
-        string path,
-        FileService.ReadRequest request,
-        CancellationToken cancellationToken) =>
-        DocumentLookup.Find(workspace, path) is null
-            ? FileService.ReadTextAsync(workspace, path, request, cancellationToken)
-            : SteeredAsync(workspace, path, cancellationToken);
+            LoadedWorkspace workspace,
+            string path,
+            FileService.ReadRequest request,
+            CancellationToken cancellationToken) =>
+            DocumentLookup.Find(workspace, path) is not { } document
+                ? FileService.ReadTextAsync(workspace, path, request, cancellationToken)
+                : SteeredAsync(workspace, path, request.Bytes ? FileService.ByteLength(document.FilePath) : null, cancellationToken);
 }

@@ -401,7 +401,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task AddMember_RolledBackForAMissingUsing_NamesTheNamespaceToImport()
+    public async Task AddMember_RolledBackForAMissingUsing_NamesTheUsingsParameterAndTheRetryToken()
     {
         var text = await server.CallAsync("add_member", new()
         {
@@ -411,7 +411,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
         Assert.Contains("CS0246", text, StringComparison.Ordinal);
-        Assert.Contains("add: using System.Collections.Immutable;", text, StringComparison.Ordinal);
+        Assert.Contains("usings=[\"System.Collections.Immutable\"]", text, StringComparison.Ordinal);
         Assert.Contains("retryWith=", text, StringComparison.Ordinal);
     }
 
@@ -425,7 +425,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         });
 
         Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("add: using", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("usings=[", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -439,7 +439,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
         Assert.Contains("CS0246", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("add: using", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("usings=[", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -453,6 +453,186 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
         Assert.Contains("CS0246", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("usings=[", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_DryRunForAMissingUsing_NamesTheUsingsParameterItWouldNeed()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderBook",
+            ["declaration"] = "public ImmutableArray<string> PreviewedTags() => [];",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("retry with usings=[\"System.Collections.Immutable\"]", text, StringComparison.Ordinal);
         Assert.DoesNotContain("add: using", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAdd_LandsTheNewHelperInTheSameCompileGatedEdit()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = UnusedMethod,
+            ["declaration"] = "public int Unused() => Doubled(21);",
+            ["add"] = new[] { "private static int Doubled(int value) => value * 2;" },
+            ["dryRun"] = true,
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("Doubled", text, StringComparison.Ordinal);
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("would be rolled back", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithoutAdd_IsStillRolledBackForTheHelperThatDoesNotExistYet()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = UnusedMethod,
+            ["declaration"] = "public int Unused() => Doubled(21);",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("CS0103", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAdd_WritesBothMembersInOneEdit()
+    {
+        var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(OrderServicePath);
+
+        try
+        {
+            var text = await server.CallAsync("replace_symbol", new()
+            {
+                ["symbolId"] = UnusedMethod,
+                ["declaration"] = "public int Unused() => Tripled(7);",
+                ["add"] = new[] { "private static int Tripled(int value) => value * 3;" },
+            });
+
+            var after = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+
+            Assert.Contains("OrderService.cs", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("private static int Tripled(int value) => value * 3;", after, StringComparison.Ordinal);
+            Assert.Contains("public int Unused() => Tripled(7);", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(OrderServicePath, before, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(OrderServicePath, stamp);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAddAcrossTwoTypes_IsRefusedRatherThanGuessingTheContainer()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { UnusedMethod, "M:Fixture.Trading.OrderBook.Clear" },
+            ["declarations"] = new[] { "public int Unused() => 9;", "public void Clear() => bySymbol.Clear();" },
+            ["add"] = new[] { "private static int Doubled(int value) => value * 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService", text, StringComparison.Ordinal);
+        Assert.Contains("OrderBook", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAddOnTheTypeItself_IsRefused()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.Alpha.DuplicatedName",
+            ["declaration"] = "public sealed class DuplicatedName;",
+            ["add"] = new[] { "private static int Zero() => 0;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("replaces that type itself", text, StringComparison.Ordinal);
+        Assert.Contains("add_member", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAddOnAnEnumMember_IsRefusedNamingTheEnum()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "F:Fixture.Trading.OrderSide.Buy",
+            ["declaration"] = "Buy",
+            ["add"] = new[] { "private static int Zero() => 0;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("the enum OrderSide", text, StringComparison.Ordinal);
+        Assert.Contains("cannot take member declarations", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAnEmptyAdd_IsANoOpTheWayAnEmptyUsingsIs()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = UnusedMethod,
+            ["declaration"] = "public int Unused() => 9;",
+            ["add"] = Array.Empty<string>(),
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("dryRun", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAddInsideANestedEnum_IsRefusedInsteadOfAppendingToTheOuterClass()
+    {
+        const string Probe = "src/Fixture.Trading/NestedEnumProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class NestedEnumProbe\n{\n    public enum Mode\n    {\n        Buy,\n        Sell,\n    }\n}\n",
+            ["force"] = true,
+        });
+
+        try
+        {
+            var member = await server.CallAsync("replace_symbol", new()
+            {
+                ["symbolId"] = "F:Fixture.Trading.NestedEnumProbe.Mode.Buy",
+                ["declaration"] = "Buy",
+                ["add"] = new[] { "private static int Zero() => 0;" },
+                ["dryRun"] = true,
+            });
+
+            var declared = await server.CallAsync("replace_symbol", new()
+            {
+                ["symbolId"] = "T:Fixture.Trading.NestedEnumProbe.Mode",
+                ["declaration"] = "public enum Mode { Buy, Sell }",
+                ["add"] = new[] { "private static int Zero() => 0;" },
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("ERROR InvalidArgument", member, StringComparison.Ordinal);
+            Assert.Contains("the enum Mode", member, StringComparison.Ordinal);
+            Assert.DoesNotContain("NestedEnumProbe,", member, StringComparison.Ordinal);
+            Assert.Contains("ERROR InvalidArgument", declared, StringComparison.Ordinal);
+            Assert.Contains("the enum Mode", declared, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
     }
 }

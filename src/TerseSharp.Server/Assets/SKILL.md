@@ -52,7 +52,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` | every ASP.NET Core `Map*` with the member it sits in |
 | **Files** | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
-| **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell |
+| **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell; `glob` takes a **concrete path** as readily as a pattern, so one file's size is one call |
 | **Files** | `Bash: git ls-files` to tell a checked-in file from a scratch one | `find_files(glob, tracked: true)` | only the files git tracks, so build output and another session's untracked notes drop out; the bare `git ls-files` is denied by the guard, every flagged form is not |
 | **Files** | `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC` once for the whole response, not per record - these two answer nothing else; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
 | **Files** | `grep -n -e A -e B -e C` / one search per literal | `search_text(queries: ["I175", "I176", "I177"])` | up to 10 literals in **one** pass over the same file set; every record carries `q1`..`qN` for the position of its literal in `queries=`, which a regex alternation cannot tell you. A line matching several is **one** record tagged `q1,q3` in query order, so a tag absent from a record means that literal is absent from that line. No legend is echoed back — you passed the array |
@@ -64,6 +64,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
 | **Files** | `Read` **several** files | `read_text(paths: [...])` | up to 10 in one response, each under its own path line with its own count and `next:` note; an unresolved path is `NOT_FOUND` inline, and `maxChars` is one budget shared across the batch that names the entry it clipped |
 | **Files** | `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
+| **Files** | `wc -c file` for a size you want *while* reading | `read_text(path, bytes: true)` | ends the answer with `bytes=N`, on every shape it returns and once per `paths=` entry |
 | **Files** | a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from, and says `line N was cut mid-way` when the budget ran out **inside** a line — raise `maxChars` for that line, because a line range cannot resume at a character offset |
 | **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | **Files** | `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
@@ -76,6 +77,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call, and the next `.cs` write's compile gate already sees it, so two interdependent new files land in either order |
 | **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
 | **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
+| **Edit code** | a new body that calls a private helper you have not written yet | `replace_symbol(symbolId, declaration, add: [...])` | the new members land in the **containing type** inside the same compile-gated edit, so the callee-after-caller `CompileRegression` never happens; targets must share one containing type, and an enum container is refused, never walked past |
 | **Edit code** | a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` | one declaration per symbol, paired positionally, applied as **one** compile-gated edit across every file they live in — the way to land a signature change together with the callers it breaks instead of paying a `CompileRegression` and a retry |
 | **Edit code** | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` | an enum id takes enum members; `replace_symbol` and `delete_symbol` work on one too |
 | **Edit code** | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` | appended to that file's namespace as one compile-gated edit — no whole-file rewrite, no forced text edit |
@@ -466,11 +468,14 @@ that answers nothing, and the clip always names `next: startLine=`.
    `replace_symbol_body` and `add_member` take `retryWith: "r3"` to replay exactly what was rejected —
    after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
    declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
-   **When every new error is just a missing import, the remedy names it**: a rollback whose errors are
-   all `CS0246`/`CS0103` for names the project resolves in exactly one namespace each answers
-   `remedy: add: using System.Collections.Immutable; then replay the rejected text with retryWith`.
-   Add the using with `edit_text force=true`, then `retryWith` — the using is never added for you,
-   because that would edit a region you did not address.
+   Better still, do not earn the rollback: `replace_symbol add=[…]` appends the helper in the same
+   edit. Like `usings=`, it is not held by the token; pass it again on the retry.
+   **When every new error is just a missing import, the remedy names the one-call fix**: a rollback
+   whose errors are all `CS0246`/`CS0103` for names the project resolves in exactly one namespace each
+   answers `remedy: retry with usings=["System.Collections.Immutable"] and the retryWith token below`.
+   Do exactly that: `usings=` lands the directive inside the *same* compile-gated edit, so the whole
+   recovery is one call rather than an `edit_text force=true` on the header plus a `retryWith`. The
+   directive is never added behind your back. A `dryRun` names the same parameter without a token.
    **A token belongs to the workspace it was rejected in**: replaying it against another one - a
    sibling worktree where the same symbol id resolves - is refused naming both roots, instead of
    landing the held declaration in the wrong tree. Every diagnostic a rollback lists names its file
@@ -684,6 +689,12 @@ one.
 
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
 produced no results reports `FAILED …, no test results were produced` and never `0 failures`.
+
+**A suite can hand you a run-level note.** `run_tests` sets `TERSE_RESULTS_DIRECTORY` on the
+`dotnet test` process, and whatever the run writes to `$TERSE_RESULTS_DIRECTORY/terse-notes*.txt`
+comes back under `run notes:` when `verbose=true`, bounded to 20 lines. It is the only channel that
+survives a **green** run — a test host's own console output never reaches `run_tests` at any
+verbosity, because the runner captures it per test.
 
 `project=` takes the name `list_projects` prints as readily as a path — `run_tests(project: "Trading.Tests")`
 resolves against the solution's projects first and then against the `*.csproj` under the workspace

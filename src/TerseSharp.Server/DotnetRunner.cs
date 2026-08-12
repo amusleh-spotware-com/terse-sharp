@@ -45,9 +45,9 @@ public static partial class DotnetRunner
         exitCode is not 0 && LockedOutput().IsMatch(output);
 
     internal static async Task<TestRunResult> TestAsync(
-    WorkspaceTarget workspace,
-    TestRunRequest request,
-    CancellationToken cancellationToken)
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        CancellationToken cancellationToken)
     {
         var results = Directory.CreateTempSubdirectory("terse-tests-");
 
@@ -55,7 +55,8 @@ public static partial class DotnetRunner
         {
             var (run, missing) = await InvokeAsync(workspace, request, results.FullName, cancellationToken).ConfigureAwait(false);
             var report = Report(results, workspace.Root);
-            var response = RenderTest(run, report, request, workspace.Root);
+            var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
+            var response = Noted(RenderTest(run, report, request, workspace.Root), notes);
 
             return new TestRunResult(TimedOut(response, missing, request.Invocations.Length), report, Locked(run));
         }
@@ -76,14 +77,15 @@ public static partial class DotnetRunner
         : string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first timeout; {missing.Count} of {invocations} project(s) produced no results");
 
     private static async Task<(ProcessRun Run, List<string> Missing)> InvokeAsync(
-    WorkspaceTarget workspace,
-    TestRunRequest request,
-    string resultsDirectory,
-    CancellationToken cancellationToken)
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        string resultsDirectory,
+        CancellationToken cancellationToken)
     {
         var combined = default(ProcessRun);
         var missing = new List<string>();
         var stopped = false;
+        var environment = new[] { new KeyValuePair<string, string>(ResultsDirectoryVariable, resultsDirectory) };
 
         foreach (var target in request.Invocations)
         {
@@ -98,7 +100,8 @@ public static partial class DotnetRunner
                 Arguments(request with { Target = target }, resultsDirectory),
                 workspace.Root,
                 request.Timeout,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                environment).ConfigureAwait(false);
 
             combined = combined is null ? run : Merge(combined, run);
 
@@ -135,7 +138,7 @@ public static partial class DotnetRunner
     }
 
     private static TestRunReport Report(DirectoryInfo results, string workspaceRoot) =>
-        TestResultParser.Parse(Directory.EnumerateFiles(results.FullName, "*.trx", SearchOption.AllDirectories), workspaceRoot);
+            TestResultParser.Parse(Directory.EnumerateFiles(results.FullName, "*.trx", RecursiveAndTolerant), workspaceRoot);
 
     private static string[] Arguments(TestRunRequest request, string resultsDirectory)
     {
@@ -320,8 +323,13 @@ public static partial class DotnetRunner
     private static IEnumerable<string> Tail(string output) =>
         output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(MaxTailLines);
 
-    private static Task<ProcessRun> RunAsync(string[] arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>
-        ChildProcess.RunAsync("dotnet", arguments, workingDirectory, timeout, cancellationToken);
+    private static Task<ProcessRun> RunAsync(
+            string[] arguments,
+            string workingDirectory,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyList<KeyValuePair<string, string>>? environment = null) =>
+            ChildProcess.RunAsync("dotnet", arguments, workingDirectory, timeout, cancellationToken, environment);
 
     [GeneratedRegex(@"^.*?: (error|warning) [A-Z]+\d+:.*$", RegexOptions.Multiline)]
     private static partial Regex DiagnosticLine();
@@ -443,6 +451,56 @@ public static partial class DotnetRunner
     : "  " + string.Join("  ", report.Projects.Select(project => string.Create(
         CultureInfo.InvariantCulture,
         $"{project.Project}:{project.Total}/{project.DurationMs}ms")));
+
+    internal const string ResultsDirectoryVariable = "TERSE_RESULTS_DIRECTORY";
+    private const int MaxNoteLines = 20;
+
+    private static async Task<string[]> NotesAsync(DirectoryInfo results, CancellationToken cancellationToken)
+    {
+        var notes = new List<string>(MaxNoteLines);
+
+        foreach (var file in results.EnumerateFiles("terse-notes*.txt", RecursiveAndTolerant))
+        {
+            if (notes.Count >= MaxNoteLines)
+                break;
+
+            if (file.Length > MaxNoteBytes)
+                continue;
+
+            notes.AddRange(await ReadNoteAsync(file, cancellationToken).ConfigureAwait(false));
+        }
+
+        return [.. notes.Take(MaxNoteLines)];
+    }
+
+    private static async Task<IEnumerable<string>> ReadNoteAsync(FileInfo file, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var lines = await File.ReadAllLinesAsync(file.FullName, cancellationToken).ConfigureAwait(false);
+
+            return lines.Where(line => line.Length > 0);
+        }
+        catch (IOException)
+        {
+            return [];
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    private static string Noted(string response, string[] notes) => notes.Length is 0
+        ? response
+        : response + "\nrun notes:\n" + string.Join('\n', notes);
+
+    private const long MaxNoteBytes = 64 * 1024;
+    private static readonly EnumerationOptions RecursiveAndTolerant = new()
+    {
+        RecurseSubdirectories = true,
+        IgnoreInaccessible = true,
+    };
 }
 
 internal sealed record ProcessRun(

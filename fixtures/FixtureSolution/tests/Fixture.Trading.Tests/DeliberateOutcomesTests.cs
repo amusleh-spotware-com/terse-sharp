@@ -1,9 +1,40 @@
+using System.Globalization;
 using Xunit;
 
 namespace Fixture.Trading.Tests;
 
 public sealed class DeliberateOutcomesTests
 {
+    static DeliberateOutcomesTests() =>
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Note("fixture-host-exit-marker");
+
+    private static void Note(string line)
+    {
+        var directory = Environment.GetEnvironmentVariable("TERSE_RESULTS_DIRECTORY");
+
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+        {
+            Console.Error.WriteLine(line);
+
+            return;
+        }
+
+        var name = "terse-notes-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ".txt";
+
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, name), line);
+        }
+        catch (IOException)
+        {
+            Console.Error.WriteLine(line);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine(line);
+        }
+    }
+
     [Fact]
     public void Succeeds()
     {

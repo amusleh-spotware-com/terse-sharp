@@ -65,12 +65,12 @@ public static class Errors
         string.Create(CultureInfo.InvariantCulture, $"'{path}' resolves outside the workspace root"),
         "pass a path inside the loaded workspace");
 
-    public static TerseError CompileRegression(IReadOnlyList<string> diagnostics, string? import = null) => new(
-        TerseErrorCode.CompileRegression,
-        "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
-        import is { Length: > 0 }
-            ? "add: " + import + " then replay the rejected text with retryWith, or pass allowErrors=true to apply it anyway"
-            : "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway");
+    public static TerseError CompileRegression(IReadOnlyList<string> diagnostics, IReadOnlyList<string>? imports = null) => new(
+            TerseErrorCode.CompileRegression,
+            "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
+            imports is { Count: > 0 }
+                ? "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway"
+                : "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway");
 
     public static TerseError EditConflict(string message) => new(
         TerseErrorCode.EditConflict,
@@ -119,4 +119,7 @@ public static class Errors
         TerseErrorCode.DocumentNotFound,
         string.Create(CultureInfo.InvariantCulture, $"'{path}' is not a document in the loaded workspace"),
         remedy);
+
+    internal static string QuotedList(IReadOnlyList<string> names) =>
+            string.Join(", ", names.Select(name => "\"" + name + "\""));
 }

@@ -7,11 +7,11 @@ namespace TerseSharp.Core;
 public static class EditGate
 {
     public static async Task<Result<string>> ApplyAsync(
-    LoadedWorkspace workspace,
-    Solution updated,
-    IReadOnlyList<DocumentId> changed,
-    EditOptions options,
-    CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        Solution updated,
+        IReadOnlyList<DocumentId> changed,
+        EditOptions options,
+        CancellationToken cancellationToken)
     {
         var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
         var diff = await DiffAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
@@ -24,7 +24,7 @@ public static class EditGate
             return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root));
 
         if (report is { NewErrors.Length: > 0 })
-            return Result.Fail<string>(Errors.CompileRegression(report.NewErrors, report.Import));
+            return Result.Fail<string>(Errors.CompileRegression(report.NewErrors, report.Imports));
 
         return await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false)
             ? Result.Ok(Render(options, diff, "applied", report, workspace.Root))
@@ -83,8 +83,8 @@ public static class EditGate
         foreach (var error in report.NewErrors)
             response.Note(error);
 
-        if (report.Import is { Length: > 0 } import)
-            response.Note("add: " + import);
+        if (report.Imports is { Length: > 0 } imports)
+            response.Note("retry with usings=[" + Errors.QuotedList(imports) + "]");
     }
 
     private static string Describe(GateReport report, bool verbose) => verbose
@@ -232,13 +232,13 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-    string[] NewErrors,
-    string[] Unresolved,
-    int Errors,
-    int ErrorDelta,
-    int Warnings,
-    int WarningDelta,
-    string? Import);
+        string[] NewErrors,
+        string[] Unresolved,
+        int Errors,
+        int ErrorDelta,
+        int Warnings,
+        int WarningDelta,
+        string[]? Imports);
 
     private readonly record struct Tally(Dictionary<string, int> Errors, int ErrorCount, int WarningCount);
     private static string Compact(ResponseBuilder response, DocumentDiff[] diffs, string root)
@@ -348,12 +348,12 @@ public static class EditGate
         .Distinct(StringComparer.Ordinal)];
     }
 
-    private static async Task<string?> ImportHintAsync(
-    Solution after,
-    IReadOnlyList<DocumentId> changed,
-    string root,
-    string[] errors,
-    CancellationToken cancellationToken)
+    private static async Task<string[]?> ImportHintAsync(
+            Solution after,
+            IReadOnlyList<DocumentId> changed,
+            string root,
+            string[] errors,
+            CancellationToken cancellationToken)
     {
         if (errors.Length is 0)
             return null;
@@ -374,7 +374,7 @@ public static class EditGate
             spaces.Add(only);
         }
 
-        return spaces.Count > MaxImportHints ? null : string.Join(' ', spaces.Select(space => "using " + space + ";"));
+        return spaces.Count > MaxImportHints ? null : [.. spaces];
     }
 
     private static Project? Edited(Solution after, IReadOnlyList<DocumentId> changed)

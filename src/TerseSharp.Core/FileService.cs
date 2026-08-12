@@ -218,12 +218,11 @@ public static class FileService
 
     private static Result<string> Present(string path, string label, string text, ReadRequest request)
     {
-        if (request.Headings)
-            return Outline(path, label, text, request.Verbose);
+        var answer = Rendered(path, label, text, request);
 
-        return request.Section is { Length: > 0 } heading
-            ? Slice(label, text, heading, request)
-            : Result.Ok(Render(label, text, Tailed(text, request), request));
+        return request.Bytes && answer.IsOk
+            ? Result.Ok(answer.Value! + "\n" + Sized(request.Length))
+            : answer;
     }
 
     private static LineRange Tailed(string text, ReadRequest request)
@@ -398,7 +397,7 @@ public static class FileService
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0);
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0);
 
@@ -489,7 +488,9 @@ public static class FileService
             ReadRequest request,
             CancellationToken cancellationToken)
     {
-        if (!File.Exists(full))
+        var file = new FileInfo(full);
+
+        if (!file.Exists)
             return Result.Fail<string>(Errors.DocumentNotFound(label));
 
         if (BinaryContent.Reject(full, label) is { } binary)
@@ -497,7 +498,7 @@ public static class FileService
 
         var text = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
 
-        return Present(full, label, text, request);
+        return Present(full, label, text, request.Bytes ? request with { Length = file.Length } : request);
     }
 
     private const string OutsideSuffix = "  " + OutsideMarker;
@@ -837,4 +838,19 @@ public static class FileService
 
         return DiffResponse("write_text", entry.Path, entry.Before, entry.After, dryRun, verbose);
     }
+
+    public static long? ByteLength(string? full) =>
+            full is { Length: > 0 } && File.Exists(full) ? new FileInfo(full).Length : null;
+
+    private static Result<string> Rendered(string path, string label, string text, ReadRequest request)
+    {
+        if (request.Headings)
+            return Outline(path, label, text, request.Verbose);
+
+        return request.Section is { Length: > 0 } heading
+            ? Slice(label, text, heading, request)
+            : Result.Ok(Render(label, text, Tailed(text, request), request));
+    }
+
+    public static string Sized(long bytes) => string.Create(CultureInfo.InvariantCulture, $"bytes={bytes}");
 }

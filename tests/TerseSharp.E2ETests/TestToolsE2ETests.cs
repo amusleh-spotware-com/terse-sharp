@@ -17,7 +17,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("Expected: 4", text, StringComparison.Ordinal);
         Assert.Contains("Actual:   5", text, StringComparison.Ordinal);
         Assert.Contains("System.InvalidOperationException : probe boom", text, StringComparison.Ordinal);
-        Assert.Contains("at tests/Fixture.Trading.Tests/DeliberateOutcomesTests.cs:39", text, StringComparison.Ordinal);
+        Assert.Contains("at tests/Fixture.Trading.Tests/DeliberateOutcomesTests.cs:70", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -310,5 +310,32 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         var text = await RunAsync(new() { ["changed"] = true, ["project"] = TestProject });
 
         Assert.DoesNotContain("NOTE changed=true", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_GreenAndVerbose_ShowsWhatTheTestHostPrinted()
+    {
+        var text = await RunAsync(new()
+        {
+            ["project"] = "Fixture.Trading.Tests",
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("passed=1", text, StringComparison.Ordinal);
+        Assert.Contains("fixture-host-exit-marker", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_GreenWithoutVerbose_HidesWhatTheTestHostPrinted()
+    {
+        var text = await RunAsync(new()
+        {
+            ["project"] = "Fixture.Trading.Tests",
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+        });
+
+        Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("fixture-host-exit-marker", text, StringComparison.Ordinal);
     }
 }

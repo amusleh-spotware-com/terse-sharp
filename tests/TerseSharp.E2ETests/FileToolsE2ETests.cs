@@ -525,4 +525,93 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("  q1,q2  ", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithBytes_ReportsTheSameByteLengthThatFindFilesStampsDoes()
+    {
+        const string ProjectPath = "src/Fixture.Trading/Fixture.Trading.csproj";
+
+        var stamped = await server.CallAsync("find_files", new() { ["glob"] = ProjectPath, ["stamps"] = true });
+        var read = await server.CallAsync("read_text", new() { ["path"] = ProjectPath, ["bytes"] = true });
+        var length = stamped.Split("  ", StringSplitOptions.RemoveEmptyEntries)[^1].Trim();
+
+        Assert.StartsWith("1 files", stamped, StringComparison.Ordinal);
+        Assert.True(int.TryParse(length, NumberStyles.None, CultureInfo.InvariantCulture, out var bytes));
+        Assert.True(bytes > 0);
+        Assert.Contains("\nbytes=" + length, read, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithBytesOnAWholeCSharpRead_ReportsThemBesideTheOutlineSteer()
+    {
+        const string SourcePath = "src/Fixture.Trading/OrderService.cs";
+
+        var stamped = await server.CallAsync("find_files", new() { ["glob"] = SourcePath, ["stamps"] = true });
+        var text = await server.CallAsync("read_text", new() { ["path"] = SourcePath, ["bytes"] = true });
+        var length = stamped.Split("  ", StringSplitOptions.RemoveEmptyEntries)[^1].Trim();
+
+        Assert.Contains("this is the outline", text, StringComparison.Ordinal);
+        Assert.Contains("\nbytes=" + length, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithoutBytes_ReportsNoByteLength()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/Fixture.Trading.csproj",
+        });
+
+        Assert.DoesNotContain("bytes=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithBytesOverSeveralPaths_ReportsTheLengthOfEachEntry()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/Fixture.Trading.csproj", "tests/Fixture.Trading.Tests/Fixture.Trading.Tests.csproj" },
+            ["bytes"] = true,
+        });
+
+        Assert.Equal(2, text.Split('\n').Count(line => line.StartsWith("bytes=", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task ReadText_WithBytesOnAHeadingMapAndASection_ReportsThemOnBothShapes()
+    {
+        var path = Path.Combine(TerseServerFixture.RepositoryRoot, "CHANGELOG.md");
+        var headings = await server.CallAsync("read_text", new() { ["path"] = path, ["headings"] = true, ["bytes"] = true });
+        var section = await server.CallAsync("read_text", new() { ["path"] = path, ["section"] = "## [Unreleased]", ["bytes"] = true });
+
+        Assert.Contains("sections", headings, StringComparison.Ordinal);
+        Assert.Matches("\nbytes=[1-9][0-9]*", headings);
+        Assert.Matches("\nbytes=[1-9][0-9]*", section);
+    }
+
+    [Fact]
+    public async Task ReadText_WithBytesOnAnEmptyCSharpDocument_StillReportsBytesZero()
+    {
+        const string Probe = "src/Fixture.Trading/EmptyProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = string.Empty,
+            ["allowEmpty"] = true,
+            ["force"] = true,
+        });
+
+        try
+        {
+            var text = await server.CallAsync("read_text", new() { ["path"] = Probe, ["bytes"] = true });
+
+            Assert.Contains("this is the outline", text, StringComparison.Ordinal);
+            Assert.Contains("\nbytes=0", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }
