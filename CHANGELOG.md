@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **`global.json` pins the SDK feature band.** `rollForward` was `latestFeature`, which let a
+  **10.0.4xx** SDK satisfy a `10.0.300` pin. SDK 10.0.400 reached the GitHub runners on 2026-08-12 and
+  broke CI on all three legs — the Razor source generator stopped running (`generator=unavailable`,
+  every `RZR###` finding collapsing to `RZR000`) and every IDE code fix `cleanup fix=style` applies
+  became a no-op, because both are served by the Roslyn this server *ships*, not the one the SDK
+  carries. Falsified against the change set by re-running the previous, green commit's CI unchanged:
+  it failed identically. `latestPatch` keeps the 10.0.3xx band the referenced
+  `Microsoft.CodeAnalysis` packages match. Logged as **I217**: the underlying lag hits any *user* on a
+  10.0.4xx SDK, and pinning CI does not fix that.
+
 ## [0.33.0] - 2026-08-12
 
 ### Added
