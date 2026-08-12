@@ -9,13 +9,13 @@ namespace TerseSharp.Server;
 public static class McpHost
 {
     public static async Task RunAsync(
-    string? workspace,
-    bool readOnly,
-    bool watch,
-    int maxWorkspaces,
-    TimeSpan idleFor,
-    string? tools,
-    CancellationToken cancellationToken)
+            string? workspace,
+            bool readOnly,
+            bool watch,
+            int maxWorkspaces,
+            TimeSpan idleFor,
+            string? tools,
+            CancellationToken cancellationToken)
     {
         var builder = Host.CreateApplicationBuilder();
         var surface = ToolProfile.Resolve(tools);
@@ -41,6 +41,8 @@ public static class McpHost
 
                 if (surface.MarkupDerived)
                     filters.AddListToolsFilter(ToolProfile.MarkupFilter(context));
+
+                filters.AddListToolsFilter(AdvertisedCost.Filter());
             });
 
         var host = builder.Build();

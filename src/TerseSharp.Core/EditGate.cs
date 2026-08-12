@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Text;
 
@@ -7,11 +8,11 @@ namespace TerseSharp.Core;
 public static class EditGate
 {
     public static async Task<Result<string>> ApplyAsync(
-        LoadedWorkspace workspace,
-        Solution updated,
-        IReadOnlyList<DocumentId> changed,
-        EditOptions options,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            Solution updated,
+            IReadOnlyList<DocumentId> changed,
+            EditOptions options,
+            CancellationToken cancellationToken)
     {
         var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
         var diff = await DiffAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
@@ -24,7 +25,7 @@ public static class EditGate
             return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root));
 
         if (report is { NewErrors.Length: > 0 })
-            return Result.Fail<string>(Errors.CompileRegression(report.NewErrors, report.Imports));
+            return Result.Fail<string>(Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers));
 
         return await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false)
             ? Result.Ok(Render(options, diff, "applied", report, workspace.Root))
@@ -62,20 +63,26 @@ public static class EditGate
             response.Note(counters);
 
         if (report.Unresolved.Length > 0)
-        {
-            response.Note(string.Create(
-                CultureInfo.InvariantCulture,
-                $"UNRESOLVED {report.Unresolved.Length} name(s) this project does not resolve; the edit was applied, not rolled back"));
+            Unresolved(response, report);
 
-            foreach (var unresolved in report.Unresolved)
-                response.Note(unresolved);
+        if (report.NewErrors.Length > 0)
+            Rejected(response, report);
+    }
 
-            response.Note("remedy: add the missing reference to the project, or accept it if the name is resolved by a build the workspace has not seen");
-        }
+    private static void Unresolved(ResponseBuilder response, GateReport report)
+    {
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"UNRESOLVED {report.Unresolved.Length} name(s) this project does not resolve; the edit was applied, not rolled back"));
 
-        if (report.NewErrors.Length is 0)
-            return;
+        foreach (var unresolved in report.Unresolved)
+            response.Note(unresolved);
 
+        response.Note("remedy: add the missing reference to the project, or accept it if the name is resolved by a build the workspace has not seen");
+    }
+
+    private static void Rejected(ResponseBuilder response, GateReport report)
+    {
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
             $"WARNING this edit introduces {report.NewErrors.Length} new error(s) and would be rolled back"));
@@ -85,6 +92,9 @@ public static class EditGate
 
         if (report.Imports is { Length: > 0 } imports)
             response.Note("retry with usings=[" + Errors.QuotedList(imports) + "]");
+
+        if (report.Callers is { Length: > 0 } callers)
+            response.Note(Errors.CallerBatch(callers));
     }
 
     private static string Describe(GateReport report, bool verbose) => verbose
@@ -111,11 +121,11 @@ public static class EditGate
     }
 
     private static async Task<GateReport> AnalyseAsync(
-    Solution before,
-    Solution after,
-    IReadOnlyList<DocumentId> changed,
-    string root,
-    CancellationToken cancellationToken)
+            Solution before,
+            Solution after,
+            IReadOnlyList<DocumentId> changed,
+            string root,
+            CancellationToken cancellationToken)
     {
         var projects = Affected(before, changed);
         var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
@@ -131,7 +141,8 @@ public static class EditGate
             current.ErrorCount - baseline.ErrorCount,
             current.WarningCount,
             current.WarningCount - baseline.WarningCount,
-            await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false));
+            await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
+            await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false));
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -178,12 +189,16 @@ public static class EditGate
         entry.Value > baseline.GetValueOrDefault(entry.Key);
 
     private static async Task<Tally> TallyAsync(
-        Solution solution,
-        IReadOnlyList<ProjectId> projects,
-        string root,
-        CancellationToken cancellationToken)
+            Solution solution,
+            IReadOnlyList<ProjectId> projects,
+            string root,
+            CancellationToken cancellationToken)
     {
-        var tally = new Tally(new Dictionary<string, int>(StringComparer.Ordinal), 0, 0);
+        var tally = new Tally(
+            new Dictionary<string, int>(StringComparer.Ordinal),
+            new Dictionary<string, List<int>>(StringComparer.Ordinal),
+            0,
+            0);
 
         foreach (var projectId in projects)
         {
@@ -204,7 +219,7 @@ public static class EditGate
         foreach (var diagnostic in diagnostics)
         {
             if (diagnostic.Severity is DiagnosticSeverity.Error)
-                errors += Record(tally.Errors, diagnostic, root);
+                errors += Record(tally.Errors, tally.Lines, diagnostic, root);
 
             if (diagnostic.Severity is DiagnosticSeverity.Warning)
                 warnings++;
@@ -213,13 +228,16 @@ public static class EditGate
         return tally with { ErrorCount = errors, WarningCount = warnings };
     }
 
-    private static int Record(Dictionary<string, int> errors, Diagnostic diagnostic, string root)
+    private static int Record(Dictionary<string, int> errors, Dictionary<string, List<int>> lines, Diagnostic diagnostic, string root)
     {
+        var span = diagnostic.Location.GetLineSpan();
+
         var key = string.Create(
             CultureInfo.InvariantCulture,
-            $"{diagnostic.Id} {PositionFormat.Relative(root, diagnostic.Location.GetLineSpan().Path)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+            $"{diagnostic.Id} {PositionFormat.Relative(root, span.Path)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
 
         errors[key] = errors.GetValueOrDefault(key) + 1;
+        Note(lines, key, span.StartLinePosition.Line + 1);
 
         return 1;
     }
@@ -232,15 +250,16 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-        string[] NewErrors,
-        string[] Unresolved,
-        int Errors,
-        int ErrorDelta,
-        int Warnings,
-        int WarningDelta,
-        string[]? Imports);
+            string[] NewErrors,
+            string[] Unresolved,
+            int Errors,
+            int ErrorDelta,
+            int Warnings,
+            int WarningDelta,
+            string[]? Imports,
+            string[]? Callers);
 
-    private readonly record struct Tally(Dictionary<string, int> Errors, int ErrorCount, int WarningCount);
+    private readonly record struct Tally(Dictionary<string, int> Errors, Dictionary<string, List<int>> Lines, int ErrorCount, int WarningCount);
     private static string Compact(ResponseBuilder response, DocumentDiff[] diffs, string root)
     {
         foreach (var diff in diffs)
@@ -406,5 +425,107 @@ public static class EditGate
         }
 
         return Edited(after, changed);
+    }
+
+    private const int MaxCallerHints = 5;
+
+    private static bool IsCallShape(string key) =>
+        key.StartsWith("CS7036 ", StringComparison.Ordinal)
+        || key.StartsWith("CS1501 ", StringComparison.Ordinal)
+        || key.StartsWith("CS1503 ", StringComparison.Ordinal)
+        || key.StartsWith("CS1729 ", StringComparison.Ordinal);
+
+
+    private static Document? Located(Solution after, string root, string error) =>
+        PathOf(error) is { Length: > 0 } relative
+        && after.GetDocumentIdsWithFilePath(Path.Combine(root, relative)) is [var id, ..]
+            ? after.GetDocument(id)
+            : null;
+
+    private static string? Declaring(SyntaxNode syntax, SemanticModel model, TextSpan line, CancellationToken cancellationToken)
+    {
+        var containing = syntax.FindNode(line, getInnermostNodeForTie: true)
+            .AncestorsAndSelf()
+            .OfType<MemberDeclarationSyntax>()
+            .FirstOrDefault(node => node is not BaseTypeDeclarationSyntax);
+
+        return containing is not null && model.GetDeclaredSymbol(containing, cancellationToken) is { } symbol
+            ? SymbolLookup.Addressable(symbol)
+            : null;
+    }
+
+    private static async Task<string?> ContainingAsync(
+            Solution after,
+            string root,
+            string error,
+            int line,
+            CancellationToken cancellationToken)
+    {
+        if (Located(after, root, error) is not { } document)
+            return null;
+
+        var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+
+        if (line < 1 || line > text.Lines.Count)
+            return null;
+
+        var syntax = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+        var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+
+        return syntax is null || model is null
+            ? null
+            : Declaring(syntax, model, text.Lines[line - 1].Span, cancellationToken);
+    }
+
+    private static async Task<string[]?> CallerHintAsync(
+            Solution after,
+            string root,
+            string[] errors,
+            Dictionary<string, List<int>> lines,
+            CancellationToken cancellationToken)
+    {
+        if (errors.Length is 0)
+            return null;
+
+        var callers = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var error in errors)
+        {
+            if (!IsCallShape(error) || !lines.TryGetValue(error, out var at))
+                return null;
+
+            if (!await GatherAsync(after, root, error, at, callers, cancellationToken).ConfigureAwait(false))
+                return null;
+        }
+
+        return callers.Count is 0 or > MaxCallerHints ? null : [.. callers];
+    }
+
+    private static void Note(Dictionary<string, List<int>> lines, string key, int line)
+    {
+        if (!lines.TryGetValue(key, out var at))
+            lines[key] = at = new List<int>(1);
+
+        if (at.Count <= MaxCallerHints && !at.Contains(line))
+            at.Add(line);
+    }
+
+    private static async Task<bool> GatherAsync(
+        Solution after,
+        string root,
+        string error,
+        List<int> lines,
+        SortedSet<string> callers,
+        CancellationToken cancellationToken)
+    {
+        foreach (var line in lines)
+        {
+            if (await ContainingAsync(after, root, error, line, cancellationToken).ConfigureAwait(false) is not { } caller)
+                return false;
+
+            callers.Add(caller);
+        }
+
+        return true;
     }
 }

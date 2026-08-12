@@ -86,19 +86,45 @@ public static class TextSearchService
     }
 
     public static string FindFiles(
-    LoadedWorkspace workspace,
-    string glob,
-    int maxResults,
-    bool stamps,
-    IReadOnlySet<string>? tracked = null)
+            LoadedWorkspace workspace,
+            string glob,
+            int maxResults,
+            bool stamps,
+            IReadOnlySet<string>? tracked = null,
+            string? name = null)
     {
-        var files = Tracked(Matched(workspace, glob), tracked);
+        var files = Named(Tracked(Matched(workspace, glob), tracked), name);
         var response = new ResponseBuilder("find_files", glob);
+        var shown = files.Capped(maxResults).ToArray();
+
         response.Summary(ResultCap.Shown(files.Count, maxResults), files.Count, "files", "a narrower glob= or maxResults=");
-        foreach (var file in files.Capped(maxResults))
+
+        foreach (var file in shown)
             response.Line(stamps ? Stamped(file) : file.RelativePath);
 
+        if (files.Count is 0 && name is not { Length: > 0 })
+            response.Note("no file matched - pass name=<text> to match a file name substring instead of a glob");
+
+        if (ArgumentLine.Paths(shown.Select(file => file.RelativePath)) is { } batch)
+            response.Note(batch);
+
         return response.ToString();
+    }
+
+    private static List<WorkspacePath> Named(List<WorkspacePath> files, string? name)
+    {
+        if (name is not { Length: > 0 } text)
+            return files;
+
+        var kept = new List<WorkspacePath>(files.Count);
+
+        foreach (var file in files)
+        {
+            if (Path.GetFileName(file.RelativePath.AsSpan()).Contains(text, StringComparison.OrdinalIgnoreCase))
+                kept.Add(file);
+        }
+
+        return kept;
     }
 
     private static bool IsBinary(string text) =>
@@ -273,6 +299,9 @@ public static class TextSearchService
 
         foreach (var record in records)
             response.Line(record);
+
+        if (request.Root is not { Length: > 0 } && ArgumentLine.Paths(records) is { } batch)
+            response.Note(batch);
 
         return response.ToString();
     }

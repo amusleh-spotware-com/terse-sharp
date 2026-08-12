@@ -101,6 +101,7 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("edit_text", new() { ["path"] = "appsettings.json", ["oldText"] = "MaxVolume", ["newText"] = "PeakVolume", ["dryRun"] = true }, "changedLines="),
         ("find_files", new() { ["glob"] = "*.cs" }, "OrderService.cs"),
         ("changed_files", new() { ["maxResults"] = 5 }, "files"),
+        ("history", new() { ["maxResults"] = 3 }, "commits"),
         ("diff_symbols", new() { ["maxResults"] = 5 }, "declarations"),
         ("diff_text", new() { ["maxLines"] = 5 }, "lines"),
         ("search_text", new() { ["pattern"] = "Order", ["glob"] = "*.cs" }, "HEURISTIC"),

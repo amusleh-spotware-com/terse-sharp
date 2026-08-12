@@ -767,18 +767,16 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task AThirdConsecutiveCallOfTheSameTool_CarriesTheSteerThatNamesItsPluralParameter()
+    public async Task ASecondConsecutiveCallOfTheSameTool_CarriesTheImperativeSteerThatNamesItsPluralParameter()
     {
         await server.CallAsync("workspace_status", []);
 
         var first = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
         var second = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
-        var third = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
         var batched = await server.CallRawAsync("get_file_outline", new() { ["paths"] = new[] { "src/Fixture.Trading/OrderSide.cs" } });
 
         Assert.DoesNotContain("calls in a row", first, StringComparison.Ordinal);
-        Assert.DoesNotContain("calls in a row", second, StringComparison.Ordinal);
-        Assert.Contains("3 get_file_outline calls in a row - pass paths=[...] for the rest", third, StringComparison.Ordinal);
+        Assert.Contains("2 get_file_outline calls in a row - pass paths=[...] with the next 2+ in ONE call", second, StringComparison.Ordinal);
         Assert.DoesNotContain("calls in a row", batched, StringComparison.Ordinal);
     }
 
@@ -971,5 +969,63 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.Contains("Fixture.Trading.Tests", batch, StringComparison.Ordinal);
         Assert.DoesNotContain("batch", alone, StringComparison.Ordinal);
         Assert.Contains("this run timed out and produced no results", alone, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_OverSeveralFiles_EndsWithAPasteReadyPathsArgument()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Submit",
+            ["glob"] = "**/*.cs",
+        });
+
+        var batch = text.Split('\n').Single(line => line.StartsWith("paths=[", StringComparison.Ordinal));
+
+        Assert.Contains("\"src", batch, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\\"", batch.Replace("\\\\", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.EndsWith("]", batch, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindUsages_AcrossFiles_EndsWithAPasteReadyPathsArgument()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)" });
+
+        Assert.Contains("paths=[\"src", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangedFiles_AndFindFiles_EndWithAPasteReadyPathsArgument()
+    {
+        var files = await server.CallAsync("find_files", new() { ["glob"] = "src/Fixture.Trading/*.cs" });
+
+        Assert.Contains("paths=[\"src", files, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_OfANarrowFile_EndsWithAPasteReadySymbolIdsArgument()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+
+        var batch = text.Split('\n').Single(line => line.StartsWith("symbolIds=[", StringComparison.Ordinal));
+        var entries = batch["symbolIds=[".Length..^1].Split(',').Select(entry => entry.Trim('"')).ToArray();
+
+        Assert.Contains("OrderService.Submit", entries);
+        Assert.Contains("OrderService.SubmitTwice", entries);
+        Assert.Contains("M:Fixture.Trading.OrderService.#ctor(Fixture.Trading.IOrderRepository)", entries);
+
+        var resolved = await server.CallAsync("get_symbol_source", new() { ["symbolIds"] = entries });
+
+        Assert.DoesNotContain("NOT_RESOLVED", resolved, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_OfAWideFile_OffersContainsRatherThanAnArbitraryTenOfItsMembers()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/ProbeSaturation.cs" });
+
+        Assert.Contains(" members - narrow with contains=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("symbolIds=[", text, StringComparison.Ordinal);
     }
 }

@@ -320,21 +320,36 @@ public sealed class ToolGuardTests
     [InlineData("git --no-pager diff")]
     [InlineData("git.exe status")]
     [InlineData("cd src && git diff")]
+    [InlineData("git log --oneline -20")]
+    [InlineData("git -c core.pager=cat log")]
+    [InlineData("git show --stat HEAD")]
+    [InlineData("git show HEAD:src/App/OrderService.cs")]
     public void Inspect_ForAGitCommandTerseSharpReplaces_Denies(string command) =>
-        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+            Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
     [Theory]
-    [InlineData("git log -p")]
+    [InlineData("git log --oneline -20", "history")]
+    [InlineData("git log -S RepeatSteer", "history")]
+    [InlineData("git show --stat HEAD", "history")]
+    [InlineData("git show HEAD:src/App/OrderService.cs", "read_text")]
+    public void Inspect_ForGitHistoryInADotNetTree_NamesTheToolThatReplacesIt(string command, string replacement)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(replacement, verdict.Routing);
+    }
+
+    [Theory]
     [InlineData("git blame src/App/OrderService.cs")]
-    [InlineData("git show HEAD:src/App/OrderService.cs")]
     [InlineData("git difftool")]
-    [InlineData("git -c core.pager=cat log")]
     [InlineData("git stash show -p")]
     [InlineData("git commit -m \"diff status\"")]
     [InlineData("git push origin main")]
     [InlineData("git stash")]
+    [InlineData("git tag --list")]
     public void Inspect_ForAGitCommandNoToolReplaces_Allows(string command) =>
-        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+            Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
     [Fact]
     public void Inspect_ForGitStatus_NamesChangedFiles() =>
@@ -415,7 +430,7 @@ public sealed class ToolGuardTests
 
 
     [Theory]
-    [InlineData("GIT_PAGER=cat git log -p")]
+    [InlineData("GIT_PAGER=cat git blame src/App/OrderService.cs")]
     [InlineData("\"git\" commit -m \"diff status\"")]
     [InlineData("(git push origin main)")]
     [InlineData("DOTNET_CLI_TELEMETRY_OPTOUT=1 dotnet restore")]
@@ -460,11 +475,13 @@ public sealed class ToolGuardTests
     [InlineData("FILES=$(git diff --name-only)")]
     [InlineData("$(dotnet build)")]
     [InlineData("`git diff`")]
+    [InlineData("$(git log --oneline -1)")]
     public void Inspect_ForAReplacedCommandInsideACommandSubstitution_StillDenies(string command) =>
             Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 
 
     [Theory]
+    [InlineData("$(git rev-parse --abbrev-ref HEAD)")]
     [InlineData("$(git log -1 --format=%H)")]
     [InlineData("SHA=$(git rev-parse HEAD)")]
     [InlineData("$(dotnet restore)")]
@@ -730,4 +747,40 @@ public sealed class ToolGuardTests
         Assert.DoesNotContain("search_symbols", verdict.Reason, StringComparison.Ordinal);
         Assert.DoesNotContain("search_symbols", verdict.Routing!, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Coverage_InADotNetTree_ReportsEveryMeasuredBreachClassDenied()
+    {
+        var coverage = ToolGuard.Coverage(Fixtures.RepositoryRoot);
+
+        Assert.True(coverage.Complete, coverage.Detail);
+        Assert.Equal(
+            "read-cs=denied bash-text=denied dotnet-build=denied dotnet-test=denied git-status=denied git-diff=denied",
+            coverage.Detail);
+    }
+
+    [Fact]
+    public void Coverage_OutsideADotNetTree_ReportsTheGitRowsAsAllowedBecauseNothingReplacesThem()
+    {
+        var coverage = ToolGuard.Coverage(Path.GetTempPath());
+
+        Assert.False(coverage.Complete, coverage.Detail);
+        Assert.Contains("git-status=allowed", coverage.Detail, StringComparison.Ordinal);
+        Assert.Contains("git-diff=allowed", coverage.Detail, StringComparison.Ordinal);
+        Assert.Contains("read-cs=denied", coverage.Detail, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git log -1 --format=%H")]
+    [InlineData("git log --pretty=format:%s -5")]
+    [InlineData("git show -s --format=%H HEAD")]
+    [InlineData("git log --name-only -1")]
+    [InlineData("git log -p")]
+    [InlineData("GIT_PAGER=cat git log -p")]
+    [InlineData("git log --stat -3")]
+    [InlineData("git log --follow src/App/OrderService.cs")]
+    [InlineData("git log --graph --oneline")]
+    [InlineData("git log --author=amusleh")]
+    public void Inspect_ForAGitShapeHistoryCannotProduce_AllowsItBecauseNothingReplacesIt(string command) =>
+            Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 }

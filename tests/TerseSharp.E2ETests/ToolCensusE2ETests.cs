@@ -245,4 +245,47 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
 
         Assert.True(ToolProfile.CoreTools.Count < advertised.Count, "the core profile must be a proper subset of the surface");
     }
+
+    [Fact]
+    public async Task NoTwoAdvertisedTools_DescribeThemselvesNearlyIdentically()
+    {
+        var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var described = surface.Select(tool => (tool.Name, Words: ToolCensus.Words(tool.Description ?? string.Empty))).ToArray();
+        var similar = new List<string>();
+        var pairs = 0;
+
+        for (var first = 0; first < described.Length; first++)
+        {
+            for (var second = first + 1; second < described.Length; second++)
+            {
+                pairs++;
+
+                var score = ToolCensus.Overlap(described[first].Words, described[second].Words);
+
+                if (score >= ToolCensus.RedundancyThreshold && !ToolCensus.SimilarByDesign(described[first].Name, described[second].Name))
+                    similar.Add(string.Create(CultureInfo.InvariantCulture, $"{described[first].Name}~{described[second].Name}={score:F2}"));
+            }
+        }
+
+        Assert.True(pairs > 1000, "the pairwise sweep saw too few pairs to be a census");
+        Assert.True(
+            similar.Count is 0,
+            "advertised tools whose descriptions overlap past the redundancy threshold: " + string.Join(", ", similar));
+    }
+
+    [Fact]
+    public async Task EverySimilarByDesignPair_StillNamesTwoAdvertisedTools()
+    {
+        var advertised = (await Advertised()).ToHashSet(StringComparer.Ordinal);
+        var stale = ToolCensus.SimilarByDesignPairs
+            .Where(pair => !advertised.Contains(pair.First) || !advertised.Contains(pair.Second))
+            .Select(pair => pair.First + "~" + pair.Second)
+            .ToArray();
+
+        Assert.True(stale.Length is 0, "similar-by-design pairs naming a tool the server no longer advertises: " + string.Join(", ", stale));
+        Assert.True(
+            ToolCensus.SimilarByDesignPairs.Length <= ToolCensus.MaxSimilarByDesignPairs,
+            "the similar-by-design set may only shrink");
+        Assert.DoesNotContain(ToolCensus.SimilarByDesignPairs, pair => pair.Reason.Length is 0);
+    }
 }

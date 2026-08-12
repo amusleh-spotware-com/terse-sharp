@@ -66,13 +66,13 @@ public static class ReferenceService
     }
 
     private static async Task<string> RenderAsync(
-        LoadedWorkspace workspace,
-        ISymbol symbol,
-        ReferenceLocation[] locations,
-        IReadOnlyList<RazorUsage> razor,
-        int maxResults,
-        bool containers,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            ISymbol symbol,
+            ReferenceLocation[] locations,
+            IReadOnlyList<RazorUsage> razor,
+            int maxResults,
+            bool containers,
+            CancellationToken cancellationToken)
     {
         var shown = ResultCap.Shown(locations.Length, maxResults);
         var files = locations
@@ -81,6 +81,7 @@ public static class ReferenceService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
         var response = new ResponseBuilder("find_usages", SymbolId.From(symbol).Value);
+        var records = new List<string>();
 
         response.Summary(
             shown,
@@ -91,13 +92,19 @@ public static class ReferenceService
         var grouped = await GroupAsync(workspace.Root, locations.Take(shown), containers, cancellationToken).ConfigureAwait(false);
 
         foreach (var group in grouped.GroupBy(entry => entry.Group))
-            response.Line(Describe(group.Key, group.Select(entry => entry.Location)));
+            records.Add(Describe(group.Key, group.Select(entry => entry.Location)));
 
         foreach (var usage in razor)
-            response.Line(RazorUsageService.Describe(usage));
+            records.Add(RazorUsageService.Describe(usage));
 
         foreach (var usage in XamlUsageService.Find(workspace, symbol, symbol.Name))
-            response.Line(DescribeXaml(usage));
+            records.Add(DescribeXaml(usage));
+
+        foreach (var record in records)
+            response.Line(record);
+
+        if (ArgumentLine.Paths(records) is { } batch)
+            response.Note(batch);
 
         return response.ToString();
     }

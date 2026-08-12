@@ -27,4 +27,11 @@ internal static class GitRunner
 
         return trimmed.Length <= 300 ? trimmed : trimmed[..300] + "...";
     }
+
+    public static Task<Result<string>> ShowAsync(
+            string workingDirectory,
+            string reference,
+            string relativePath,
+            CancellationToken cancellationToken) =>
+            ReadAsync(workingDirectory, ["show", reference + ":./" + relativePath.Replace('\\', '/')], cancellationToken);
 }

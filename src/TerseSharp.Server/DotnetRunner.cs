@@ -169,6 +169,9 @@ public static partial class DotnetRunner
         response.Summary(shown.Length, Parsed(diagnostics), "diagnostics");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}"));
 
+        if (verbose)
+            AppendOutputs(response, run, root, target);
+
         AppendLockWarning(response, run);
         AppendHiddenWarnings(response, diagnostics, shown.Length);
 
@@ -501,6 +504,38 @@ public static partial class DotnetRunner
         RecurseSubdirectories = true,
         IgnoreInaccessible = true,
     };
+    private const string ProbeAssembly = "terse.dll";
+
+    [GeneratedRegex(@"(?m)^\s*\S+ -> (?<path>.+\.(?:dll|exe))\s*$")]
+    private static partial Regex WrittenOutput();
+
+
+    private static string Probe(string assembly, string target) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"probe: dotnet \"{assembly}\" call <tool> --workspace \"{target}\" --json '{{...}}'  - answers from the binary this build just wrote, not from the connected server");
+
+    internal static string[] OutputNotes(string output, string root, string target)
+    {
+        var notes = new List<string>();
+
+        foreach (Match match in WrittenOutput().Matches(output))
+        {
+            var path = match.Groups["path"].Value;
+
+            notes.Add("wrote " + PositionFormat.Relative(root, path));
+
+            if (Path.GetFileName(path.AsSpan()).Equals(ProbeAssembly, StringComparison.OrdinalIgnoreCase))
+                notes.Add(Probe(path, target));
+        }
+
+        return [.. notes];
+    }
+
+    private static void AppendOutputs(ResponseBuilder response, ProcessRun run, string root, string target)
+    {
+        foreach (var note in OutputNotes(run.Output, root, target))
+            response.Note(note);
+    }
 }
 
 internal sealed record ProcessRun(

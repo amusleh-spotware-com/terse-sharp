@@ -307,12 +307,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         var found = Registry.Resolve(null, null, semantic: true);
 
         if (!found.IsOk)
-            return new PhaseLatency(string.Empty, 0, 0, 0);
+            return new PhaseLatency(string.Empty, 0, 0, 0, 0);
 
         var synced = await SyncedAsync(found.Value!, null, null, cancellationToken).ConfigureAwait(false);
 
         if (!synced.IsOk)
-            return new PhaseLatency(string.Empty, 0, 0, 0);
+            return new PhaseLatency(string.Empty, 0, 0, 0, 0);
 
         using var lease = synced.Value!;
 
@@ -351,4 +351,4 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     }
 }
 
-public readonly record struct PhaseLatency(string Document, double OutlineMs, double GateMs, double DiffMs);
+public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

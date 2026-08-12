@@ -65,12 +65,23 @@ public static class Errors
         string.Create(CultureInfo.InvariantCulture, $"'{path}' resolves outside the workspace root"),
         "pass a path inside the loaded workspace");
 
-    public static TerseError CompileRegression(IReadOnlyList<string> diagnostics, IReadOnlyList<string>? imports = null) => new(
+    public static TerseError CompileRegression(
+            IReadOnlyList<string> diagnostics,
+            IReadOnlyList<string>? imports = null,
+            IReadOnlyList<string>? callers = null) => new(
             TerseErrorCode.CompileRegression,
             "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
-            imports is { Count: > 0 }
-                ? "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway"
-                : "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway");
+            Rollback(imports, callers));
+
+    private static string Rollback(IReadOnlyList<string>? imports, IReadOnlyList<string>? callers) => (imports, callers) switch
+    {
+        ({ Count: > 0 }, _) => "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway",
+        (_, { Count: > 0 }) => CallerBatch(callers) + ", or pass allowErrors=true to apply it anyway",
+        _ => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
+    };
+
+    internal static string CallerBatch(IReadOnlyList<string> callers) =>
+        "send these callers in the same replace_symbol symbolIds/declarations batch: " + string.Join(", ", callers);
 
     public static TerseError EditConflict(string message) => new(
         TerseErrorCode.EditConflict,
@@ -122,4 +133,13 @@ public static class Errors
 
     internal static string QuotedList(IReadOnlyList<string> names) =>
             string.Join(", ", names.Select(name => "\"" + name + "\""));
+
+    public static TerseError NoSuchMember(string symbolId, string type, IReadOnlyList<string> members) => new(
+            TerseErrorCode.SymbolNotFound,
+            string.Create(CultureInfo.InvariantCulture, $"'{symbolId}' did not resolve: type '{type}' declares no such member"),
+            members.Count is 0
+                ? string.Create(CultureInfo.InvariantCulture, $"'{type}' declares no member addressable by name; use get_type_outline symbolId={type} ids=full")
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"members of '{type}': {string.Join(", ", members.Take(MaxListedCandidates))}"));
 }

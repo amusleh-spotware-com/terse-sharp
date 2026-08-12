@@ -13,7 +13,7 @@
   <a href="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml"><img src="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT"/></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 10"/>
-  <img src="https://img.shields.io/badge/tools-87-26C281.svg" alt="87 tools"/>
+  <img src="https://img.shields.io/badge/tools-88-26C281.svg" alt="88 tools"/>
   <img src="https://img.shields.io/badge/tokens-10--30×_fewer-26C281.svg" alt="10-30x fewer tokens"/>
 </p>
 
@@ -185,7 +185,7 @@ terse-sharp; `Read`/`Grep`/`Edit` on `.cs`, `.xaml`, `.razor` or `.resx` is forb
 
 ## 🧰 The tools
 
-**87 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
+**88 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with
 `verbose=true` for the diff and `dryRun=true` to preview it. Any caveat prints in full.
 
@@ -193,17 +193,17 @@ success that costs nothing — every mutating tool answers in one line per chang
 `get_symbol_source symbolIds=`, `replace_symbol symbolIds=`, `search_text`/`search_regex queries=`,
 `run_tests projects=`, `write_text files=` and `edit_text edits=` each answer in one call what used to
 cost one call per item — and `write_text files=` puts every `.cs` file it writes through **one**
-compile gate, so a type and the consumer it breaks land together. From the third consecutive call of
-the same tool the response gains **one** extra line naming the plural parameter to use instead — the
-single documented exception to "a success is one line", worth about 12 tokens, emitted only once the
-repetition has already proved itself and never when the call already passed the plural.
+compile gate, so a type and the consumer it breaks land together. From the **second** consecutive call
+of the same tool the response gains **one** extra line — `2 read_text calls in a row - pass paths=[...]
+with the next 2+ in ONE call` — the single documented exception to "a success is one line", worth
+about 14 tokens, and never emitted when the call already passed the plural.
 
 A full catalogue is attached to every request, and past a certain size that measurably costs
 tool-selection accuracy — so **the advertised set is derived from what the solution actually
 contains**. A tree with no `.xaml`/`.axaml` is not offered the 13 `xaml_*` tools, one with no
 `.razor`/`.cshtml` is not offered the 10 `razor_*`, one with no `.resx`/`.resw` is not offered the 8
-`resx_*`; measured on a plain C# solution that is **56 tools instead of 87, 16 962 tokens instead of
-22 193 (-23.6 %)** on every request. Loading a second solution that does hold them re-advertises the
+`resx_*`; measured on a plain C# solution that is **57 tools instead of 88, 18 833 tokens instead of
+24 073 (-21.8 %)** on every request. Loading a second solution that does hold them re-advertises the
 families through `notifications/tools/list_changed`, and a hidden tool still answers when called by
 name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything regardless;
 `--tools core` still narrows to a 21-tool subset. `workspace_status` names whatever is hidden.
@@ -221,7 +221,7 @@ name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything reg
 | **Localization** (`.resx`/`.resw`) | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Files** — replaces `Glob`/`ls`/`cat` | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
-| **Git** — replaces `git status`/`git diff` | `changed_files` · `diff_symbols` · `diff_text` |
+| **Git** — replaces `git status`/`git diff`/`git log` | `changed_files` · `diff_symbols` · `diff_text` · `history` |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 Every read tool declares the MCP `readOnlyHint` annotation and every deleting tool declares

@@ -221,6 +221,123 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Contains("changed_files root=", text, StringComparison.Ordinal);
         Assert.Contains("diff_text root=", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task DiffText_WhenItTruncates_NamesTheExactMaxLinesThatReturnsTheRest()
+    {
+        var text = await server.CallAsync("diff_text", new()
+        {
+            ["root"] = TerseServerFixture.RepositoryRoot,
+            ["baseRef"] = "HEAD~1",
+            ["maxLines"] = 1,
+        });
+
+        var summary = text.Split('\n')[0];
+
+        Assert.DoesNotContain("ERROR", summary, StringComparison.Ordinal);
+        Assert.Contains("truncated", summary, StringComparison.Ordinal);
+
+        var total = summary.Split('/')[1].Split(' ')[0];
+
+        Assert.True(int.Parse(total, CultureInfo.InvariantCulture) > 1, summary);
+        Assert.EndsWith("narrow with path=, paths= or maxLines=" + total, summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_AtARef_AnswersTheOutlineOfThatRevisionAndNotItsWholeText()
+    {
+        var outline = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.Contains("OrderService  class public", outline, StringComparison.Ordinal);
+        Assert.Contains("OrderService.SubmitTwice", outline, StringComparison.Ordinal);
+        Assert.DoesNotContain("namespace Fixture.Trading;", outline, StringComparison.Ordinal);
+        Assert.DoesNotContain("symbolIds=[", outline, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_AtARef_TakesTheLineRangeAndTailTheWorkingTreeReadTakes()
+    {
+        var ranged = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "HEAD",
+            ["startLine"] = 11,
+            ["endLine"] = 11,
+        });
+
+        Assert.StartsWith("1 lines", ranged, StringComparison.Ordinal);
+        Assert.Contains("public bool Submit(Order order)", ranged, StringComparison.Ordinal);
+        Assert.DoesNotContain("SubmitTwice", ranged, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_AtARef_OutlinesThatRevision()
+    {
+        var text = await server.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "HEAD",
+            ["contains"] = "Submit",
+        });
+
+        Assert.Contains("OrderService.Submit", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.SubmitTwice", text, StringComparison.Ordinal);
+        Assert.Contains(" members", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PendingCount", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_AtARef_IsRefusedWithPathsRatherThanReadingOnlyTheFirst()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/OrderService.cs", "src/Fixture.Trading/OrderRouter.cs" },
+            ["ref"] = "HEAD",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("cannot be combined with paths=", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_AtARefThatDoesNotExist_SaysSoInsteadOfAnsweringTheWorkingTree()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "no-such-ref-anywhere",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("public bool Submit", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task History_WithCommitBesideAFilter_IsRefusedRatherThanIgnoringTheFilter()
+    {
+        var text = await server.CallAsync("history", new() { ["commit"] = "HEAD", ["contains"] = "Submit" });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("cannot be combined with contains=", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task History_WithAPickaxe_ListsOnlyTheCommitsThatTouchedThatLiteral()
+    {
+        var all = await server.CallAsync("history", new() { ["maxResults"] = 20 });
+        var picked = await server.CallAsync("history", new() { ["contains"] = "SubmitTwice", ["maxResults"] = 20 });
+
+        Assert.StartsWith("20 commits", all, StringComparison.Ordinal);
+        Assert.Contains("more commits match than were listed", all, StringComparison.Ordinal);
+        Assert.DoesNotContain("/21", all, StringComparison.Ordinal);
+        Assert.True(picked.Split('\n').Length < all.Split('\n').Length, picked);
+    }
 }
 
 internal static class DiffSymbolProbe

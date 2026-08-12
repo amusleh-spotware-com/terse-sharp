@@ -8,8 +8,9 @@ internal static class PhaseProbe
     public static async Task<PhaseLatency> MeasureAsync(LoadedWorkspace workspace, CancellationToken cancellationToken)
     {
         if (Widest(workspace) is not { FilePath: { Length: > 0 } path } document)
-            return new PhaseLatency(string.Empty, 0, 0, 0);
+            return new PhaseLatency(string.Empty, 0, 0, 0, 0);
 
+        var realize = await TimedAsync(() => document.Project.GetCompilationAsync(cancellationToken)).ConfigureAwait(false);
         var outline = await TimedAsync(() => OutlineService.FileAsync(workspace, path, true, "short", false, cancellationToken)).ConfigureAwait(false);
         var gate = await TimedAsync(() => EditGate.ApplyAsync(
             workspace,
@@ -19,7 +20,7 @@ internal static class PhaseProbe
             cancellationToken)).ConfigureAwait(false);
         var diff = await TimedAsync(() => GitRunner.ReadAsync(workspace.Root, ["diff", "--stat"], cancellationToken)).ConfigureAwait(false);
 
-        return new PhaseLatency(PositionFormat.Relative(workspace.Root, path), outline, gate, diff);
+        return new PhaseLatency(PositionFormat.Relative(workspace.Root, path), realize, outline, gate, diff);
     }
 
     private static async Task<double> TimedAsync<TResult>(Func<Task<TResult>> phase)

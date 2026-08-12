@@ -328,4 +328,33 @@ public sealed class DotnetRunnerTests
 
     private static TestRunRequest Request(string target) =>
         new(target, null, false, false, 0, TimeSpan.FromSeconds(60));
+
+    [Fact]
+    public void OutputNotes_ForTheServersOwnAssembly_NamesTheProbeCommandForTheBinaryJustBuilt()
+    {
+        var output = string.Join(
+            '\n',
+            "  TerseSharp.Core -> /repo/src/TerseSharp.Core/bin/Debug/net10.0/TerseSharp.Core.dll",
+            "  TerseSharp.Server -> /repo/src/TerseSharp.Server/bin/Debug/net10.0/terse.dll");
+
+        var notes = DotnetRunner.OutputNotes(output, "/repo", "/repo/TerseSharp.slnx").Select(Slashed).ToArray();
+
+        Assert.Equal(3, notes.Length);
+        Assert.Equal("wrote src/TerseSharp.Core/bin/Debug/net10.0/TerseSharp.Core.dll", notes[0]);
+        Assert.Equal("wrote src/TerseSharp.Server/bin/Debug/net10.0/terse.dll", notes[1]);
+        Assert.StartsWith(
+            "probe: dotnet \"/repo/src/TerseSharp.Server/bin/Debug/net10.0/terse.dll\" call <tool> --workspace \"/repo/TerseSharp.slnx\" --json ",
+            notes[2],
+            StringComparison.Ordinal);
+    }
+
+    private static string Slashed(string note) => note.Replace('\\', '/');
+
+    [Fact]
+    public void OutputNotes_ForABuildThatWroteNothingElse_NamesNoProbeForAnotherAssembly()
+    {
+        var notes = DotnetRunner.OutputNotes("  Fixture.Trading -> /repo/bin/Fixture.Trading.dll", "/repo", "/repo/FixtureSolution.slnx");
+
+        Assert.Equal(["wrote bin/Fixture.Trading.dll"], notes.Select(Slashed));
+    }
 }

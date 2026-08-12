@@ -27,7 +27,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 
 | Job | Instead of | Use | Why |
 |---|---|---|---|
-| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do |
+| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` | lists every solution and project under a directory without loading one; auto-discovery only walks *up* from the working directory |
 | **Workspace** | — | `load_workspace` | one call per solution; `targetFramework:` picks the framework every semantic tool answers from, `reload: true` forces a re-read you should almost never need |
 | **Workspace** | — | `list_workspaces` | every loaded solution with its git branch and worktree, and the absolute path `unload_workspace` takes |
@@ -35,7 +35,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Workspace** | — | `list_projects(filter)` | name, language, document count; the name it prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=` |
 | **Navigate** | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` | up to 10 in one response, each under its own path line; an unresolved path is reported inline as `NOT_FOUND`, never a failed call |
-| **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too |
+| **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too, and an unfiltered outline of 25+ members ends with `104 members - narrow with contains=`, because an outline never truncates and so never earned the truncation steer |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id | answers `get_type_outline`'s member list plus a steer to one member, not the whole file's text; `verbose: true` opts back into the source |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
@@ -51,6 +51,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
 | **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` | every ASP.NET Core `Map*` with the member it sits in |
+| **Files** | "find the file called X" | `find_files(name: "orderrouter")` | a plain file-name substring, case-insensitive, no glob to get right; combines with `glob=`, which selects first, and a glob that matched nothing names it |
 | **Files** | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
 | **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell; `glob` takes a **concrete path** as readily as a pattern, so one file's size is one call |
 | **Files** | `Bash: git ls-files` to tell a checked-in file from a scratch one | `find_files(glob, tracked: true)` | only the files git tracks, so build output and another session's untracked notes drop out; the bare `git ls-files` is denied by the guard, every flagged form is not |
@@ -61,6 +62,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `grep -o` | `search_text(query, matchesOnly: true)` | prints the matched span instead of the whole line; compose with `unique: true` to answer "which distinct values of this shape exist" |
 | **Files** | `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
 | **Files** | `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` | identical matching lines collapse to the first record plus `x<count>` |
+| **Files** | `Bash: git show <ref>:<path>` | `read_text(path, ref: "main")` · `get_file_outline(path, ref: "main")` | the file as it was at that ref, with the same gutter, line ranges, `tail=`, `section=` and `maxChars` as the working tree, and a whole `.cs` answering its outline; one path, and a ref that does not exist is refused rather than answered from the working tree |
 | **Files** | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
 | **Files** | `Read` **several** files | `read_text(paths: [...])` | up to 10 in one response, each under its own path line with its own count and `next:` note; an unresolved path is `NOT_FOUND` inline, and `maxChars` is one budget shared across the batch that names the entry it clipped |
 | **Files** | `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
@@ -90,9 +92,10 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Projects** | editing `PackageReference` by hand | `package_list` · `package_add` · `package_remove` | central package management aware: the version lands in `Directory.Packages.props` |
 | **Projects** | editing a `.sln`/`.slnx` by hand | `solution_add_project` · `solution_remove_project` | the solution file only, no MSBuild evaluation |
 | **Projects** | "which projects does this solution contain?" for a solution that is **not** loaded | `solution_projects(path: …)` | reads the `.slnx`, `.sln` or `.slnf` directly and loads nothing, so a fixture-scoped question does not cost a `load_workspace` that makes every later un-hinted call ambiguous |
+| **Git** | `Bash: git log` / `git show --stat` | `history` | commits touching a path, one line each - short sha, date, author, subject - `baseRef=` for a ref or a range, `contains=` for git's pickaxe (only the commits whose diff added or removed that literal), `message=` for the subject grep, and `commit=<sha>` for one commit's per-file stat. `git blame` stays on the shell: it ran **once** in 683 sessions |
 | **Git** | `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, `path=` scopes it to one pathspec on a shared tree, and `exclude=` drops what a pathspec cannot leave out - `exclude: ".research/**"` for another session's notes; an excluded file is not counted |
 | **Git** | `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
-| **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `paths=[...]` takes up to 10 pathspecs in the same git invocation, `maxLines=` caps it at 400 |
+| **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `paths=[...]` takes up to 10 pathspecs in the same git invocation, `maxLines=` caps it at 1000 and a truncated answer names the exact `maxLines=` that returns the rest |
 | **Build and test** | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
 | **Build and test** | `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
@@ -169,10 +172,12 @@ TerseSharp tool replaces them, so shelling out is the right call.
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then the working
-directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Only git **history** —
-`git log`, `git log -p`, `git blame`, `git show <ref>:<path>` — and anything that mutates the index or
-history — `git add`, `git commit`, `git push` — stay on the shell, because TerseSharp does not model
-them.
+directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
+`git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`. Still on the shell: `git blame`
+— measured at **one** call in 683 sessions — anything that mutates the index or history (`git add`,
+`git commit`, `git push`, `git tag`), and a **scripted extraction** such as
+`$(git log -1 --format=%H)`, because `--format=`, `--pretty=`, `-s` and `--name-only` ask for a shape
+`history` does not produce.
 
 **Banned reasoning.** Every one of these has produced a breach: "just this once" · "Grep is faster" ·
 "I only need one line" · "the tool errored so I'll use Grep" · "I
@@ -210,8 +215,8 @@ reloads it. The user can change the limit with `terse serve --max-workspaces N` 
 `TERSE_MAX_WORKSPACES` — worth telling them when a big solution is making the server heavy, because a
 loaded workspace costs roughly 3 GB on a 148-project tree.
 **The advertised surface is derived from what the solution holds** — no `.xaml`/`.axaml` hides the 13
-`xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*`, no `.resx`/`.resw` the 8 `resx_*`: 56 tools
-instead of 87 on a plain C# solution, because the full catalogue costs tokens on every request and
+`xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*`, no `.resx`/`.resw` the 8 `resx_*`: 57 tools
+instead of 88 on a plain C# solution, because the full catalogue costs tokens on every request and
 measurably lowers selection accuracy. Loading a second solution that does hold them re-advertises
 those families through `notifications/tools/list_changed`; `--tools all` (or `TERSE_TOOLS=all`)
 advertises everything regardless and `--tools core` narrows to about twenty. A hidden tool still
@@ -360,11 +365,12 @@ is also a property name — `Errors`, `Report`, `Tally` — resolves to the type
 `AmbiguousSymbol`. A name matching no type at all says so and counts the non-type matches rather than
 hiding them.
 
-**From the third consecutive call of one tool the response gains one line** —
-`3 read_text calls in a row - pass paths=[...] for the rest` — naming the plural parameter that tool
-declares. It is framing, never payload, it says nothing when the call already used the plural
-parameter, and the counter resets on any different tool. Read it as the instruction it is: the batch
-form removes an inference, not just tokens.
+**From the second consecutive call of one tool the response gains one line** —
+`2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call` — naming the plural
+parameter that tool declares. It is framing, never payload, it says nothing when the call already
+used the plural parameter, and the counter resets on any different tool. Obey it literally: 571 runs
+of exactly **two** consecutive calls were unreachable while it fired on the third, and the only
+published technique that raises batch width is an imperative naming a count, not a fact.
 
 **Git is the other deliberate shell-out beside `build`/`run_tests`**, and the answer to the
 end-of-task review, which is defined over the diff. Start
@@ -476,6 +482,11 @@ that answers nothing, and the clip always names `next: startLine=`.
    Do exactly that: `usings=` lands the directive inside the *same* compile-gated edit, so the whole
    recovery is one call rather than an `edit_text force=true` on the header plus a `retryWith`. The
    directive is never added behind your back. A `dryRun` names the same parameter without a token.
+   **When every new error is a broken *call* (`CS7036`/`CS1501`/`CS1503`/`CS1729`) the remedy names
+   the callers instead** — `send these callers in the same replace_symbol symbolIds/declarations
+   batch: OrderRouter.Route(Order)`. Paste them into `replace_symbol symbolIds=` beside the member you
+   changed: that is the only ordering that works when the callee is what moved. `dryRun` prints it
+   too, and nothing is named when a caller cannot be proven.
    **A token belongs to the workspace it was rejected in**: replaying it against another one - a
    sibling worktree where the same symbol id resolves - is refused naming both roots, instead of
    landing the held declaration in the wrong tree. Every diagnostic a rollback lists names its file
@@ -531,7 +542,15 @@ that answers nothing, and the clip always names `next: startLine=`.
     to repeat. `find_usages`, `rename_symbol` and `explore_symbol` filter by index record first and
     parse only the files that could match, so they are cheap even on a large XAML tree.
 
-12. **A line starting `UPDATE terse` is not part of the answer — it is a message for the user.** Once per
+12. **A hit list ends with the argument its consumer takes — lift it, do not retype it.**
+    `search_text`, `search_regex`, `find_files`, `changed_files` and `find_usages` end with
+    `paths=["src/A.cs", "src/B.cs"]` (deduped, at most 10, JSON-escaped) whenever they matched more
+    than one file: paste it straight into `read_text paths=` or `get_file_outline paths=`. An outline
+    of at most ten members ends with `symbolIds=[…]` for `get_symbol_source symbolIds=`; a wider one
+    offers `contains=` instead, because ten of a hundred members is a batch nobody asked for. Neither
+    line appears when there is nothing to batch.
+
+13. **A line starting `UPDATE terse` is not part of the answer — it is a message for the user.** Once per
     server process, at most once a day, the first tool response may carry one extra last line:
     `UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp`. Everything
     above it is the tool's real answer and is unaffected. Tell the user the newer version exists and
@@ -540,7 +559,7 @@ that answers nothing, and the clip always names `next: startLine=`.
     `terse serve` rewrites the installed `SKILL.md` and the `terse guard` hook to match the new binary,
     so the skill you are reading always describes the binary you are talking to.
 
-13. **Independent calls go in one message.** If you intend to call several tools and there are no
+14. **Independent calls go in one message.** If you intend to call several tools and there are no
     dependencies between them, make all of the independent calls in parallel, in a single assistant
     message, rather than one after another. Reading three files is three `get_symbol_source` calls
     issued together; outlining four files is four `get_file_outline` calls issued together;
@@ -719,7 +738,8 @@ Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the n
 `AmbiguousSymbol` lists the candidates and says how many of the total it shows; `SaturatedName` means
 the name matched too many symbols to resolve safely — and it is now reached only by a **bare** name:
 a `Type.Member` whose member name saturates is resolved through the members of the types called
-`Type`, so qualifying the name really is the fix the remedy names; `OutOfWorkspace` means the path
+`Type`, so qualifying the name really is the fix the remedy names, and a type declaring no such member
+answers `SymbolNotFound` listing its members instead of a saturation count; `OutOfWorkspace` means the path
 escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
 no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
 parameter means the argument names were wrong, and the remedy lists the ones the tool declares; an

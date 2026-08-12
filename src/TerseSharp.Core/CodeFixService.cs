@@ -10,16 +10,18 @@ public static class CodeFixService
     private const int MaxPasses = 25;
 
     public static async Task<FixOutcome> ApplyAsync(
-        Solution solution,
-        IReadOnlyList<DocumentId> documents,
-        FixRequest request,
-        CancellationToken cancellationToken)
+            Solution solution,
+            IReadOnlyList<DocumentId> documents,
+            FixRequest request,
+            CancellationToken cancellationToken)
     {
         var unfixed = new List<string>();
         var current = solution;
 
         foreach (var projectId in documents.Select(document => document.ProjectId).Distinct())
         {
+            ReportStyleAvailability(current, projectId, request, unfixed);
+
             current = await FixProjectAsync(current, projectId, Scoped(current, documents, projectId), request, unfixed, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -251,6 +253,22 @@ public static class CodeFixService
             [pending[0].Id],
             new SuppliedDiagnostics(pending),
             cancellationToken);
+
+    internal static string? StyleUnavailable(FixMode mode, bool hasStyleFixers, string project) =>
+            mode is not (FixMode.Style or FixMode.All) || hasStyleFixers
+                ? null
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"UNAVAILABLE {project} registers no IDE code fixer, so fix=style checked nothing - the IDE fixers are served by the Roslyn this build carries, and an SDK ahead of it disables them; run doctor and read the roslyn line");
+
+    private static void ReportStyleAvailability(Solution solution, ProjectId projectId, FixRequest request, List<string> unfixed)
+    {
+        if (solution.GetProject(projectId) is not { } project)
+            return;
+
+        if (StyleUnavailable(request.Mode, FixerCatalog.For(project).HasStyleFixers, project.Name) is { } note)
+            unfixed.Add(note);
+    }
 }
 
 public readonly record struct FixOutcome(Solution Solution, IReadOnlyList<string> Unfixed);

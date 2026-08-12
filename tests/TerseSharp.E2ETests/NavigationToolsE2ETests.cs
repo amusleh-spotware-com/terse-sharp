@@ -167,10 +167,11 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     private static IEnumerable<string> References(string outline) => outline
-        .Split('\n')
-        .Skip(1)
-        .Where(line => line.Trim().Length > 0)
-        .Select(line => line.Trim().Split("  ", StringSplitOptions.RemoveEmptyEntries)[0]);
+            .Split('\n')
+            .Skip(1)
+            .Where(line => line.Trim().Length > 0)
+            .Where(line => !line.StartsWith("symbolIds=[", StringComparison.Ordinal))
+            .Select(line => line.Trim().Split("  ", StringSplitOptions.RemoveEmptyEntries)[0]);
 
     [Fact]
     public async Task TheReferencesAnOutlinePrints_ResolveWhenFedStraightBackToAnotherTool()
@@ -539,5 +540,45 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("matches more than 100 symbols", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_OfAWideFile_NamesTheContainsParameterItNeverTruncatedInto()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/ProbeSaturation.cs" });
+
+        Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
+        Assert.Contains(" members - narrow with contains=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_OfANarrowFile_NamesNoParameterItDoesNotNeed()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+
+        Assert.DoesNotContain("narrow with contains=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_FilteredOnAWideFile_DoesNotSteerToTheParameterItAlreadyUsed()
+    {
+        var text = await server.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "src/Fixture.Trading/ProbeSaturation.cs",
+            ["contains"] = "Probe01",
+        });
+
+        Assert.DoesNotContain("narrow with contains=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_QualifiedByATypeThatDeclaresNoSuchMember_BlamesTheQualifierNotTheName()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "ProbeNames.Probe" });
+
+        Assert.Contains("ERROR SymbolNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("declares no such member", text, StringComparison.Ordinal);
+        Assert.Contains("ProbeNames.Probe001", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("matches more than 100 symbols", text, StringComparison.Ordinal);
     }
 }

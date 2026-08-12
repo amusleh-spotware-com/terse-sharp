@@ -426,6 +426,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
         Assert.DoesNotContain("usings=[", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("send these callers", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -634,5 +635,37 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_RolledBackByASignatureChange_NamesTheDeclarationsThatCallIt()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+            ["declaration"] = "public bool Submit(Order order, bool force) => repository.Submit(order);",
+        });
+
+        Assert.Contains("ERROR CompileRegression", text, StringComparison.Ordinal);
+        Assert.Contains("CS7036", text, StringComparison.Ordinal);
+        Assert.Contains("send these callers in the same replace_symbol symbolIds/declarations batch:", text, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.Retry(Order)", text, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.Route(Order)", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.SubmitTwice(Order)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_DryRunOfASignatureChange_NamesTheCallersItWouldBreak()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+            ["declaration"] = "public bool Submit(Order order, int attempt) => repository.Submit(order);",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("send these callers in the same replace_symbol symbolIds/declarations batch:", text, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.Route(Order)", text, StringComparison.Ordinal);
     }
 }

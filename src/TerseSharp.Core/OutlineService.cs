@@ -80,11 +80,11 @@ string? contains = null)
         member is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax;
 
     private static string Render(
-        string tool,
-        string argument,
-        MemberDeclarationSyntax[] declarations,
-        SemanticModel model,
-        OutlineFormat format)
+            string tool,
+            string argument,
+            MemberDeclarationSyntax[] declarations,
+            SemanticModel model,
+            OutlineFormat format)
     {
         var response = new ResponseBuilder(tool, argument);
 
@@ -93,22 +93,33 @@ string? contains = null)
         if (format.Usings is { Length: > 0 } usings)
             response.Note("usings: " + usings);
 
+        var references = new List<string>();
+        var members = 0;
+
         foreach (var declaration in declarations)
-            AppendType(response, declaration, model, format);
+            members += AppendType(response, declaration, model, format, references);
+
+        if (format.Contains is not { Length: > 0 } && members >= WideOutline)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{members} members - narrow with contains="));
+        else if (format.Batchable && ArgumentLine.Ids(references) is { } batch)
+            response.Note(batch);
 
         return response.ToString();
     }
 
-    private static void AppendType(
-    ResponseBuilder response,
-    MemberDeclarationSyntax declaration,
-    SemanticModel model,
-    OutlineFormat format)
+    private const int WideOutline = 25;
+
+    private static int AppendType(
+            ResponseBuilder response,
+            MemberDeclarationSyntax declaration,
+            SemanticModel model,
+            OutlineFormat format,
+            List<string> references)
     {
         var symbol = model.GetDeclaredSymbol(declaration);
 
         if (symbol is null)
-            return;
+            return 0;
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
@@ -122,12 +133,17 @@ string? contains = null)
         {
             total += IsTypeDeclaration(member) ? 0 : 1;
 
-            if (AppendMember(response, member, model, format, overloaded))
+            if (AppendMember(response, member, model, format, overloaded) is { } reference)
+            {
+                references.Add(reference);
                 shown++;
+            }
         }
 
         if (format.Contains is { Length: > 0 } && shown < total)
             response.Line(string.Create(CultureInfo.InvariantCulture, $"  {shown} of {total} members"));
+
+        return total;
     }
 
     private static readonly IReadOnlySet<string> Never = new HashSet<string>(StringComparer.Ordinal);
@@ -139,26 +155,28 @@ string? contains = null)
         _ => [],
     };
 
-    private static bool AppendMember(
-ResponseBuilder response,
-MemberDeclarationSyntax member,
-SemanticModel model,
-OutlineFormat format,
-IReadOnlySet<string> overloaded)
+    private static string? AppendMember(
+            ResponseBuilder response,
+            MemberDeclarationSyntax member,
+            SemanticModel model,
+            OutlineFormat format,
+            IReadOnlySet<string> overloaded)
     {
         var symbol = model.GetDeclaredSymbol(member);
 
         if (symbol is null || IsTypeDeclaration(member))
-            return false;
+            return null;
 
         if (format.Contains is { Length: > 0 } filter && !symbol.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
-            return false;
+            return null;
+
+        var reference = Reference(symbol, format.Ids, overloaded);
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"  {Reference(symbol, format.Ids, overloaded)}  {Signature(symbol, format)} :{PositionFormat.LineRange(member)}"));
+            $"  {reference}  {Signature(symbol, format)} :{PositionFormat.LineRange(member)}"));
 
-        return true;
+        return reference;
     }
 
     private static string Signature(ISymbol symbol, OutlineFormat format) => format.Signatures
@@ -229,7 +247,7 @@ IReadOnlySet<string> overloaded)
             directive.Alias is { } alias ? alias.Name.Identifier.ValueText + " = " : string.Empty,
             directive.NamespaceOrType?.ToString() ?? string.Empty);
 
-    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true, string? Contains = null);
+    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true, string? Contains = null, bool Batchable = true);
 
     private const string TextSteer =
         "NOTE this is the outline, not the file text - a whole-file .cs read costs about three times as much and is almost never the question."
@@ -259,4 +277,27 @@ IReadOnlySet<string> overloaded)
             DocumentLookup.Find(workspace, path) is not { } document
                 ? FileService.ReadTextAsync(workspace, path, request, cancellationToken)
                 : SteeredAsync(workspace, path, request.Bytes ? FileService.ByteLength(document.FilePath) : null, cancellationToken);
+
+    public static Result<string> FromText(
+            string path,
+            string text,
+            bool signatures,
+            string ids,
+            bool usings,
+            bool parameterNames = true,
+            string? contains = null)
+    {
+        if (Rejected(ids) is { } refusal)
+            return refusal;
+
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        var root = tree.GetRoot();
+        var model = CSharpCompilation.Create("terse-ref", [tree]).GetSemanticModel(tree);
+        var declarations = Declarations(root);
+        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, Batchable: false);
+
+        return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
+            ? note
+            : Render("get_file_outline", path, declarations, model, format));
+    }
 }

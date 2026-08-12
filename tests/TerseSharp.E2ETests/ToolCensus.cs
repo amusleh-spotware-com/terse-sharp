@@ -161,7 +161,7 @@ internal static class ToolCensus
     public const int MinShellReplacements = 10;
     public static readonly string[] ReadOnlyTools =
     [
-        "changed_files", "diff_symbols", "diff_text",
+        "changed_files", "diff_symbols", "diff_text", "history",
     "explore_symbol", "find_files", "find_implementations", "find_registrations", "find_usages",
     "get_diagnostics", "get_file_outline", "get_symbol", "get_symbol_source", "get_type_outline",
     "impact_of", "list_endpoints", "list_projects", "list_workspaces",
@@ -190,4 +190,98 @@ internal static class ToolCensus
     public static string WithoutSteer(string text) => string.Join(
         '\n',
         text.Split('\n').Where(line => !line.Contains(" calls in a row - pass ", StringComparison.Ordinal)));
+
+    public const double RedundancyThreshold = 0.45;
+    public const int MaxSimilarByDesignPairs = 7;
+    private static readonly string[] Stopwords =
+    [
+        "that", "this", "with", "from", "into", "when", "which", "they", "them", "than", "then",
+        "instead", "every", "each", "call", "calls", "tool", "tools", "pass", "passed", "returns",
+        "return", "response", "answer", "answers", "path", "paths", "file", "files", "workspace",
+        "default", "false", "true", "only", "also", "same", "onto", "over", "under", "does", "one",
+        "replaces", "bash", "name", "names", "line", "lines", "what", "have", "been", "because",
+    ];
+
+    public static ToolPair[] SimilarByDesignPairs =>
+        [
+            new(
+                "search_text",
+                "search_regex",
+                "literal versus pattern is the whole difference and both are named in every routing table; the descriptions are symmetric because the parameters are, and the pair carried 615 and 191 calls in the measured corpus, so neither is the unused half of a redundant pair"),
+            new(
+                "xaml_set_property",
+                "xaml_remove_element",
+                "opposite verbs on the same addressing scheme; the descriptions overlap on how an element is addressed, which is the part that must read identically"),
+            new(
+                "razor_add_element",
+                "razor_remove_element",
+                "opposite verbs on the same addressing scheme, as above"),
+            new(
+                "project_add_reference",
+                "project_remove_reference",
+                "opposite verbs on the same target; add versus remove is unambiguous from the verb, which is not the selection hazard ToolScope measured"),
+            new(
+                "project_remove_reference",
+                "package_remove",
+                "project reference versus PackageReference; both remove a reference from a project file, and the shared wording is the containment and central-package-management rule they must state the same way"),
+            new(
+                "solution_add_project",
+                "solution_remove_project",
+                "opposite verbs on the same solution file, as above"),
+            new(
+                "xaml_names",
+                "xaml_resources",
+                "x:Name declarations versus x:Key declarations, from the same index; the descriptions share the index and dialect wording every xaml_* tool must repeat"),
+        ];
+
+    public static bool SimilarByDesign(string first, string second) => Array.Exists(
+        SimilarByDesignPairs,
+        pair => (string.Equals(pair.First, first, StringComparison.Ordinal) && string.Equals(pair.Second, second, StringComparison.Ordinal))
+            || (string.Equals(pair.First, second, StringComparison.Ordinal) && string.Equals(pair.Second, first, StringComparison.Ordinal)));
+
+    public static HashSet<string> Words(string description)
+    {
+        var words = new HashSet<string>(StringComparer.Ordinal);
+        var current = new System.Text.StringBuilder(32);
+
+        foreach (var character in description)
+        {
+            if (char.IsAsciiLetter(character))
+            {
+                current.Append(char.ToLowerInvariant(character));
+                continue;
+            }
+
+            Keep(words, current);
+        }
+
+        Keep(words, current);
+
+        return words;
+    }
+
+    private static void Keep(HashSet<string> words, System.Text.StringBuilder current)
+    {
+        if (current.Length >= 4)
+        {
+            var word = current.ToString();
+
+            if (!Array.Exists(Stopwords, stopword => string.Equals(stopword, word, StringComparison.Ordinal)))
+                words.Add(word);
+        }
+
+        current.Clear();
+    }
+
+    public static double Overlap(HashSet<string> first, HashSet<string> second)
+    {
+        if (first.Count is 0 || second.Count is 0)
+            return 0;
+
+        var shared = first.Count(word => second.Contains(word));
+
+        return (double)shared / (first.Count + second.Count - shared);
+    }
 }
+
+internal sealed record ToolPair(string First, string Second, string Reason);

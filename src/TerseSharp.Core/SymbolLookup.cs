@@ -154,8 +154,8 @@ CancellationToken cancellationToken)
 
         return new string(arity < 0 ? name : name[..arity]);
     }
-    private static string Addressable(ISymbol symbol) =>
-        SymbolReference.RoundTrips(symbol) ? SymbolReference.Brief(symbol) : SymbolId.From(symbol).Value;
+    internal static string Addressable(ISymbol symbol) =>
+            SymbolReference.RoundTrips(symbol) ? SymbolReference.Brief(symbol) : SymbolId.From(symbol).Value;
 
     private static async Task<Result<ISymbol>> ByIdAsync(
         LoadedWorkspace workspace,
@@ -217,10 +217,10 @@ CancellationToken cancellationToken)
         "pass a documentation id such as M:Ns.Type.Member(Ns.Arg), or a name such as Type.Member"));
 
     private static async Task<Result<ISymbol>?> ByContainerAsync(
-        LoadedWorkspace workspace,
-        string text,
-        SymbolQuery query,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            string text,
+            SymbolQuery query,
+            CancellationToken cancellationToken)
     {
         if (query.ContainingType is not { Length: > 0 } qualifier)
             return null;
@@ -228,16 +228,46 @@ CancellationToken cancellationToken)
         var name = qualifier[(qualifier.LastIndexOf('.') + 1)..];
         var types = (await SymbolSearch.FindAsync(workspace, name, null, null, NameCap + 1, cancellationToken).ConfigureAwait(false)).Ranked;
 
-        return types.Count > NameCap ? null : Scoped(text, Declared(types, name, query));
+        if (types.Count > NameCap)
+            return null;
+
+        var named = Named(types, name);
+
+        return Scoped(text, Declared(named, query)) ?? Unmatched(text, named, query);
     }
 
-    private static ISymbol[] Declared(IReadOnlyList<ISymbol> types, string name, SymbolQuery query) =>
-    [
-        .. types
+    private static ISymbol[] Declared(IReadOnlyList<INamedTypeSymbol> types, SymbolQuery query) =>
+        [
+            .. types
+            .SelectMany(type => type.GetMembers(query.Member))
+            .Where(symbol => SymbolReference.Matches(symbol, query))
+            .DistinctBy(Describe, StringComparer.Ordinal),
+        ];
+
+    private static INamedTypeSymbol[] Named(IReadOnlyList<ISymbol> types, string name) =>
+        [
+            .. types
         .OfType<INamedTypeSymbol>()
         .Where(type => string.Equals(type.Name, name, StringComparison.Ordinal))
-        .SelectMany(type => type.GetMembers(query.Member))
-        .Where(symbol => SymbolReference.Matches(symbol, query))
         .DistinctBy(Describe, StringComparer.Ordinal),
-];
+    ];
+
+
+    private static string[] Nearest(INamedTypeSymbol type, string member) =>
+    [
+        .. type.GetMembers()
+        .Where(symbol => symbol.CanBeReferencedByName)
+        .Select(Addressable)
+        .Distinct(StringComparer.Ordinal)
+        .OrderBy(name => name.Contains(member, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+        .ThenBy(name => name, StringComparer.Ordinal)
+        .Take(MaxNearestMembers),
+    ];
+
+
+    private static Result<ISymbol>? Unmatched(string text, INamedTypeSymbol[] types, SymbolQuery query) => types is [var only]
+        ? Result.Fail<ISymbol>(Errors.NoSuchMember(text, SymbolReference.Simple(only), Nearest(only, query.Member)))
+        : null;
+
+    private const int MaxNearestMembers = 5;
 }

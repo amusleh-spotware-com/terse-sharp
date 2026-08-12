@@ -43,7 +43,7 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
         var tokens = (narrowed.Sum(tool => tool.Name.Length + (tool.Description?.Length ?? 0) + tool.JsonSchema.GetRawText().Length) + 3) / 4;
 
         Assert.True(hidden >= 30, string.Create(CultureInfo.InvariantCulture, $"only {hidden} tools were hidden"));
-        Assert.True(tokens <= 18200, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
+        Assert.True(tokens <= 19000, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
     }
 
     [Fact]

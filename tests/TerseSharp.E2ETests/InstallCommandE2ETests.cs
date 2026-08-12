@@ -228,4 +228,43 @@ public sealed class InstallCommandE2ETests : IDisposable
             ? Path.ChangeExtension(assembly, ".exe")
             : Path.Combine(Path.GetDirectoryName(assembly)!, Path.GetFileNameWithoutExtension(assembly));
     }
+
+    [Fact]
+    public async Task Doctor_ComparesTheRoslynThisBuildCarriesAgainstTheOneTheSdkCarries()
+    {
+        var output = await RunAsync("doctor", "--workspace", Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+
+        Assert.Contains("roslyn: terse carries Microsoft.CodeAnalysis ", output, StringComparison.Ordinal);
+        Assert.Contains("the selected SDK carries ", output, StringComparison.Ordinal);
+        Assert.Contains("OK   roslyn:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Doctor_ReportsWhetherTheGuardCoversThisTreesMeasuredBreachClasses()
+    {
+        var output = await RunAsync("doctor", "--workspace", Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+
+        Assert.Contains("guard coverage: read-cs=denied", output, StringComparison.Ordinal);
+        Assert.Contains("git-status=denied", output, StringComparison.Ordinal);
+        Assert.Contains("OK   guard coverage:", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Doctor_SeparatesTheOncePerLoadCompilationFromThePerCallPhases()
+    {
+        var output = await RunAsync("doctor", "--workspace", Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"));
+        var line = output.Split('\n').Single(candidate => candidate.Contains(" phases: ", StringComparison.Ordinal));
+
+        Assert.Contains("realizeMs=", line, StringComparison.Ordinal);
+        Assert.True(Phase(line, "realizeMs") > Phase(line, "outlineMs"), line);
+        Assert.True(Phase(line, "outlineMs") > 0, line);
+    }
+
+    private static double Phase(string line, string name)
+    {
+        var start = line.IndexOf(name, StringComparison.Ordinal) + name.Length + 1;
+        var end = line.IndexOf(' ', start);
+
+        return double.Parse(end < 0 ? line[start..] : line[start..end], CultureInfo.InvariantCulture);
+    }
 }

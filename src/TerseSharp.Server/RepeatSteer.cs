@@ -6,7 +6,7 @@ namespace TerseSharp.Server;
 
 public static class RepeatSteer
 {
-    public const int Threshold = 3;
+    public const int Threshold = 2;
 
     public static readonly FrozenDictionary<string, string> Plural = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -48,9 +48,11 @@ public static class RepeatSteer
         var count = Counted(tool);
 
         return !batched && count >= Threshold && Plural.TryGetValue(tool, out var plural)
-            ? string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - pass {plural}=[...] for the rest")
+            ? string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - pass {plural}=[...] with the next {Math.Min(count, MaxBatch)}+ in ONE call")
             : null;
     }
+
+    private const int MaxBatch = 10;
 
     public static void Forget()
     {

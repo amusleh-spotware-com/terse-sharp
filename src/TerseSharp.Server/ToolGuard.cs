@@ -155,6 +155,9 @@ public static class ToolGuard
         "status" => "use changed_files, or changed_files root=<that directory> when it is not the loaded workspace",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show; for a directory that is not loaded, diff_text root=<that directory>",
         "ls-files" => "use find_files tracked=true",
+        "log" => "use history, which takes path=, baseRef=, contains= for the pickaxe and message= for the subject grep",
+        "show" => "use history commit=<sha>, which answers the subject and one line per file with added and deleted counts",
+        "show-file" => "use read_text ref=<ref> path=<path>, or get_file_outline ref=<ref> path=<path> for a .cs file",
         _ => "use run_tests, rerun_failed or list_tests",
     };
 
@@ -162,8 +165,10 @@ public static class ToolGuard
     {
         "format" or "format-analyzers" or "format-style" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, names every diagnostic no fixer covers, and answers a verify in one line instead of a per-file listing.",
         "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, so the end-of-task review costs a listing instead of a diff.",
-        "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths. Only git history - log, blame, show <ref>:<path> - and index or history mutation stay on the shell.",
+        "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
+        "log" or "show" => "history answers the same commits workspace-relative and bounded, with the pickaxe and the subject grep as parameters instead of flags. Only git blame and index or history mutation stay on the shell.",
+        "show-file" => "read_text ref= gives a revision's text the same numbering gutter, line ranges, tail=, section= and maxChars budget as the working tree, and a whole .cs file answers its outline instead of about three times the tokens.",
         _ => "Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.",
     };
 
@@ -317,9 +322,27 @@ public static class ToolGuard
             "status" when IsDotNetTree(directed) => "status",
             "diff" when IsDotNetTree(directed) => "diff",
             "ls-files" when IsDotNetTree(directed) && Unflagged(tokens, "ls-files") => "ls-files",
+            "log" when IsDotNetTree(directed) && !Shaped(tokens) => "log",
+            "show" when IsDotNetTree(directed) && !Scripted(tokens) => Showing(tokens),
             _ => null,
         };
     }
+
+    private static bool Scripted(string[] tokens) => Array.Exists(
+        tokens,
+        token => token.StartsWith("--format", StringComparison.Ordinal)
+            || token.StartsWith("--pretty", StringComparison.Ordinal)
+            || token is "-s" or "--name-only" or "--name-status");
+
+    private static bool Shaped(string[] tokens) => Scripted(tokens) || Array.Exists(
+            tokens,
+            token => token.StartsWith("--author", StringComparison.Ordinal)
+                || token.StartsWith("-L", StringComparison.Ordinal)
+                || token is "-p" or "--patch" or "--stat" or "--numstat" or "--shortstat"
+                    or "--follow" or "--graph" or "--reverse");
+
+    private static string Showing(string[] tokens) =>
+            Array.Exists(tokens, token => token.Contains(':', StringComparison.Ordinal) && !token.StartsWith('-')) ? "show-file" : "show";
 
     private static string Directed(string[] tokens, string? cwd, string? subcommand)
     {
@@ -535,6 +558,9 @@ public static class ToolGuard
         "status" => "changed_files",
         "diff" => "diff_symbols",
         "ls-files" => "find_files tracked=true",
+        "log" => "history",
+        "show" => "history",
+        "show-file" => "read_text",
         _ => "run_tests",
     };
 
@@ -595,4 +621,27 @@ public static class ToolGuard
             return [];
         }
     }
+
+    public static GuardCoverage Coverage(string? cwd)
+    {
+        var probes = Probes(cwd);
+        var detail = string.Join(' ', probes.Select(probe => probe.Name + '=' + (probe.Denied ? "denied" : "allowed")));
+
+        return new GuardCoverage(detail, probes.All(probe => probe.Denied));
+    }
+
+    private static (string Name, bool Denied)[] Probes(string? cwd) =>
+        [
+            ("read-cs", Inspect("Read", Payload("file_path", Path.Combine(cwd ?? ".", "Program.cs")), cwd).Denied),
+            ("bash-text", Inspect("Bash", Payload("command", "grep -rn Submit Program.cs"), cwd).Denied),
+            ("dotnet-build", Inspect("Bash", Payload("command", "dotnet build"), cwd).Denied),
+            ("dotnet-test", Inspect("Bash", Payload("command", "dotnet test"), cwd).Denied),
+            ("git-status", Inspect("Bash", Payload("command", "git status"), cwd).Denied),
+            ("git-diff", Inspect("Bash", Payload("command", "git diff"), cwd).Denied),
+        ];
+
+
+    private static JsonObject Payload(string name, string value) => new() { [name] = value };
 }
+
+public readonly record struct GuardCoverage(string Detail, bool Complete);

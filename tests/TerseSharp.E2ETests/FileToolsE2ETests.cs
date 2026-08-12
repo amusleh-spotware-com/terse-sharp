@@ -157,7 +157,8 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("Z  ", plain, StringComparison.Ordinal);
         var line = Assert.Single(
             stamped.Split('\n'),
-            candidate => candidate.Contains("Fixture.Trading.csproj", StringComparison.Ordinal));
+            candidate => candidate.Contains("Fixture.Trading.csproj", StringComparison.Ordinal)
+                && !candidate.StartsWith("paths=[", StringComparison.Ordinal));
         var columns = line.Split("  ", StringSplitOptions.RemoveEmptyEntries);
 
         Assert.Equal(3, columns.Length);
@@ -168,8 +169,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             CultureInfo.InvariantCulture,
             DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
             out _));
-        Assert.True(int.TryParse(columns[2], NumberStyles.None, CultureInfo.InvariantCulture, out var bytes));
-        Assert.True(bytes > 0);
+        Assert.True(long.Parse(columns[2], CultureInfo.InvariantCulture) > 0);
     }
 
     [Fact]
@@ -613,5 +613,42 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
+    }
+
+    [Fact]
+    public async Task FindFiles_WithNameAlone_MatchesAFileNameSubstringWithNoGlobToGetRight()
+    {
+        var text = await server.CallAsync("find_files", new() { ["name"] = "orderrouter" });
+
+        Assert.Contains("OrderRouter.cs", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithNameBesideAGlob_FiltersWhatTheGlobSelected()
+    {
+        var text = await server.CallAsync("find_files", new() { ["glob"] = "**/*.csproj", ["name"] = "Tests" });
+
+        Assert.Contains("Fixture.Trading.Tests.csproj", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fixture.Trading.csproj\n", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithAGlobThatMatchedNothing_NamesTheNameParameterInstead()
+    {
+        var text = await server.CallAsync("find_files", new() { ["glob"] = "**/*.nosuchextension" });
+
+        Assert.StartsWith("0 files", text, StringComparison.Ordinal);
+        Assert.Contains("pass name=<text> to match a file name substring instead of a glob", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithNeitherGlobNorName_IsRefusedNamingBoth()
+    {
+        var text = await server.CallAsync("find_files", []);
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("neither 'glob' nor 'name' was supplied", text, StringComparison.Ordinal);
+        Assert.Contains("'name' to match a file name substring", text, StringComparison.Ordinal);
     }
 }

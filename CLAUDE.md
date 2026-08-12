@@ -19,9 +19,10 @@ Every read, search, edit, refactor, build and test **of this repository** goes t
 `find_usages` instead of `Grep`, `find_files` instead of `Glob`, `replace_symbol_body` /
 `replace_symbol` / `add_member` instead of `Edit`, `read_text` / `edit_text` / `write_text` for
 `.md`, `.csproj`, `.slnx` and `.json`, `build` and `run_tests` instead of shelling out to `dotnet`,
-and **`changed_files` / `diff_symbols` / `diff_text` instead of `Bash: git status` / `git diff`** —
-the working tree is served by tools, so only *history* (`git log`, `git blame`, `git show <ref>:<path>`)
-and index/history mutation (`git add`, `git commit`, `git push`) stay on `Bash`.
+and **`changed_files` / `diff_symbols` / `diff_text` instead of `Bash: git status` / `git diff`**,
+**`history` instead of `git log` / `git show --stat`** and **`read_text ref=` / `get_file_outline ref=`
+instead of `git show <ref>:<path>`** — so only `git blame` and index/history mutation (`git add`,
+`git commit`, `git tag`, `git push`) stay on `Bash`.
 
 This is not style. This repo is the one place where the server is driven by the agent that also
 maintains it, so **every session is the product's own usability test**. Friction you route around
@@ -35,10 +36,11 @@ Dropping to a built-in or to `Bash` is allowed only when:
    target — a rejected glob means fix the glob, not abandon the server.
 2. The task is verifying a **just-built** binary whose behaviour differs from the running server (the
    connected `terse` is whatever was installed, not `HEAD` — say which binary answered).
-3. Neither the server nor any tool exposes the action: `git` **history** (`log`, `blame`,
-   `show <ref>:<path>`) or index/history mutation (`add`, `commit`, `push`), `dotnet pack`,
-   `dotnet restore`, `dotnet tool install`, running the server by hand over stdio. The working tree
-   itself is **not** on this list — `changed_files`, `diff_symbols` and `diff_text` serve it.
+3. Neither the server nor any tool exposes the action: `git blame` or index/history mutation (`add`,
+   `commit`, `tag`, `push`), `dotnet pack`, `dotnet restore`, `dotnet tool install`, running the
+   server by hand over stdio. The working tree is **not** on this list — `changed_files`,
+   `diff_symbols` and `diff_text` serve it — and neither is history: `history` serves `git log` and
+   `git show --stat`, and `read_text ref=` serves `git show <ref>:<path>`.
 
 Say which of the three applies **at the call**, in one clause. A silent drop is the breach, and the
 same drop is a candidate for the improvement backlog below.
@@ -142,7 +144,7 @@ until it passes.
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **87 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **88 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `ExploreService`, `RegistrationService`, `RenameService`, `RefactorService`, `SymbolEditService`,
 `AnalysisService`, `DeadCodeService`, `CodeFixService`, `DiagnosticsService`, `FormatService`,
@@ -390,9 +392,16 @@ the expected saving, and any approach already refuted for that row; the exact co
 the gate directly below, and a row that omits one of them fails it. Then either fix it in the same task when it is cheap and in scope, or leave it
 logged with a reason. Silently dropping it is the one outcome that is not allowed. Ranking rules:
 
-- **Improving an existing tool or its response format beats adding a tool.** The surface already
-  costs every session in tool-list tokens and in selection accuracy; a 57th tool must beat the one it
-  splits, not merely be useful.
+- **A new tool is judged by two measured numbers, not by the tool count.** One extra tool is ~255
+  tokens of `tools/list`, which — cached — cost **1.51 M base-input-equivalent tokens across 508
+  sessions**, against **46 817 BIE per removed API turn**: a **break-even of 32 calls per 508
+  sessions**. That bar is low, so "the surface is already big" is not an argument; the real veto is
+  **discoverability**, and it is measurable. `explore_symbol` was called **7 times** and `impact_of`
+  **once** in 683 sessions while the chains they exist to collapse ran 1 922 adjacent navigation pairs.
+  So: estimate the call count, ship it if it clears 32 calls per 500 sessions, and **re-measure the
+  per-tool selection rate on the next scan — a shipped tool nobody calls is a defect to fix or delete,
+  not a number to defend.** Improving an existing tool or its response format is still usually the
+  better trade, because it needs no discovery at all.
 - **A saving that is not measured is not a saving.** Any accepted improvement lands with an assertion
   in `TokenBudgetE2ETests` against the *widest* fixture case, so the next format change cannot quietly
   give it back.
@@ -683,6 +692,9 @@ and being absent from it is the point:**
 | Rule | Gate | Discovers its subject from |
 |---|---|---|
 | **`IMPROVEMENTS.md` is two tables and nothing else** | `BacklogShapeTests` | the file itself — every heading line must be exactly `# Improvements backlog`, `## Open`, `## Closed` in that order, every non-blank line must open with `#` or `\|`, both mandated column headers must be present, and every row must carry the cell count its own table's header declares |
+| **every test the changelog names still exists** | `ChangelogReferenceTests` | the two newest `## [` sections of `CHANGELOG.md` — every back-ticked test-name-shaped identifier resolved against the method declarations of both test projects, with the discriminator itself covered and the referenced set asserted non-empty |
+| **no two advertised tools describe themselves nearly identically** | `ToolCensusE2ETests.NoTwoAdvertisedTools_DescribeThemselvesNearlyIdentically` | `tools/list` — pairwise word overlap of every advertised `[Description]`, failing above 0.45, minus `ToolCensus.SimilarByDesignPairs`: seven reasoned, ratcheted pairs, each still asserted to name two advertised tools |
+| **every question in the reference set is still answered** | `AnswerQualityE2ETests` | its own 17-question set over `fixtures/FixtureSolution`, each with the facts its answer must carry; the set is asserted ≥ 14 questions so it cannot go vacuous, and a second test reports what answering all of it costs |
 | every tool has an E2E test | `ToolCoverageE2ETests` | `tools/list`, both directions |
 | every tool is named in `SKILL.md`, `README.md`, `NUGET_README.md` | `DocsCoverageE2ETests` | `tools/list` |
 | every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus `ToolCensus.RobustnessExcluded` — seven entries, each carrying a written reason, ratcheted by `MaxRobustnessExclusions` |
@@ -717,7 +729,11 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
 - **The compile gate rolls back a callee-after-caller edit.** 35 `CompileRegression` rejections were a
   `replace_symbol` / `add_member` whose new body called a helper that did not exist yet (`FileGlob`,
   `Separated`, `MinSharedPrefix`). Add the callee **first**, bottom-up — a rejected edit costs the call
-  *and* the whole declaration you sent.
+  *and* the whole declaration you sent. The other half of that class — a **signature** change, where
+  callee-first ordering cannot help because the callee is what moved — is now answered by the
+  rejection itself: when every new error is `CS7036`/`CS1501`/`CS1503`/`CS1729` the remedy names the
+  calling declarations as addressable ids, and the fix is to paste them into one `replace_symbol
+  symbolIds=` batch beside the member you were changing.
 - **Never hand-write a documentation id.** 15 `SymbolNotFound`s were ids typed from memory, missing a
   parameter list or a `~ReturnType` suffix. Copy it from `get_file_outline ids=full` /
   `search_symbols`, or use the short name form (`OrderService.Submit`) — that is what it exists for.

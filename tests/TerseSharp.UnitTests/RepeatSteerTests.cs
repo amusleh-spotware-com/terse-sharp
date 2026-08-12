@@ -6,14 +6,13 @@ namespace TerseSharp.UnitTests;
 public sealed class RepeatSteerTests
 {
     [Fact]
-    public void Steer_SaysNothingUntilTheThirdCallOfTheSameTool()
+    public void Steer_SaysNothingUntilTheSecondCallOfTheSameTool()
     {
         RepeatSteer.Forget();
 
         Assert.Null(RepeatSteer.Steer("read_text"));
-        Assert.Null(RepeatSteer.Steer("read_text"));
-        Assert.Equal("3 read_text calls in a row - pass paths=[...] for the rest", RepeatSteer.Steer("read_text"));
-        Assert.Equal("4 read_text calls in a row - pass paths=[...] for the rest", RepeatSteer.Steer("read_text"));
+        Assert.Equal("2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call", RepeatSteer.Steer("read_text"));
+        Assert.Equal("3 read_text calls in a row - pass paths=[...] with the next 3+ in ONE call", RepeatSteer.Steer("read_text"));
     }
 
     [Fact]
@@ -22,9 +21,8 @@ public sealed class RepeatSteerTests
         RepeatSteer.Forget();
 
         Assert.Null(RepeatSteer.Steer("read_text"));
-        Assert.Null(RepeatSteer.Steer("read_text"));
+        Assert.NotNull(RepeatSteer.Steer("read_text"));
         Assert.Null(RepeatSteer.Steer("build"));
-        Assert.Null(RepeatSteer.Steer("read_text"));
         Assert.Null(RepeatSteer.Steer("read_text"));
         Assert.NotNull(RepeatSteer.Steer("read_text"));
     }
@@ -50,7 +48,6 @@ public sealed class RepeatSteerTests
     {
         RepeatSteer.Forget();
 
-        RepeatSteer.Steer(tool);
         RepeatSteer.Steer(tool);
 
         Assert.Contains(plural + "=[...]", RepeatSteer.Steer(tool)!, StringComparison.Ordinal);

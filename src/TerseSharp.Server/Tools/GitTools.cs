@@ -6,7 +6,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class GitTools(ToolContext context)
 {
-    private const int MaxDiffLines = 400;
+    private const int MaxDiffLines = 1000;
 
     [McpServerTool(Name = "changed_files", ReadOnly = true)]
     [Description("Replaces Bash git status and git diff --stat. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files, path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed.")]
@@ -52,7 +52,7 @@ public sealed class GitTools(ToolContext context)
     [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
     [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
     [Description("Several paths or pathspecs answered in one diff, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
-    [Description("Max diff lines returned (400).")] int maxLines = 0,
+    [Description("Max diff lines returned (1000). A truncated answer names the exact maxLines= that returns the rest, so one retry is enough.")] int maxLines = 0,
     [Description("Workspace or worktree name.")] string? workspace = null,
     [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
     CancellationToken cancellationToken = default)
@@ -112,14 +112,18 @@ public sealed class GitTools(ToolContext context)
     {
         var lines = Lines(numstat, nameStatus, untracked, Excluded(exclude));
         var response = new ResponseBuilder("changed_files", string.Empty);
+        var shown = lines.Capped(maxResults).ToArray();
 
         response.Summary(ResultCap.Shown(lines.Count, maxResults), lines.Count, "files", "path=, exclude=, baseRef= or maxResults=");
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
 
-        foreach (var line in lines.Capped(maxResults))
+        foreach (var line in shown)
             response.Line(line);
+
+        if (outside is not { Length: > 0 } && ArgumentLine.Paths(shown) is { } batch)
+            response.Note(batch);
 
         return response.ToString();
     }
@@ -144,12 +148,12 @@ public sealed class GitTools(ToolContext context)
     }
 
     private static async Task<string> TextAsync(
-    string root,
-    string? baseRef,
-    IReadOnlyList<string> paths,
-    int maxLines,
-    string? outside,
-    CancellationToken cancellationToken)
+            string root,
+            string? baseRef,
+            IReadOnlyList<string> paths,
+            int maxLines,
+            string? outside,
+            CancellationToken cancellationToken)
     {
         var diff = await GitRunner.ReadAsync(
             root,
@@ -172,7 +176,11 @@ public sealed class GitTools(ToolContext context)
 
         var response = new ResponseBuilder("diff_text", paths.Count is 0 ? string.Empty : string.Join(" ", paths));
 
-        response.Summary(lines.Count, total, "lines", "path=, paths= or maxLines=");
+        response.Summary(
+            lines.Count,
+            total,
+            "lines",
+            string.Create(CultureInfo.InvariantCulture, $"path=, paths= or maxLines={total}"));
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
@@ -257,5 +265,125 @@ public sealed class GitTools(ToolContext context)
         var resolved = Outside(root);
 
         return resolved.IsOk ? action(resolved.Value!) : Task.FromResult(resolved.Error!.Render());
+    }
+
+    [McpServerTool(Name = "history", ReadOnly = true)]
+    [Description("Replaces Bash git log and git show --stat. Commits touching a path, one line each - short sha, author date, author, subject - workspace-relative and oneline by default. baseRef takes a commit, a branch or a range such as v0.32.0..HEAD; contains= is git's pickaxe, listing only the commits whose diff added or removed that literal; message= greps subject and body. commit= answers one commit instead - its subject and one line per file with added and deleted counts - and is refused beside baseRef=, contains= or message= rather than ignoring them. root= answers about any absolute directory, tagged outside-workspace.")]
+    public Task<string> History(
+            [Description("Commit, branch or range to list, e.g. main, HEAD~20 or v0.32.0..HEAD. Empty lists from HEAD backwards.")] string? baseRef = null,
+            [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
+            [Description("Only commits whose diff added or removed this literal - git's pickaxe, which no text search over the working tree can answer.")] string? contains = null,
+            [Description("Only commits whose subject or body matches this text.")] string? message = null,
+            [Description("One commit instead of a listing: its subject and one line per file with added and deleted counts. Cannot be combined with baseRef=, contains= or message=.")] string? commit = null,
+            [Description("Max commits (50).")] int maxResults = 0,
+            [Description("Workspace or worktree name.")] string? workspace = null,
+            [Description("Absolute directory to answer about instead of the loaded workspace. The answer is tagged outside-workspace.")] string? root = null,
+            CancellationToken cancellationToken = default)
+    {
+        if (Conflicting(commit, baseRef, contains, message) is { } refusal)
+            return Task.FromResult(refusal.Render());
+
+        return root is { Length: > 0 }
+            ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, NavigationTools.Cap(maxResults, 50), full, cancellationToken))
+            : context.WithWorkspaceAsync(
+                workspace,
+                path,
+                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, NavigationTools.Cap(maxResults, 50), null, cancellationToken),
+                semantic: false,
+                cancellationToken);
+    }
+
+    private static async Task<string> HistoryAsync(
+            string root,
+            string? baseRef,
+            string? path,
+            string? contains,
+            string? message,
+            string? commit,
+            int maxResults,
+            string? outside,
+            CancellationToken cancellationToken)
+    {
+        var run = await GitRunner.ReadAsync(root, HistoryArguments(baseRef, path, contains, message, commit, maxResults), cancellationToken).ConfigureAwait(false);
+
+        if (!run.IsOk)
+            return run.Error!.Render();
+
+        var lines = new List<string>();
+
+        foreach (var line in run.Value!.AsSpan().EnumerateLines())
+        {
+            if (!line.IsWhiteSpace())
+                lines.Add(new string(line.Trim()));
+        }
+
+        var response = new ResponseBuilder("history", commit ?? path ?? string.Empty);
+        var shown = Math.Min(lines.Count, maxResults);
+
+        response.Summary(shown, shown, commit is { Length: > 0 } ? "lines" : "commits");
+
+        if (outside is { Length: > 0 })
+            response.Note("outside-workspace  " + outside);
+
+        if (lines.Count > maxResults)
+            response.Note("more commits match than were listed - raise maxResults=, or narrow with path=, contains=, message= or baseRef=");
+
+        foreach (var line in lines.Capped(maxResults))
+            response.Line(line);
+
+        return response.ToString();
+    }
+
+    private static string[] HistoryArguments(
+            string? baseRef,
+            string? path,
+            string? contains,
+            string? message,
+            string? commit,
+            int maxResults)
+    {
+        if (commit is { Length: > 0 } one)
+            return Arguments(["show", "--stat=200", "--oneline", "--no-color", "--relative", one], null, path);
+
+        var command = new List<string>(10)
+            {
+                "log",
+                "--no-color",
+                "--relative",
+                "--date=short",
+                "--pretty=format:%h %ad %an %s",
+                "--max-count=" + (maxResults + 1).ToString(CultureInfo.InvariantCulture),
+            };
+
+        if (contains is { Length: > 0 } literal)
+            command.Add("-S" + literal);
+
+        if (message is { Length: > 0 } subject)
+            command.Add("--grep=" + subject);
+
+        return Arguments(command, baseRef, path);
+    }
+
+    private static TerseError? Conflicting(string? commit, string? baseRef, string? contains, string? message)
+    {
+        if (commit is not { Length: > 0 })
+            return null;
+
+        var ignored = new List<string>(3);
+
+        if (baseRef is { Length: > 0 })
+            ignored.Add("baseRef=");
+
+        if (contains is { Length: > 0 })
+            ignored.Add("contains=");
+
+        if (message is { Length: > 0 })
+            ignored.Add("message=");
+
+        return ignored.Count is 0
+            ? null
+            : Errors.Invalid(
+                "commit= answers one commit, so it cannot be combined with " + string.Join(", ", ignored),
+                "drop commit= to list commits with those filters, or drop the filters to describe that one commit");
     }
 }

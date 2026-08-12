@@ -103,4 +103,24 @@ public sealed class CodeFixServiceTests
 
         Assert.False(ProjectDiagnostics.Producing(project, [requested]).IsEmpty);
     }
+
+    [Theory]
+    [InlineData(FixMode.Style)]
+    [InlineData(FixMode.All)]
+    public void StyleUnavailable_WhenNoIdeFixerIsRegistered_SaysNothingWasChecked(FixMode mode)
+    {
+        var note = CodeFixService.StyleUnavailable(mode, hasStyleFixers: false, "Fixture.Trading");
+
+        Assert.NotNull(note);
+        Assert.StartsWith("UNAVAILABLE Fixture.Trading registers no IDE code fixer", note, StringComparison.Ordinal);
+        Assert.Contains("fix=style checked nothing", note, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(FixMode.Style, true)]
+    [InlineData(FixMode.All, true)]
+    [InlineData(FixMode.Usings, false)]
+    [InlineData(FixMode.Analyzers, false)]
+    [InlineData(FixMode.None, false)]
+    public void StyleUnavailable_WhenTheFixersAreThereOrTheModeDoesNotUseThem_SaysNothing(FixMode mode, bool hasStyleFixers) => Assert.Null(CodeFixService.StyleUnavailable(mode, hasStyleFixers, "Fixture.Trading"));
 }

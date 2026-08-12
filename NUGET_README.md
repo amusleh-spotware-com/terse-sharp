@@ -4,7 +4,7 @@
 
 A Roslyn-powered [MCP](https://modelcontextprotocol.io) server so your agent navigates, edits,
 refactors, builds and tests .NET **semantically** — instead of reading whole files and grepping for
-symbols. **87 tools. One install. No IDE, no licence, no language server.**
+symbols. **88 tools. One install. No IDE, no licence, no language server.**
 
 [![CI](https://img.shields.io/github/actions/workflow/status/amusleh-spotware-com/terse-sharp/ci.yml?branch=main&label=CI)](https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/amusleh-spotware-com/terse-sharp/blob/main/LICENSE)
@@ -150,7 +150,7 @@ families through `notifications/tools/list_changed`, and a hidden tool still ans
 name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything regardless;
 `--tools core` still narrows to a 21-tool subset. `workspace_status` names whatever is hidden.
 
-**87 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
+**88 tools.** One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a
 success that costs nothing — every mutating tool answers in one line per changed file, with
 `verbose=true` for the diff and `dryRun=true` to preview it. Any caveat prints in full.
 
@@ -158,10 +158,10 @@ success that costs nothing — every mutating tool answers in one line per chang
 `get_symbol_source symbolIds=`, `replace_symbol symbolIds=`, `search_text`/`search_regex queries=`,
 `run_tests projects=`, `write_text files=` and `edit_text edits=` each answer in one call what used to
 cost one call per item — and `write_text files=` puts every `.cs` file it writes through **one**
-compile gate, so a type and the consumer it breaks land together. From the third consecutive call of
-the same tool the response gains **one** extra line naming the plural parameter to use instead — the
-single documented exception to "a success is one line", worth about 12 tokens, emitted only once the
-repetition has already proved itself and never when the call already passed the plural.
+compile gate, so a type and the consumer it breaks land together. From the **second** consecutive call
+of the same tool the response gains **one** extra line — `2 read_text calls in a row - pass paths=[...]
+with the next 2+ in ONE call` — the single documented exception to "a success is one line", worth
+about 14 tokens, and never emitted when the call already passed the plural.
 
 | Group | Tools |
 | --- | --- |
@@ -176,7 +176,7 @@ repetition has already proved itself and never when the call already passed the 
 | **Localization** (`.resx`/`.resw`) | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Files** — replaces `Glob`/`ls`/`cat` | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
-| **Git** — replaces `git status`/`git diff` | `changed_files` · `diff_symbols` · `diff_text` |
+| **Git** — replaces `git status`/`git diff`/`git log` | `changed_files` · `diff_symbols` · `diff_text` · `history` |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 Every read tool declares the MCP `readOnlyHint` annotation and every deleting tool declares

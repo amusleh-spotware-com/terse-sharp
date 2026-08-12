@@ -842,7 +842,7 @@ public static class FileService
     public static long? ByteLength(string? full) =>
             full is { Length: > 0 } && File.Exists(full) ? new FileInfo(full).Length : null;
 
-    private static Result<string> Rendered(string path, string label, string text, ReadRequest request)
+    public static Result<string> Rendered(string path, string label, string text, ReadRequest request)
     {
         if (request.Headings)
             return Outline(path, label, text, request.Verbose);

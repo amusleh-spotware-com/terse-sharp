@@ -137,11 +137,11 @@ context.WithWorkspaceAsync(
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
 
     private static async Task<string> RenderStatusAsync(
-LoadedWorkspace workspace,
-bool verbose,
-ToolSurface surface,
-WorkspaceMarkup served,
-CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            bool verbose,
+            ToolSurface surface,
+            WorkspaceMarkup served,
+            CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("workspace_status", workspace.SolutionPath).Verbose(verbose);
 
@@ -153,6 +153,9 @@ CancellationToken cancellationToken)
 
         if (ToolProfile.Describe(surface, served) is { } profile)
             response.Note(profile);
+
+        if (AdvertisedCost.Describe() is { } cost)
+            response.Note(cost);
 
         if (verbose)
             response.Note(workspace.Indexes.Describe());

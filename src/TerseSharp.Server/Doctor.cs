@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Reflection;
+using System.Security;
 
 namespace TerseSharp.Server;
 
@@ -8,16 +10,18 @@ public static class Doctor
     {
         var target = workspace ?? Discovered();
         var lines = new List<string>
-    {
-        VersionLine(),
-        SdkLine(),
-        Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
-        ClientLine(),
-        await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
-        await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
-        WatcherLine(),
-        ProcessLine(),
-    };
+            {
+                VersionLine(),
+                SdkLine(),
+                Check("MSBuild", MsBuildBootstrap.Ensure(), true, "install the .NET SDK or Visual Studio Build Tools"),
+                RoslynLine(),
+                ClientLine(),
+                await AssetsLineAsync(cancellationToken).ConfigureAwait(false),
+                GuardCoverageLine(target),
+                await UpdateLineAsync(cancellationToken).ConfigureAwait(false),
+                WatcherLine(),
+                ProcessLine(),
+            };
 
         lines.AddRange(await InstalledLinesAsync(Probed(target), cancellationToken).ConfigureAwait(false));
         lines.AddRange(await WorkspaceLinesAsync(target, cancellationToken).ConfigureAwait(false));
@@ -282,9 +286,9 @@ public static class Doctor
             "phases",
             string.Create(
                 CultureInfo.InvariantCulture,
-                $"widest={phases.Document} outlineMs={phases.OutlineMs:F2} gateMs={phases.GateMs:F2} diffMs={phases.DiffMs:F2}"),
-            phases.GateMs < PhaseFloorMs,
-            "the compile gate, not workspace resolution, is where the per-call time goes - report this line with the solution size");
+                $"widest={phases.Document} realizeMs={phases.RealizeMs:F2} outlineMs={phases.OutlineMs:F2} gateMs={phases.GateMs:F2} diffMs={phases.DiffMs:F2}"),
+            phases.OutlineMs < PhaseFloorMs && phases.GateMs < PhaseFloorMs,
+            "realizeMs is paid once per load and again after an idle drop; outlineMs and gateMs are the per-call path - report this line with the solution size");
     }
 
     private const double PhaseFloorMs = 60_000;
@@ -312,4 +316,50 @@ public static class Doctor
 
     private static bool IsMuxer(string host) =>
         Path.GetFileNameWithoutExtension(host.AsSpan()).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
+
+    private static Version? SdkRoslyn()
+    {
+        if (MsBuildBootstrap.SdkPath is not { Length: > 0 } sdk)
+            return null;
+
+        var path = Path.Combine(sdk, "Roslyn", "bincore", "Microsoft.CodeAnalysis.dll");
+
+        try
+        {
+            return File.Exists(path) ? AssemblyName.GetAssemblyName(path).Version : null;
+        }
+        catch (Exception exception) when (exception is IOException or BadImageFormatException or UnauthorizedAccessException or SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static string RoslynLine()
+    {
+        var carried = typeof(Microsoft.CodeAnalysis.Workspace).Assembly.GetName().Version;
+
+        if (SdkRoslyn() is not { } sdk || carried is null)
+            return Check("roslyn", string.Create(CultureInfo.InvariantCulture, $"terse carries Microsoft.CodeAnalysis {carried?.ToString() ?? "unknown"}; the SDK's own Roslyn could not be read"), true, string.Empty);
+
+        return Check(
+            "roslyn",
+            string.Create(CultureInfo.InvariantCulture, $"terse carries Microsoft.CodeAnalysis {carried}, the selected SDK carries {sdk}"),
+            sdk <= carried,
+            "the SDK is ahead of the Roslyn this build references, which silently disables the Razor source generator and every IDE code fix cleanup fix=style applies; pin the SDK feature band in global.json with rollForward=latestPatch, or update terse");
+    }
+
+    private static string GuardCoverageLine(string? target)
+    {
+        var directory = target is { Length: > 0 }
+            ? Path.GetDirectoryName(Path.GetFullPath(target)) ?? Environment.CurrentDirectory
+            : Environment.CurrentDirectory;
+
+        var coverage = ToolGuard.Coverage(directory);
+
+        return Check(
+            "guard coverage",
+            string.Create(CultureInfo.InvariantCulture, $"{coverage.Detail}  in {directory}"),
+            coverage.Complete,
+            "this tree still lets a measured breach class through: install the hook with terse install --guard, and check the directory is at or under a .sln/.slnx/.slnf/.csproj, which is what scopes the git rows");
+    }
 }

@@ -8,7 +8,257 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-08-12
+
+### Changed
+
+- **The rule that vetoed new tools is replaced by the two numbers that actually decide it.**
+  `CLAUDE.md` said *"a 57th tool must beat the one it splits"*; measurement says one extra tool is
+  ~255 tokens of `tools/list`, which cached cost **1.51 M base-input-equivalent tokens across 508
+  sessions** against **46 817 BIE per removed API turn** — a **break-even of 32 calls per 508
+  sessions**, far below the bar that sentence asserted. The real veto is **discoverability**, and it
+  is measurable: `explore_symbol` was called 7 times and `impact_of` once in 683 sessions while the
+  chains they exist to collapse ran 1 922 adjacent navigation pairs. The rule now says to estimate the
+  call count, ship above 32 calls per 500 sessions, and **re-measure the per-tool selection rate on
+  the next scan — a shipped tool nobody calls is a defect to fix or delete, not a number to defend.**
+  Pricing the surface by the "accuracy degrades past 30-50 tools" figure stays refused: it exists in a
+  primary source but carries no eval, dataset, curve or sample size, and two independent measurements
+  bracket it badly. Closes **I224**.
+
+- **`diff_text` returns 1 000 lines by default, up from 400, and a truncated answer names the exact
+  `maxLines=` that returns the rest.** It truncated on **105 of 133 calls (78.9 %)** — the highest
+  steer rate of any tool measured, against `find_files` 23.0 %, `search_symbols` 15.0 % and
+  `read_text` 11.1 % — so the caller paid a second call at p50 3 595 ms. The steer now reads
+  `narrow with path=, paths= or maxLines=1234`, which is one retry rather than a widening ladder. The
+  other three caps are untouched: a wider default there pays the payload on every call that did not
+  need it. Locked by `GitToolsE2ETests.DiffText_WhenItTruncates_NamesTheExactMaxLinesThatReturnsTheRest`
+  beside the unchanged `…DiffText_NeverReturnsMoreLinesThanMaxLines`. Closes **I220**.
+
+- **The repeat steer fires on the second consecutive call, not the third, and is now an imperative
+  naming a count.** `2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call`.
+  Two measurements drove both halves. Reach: over 4 982 plural-capable calls, 1 735 (34.8 %) collapse
+  into a ten-item batch, but a steer that first appears on the *third* call reaches only 432 (24.9 %)
+  of them — 571 runs are exactly two calls long and end before any third-call steer can be read —
+  against 802 (46.2 %) at a threshold of two, worth **+370 calls = 17.3 M base-input-equivalent
+  tokens and 1.0 h of model think** in that corpus. Form: W&D (arXiv:2602.07359) measured that a
+  model cannot self-select parallel width, while the imperative *"you MUST make at least m but not
+  more than m+1 function calls"* moved BrowseComp 66 % → 74 % and nearly halved turns; the shipped
+  steer stated a fact and named neither an obligation nor a number. Threshold one stays refused: it
+  would fire on the first call of every plural-capable tool. Locked by
+  `RepeatSteerTests.Steer_SaysNothingUntilTheSecondCallOfTheSameTool` and
+  `BacklogClosureE2ETests.ASecondConsecutiveCallOfTheSameTool_CarriesTheImperativeSteerThatNamesItsPluralParameter`.
+  Closes **I218** and **I226**.
+
+### Added
+
+- **An answer-quality gate that scores answers, not bytes.** `AnswerQualityE2ETests` carries 17
+  questions a human would actually ask of a codebase — *which members does OrderService declare and on
+  which lines*, *who implements IOrderRepository*, *where is it registered for DI*, *what does line 11
+  say*, *what did the last commit touching this file do* — each with the facts its answer must carry,
+  verified against the fixture. A format or default change that saves tokens by dropping information
+  now fails a gate instead of passing a budget. This is the failure mode the prime directive itself
+  creates: every token measurement in this space, including this repository's own
+  `TokenBudgetE2ETests`, measures **payload size**, which is silent by construction on whether the
+  answer was right — and the one published study that measured both found the trade negative, a
+  graph-backed MCP agent scoring **83 % answer quality against 92 % for a plain grep-and-read agent**
+  at ten times fewer tokens (arXiv:2603.27277). The set is asserted to be at least 14 questions so it
+  cannot go vacuous, and a second test reports what answering all of it costs (≤ 4 000 tokens), so
+  quality and cost are read together. Closes **I227**.
+
+- **A census gate on semantic redundancy of the advertised surface.**
+  `ToolCensusE2ETests.NoTwoAdvertisedTools_DescribeThemselvesNearlyIdentically` computes the word
+  overlap of every pair of advertised `[Description]`s — 3 828 pairs at 88 tools — and fails above
+  0.45, because merging semantically redundant tools is worth **+8.4 % to +38.6 % tool-selection
+  accuracy** across three models and three benchmarks (ToolScope, arXiv:2510.20036), the largest
+  published accuracy lever found anywhere in this scan, while adding merely *similar* tools costs
+  8-19 % (arXiv:2504.00914). Seven pairs are excluded by design, each with a written reason and
+  ratcheted by `…EverySimilarByDesignPair_StillNamesTwoAdvertisedTools`: they are opposite verbs on
+  one addressing scheme (`*_add_*`/`*_remove_*`) or a literal/pattern pair, which is not the
+  same-thing-twice hazard ToolScope measured. Deleting the low-traffic near-synonyms outright stays
+  refused — a client can only call what its list carries. Closes **I225**.
+
+- **`find_files name=`** matches a plain file-name substring, case-insensitively, with no glob syntax
+  to get right; it combines with `glob=`, which selects first, and a glob that matched nothing now ends
+  with `pass name=<text> to match a file name substring instead of a glob`. Measured: the agent
+  preferred a competing server's fuzzy file finder roughly **2:1** — 363 calls against `find_files`'
+  191 — and `find_files` carried the **worst error rate of any terse tool measured, 7.3 % (14/191)`,
+  with 44 truncation steers. Loosening `glob=` itself stays refused: a glob that silently matches more
+  than it says is the confident wrong answer this server exists to prevent, and a separate parameter
+  records which semantics were asked for. Locked by
+  `FileToolsE2ETests.FindFiles_WithNameAlone_MatchesAFileNameSubstringWithNoGlobToGetRight`,
+  `…FindFiles_WithNameBesideAGlob_FiltersWhatTheGlobSelected`,
+  `…FindFiles_WithAGlobThatMatchedNothing_NamesTheNameParameterInstead` and
+  `…FindFiles_WithNeitherGlobNorName_IsRefusedNamingBoth`. Closes **I223**.
+
+- **`history` — the 88th tool, and the last legal-`Bash` class of any size.** Commits touching a path
+  or pathspec, one line each — short sha, author date, author, subject — workspace-relative and
+  bounded. `baseRef=` takes a commit, a branch or a range such as `v0.32.0..HEAD`; `contains=` is
+  git's pickaxe, which lists only the commits whose diff added or removed that literal and which no
+  search over the working tree can answer; `message=` greps subject and body; `commit=<sha>` answers
+  one commit's subject and per-file stat instead, and is **refused** beside `baseRef=`, `contains=`
+  or `message=` rather than silently ignoring them. Measured: `git log` ran **725 times** — 633 of them
+  `--oneline`, 48 with `-S` or `--grep` — and `git show --stat` **103 times** across 683 sessions,
+  ~1.9 calls per session and 258 K tokens, against a **32-call** break-even for one extra tool's
+  `tools/list` cost. `git blame` is deliberately **not** modelled: it ran once in those 683 sessions.
+  The guard now denies `git log` and `git show --stat` in a .NET tree and routes them to `history`,
+  routes `git show <ref>:<path>` to `read_text ref=`, and still allows `git blame`, `git difftool`,
+  `git stash show`, every index or history mutation, and every `git log`/`git show` **shape `history`
+  cannot produce**: `--format=`, `--pretty=`, `-s`, `--name-only`, and on `git log` also `-p`,
+  `--stat`, `--numstat`, `--follow`, `--graph`, `--author=` and `-L`. A guard that denies a command
+  the server cannot replace is worse than no guard, so `$(git log -1 --format=%H)` and
+  `git log -p -- <path>` stay allowed while the plain listing forms do not. `README`, `NUGET_README`, `SKILL.md` and
+  `CLAUDE.md` move from 87 tools to 88, the advertised-payload budget from 23 450 to 24 200 tokens on
+  that evidence, and the markup-narrowed surface budget from 18 200 to 19 000. Locked by `ToolGuardTests.Inspect_ForGitHistoryInADotNetTree_NamesTheToolThatReplacesIt`,
+  the widened `…Inspect_ForAGitCommandTerseSharpReplaces_Denies`, the control
+  `…Inspect_ForAGitCommandNoToolReplaces_Allows`, and the whole census set through
+  `ToolHappyPathE2ETests` and `ToolCoverageE2ETests`. Closes **I222**.
+
+- **`ref=` on `read_text` and `get_file_outline` reads a file as it was at a git ref.** Historical text
+  gets the same treatment as the working tree — the numbering gutter, `startLine`/`endLine`, `tail=`,
+  `headings=true`, `section=` and the `maxChars` budget — and a whole `.cs` file answers its **outline**,
+  parsed from that revision's own text through a throwaway compilation. `git show <ref>:<path>` ran
+  **363 times** across 683 sessions of two 12-week corpora, returning **133 873 tokens** of raw
+  uncompressed file text at 2 099 characters a call, and it is the one shell fallback this
+  repository's own review gate *mandates*, as the introduced-vs-pre-existing evidence. `ref=` takes one
+  `path=`: combined with `paths=` it is refused by name rather than reading only the first, and a ref
+  that does not exist answers `ERROR InvalidArgument` rather than falling back to the working tree. A
+  ref'd outline deliberately does **not** end with `symbolIds=[…]`, because those ids address the
+  loaded solution and not that revision. Locked by
+  `GitToolsE2ETests.ReadText_AtARef_AnswersTheOutlineOfThatRevisionAndNotItsWholeText`,
+  `…ReadText_AtARef_TakesTheLineRangeAndTailTheWorkingTreeReadTakes`,
+  `…GetFileOutline_AtARef_OutlinesThatRevision`,
+  `…ReadText_AtARef_IsRefusedWithPathsRatherThanReadingOnlyTheFirst` and
+  `…ReadText_AtARefThatDoesNotExist_SaysSoInsteadOfAnsweringTheWorkingTree`. Closes **I221**.
+
+- **Every hit list ends with the argument its consumer takes.** `search_text`, `search_regex`,
+  `find_files`, `changed_files` and `find_usages` close with `paths=["src/A.cs", "src/B.cs"]` —
+  deduped, at most ten, separators normalized to `/` so the line is valid JSON on every platform, and
+  suppressed entirely on a `root=` answer, whose paths are relative to a tree the consumer would not
+  resolve against — and `get_file_outline` / `get_type_outline` close
+  with `symbolIds=[…]` when they listed at most ten members. Measured over 12 weeks: `read_text` took
+  1 710 calls of which 679 (39.7 %) were fusable, yet `paths=` was passed on 5 of 190 calls after it
+  shipped, against 63 % for `search_text queries=`; the differentiator is that
+  `get_symbol_source` batches at 55 % when `get_file_outline` precedes it — the one predecessor whose
+  records already read as arguments — against 0 % for `read_text` after `search_text`, whose records
+  the caller must extract and dedupe first. Neither line appears when there is nothing to batch
+  (fewer than two distinct entries), and a **wide** outline offers `contains=` instead, because ten
+  of a hundred members is a batch nobody asked for. Locked by
+  `BacklogClosureE2ETests.SearchText_OverSeveralFiles_EndsWithAPasteReadyPathsArgument`,
+  `…FindUsages_AcrossFiles_EndsWithAPasteReadyPathsArgument`,
+  `…ChangedFiles_AndFindFiles_EndWithAPasteReadyPathsArgument`,
+  `…GetFileOutline_OfANarrowFile_EndsWithAPasteReadySymbolIdsArgument` — which feeds the emitted ids
+  straight back into `get_symbol_source symbolIds=` and asserts none answers `NOT_RESOLVED` — and
+  `…GetFileOutline_OfAWideFile_OffersContainsRatherThanAnArbitraryTenOfItsMembers`. Closes the second
+  **I217**.
+
+- **`doctor` reports per-tree guard coverage**, on a `guard coverage:` line that runs the four
+  measured breach classes through `ToolGuard` with this workspace's directory as the hook's `cwd`:
+  `read-cs=denied bash-text=denied dotnet-build=denied dotnet-test=denied git-status=denied
+  git-diff=denied`. The `assets guard=` line says the hook is *installed*; this one says what it
+  actually denies **here**, which is the part that varies — the git rows are cwd-scoped, so a tree
+  with no solution or project above it is not covered and now says so instead of being inferred.
+  A 12-week scan of 509 transcripts measured 4 932 of 28 978 tool calls (17.0 %) still going to a
+  built-in or shell command terse replaces, in trees whose own instructions carried the ban. Locked
+  by `ToolGuardTests.Coverage_InADotNetTree_ReportsEveryMeasuredBreachClassDenied`,
+  `…Coverage_OutsideADotNetTree_ReportsTheGitRowsAsAllowedBecauseNothingReplacesThem` and
+  `InstallCommandE2ETests.Doctor_ReportsWhetherTheGuardCoversThisTreesMeasuredBreachClasses`.
+  Closes the second **I216**.
+
+- **`build verbose=true` names what it wrote, and the probe command for it.** One `wrote <path>` note
+  per assembly MSBuild reported, and — for `terse.dll` — the exact
+  `probe: dotnet "<path>" call <tool> --workspace "<solution>" --json '{…}'` line, because verifying a
+  behaviour change against the *freshly built* binary is what this repository's own hard gate
+  mandates and the path differed from the one `doctor` prints for the installed tool. A successful
+  build without `verbose=true` is still one line. Locked by
+  `DotnetRunnerTests.OutputNotes_ForTheServersOwnAssembly_NamesTheProbeCommandForTheBinaryJustBuilt`
+  and `…OutputNotes_ForABuildThatWroteNothingElse_NamesNoProbeForAnotherAssembly`. Closes **I215**.
+
+- **A census gate resolves the test names the changelog claims.** `ChangelogReferenceTests` extracts
+  every back-ticked test-name-shaped identifier from the two newest `## [` sections — the ones the
+  release notes are assembled from — and resolves each against the method declarations of both test
+  projects, read from source. A rename that leaves a dead reference behind now fails the build
+  instead of being caught by a reviewer, which is how
+  `…AddMember_DryRunForAMissingUsing_NamesTheUsingsParameterItWouldNeed` shipped. The discriminator is
+  itself covered, so `TERSE_RESULTS_DIRECTORY` and `get_file_outline` are not mistaken for tests, and
+  the referenced set is asserted non-empty so the census cannot go vacuous. The exclusion set is
+  empty and ratcheted by `EveryExclusionStillNamesSomethingTheChangelogReferences`. Closes **I216**.
+
+- **`doctor` compares the Roslyn this build carries against the one the selected SDK carries**, on a
+  new `roslyn:` line, and `FAIL`s when the SDK is ahead. That skew is what silently disabled the
+  Razor source generator and every IDE code fix `cleanup fix=style` applies when SDK 10.0.400 reached
+  the runners: both are served by the *carried* Roslyn, not the SDK's. Pinning `global.json` fixes
+  CI, not users, and until now a user on a 10.0.4xx SDK had only `generator=unavailable` to go on.
+  Locked by `InstallCommandE2ETests.Doctor_ComparesTheRoslynThisBuildCarriesAgainstTheOneTheSdkCarries`.
+
+- **`cleanup fix=style` and `fix=all` report `UNAVAILABLE` instead of a confidently clean `no
+  change`** when the project registers no IDE code fixer at all. Answering `0 files changed` for a
+  fix set that never ran is the confident wrong answer this server exists to refuse; the note names
+  the project and points at `doctor`'s `roslyn` line. Locked by
+  `CodeFixServiceTests.StyleUnavailable_WhenNoIdeFixerIsRegistered_SaysNothingWasChecked` and
+  `…StyleUnavailable_WhenTheFixersAreThereOrTheModeDoesNotUseThem_SaysNothing`. Both close **I217**.
+
+- The shipped `SKILL.md` token budget rises from 18 450 to 19 200 for the behaviours this release
+  adds to it. The budget is a ratchet: it moves only in the commit that needs it, with the reason.
+
+- **`workspace_status` reports what the tool surface costs.** A new line reads
+  `advertised=88 tools 24192 tokens`, measured on the `tools/list` payload this client actually
+  received — after the schema compaction, the profile filter and the markup filter — so it is the
+  same number `TokenBudgetE2ETests.TheAdvertisedToolPayload_StaysWithinItsBudget` asserts. Until this
+  release the only reader of that number was that test, and three description edits in one session
+  each cost a full E2E run to discover they had blown the budget. Locked by
+  `TokenBudgetE2ETests.WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived`, which
+  recomputes it client-side rather than matching a literal. Closes **I214**.
+
+- **A rollback caused by a signature change names the declarations that call the member.** When every
+  new error of a rolled-back edit is a call-shape error — `CS7036`, `CS1501`, `CS1503`, `CS1729` —
+  `EditGate` resolves each error location to the `MemberDeclarationSyntax` containing it and the
+  remedy reads `send these callers in the same replace_symbol symbolIds/declarations batch:
+  OrderRouter.Retry(Order), OrderRouter.Route(Order), OrderService.SubmitTwice(Order)`. A `dryRun`
+  that *would* be rolled back prints the same line under its `WARNING`. The callers are addressable
+  ids, so they are fed straight back into `replace_symbol symbolIds=`, which is the edit the tool
+  wanted in the first place. Nothing is named when a single error is not a call shape, when a caller
+  cannot be resolved, or when more than five distinct declarations call it — an unproven answer costs
+  more than none. Locked by
+  `EditToolsE2ETests.ReplaceSymbol_RolledBackByASignatureChange_NamesTheDeclarationsThatCallIt`,
+  `…ReplaceSymbol_DryRunOfASignatureChange_NamesTheCallersItWouldBreak` and the negative
+  `…AddMember_RolledBackForARegressionWithNoImport_NamesNoImportItCannotProve`. Closes **I211**.
+
+- **A complete outline names `contains=` once it is wide enough to need it.** `get_file_outline` and
+  `get_type_outline` end with `104 members - narrow with contains=` when nothing was filtered and the
+  file or type declares 25 members or more. The `- narrow with` steer used to fire only on a
+  *truncation*, and an outline does not truncate: a 49-member type answered ~1 100 tokens with no
+  mention of the parameter that would have returned the six members that were wanted. The note is
+  silent below the threshold and silent when `contains=` was already passed. Locked by
+  `NavigationToolsE2ETests.GetFileOutline_OfAWideFile_NamesTheContainsParameterItNeverTruncatedInto`,
+  `…GetFileOutline_OfANarrowFile_NamesNoParameterItDoesNotNeed` and
+  `…GetFileOutline_FilteredOnAWideFile_DoesNotSteerToTheParameterItAlreadyUsed`. Closes **I212**.
+
 ### Fixed
+
+- **`doctor phases:` was charging a once-per-load compilation to the outline, which is the whole of
+  the "per-call latency floor".** `PhaseProbe` timed the *first* semantic call after a cold load, so
+  the realization the workspace pays once was billed to `outlineMs`. Measured on this repository's own
+  solution before and after separating them: `outlineMs` **2 948.41 ms → 54.50 ms**, with the removed
+  cost reappearing where it belongs as `realizeMs=2 748.47`; `resolveMs=0.07 syncMs=0.15` were never
+  the problem. `doctor` now prints `realizeMs= outlineMs= gateMs= diffMs=` and its verdict checks the
+  two per-call phases instead of a one-off. The corpus reading behind **I219** — `read_text` p50
+  3 049 ms on a large solution against `Read` 27 ms — is therefore the realization being re-paid after
+  every load and every idle drop, not a per-call floor in the tool; `workspace_status` already reports
+  `idle=<n>m compilations=dropped`, and `--idle-minutes` / `TERSE_IDLE_MINUTES` control how often it
+  happens. Locked by
+  `InstallCommandE2ETests.Doctor_SeparatesTheOncePerLoadCompilationFromThePerCallPhases`. Closes
+  **I219**.
+
+- **A qualified name whose type declares no such member no longer blames the name's popularity.**
+  `ProbeNames.Probe` answered `ERROR AmbiguousSymbol: name 'ProbeNames.Probe' matches more than 100
+  symbols` with the remedy *qualify the name with its containing type* — which is exactly what had
+  just been done. `SymbolLookup.ByContainerAsync` had already resolved `ProbeNames` to one type; it
+  now answers `ERROR SymbolNotFound: 'ProbeNames.Probe' did not resolve: type 'ProbeNames' declares
+  no such member`, with up to five of that type's own members as the remedy, preferring the ones
+  whose name contains what was asked for. Two or more types of that name still fall through, because
+  the type is then unproven. Locked by
+  `NavigationToolsE2ETests.GetSymbolSource_QualifiedByATypeThatDeclaresNoSuchMember_BlamesTheQualifierNotTheName`,
+  beside the unchanged bare-name saturation control. Closes **I213**.
 
 - **`global.json` pins the SDK feature band.** `rollForward` was `latestFeature`, which let a
   **10.0.4xx** SDK satisfy a `10.0.300` pin. SDK 10.0.400 reached the GitHub runners on 2026-08-12 and
@@ -2821,7 +3071,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.34.0
 [0.33.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.33.0
 [0.32.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.32.0
 [0.31.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.31.0

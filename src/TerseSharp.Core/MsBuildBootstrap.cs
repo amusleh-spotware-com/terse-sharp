@@ -32,6 +32,7 @@ public static class MsBuildBootstrap
             return "no-msbuild-found";
 
         MSBuildLocator.RegisterInstance(instance);
+        SdkPath = instance.MSBuildPath;
 
         return string.Create(CultureInfo.InvariantCulture, $"{instance.Name} {instance.Version} at {instance.MSBuildPath}");
     }
@@ -43,4 +44,6 @@ public static class MsBuildBootstrap
         return Array.Find(ordered, candidate => candidate.Version.Major == Environment.Version.Major)
             ?? ordered.FirstOrDefault();
     }
+
+    public static string? SdkPath { get; private set; }
 }

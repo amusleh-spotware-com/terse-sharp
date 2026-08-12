@@ -66,8 +66,10 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     public async Task FindUsages_OnTheWidestSymbol_StaysUnderItsBudget()
     {
         var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+        var batch = text.Split('\n').Single(line => line.StartsWith("paths=[", StringComparison.Ordinal));
 
-        Assert.True(Tokens(text) <= 200, Report("find_usages", text));
+        Assert.True(Tokens(text) <= 260, Report("find_usages", text));
+        Assert.True(Tokens(text) - Tokens(batch) <= 180, Report("find_usages without its batch line", text));
     }
 
     [Fact]
@@ -291,10 +293,11 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
 
         Assert.Contains("documents=", quiet, StringComparison.Ordinal);
         Assert.Contains("terse=", quiet, StringComparison.Ordinal);
+        Assert.Contains("advertised=", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("gen=c", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("index=xaml(", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("lastUsedUtc=", quiet, StringComparison.Ordinal);
-        Assert.Equal(4, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Equal(5, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
         Assert.True(Tokens(quiet) * 2 < Tokens(loud), Report("workspace_status", quiet, loud));
         Assert.Contains("watch=", loud, StringComparison.Ordinal);
         Assert.Contains("gen=c", loud, StringComparison.Ordinal);
@@ -526,5 +529,18 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             string.Create(CultureInfo.InvariantCulture, $"tools/list costs {tokens} tokens over {surface.Count} tools, budget {AdvertisedPayloadBudget}"));
     }
 
-    private const int AdvertisedPayloadBudget = 23450;
+    private const int AdvertisedPayloadBudget = 24200;
+
+    [Fact]
+    public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()
+    {
+        var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var characters = surface.Sum(tool => tool.Name.Length + (tool.Description?.Length ?? 0) + tool.JsonSchema.GetRawText().Length);
+        var status = await server.CallAsync("workspace_status", []);
+
+        Assert.Contains(
+            string.Create(CultureInfo.InvariantCulture, $"advertised={surface.Count} tools {(characters + 3) / 4} tokens"),
+            status,
+            StringComparison.Ordinal);
+    }
 }
