@@ -8,6 +8,100 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-08-14
+
+### Fixed
+
+- **A parameter list is now matched structurally, so a name an outline printed resolves even when a
+  parameter carries type arguments or is a tuple.** Two defects, one symptom: `MatchesType` compared
+  Roslyn's fully-qualified display string against the requested text with a single suffix test, so
+  qualification could only be omitted at the outermost level — `Unrecognized(RequestContext<CallToolRequestParams>)`
+  answered `SymbolNotFound` while `Unrecognized(ModelContextProtocol.Server.RequestContext<ModelContextProtocol.Protocol.CallToolRequestParams>)`
+  resolved; and `Split` trimmed `(` and `)` greedily, so a tuple parameter's own parentheses were
+  stripped too and `Weigh((Order Left, Order Right))` was counted as two parameters. The comparison
+  now matches the head by namespace suffix and then recurses into every type argument and tuple
+  element, and the parameter list gives up exactly one enclosing pair of parentheses. The
+  fully-qualified spelling still resolves. This also closes the half of the same defect where the
+  `nearest:` list of a `SymbolNotFound` printed back a candidate the same call could not resolve,
+  because that candidate is `SymbolReference.Brief`'s short form. The fixture gained the overloads
+  that make it observable — `Awkward.Weigh(int)`, `Awkward.Weigh(Boxed<IHandler>)` and
+  `Awkward.Weigh((IHandler Left, IHandler Right))` — so
+  `NavigationToolsE2ETests.EveryReferenceAnOutlinePrints_ResolvesBackToASymbol` can fail; gated by it
+  and by `NavigationToolsE2ETests.GetSymbolSource_ForAnOverloadWhoseParameterCarriesTypeArguments_ResolvesTheShortForm`
+  plus `SymbolReferenceTests.Parse_ForATupleParameter_KeepsItsOwnParentheses`. A tuple parameter also
+  matches the positional spelling — `Weigh((IHandler, IHandler))` finds
+  `Weigh((IHandler Left, IHandler Right))` — because `Normalize` now keeps exactly the one space that
+  separates a type from an element name and drops every other, and the leaf comparison ignores that
+  name. It ignores it **only** on a side that carries no type argument list, so a plain name can
+  never be suffix-matched against part of a tuple: `Weigh(IHandler)` and `Weigh(int [])` answer
+  `SymbolNotFound` rather than picking an overload that does not exist, asserted by
+  `NavigationToolsE2ETests.GetSymbolSource_ForAParameterListNoOverloadDeclares_RefusesInsteadOfPickingOne`.
+  An **empty parameter slot keeps its arity**, in every position of the parameter list:
+  `Reconcile(Order, )` and `Reconcile(Order,)` still name the two-parameter overload, as
+  `Reconcile(, Order)` always did, and an empty slot still matches any type — the rewritten splitter
+  emits the trailing slot the old `Trim('(', ')')` loop emitted, so no empty-slot spelling changes
+  meaning. One level down it is now **stricter** than before rather than looser: a trailing empty
+  argument inside a type-argument list or a tuple no longer vanishes, so `Weigh(Boxed<IHandler,>)`
+  and `Weigh((IHandler, IHandler,))` answer `SymbolNotFound` instead of resolving as if the comma
+  were not there. Pinned by
+  `SymbolReferenceTests.Parse_ForAnEmptyParameterSlot_KeepsItsArity` and
+  `NavigationToolsE2ETests.GetSymbolSource_ForAnEmptyParameterSlot_KeepsTheArityItWasAskedFor`.
+  Closes **I234**.
+
+- **`write_text` now compile-gates a `.cs` file it is *creating*, not only one it is overwriting.**
+  The gate keyed on `DocumentLookup.Find`, which a file that does not exist yet cannot satisfy, so a
+  new source or test file was written ungated and answered `changedLines=N` with `errors=0` never
+  checked — the ten `CS0103` errors of a file written without its `using` surfaced only at the next
+  `gate` call. Both write paths now stage the new file as a document of the project that globs it,
+  under the same `EditGate`: the single write and the `files=[...]` batch, where several new files
+  still share **one** gate, so nothing at all is written when one of them does not compile. Selection
+  is `ProjectGlobs` on the project's *evaluated* `EnableDefaultItems`/`EnableDefaultCompileItems`,
+  plus directory containment, minus `bin`/`obj` and the other excluded directories — so **a new `.cs`
+  file under no SDK-globbing project stays ungated**, having no compilation to be checked against. It
+  is deliberately a directory rule and not an item-by-item one: a project that removes the file with
+  `<Compile Remove>` is still gated, which errs toward checking rather than toward a silent pass, and
+  `allowErrors=true` is the way past it. That verdict is now memoized on `(path, mtime, length)` in
+  `ProjectGlobs.Memoized`, the memo `ProjectFileGuard` already owned, because evaluating a project
+  costs ~220 ms and the batch path asks once per file. Gated by
+  `CompileGateE2ETests.WriteText_CreatingANewFileWhoseCodeDoesNotCompile_IsRolledBackByTheCompileGate`,
+  `…WriteText_CreatingAValidNewFile_AppliesAndLeavesTheProjectFileByteIdentical`,
+  `…WriteText_CreatingAFileNoProjectCompiles_StaysUngated` and
+  `…WriteText_WithSeveralNewFilesWhereOneDoesNotCompile_WritesNoneOfThem`. The `write_text`
+  description says which files are gated. Closes **I235**.
+
+- **`cleanup fix=style` and `fix=analyzers` no longer run the Roslyn whitespace formatter, so
+  `verify=true` on either really is the CI command it claims to be.** `FormatService.RunAsync`
+  reformatted every document on every mode, which is what `dotnet format style` and
+  `dotnet format analyzers` do **not** do — so `cleanup verify=true fix=style` reported
+  `src/TerseSharp.Core/ReleaseVersion.cs` on a tree the ubuntu leg accepted, over one character
+  (`(< 0, _)` against the formatter's `( < 0, _)`), and the documented byte-equivalence was false. The
+  two code-fix modes now apply fixes only; `fix=all` and the default `fix=usings` still remove and
+  sort usings and still reformat, so they remain the supersets the docs describe, and `format` is
+  still the way to run the whitespace formatter. Measured against a freshly built `terse.dll`:
+  `cleanup verify=true fix=style` and `fix=analyzers` on that file go from `VERIFY_FAILED` to clean
+  while `format verify=true` still reports it. Gated by
+  `CompileGateE2ETests.CleanupVerify_ForStyleAndAnalyzers_IgnoresWhitespaceTheCiCommandsDoNotCheck`,
+  observed red with the reformat restored. Closes **I236**.
+
+- **`undo_last_change` no longer reports `reverted the last change` for a write that created a file.**
+  A gated new-file write reaches `LoadedWorkspace.TryApplyAsync`, whose history capture skips a
+  document the pre-change solution does not hold — so the entry it recorded was empty, and the next
+  undo popped it, reverted nothing and said it had. An entry with no captured document is no longer
+  recorded at all, so an undo after a creation reaches the previous real edit exactly as before, and
+  never claims the creation was undone. Gated by
+  `CompileGateE2ETests.WriteText_CreatingAGatedNewFile_DoesNotLetUndoClaimItRevertedTheCreation`.
+
+### Changed
+
+- **`ProjectFileGuard` now attributes MSBuild's expansion of a self-closing `<Project … />` root**, so
+  the redundant `<Compile>` item Roslyn writes when a document is added to such a project is restored
+  away instead of being left in the user's `.csproj`. Previously the guard refused — the root tag it
+  saw in the rewritten file matched no line of the snapshot — and the item survived. Gated by
+  `ProjectFileGuardTests.OnlyRedundantCompileItems_WhenMsBuildExpandedASelfClosingRoot_IsAttributable`,
+  with `…_WhenAnExpandedRootAlsoGainedAProperty_IsRefused` holding the other direction, and by
+  `CompileGateE2ETests.WriteText_CreatingAValidNewFile_AppliesAndLeavesTheProjectFileByteIdentical`.
+
+
 ## [0.35.0] - 2026-08-12
 
 ### Added
@@ -3186,7 +3280,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.36.0
 [0.35.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.35.0
 [0.34.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.34.0
 [0.33.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.33.0

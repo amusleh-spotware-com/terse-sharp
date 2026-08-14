@@ -91,4 +91,41 @@ public sealed class ProjectFileGuardTests
     [Fact]
     public async Task CaptureAsync_ForAProjectThatDoesNotExist_TakesNoSnapshot() =>
         Assert.Null(await ProjectFileGuard.CaptureAsync("terse-no-such-project.csproj", ["a.cs"], TestContext.Current.CancellationToken));
+
+    [Fact]
+    public void OnlyRedundantCompileItems_WhenMsBuildExpandedASelfClosingRoot_IsAttributable()
+    {
+        var rewritten = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <Compile Include="IOrderService.cs" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        Assert.True(ProjectFileGuard.OnlyRedundantCompileItems(
+            """<Project Sdk="Microsoft.NET.Sdk" />""",
+            rewritten,
+            ["src/IOrderService.cs"]));
+    }
+
+    [Fact]
+    public void OnlyRedundantCompileItems_WhenAnExpandedRootAlsoGainedAProperty_IsRefused()
+    {
+        var rewritten = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <LangVersion>preview</LangVersion>
+              </PropertyGroup>
+              <ItemGroup>
+                <Compile Include="IOrderService.cs" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        Assert.False(ProjectFileGuard.OnlyRedundantCompileItems(
+            """<Project Sdk="Microsoft.NET.Sdk" />""",
+            rewritten,
+            ["src/IOrderService.cs"]));
+    }
 }

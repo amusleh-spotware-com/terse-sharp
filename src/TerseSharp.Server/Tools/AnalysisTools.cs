@@ -40,7 +40,7 @@ public sealed class AnalysisTools(ToolContext context)
             cancellationToken));
 
     [McpServerTool(Name = "cleanup")]
-    [Description("Replaces Bash dotnet format style and dotnet format analyzers. Removes unused using directives, sorts the remaining ones System-first, then reformats; fix=style, analyzers or all also applies the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
+    [Description("Replaces Bash dotnet format style and dotnet format analyzers. fix=usings and fix=all remove unused usings, sort them System-first and reformat; fix=style and fix=analyzers apply code fixes ONLY and never reformat, so each matches its CI command byte for byte. Those three fix modes apply the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
     public Task<string> Cleanup(
         [Description("File, directory or glob such as src/**/*.cs; empty cleans every document.")] string? path = null,
         [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, or all.")] string? fix = null,

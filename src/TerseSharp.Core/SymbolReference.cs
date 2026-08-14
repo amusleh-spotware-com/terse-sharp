@@ -81,9 +81,11 @@ public static class SymbolReference
             yield return space.ToDisplayString();
     }
 
-    private static bool IsSuffix(string container, string qualifier) =>
-        string.Equals(container, qualifier, StringComparison.Ordinal)
-        || container.EndsWith("." + qualifier, StringComparison.Ordinal);
+    private static bool IsSuffix(ReadOnlySpan<char> container, ReadOnlySpan<char> qualifier) =>
+        container.Equals(qualifier, StringComparison.Ordinal)
+        || (container.Length > qualifier.Length
+            && container[container.Length - qualifier.Length - 1] is '.'
+            && container[^qualifier.Length..].Equals(qualifier, StringComparison.Ordinal));
 
     private static bool MatchesParameters(ISymbol symbol, IReadOnlyList<string>? parameters)
     {
@@ -97,33 +99,45 @@ public static class SymbolReference
     }
 
     private static bool MatchesType(IParameterSymbol parameter, string text) =>
-        text.Length is 0 || IsSuffix(Normalize(parameter.Type.ToDisplayString(ParameterType)), Normalize(text));
+        text.Length is 0 || SameType(Normalize(parameter.Type.ToDisplayString(ParameterType)), Normalize(text));
 
-    private static string Normalize(string text) => text.Replace(" ", string.Empty, StringComparison.Ordinal);
+    private static string Normalize(string text)
+    {
+        if (!text.Contains(' ', StringComparison.Ordinal))
+            return text;
+
+        var kept = new System.Text.StringBuilder(text.Length);
+
+        for (var index = 0; index < text.Length; index++)
+        {
+            if (text[index] is ' ' && !Separates(kept, text, index))
+                continue;
+
+            kept.Append(text[index]);
+        }
+
+        return kept.ToString();
+    }
 
     private static string[] Split(string parameters)
     {
-        var inside = parameters.Trim('(', ')').Trim();
+        var text = parameters.AsSpan().Trim();
+        var inside = text.Length > 1 && text[0] is '(' && text[^1] is ')' ? text[1..^1].Trim() : text;
 
         if (inside.Length is 0)
             return [];
 
         var parts = new List<string>();
-        var depth = 0;
-        var start = 0;
+        var more = true;
 
-        for (var index = 0; index < inside.Length; index++)
+        while (more)
         {
-            depth += Nesting(inside[index]);
+            var end = EndOfArgument(inside);
 
-            if (inside[index] is ',' && depth is 0)
-            {
-                parts.Add(inside[start..index].Trim());
-                start = index + 1;
-            }
+            parts.Add(inside[..end].Trim().ToString());
+            more = end < inside.Length;
+            inside = more ? inside[(end + 1)..] : default;
         }
-
-        parts.Add(inside[start..].Trim());
 
         return [.. parts];
     }
@@ -145,4 +159,99 @@ public static class SymbolReference
     public static string Simple(ISymbol symbol) => symbol.ToDisplayString(Named);
 
     public static string Unescaped(string text) => text.Contains('&', StringComparison.Ordinal) ? System.Net.WebUtility.HtmlDecode(text) : text;
+
+    private static bool SameType(ReadOnlySpan<char> actual, ReadOnlySpan<char> requested)
+    {
+        var actualOpen = actual.IndexOfAny('<', '(');
+        var requestedOpen = requested.IndexOfAny('<', '(');
+
+        if (actualOpen < 0 || requestedOpen < 0)
+            return IsSuffix(Leaf(actual, actualOpen), Leaf(requested, requestedOpen));
+
+        var actualClose = Closing(actual, actualOpen);
+        var requestedClose = Closing(requested, requestedOpen);
+
+        return actualClose > 0
+            && requestedClose > 0
+            && IsSuffix(actual[..actualOpen], requested[..requestedOpen])
+            && actual[(actualClose + 1)..].SequenceEqual(requested[(requestedClose + 1)..])
+            && SameArguments(actual[(actualOpen + 1)..actualClose], requested[(requestedOpen + 1)..requestedClose]);
+    }
+
+    private static bool SameArguments(ReadOnlySpan<char> actual, ReadOnlySpan<char> requested)
+    {
+        var actualMore = true;
+        var requestedMore = true;
+
+        while (actualMore && requestedMore)
+        {
+            if (!SameType(NextArgument(ref actual, ref actualMore), NextArgument(ref requested, ref requestedMore)))
+                return false;
+        }
+
+        return actualMore == requestedMore;
+    }
+
+    private static ReadOnlySpan<char> NextArgument(ref ReadOnlySpan<char> text, ref bool more)
+    {
+        var end = EndOfArgument(text);
+        var argument = text[..end];
+
+        more = end < text.Length;
+        text = more ? text[(end + 1)..] : default;
+
+        return argument;
+    }
+
+    private static int EndOfArgument(ReadOnlySpan<char> text)
+    {
+        var depth = 0;
+
+        for (var index = 0; index < text.Length; index++)
+        {
+            depth += Nesting(text[index]);
+
+            if (text[index] is ',' && depth is 0)
+                return index;
+        }
+
+        return text.Length;
+    }
+
+    private static int Closing(ReadOnlySpan<char> text, int open)
+    {
+        var depth = 0;
+
+        for (var index = open; index < text.Length; index++)
+        {
+            depth += Nesting(text[index]);
+
+            if (depth is 0)
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static ReadOnlySpan<char> Unnamed(ReadOnlySpan<char> element)
+    {
+        var name = element.LastIndexOf(' ');
+
+        return name < 0 ? element : element[..name].TrimEnd();
+    }
+
+    private static bool Separates(System.Text.StringBuilder kept, string text, int index) =>
+        kept.Length > 0
+        && EndsAType(kept[^1])
+        && index + 1 < text.Length
+        && StartsAName(text[index + 1]);
+
+    private static ReadOnlySpan<char> Leaf(ReadOnlySpan<char> text, int open) =>
+        open < 0 ? Unnamed(text) : text;
+
+    private static bool EndsAType(char character) =>
+        char.IsLetterOrDigit(character) || character is '_' or '>' or ']' or '?';
+
+    private static bool StartsAName(char character) =>
+        char.IsLetter(character) || character is '_';
 }

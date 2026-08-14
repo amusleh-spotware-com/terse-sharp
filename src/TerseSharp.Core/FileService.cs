@@ -54,7 +54,7 @@ public static class FileService
         var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
         var after = LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
 
-        if (await GatedAsync(workspace, path, after, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false) is { } gated)
+        if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false) is { } gated)
             return gated;
 
         if (!dryRun)
@@ -442,21 +442,22 @@ public static class FileService
     private static async Task<Result<string>?> GatedAsync(
         LoadedWorkspace workspace,
         string path,
+        string full,
         string content,
         bool dryRun,
         bool allowErrors,
         bool verbose,
         CancellationToken cancellationToken)
     {
-        if (!SourceFile.IsCSharp(path) || DocumentLookup.Find(workspace, path) is not { } document)
+        if (!SourceFile.IsCSharp(path))
             return null;
 
-        var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-        var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
-        var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, encoding));
+        if (await StagedAsync(workspace, path, full, content, cancellationToken).ConfigureAwait(false) is not { } staged)
+            return null;
+
         var options = new EditOptions("write_text", dryRun, allowErrors, verbose);
 
-        return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
+        return await EditGate.ApplyAsync(workspace, staged.Updated, [staged.Id], options, cancellationToken).ConfigureAwait(false);
     }
 
     private static Result<string> Readable(LoadedWorkspace workspace, string path) =>
@@ -739,7 +740,8 @@ public static class FileService
         string Full,
         string Before,
         string After,
-        Microsoft.CodeAnalysis.DocumentId? Document);
+        Microsoft.CodeAnalysis.DocumentId? Document,
+        bool IsNew);
 
     private static async Task<Result<PendingWrite>> PreparedAsync(
         LoadedWorkspace workspace,
@@ -760,9 +762,8 @@ public static class FileService
         var exists = File.Exists(full);
         var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
         var after = LineEndings.Adopt(file.Content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
-        var document = SourceFile.IsCSharp(file.Path) ? DocumentLookup.Find(workspace, file.Path) : null;
 
-        return Result.Ok(new PendingWrite(file.Path, full, before, after, document?.Id));
+        return Result.Ok(Pending(workspace, file.Path, full, before, after));
     }
 
     private static async Task<Result<string>?> GateManyAsync(
@@ -781,11 +782,7 @@ public static class FileService
 
         foreach (var entry in documents)
         {
-            var document = workspace.Solution.GetDocument(entry.Document)!;
-            var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-            var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
-
-            updated = updated.WithDocumentText(entry.Document!, SourceText.From(entry.After, encoding));
+            updated = await StagedIntoAsync(workspace, updated, entry, cancellationToken).ConfigureAwait(false);
             ids.Add(entry.Document!);
         }
 
@@ -890,4 +887,81 @@ public static class FileService
 
     private const string Append = "append";
     private const string Prepend = "prepend";
+
+    private readonly record struct StagedWrite(
+        Microsoft.CodeAnalysis.Solution Updated,
+        Microsoft.CodeAnalysis.DocumentId Id);
+
+    private static async Task<StagedWrite?> StagedAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string full,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        if (DocumentLookup.Find(workspace, path) is not { } document)
+            return Introduced(workspace, full, content);
+
+        var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
+        var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, encoding));
+
+        return new StagedWrite(updated, document.Id);
+    }
+
+    private static StagedWrite? Introduced(LoadedWorkspace workspace, string full, string content)
+    {
+        if (Globbing(workspace, full) is not { } project)
+            return null;
+
+        var id = Microsoft.CodeAnalysis.DocumentId.CreateNewId(project.Id);
+        var text = SourceText.From(content, AtomicWrite.EncodingOf(full));
+
+        return new StagedWrite(workspace.Solution.AddDocument(id, Path.GetFileName(full), text, filePath: full), id);
+    }
+
+    private static Microsoft.CodeAnalysis.Project? Globbing(LoadedWorkspace workspace, string full) =>
+        workspace.Solution.Projects
+            .Where(project => Compiles(project.FilePath, full))
+            .OrderByDescending(project => Path.GetDirectoryName(project.FilePath)!.Length)
+            .FirstOrDefault(project => ProjectGlobs.Memoized(project.FilePath!));
+
+    private static bool Compiles(string? projectPath, string full) =>
+        projectPath is { Length: > 0 }
+        && Path.GetDirectoryName(projectPath) is { Length: > 0 } directory
+        && PathBoundary.Contains(directory, full)
+        && !WorkspaceFiles.IsExcluded(full, directory);
+
+    private static async Task<Microsoft.CodeAnalysis.Solution> StagedIntoAsync(
+        LoadedWorkspace workspace,
+        Microsoft.CodeAnalysis.Solution updated,
+        PendingWrite entry,
+        CancellationToken cancellationToken)
+    {
+        if (entry.IsNew)
+        {
+            var added = SourceText.From(entry.After, AtomicWrite.EncodingOf(entry.Full));
+
+            return updated.AddDocument(entry.Document!, Path.GetFileName(entry.Full), added, filePath: entry.Full);
+        }
+
+        var document = workspace.Solution.GetDocument(entry.Document)!;
+        var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
+
+        return updated.WithDocumentText(entry.Document!, SourceText.From(entry.After, encoding));
+    }
+
+    private static PendingWrite Pending(LoadedWorkspace workspace, string path, string full, string before, string after)
+    {
+        if (!SourceFile.IsCSharp(path))
+            return new PendingWrite(path, full, before, after, null, false);
+
+        if (DocumentLookup.Find(workspace, path) is { } document)
+            return new PendingWrite(path, full, before, after, document.Id, false);
+
+        return Globbing(workspace, full) is { } project
+            ? new PendingWrite(path, full, before, after, Microsoft.CodeAnalysis.DocumentId.CreateNewId(project.Id), true)
+            : new PendingWrite(path, full, before, after, null, false);
+    }
 }

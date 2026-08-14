@@ -20,42 +20,7 @@ public static class ProjectFileGuard
         return new ProjectSnapshot(path, await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false), addedFiles);
     }
 
-    private static bool Globs(string path)
-    {
-        if (Stamp(path) is not { } key)
-            return false;
-
-        if (Verdicts.TryGetValue(key, out var known))
-            return known;
-
-        var verdict = ProjectGlobs.CompilesByGlob(path) is true;
-
-        if (Verdicts.Count >= MaxRememberedProjects)
-            Verdicts.Clear();
-
-        Verdicts[key] = verdict;
-
-        return verdict;
-    }
-
-    private static GlobKey? Stamp(string path)
-    {
-        try
-        {
-            var file = new FileInfo(path);
-
-            return new GlobKey(path, file.LastWriteTimeUtc, file.Length);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
-    private const int MaxRememberedProjects = 256;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<GlobKey, bool> Verdicts = new();
-
-    private readonly record struct GlobKey(string Path, DateTime LastWriteUtc, long Length);
+    private static bool Globs(string path) => ProjectGlobs.Memoized(path);
 
     public static async Task<bool> RestoreAsync(ProjectSnapshot snapshot, CancellationToken cancellationToken)
     {
@@ -77,9 +42,13 @@ public static class ProjectFileGuard
 
     internal static bool OnlyRedundantCompileItems(string before, string after, IReadOnlyList<string> addedFiles)
     {
-        var remaining = new List<string>(Lines(before));
+        var remaining = Lines(before);
+        var rewritten = Lines(after);
 
-        foreach (var line in Lines(after))
+        ExpandSelfClosingRoot(remaining);
+        ExpandSelfClosingRoot(rewritten);
+
+        foreach (var line in rewritten)
         {
             if (remaining.Remove(line))
                 continue;
@@ -141,4 +110,21 @@ public static class ProjectFileGuard
 
     private static string Text(byte[] bytes) =>
         Encoding.UTF8.GetString(bytes).TrimStart('﻿');
+
+    private static void ExpandSelfClosingRoot(List<string> lines)
+    {
+        var index = lines.FindIndex(IsSelfClosingRoot);
+
+        if (index < 0)
+            return;
+
+        var root = lines[index];
+
+        lines[index] = string.Concat(root.AsSpan(0, root.Length - 2).TrimEnd(), ">");
+        lines.Add("</Project>");
+    }
+
+    private static bool IsSelfClosingRoot(string line) =>
+        line.EndsWith("/>", StringComparison.Ordinal)
+        && (line.StartsWith("<Project ", StringComparison.Ordinal) || line is "<Project/>");
 }

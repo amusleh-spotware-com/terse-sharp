@@ -55,8 +55,8 @@ explicit `IFormatProvider` on every culture-sensitive format, and no comments: m
 Before opening a PR:
 
 ```bash
-dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info   # or: cleanup verify=true fix=all
-dotnet format style     TerseSharp.slnx --verify-no-changes --severity info
+dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info   # or: cleanup verify=true fix=analyzers
+dotnet format style     TerseSharp.slnx --verify-no-changes --severity info   # or: cleanup verify=true fix=style
 ```
 
 ## Releasing

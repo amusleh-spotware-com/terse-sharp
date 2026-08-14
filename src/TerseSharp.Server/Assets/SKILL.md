@@ -79,7 +79,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` | up to 10 in one call, and every `.cs` document among them shares **one** compile gate — so a type and the consumer it breaks land together instead of the first write being rolled back alone |
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; a multi-match refusal lists the candidate lines with their numbers, so `occurrence=` is picked from the refusal and needs no re-read, and an out-of-range value names the range it could have picked |
 | **Edit text** | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
-| **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the new type is resolvable on the very next call, and the next `.cs` write's compile gate already sees it, so two interdependent new files land in either order |
+| **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the write is compile-gated whenever a project globs it, the new type is resolvable on the very next call, and two interdependent new files land in either order |
 | **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
 | **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
 | **Edit code** | a new body that calls a private helper you have not written yet | `replace_symbol(symbolId, declaration, add: [...])` | the new members land in the **containing type** inside the same compile-gated edit, so the callee-after-caller `CompileRegression` never happens; targets must share one containing type, and an enum container is refused, never walked past |
@@ -332,8 +332,9 @@ the previous binary's.
 **`format verify` and `cleanup verify` are not the same gate.** `format` compares against the Roslyn
 whitespace formatter, which `dotnet format style` and `dotnet format analyzers` do not run — a
 `VERIFY_FAILED` there can still be a green CI leg. `cleanup verify=true fix=style` and
-`fix=analyzers` are exactly those two CI commands; `fix=all` and the default `fix=usings` are
-supersets and may name files CI accepts.
+`fix=analyzers` are exactly those two CI commands — they apply code fixes only and never reformat —
+while `fix=all` and the default `fix=usings` do reformat, so those two are supersets that may name
+files CI accepts.
 
 **A missing path is answered, not just refused.** `get_file_outline` and `read_text` on a path named
 after a type the workspace declares elsewhere name the file that declares it, and `add_member path=`

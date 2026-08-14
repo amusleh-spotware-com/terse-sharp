@@ -450,6 +450,9 @@ public sealed class LoadedWorkspace : IDisposable
 
     private void Record(HistoryEntry entry)
     {
+        if (entry.Documents.Count is 0)
+            return;
+
         dropped = null;
         history.Add(entry);
 

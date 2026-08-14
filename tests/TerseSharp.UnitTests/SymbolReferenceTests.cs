@@ -60,4 +60,28 @@ public sealed class SymbolReferenceTests
     [Fact]
     public void Parse_ForAnEmptyName_ReturnsNull() =>
         Assert.Null(SymbolReference.Parse("   "));
+
+    [Theory]
+    [InlineData("Weigh((Order Left, Order Right))", 1)]
+    [InlineData("Submit((int, int), string)", 2)]
+    [InlineData("Submit(Boxed<Order>)", 1)]
+    public void Parse_ForAParenthesizedParameterType_StripsOnlyTheParameterListItself(string text, int expected) =>
+        Assert.Equal(expected, SymbolReference.Parse(text)!.Value.Parameters!.Count);
+
+    [Fact]
+    public void Parse_ForATupleParameter_KeepsItsOwnParentheses()
+    {
+        var query = SymbolReference.Parse("Weigh((Order Left, Order Right))")!.Value;
+
+        Assert.Equal(["(Order Left, Order Right)"], query.Parameters);
+    }
+
+    [Theory]
+    [InlineData("Reconcile(Order,)", 2)]
+    [InlineData("Reconcile(Order, )", 2)]
+    [InlineData("Reconcile(,)", 2)]
+    [InlineData("Reconcile(, Order)", 2)]
+    [InlineData("Reconcile(Order)", 1)]
+    public void Parse_ForAnEmptyParameterSlot_KeepsItsArity(string text, int expected) =>
+        Assert.Equal(expected, SymbolReference.Parse(text)!.Value.Parameters!.Count);
 }

@@ -67,7 +67,8 @@ dotnet pack src/TerseSharp.Server -c Release -o artifacts/nupkg
 ```
 
 **Those shell forms are for humans and CI.** From an agent they are `build`, `run_tests`,
-`rerun_failed`, `list_tests`, `format verify=true`, `cleanup verify=true fix=all` and `clean` — the
+`rerun_failed`, `list_tests`, `cleanup verify=true fix=style`, `cleanup verify=true fix=analyzers`
+and `clean` — the
 `dotnet` CLI is a fallback under the gate above, not a shortcut, and `cd … && dotnet …` was the single
 most common breach in this repo's own session log.
 
@@ -121,16 +122,20 @@ Before every push, in this order, reading each result before trusting the next:
    A lingering `testhost` or `terse` process holds the E2E binary and produces the same false green:
    kill it, rebuild, re-run.
 2. **`run_tests` over the whole solution** — unit and E2E.
-3. **`cleanup verify=true fix=all`** — the closest in-server reading of that step. It is a **superset**,
-   not an equivalent: measured at `b3c381e` it named four files (`ReleaseVersion.cs`,
-   `ResponseBuilderTests.cs`, `UnifiedDiffTests.cs`, `WorkspaceRegistryTests.cs`) that both CI commands
-   accept, and `format verify=true` is Roslyn's whitespace formatter, which CI does not run at all. So a
-   `VERIFY_FAILED` naming a file you did not touch is a prompt to look, not proof CI is red. The two
+3. **`cleanup verify=true fix=style` and `cleanup verify=true fix=analyzers`** — one per CI command, and
+   since `I236` each is byte-equivalent to it: those two modes apply code fixes only and no longer run
+   the Roslyn whitespace formatter, so a `VERIFY_FAILED` there **is** a red ubuntu leg. `fix=all` and
+   the default `fix=usings` still reformat, so they stay **supersets**: measured at `b3c381e`,
+   `fix=all` named four files (`ReleaseVersion.cs`, `ResponseBuilderTests.cs`, `UnifiedDiffTests.cs`,
+   `WorkspaceRegistryTests.cs`) that both CI commands accept, and `format verify=true` is that same
+   whitespace formatter, which CI does not run at all. So a `VERIFY_FAILED` from one of those two
+   naming a file you did not touch is a prompt to look, not proof CI is red. The two
    `dotnet format … --verify-no-changes --severity info` commands are what **the ubuntu runner**
    executes — that is a statement about CI, **not a licence to run them here**. There is no legitimate
-   `dotnet` shell-out on this path: `cleanup verify=true fix=all` plus `format verify=true` is the
-   gate, and a disagreement you suspect between them and CI is reported as a finding, not resolved in
-   `Bash`. Logged as `I37`.
+   `dotnet` shell-out on this path: `cleanup verify=true fix=style` plus `cleanup verify=true
+   fix=analyzers` is the gate — `fix=all` and `format verify=true` are the optional superset sweep —
+   and a disagreement you suspect between them and CI is reported as a finding, not resolved in
+   `Bash`. Logged as `I37`, closed by `I236`.
 
 A one-runner red is not automatically a flake, and "it passed on rerun" is not a diagnosis. Real
 one-legged failures have shipped here: a macOS-only race introduced by starting the transport before
@@ -220,7 +225,8 @@ folded across records; only a file outside the workspace root is printed in full
 
 ### Edits
 
-An **added** document is the one case where Roslyn's own apply path writes to the user's `.csproj`.
+An **added** document — `move_type_to_file`, and `write_text` creating a `.cs` file under a project
+that globs its sources — is the one case where Roslyn's own apply path writes to the user's `.csproj`.
 `LoadedWorkspace.TryApplyAsync` snapshots that project's bytes first — but only when
 `ProjectGlobs.CompilesByGlob` says the SDK already globs the file, read from MSBuild's *evaluated*
 `EnableDefaultItems`/`EnableDefaultCompileItems`, never from text — and restores them afterwards
@@ -245,7 +251,10 @@ via `SymbolId`, so edits are immune to line drift — **or** by name: `OrderServ
 parameter list is needed to pick an overload. `SymbolLookup` routes on `SymbolReference.IsDocumentationId`.
 The name path never guesses: a qualifier must match a trailing run of the containing type's fully
 qualified name (a namespace only when the symbol is itself a type), parameters are split at nesting
-depth zero and compared by type name, an ambiguous name returns `AmbiguousSymbol` declaring how many
+depth zero and compared structurally — the head and then every type argument and tuple element, each
+by namespace suffix, so `Weigh(Boxed<IHandler>)` addresses the parameter Roslyn renders as
+`Fixture.Trading.Boxed<Fixture.Trading.IHandler>` and the fully-qualified spelling still resolves —
+an ambiguous name returns `AmbiguousSymbol` declaring how many
 of the total it lists, and a name whose search saturates its cap is refused rather than resolved from
 a truncated set. Outlines print the short form by default (`ids=full` for documentation ids) **only
 where it round-trips** — `SymbolReference.RoundTrips` keeps the documentation id for constructors,
@@ -784,7 +793,9 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
 - [ ] `build` clean — **read before** any test result; `run_tests` green over the whole solution.
 - [ ] `analyze` down to `info` on every touched file → `format` / `cleanup` → re-`analyze`;
       `get_diagnostics` for the solution-wide sweep.
-- [ ] `cleanup verify=true fix=all` **and** `format verify=true` — the ubuntu-only CI step.
+- [ ] `cleanup verify=true fix=style` **and** `cleanup verify=true fix=analyzers` — the ubuntu-only
+      CI step, byte for byte. `fix=all` and `format verify=true` are the wider sweep, and a file only
+      they name is not a red CI leg.
 - [ ] New behaviour has an E2E test asserting **values** against `fixtures/FixtureSolution`, observed
       failing first; a new tool is in `ToolCoverageE2ETests.Exercised`; a listing tool has a
       `TokenBudgetE2ETests` assertion against the **widest** fixture case.

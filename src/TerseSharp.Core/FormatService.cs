@@ -23,7 +23,9 @@ public static class FormatService
             ? await CodeFixService.ApplyAsync(workspace.Solution, documents, request, cancellationToken).ConfigureAwait(false)
             : new FixOutcome(workspace.Solution, []);
 
-        var updated = await RewriteAsync(outcome.Solution, documents, Rewriter(request), cancellationToken).ConfigureAwait(false);
+        var updated = request.Reformats
+            ? await RewriteAsync(outcome.Solution, documents, Rewriter(request), cancellationToken).ConfigureAwait(false)
+            : outcome.Solution;
 
         if (request.Verify)
             return Result.Ok(await VerifyAsync(workspace, updated, documents, options.Tool, outcome, cancellationToken).ConfigureAwait(false));

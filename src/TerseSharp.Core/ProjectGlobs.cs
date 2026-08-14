@@ -37,4 +37,41 @@ public static class ProjectGlobs
 
     private static bool Enabled(Project project, string property) =>
         !string.Equals(project.GetPropertyValue(property), "false", StringComparison.OrdinalIgnoreCase);
+
+    public static bool Memoized(string projectPath)
+    {
+        if (Stamp(projectPath) is not { } key)
+            return false;
+
+        if (Verdicts.TryGetValue(key, out var known))
+            return known;
+
+        var verdict = CompilesByGlob(projectPath) is true;
+
+        if (Verdicts.Count >= MaxRememberedProjects)
+            Verdicts.Clear();
+
+        Verdicts[key] = verdict;
+
+        return verdict;
+    }
+
+    private static GlobKey? Stamp(string path)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+
+            return new GlobKey(path, file.LastWriteTimeUtc, file.Length);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private const int MaxRememberedProjects = 256;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<GlobKey, bool> Verdicts = new();
+
+    private readonly record struct GlobKey(string Path, DateTime LastWriteUtc, long Length);
 }

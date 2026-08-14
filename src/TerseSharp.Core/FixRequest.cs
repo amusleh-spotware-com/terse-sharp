@@ -33,4 +33,6 @@ public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, Diagnos
     };
 
     private static bool IsStyle(string id) => id.StartsWith("IDE", StringComparison.Ordinal);
+
+    public bool Reformats => Mode is not (FixMode.Style or FixMode.Analyzers);
 }

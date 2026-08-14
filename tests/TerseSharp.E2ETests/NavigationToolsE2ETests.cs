@@ -581,4 +581,55 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("ProbeNames.Probe001", text, StringComparison.Ordinal);
         Assert.DoesNotContain("matches more than 100 symbols", text, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("Awkward.Weigh(Boxed<IHandler>)", "public int Weigh(Boxed<IHandler> boxed)")]
+    [InlineData("Awkward.Weigh((IHandler Left, IHandler Right))", "public int Weigh((IHandler Left, IHandler Right) pair)")]
+    [InlineData("Awkward.Weigh((IHandler, IHandler))", "public int Weigh((IHandler Left, IHandler Right) pair)")]
+    [InlineData("Awkward.Weigh(Fixture.Trading.Boxed<Fixture.Trading.IHandler>)", "public int Weigh(Boxed<IHandler> boxed)")]
+    [InlineData("Awkward.Weigh(int)", "public int Weigh(int count)")]
+    public async Task GetSymbolSource_ForAnOverloadWhoseParameterCarriesTypeArguments_ResolvesTheShortForm(
+        string reference,
+        string expected)
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = reference });
+
+        Assert.DoesNotContain("ERROR", source, StringComparison.Ordinal);
+        Assert.Contains(expected, source, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Awkward.Weigh(IHandler)")]
+    [InlineData("Awkward.Weigh(int [])")]
+    [InlineData("Awkward.Weigh(int[])")]
+    [InlineData("Awkward.Weigh(int,)")]
+    [InlineData("Awkward.Weigh(Boxed<IHandler,>)")]
+    [InlineData("Awkward.Weigh((IHandler, IHandler,))")]
+    public async Task GetSymbolSource_ForAParameterListNoOverloadDeclares_RefusesInsteadOfPickingOne(string reference)
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = reference });
+
+        Assert.StartsWith("ERROR SymbolNotFound", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForTwoEmptySlotsMatchingTwoOverloads_ListsThemInsteadOfPickingOne()
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Reconciler.Reconcile(,)" });
+
+        Assert.StartsWith("ERROR AmbiguousSymbol", source, StringComparison.Ordinal);
+        Assert.Contains("Reconcile", source, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Reconciler.Reconcile(Order, )", "public int Reconcile(Order order, decimal tolerance)")]
+    [InlineData("Reconciler.Reconcile(Order,)", "public int Reconcile(Order order, decimal tolerance)")]
+    [InlineData("Reconciler.Reconcile(, Order)", "public int Reconcile(Dictionary<string, int> pending, Order order)")]
+    public async Task GetSymbolSource_ForAnEmptyParameterSlot_KeepsTheArityItWasAskedFor(string reference, string expected)
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = reference });
+
+        Assert.DoesNotContain("ERROR", source, StringComparison.Ordinal);
+        Assert.Contains(expected, source, StringComparison.Ordinal);
+    }
 }
