@@ -297,7 +297,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("gen=c", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("index=xaml(", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("lastUsedUtc=", quiet, StringComparison.Ordinal);
-        Assert.Equal(5, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Count(line => !line.StartsWith("WARNING ", StringComparison.Ordinal)));
+        Assert.Equal(5, WithoutAssetWarnings(quiet).Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
         Assert.True(Tokens(quiet) * 2 < Tokens(loud), Report("workspace_status", quiet, loud));
         Assert.Contains("watch=", loud, StringComparison.Ordinal);
         Assert.Contains("gen=c", loud, StringComparison.Ordinal);
@@ -371,7 +371,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         var status = await server.CallAsync("workspace_status", []);
 
         Assert.DoesNotContain("mapped=", status, StringComparison.Ordinal);
-        Assert.True(Tokens(status) < 120, Report("workspace_status", status, status));
+        Assert.True(Tokens(WithoutAssetWarnings(status)) < 120, Report("workspace_status", status, status));
     }
 
     [Fact]
@@ -562,4 +562,8 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
             status,
             StringComparison.Ordinal);
     }
+
+    private static string WithoutAssetWarnings(string response) => string.Join(
+        "\n",
+        response.Split('\n').Where(line => !line.StartsWith("WARNING guard=", StringComparison.Ordinal) && !line.StartsWith("WARNING skill=", StringComparison.Ordinal)));
 }

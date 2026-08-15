@@ -71,9 +71,14 @@ public sealed class ChangedTestSelectionE2ETests
 
         try
         {
+            var built = await CallAsync(server, "build", []);
+
+            Assert.DoesNotContain("ERROR", built, StringComparison.Ordinal);
+
             var without = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add" });
             var with = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add", ["tests"] = true });
 
+            Assert.Contains("(test=2)", without, StringComparison.Ordinal);
             Assert.DoesNotContain("run_tests test=", without, StringComparison.Ordinal);
             Assert.Contains("tests: run_tests test=AdderTests", with, StringComparison.Ordinal);
             Assert.DoesNotContain("run_tests test=StandaloneTests", with, StringComparison.Ordinal);
