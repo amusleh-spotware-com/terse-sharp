@@ -1,5 +1,5 @@
 ---
-description: Mine every Claude Code session across all projects for token, character, latency, memory and productivity waste down to the individual character, mine the call sequences for composite and batch tools that fuse a measured round trip into one call, deep-research the state of the art in agent accuracy, log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
+description: Mine every Claude Code session across all projects for token, character, latency, memory and productivity waste down to the individual character, mine the call sequences for composite and batch tools that fuse a measured round trip into one call, mine the code the agent emitted for legacy syntax and slow constructs, mine the user's own turns for every intervention and trap that cost an extra prompt, deep-research the state of the art in agent accuracy, log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
 argument-hint: "[weeks to scan, default 1]"
 ---
 
@@ -8,7 +8,23 @@ argument-hint: "[weeks to scan, default 1]"
 `$ARGUMENTS` — a number of **weeks** to scan. Absent or unparseable → **1 week**. Nothing else takes
 input from the user; do not ask, do not confirm the window.
 
-**Four gates that outrank everything else in this command:**
+**The five goals this command exists to serve.** Every phase feeds at least one; every row logged in
+M9 is tagged with the one it serves; and M11 proves all five were mined or states what was checked and
+why that goal came back clean. They are not ranked by taste — they are ranked by what a failure costs:
+
+| Tag | Goal | What a finding for it looks like |
+|---|---|---|
+| `[accuracy]` | **the agent stops falling into traps that force the user to intervene** | an extra user prompt, a rejected edit, a retry with different arguments, a confident wrong answer acted on — measured in M5C |
+| `[modern]` | **the agent emits modern .NET — latest C# syntax, current APIs** | a legacy construct in text the agent *wrote*, counted per 1000 emitted lines and confirmed against the workspace — measured in M5B |
+| `[perf]` | **the agent emits code that is not slow** | sync-over-async, sync file I/O, an allocation on a per-file/per-line/per-symbol path in emitted text — measured in M5B |
+| `[speed]` | **the agent finishes sooner** | latency, wall time, a blind wait, a serial sequence with no dependency — measured in M4 |
+| `[cost]` | **the agent pays fewer tokens for the same answer** | payload, framing, round trips, batches — measured in M2, M3 and M6 |
+
+`[accuracy]` outranks the rest, and it is not close: an intervention costs a whole turn at M2's turn
+`p50`, plus the tokens of the re-issued work, plus the context already spent on the wrong path. A
+payload row of equal token size is worth less than an intervention row. Rank accordingly in M9.
+
+**Seven gates that outrank everything else in this command:**
 
 1. **A finding without a number is not a finding.** "Reads feel wasteful" is banned. "36 `Read` calls
    in one session, 214 KB of tool results, ~53 500 tokens, against 10 `search_text` calls" is a
@@ -42,11 +58,27 @@ input from the user; do not ask, do not confirm the window.
    (a) **the corpus** — a count from the M2 scan over the real transcripts; (b) **a tokenizer
    experiment** — an encode-before/encode-after on a real payload, in both `o200k_base` and
    `cl100k_base`, labelled directional because neither is Claude's; (c) **a primary source** — a
-   vendor document or a paper, fetched and quoted, never a summary of a summary. Where an outside
+   vendor document or a paper, fetched and quoted, never a summary of a summary; (d) **the
+   workspace** — `analyze`, `search_regex`, `get_symbol_source`, `build` or `run_tests` over
+   TerseSharp's own source, which is the only instrument that can confirm a pattern the transcripts
+   show being *written* rather than being *read*. Where an outside
    claim contradicts the corpus, **the corpus wins and the row says so**. A claim that survived none
    of the three is written `UNVERIFIED` in the report and is not allowed into `IMPROVEMENTS.md` at
    all. This gate exists because a previous run of this command shipped a trim ledger whose three
    headline classes were each worth ~0.1%, sourced from plausible reasoning that nobody encoded.
+
+6. **The agent's own output is corpus too, and a run that skipped it is incomplete.** M2 sees what the
+   agent *read*; it is structurally blind to the code the agent *wrote* (`tool_use.input` on the edit
+   family) and to the turns the user spent steering it (`user` records carrying text rather than a
+   `tool_result`). M5A–M5D are **mandatory phases**, not an appendix: a scan that reports payload and
+   latency only has measured one of the five goals and must say so in M11 as a degraded run.
+7. **A pattern counted in emitted text is HEURISTIC until instrument (d) confirms it.** The
+   emitted-code script is a regex over the characters the agent sent, with no compilation behind it.
+   It ranks candidates; it never proves one. A `[modern]` or `[perf]` row states which `analyze` /
+   `search_regex` / `get_symbol_source` call confirmed the class on real source, or it is not written.
+   And a class this repository **deliberately** leaves off — an `.editorconfig` severity, the app-wide
+   conventions clause in `CLAUDE.md` — is not a finding; check before logging, because proposing that
+   the codebase fight its own configuration is the same defect as a number nobody encoded.
 
 **Also banned:** `AskUserQuestion`, `ExitPlanMode`, editing any file other than `IMPROVEMENTS.md`,
 `git add -A`, a `Co-Authored-By:` trailer, and writing any script anywhere inside the repository.
@@ -55,8 +87,9 @@ input from the user; do not ask, do not confirm the window.
 path are explicitly waived for this command by standing user instruction. Do not spawn one and do not
 report the phase as degraded.
 
-**Subagents:** banned for every phase that touches a transcript (M2–M6) — a reviewer adds nothing to a
-log scan and doubles the private-content exposure. **Permitted, and expected, in M7 only** (the
+**Subagents:** banned for every phase that touches a transcript (M2–M6, **M5A–M5D included** — they
+read prompt text and emitted code, which is the most sensitive material in the corpus) — a reviewer
+adds nothing to a log scan and doubles the private-content exposure. **Permitted, and expected, in M7 only** (the
 research fan-out), which reads the public web and is handed **no transcript content whatsoever** —
 not a path, not a slug, not a quoted result. A research subagent prompt that contains anything mined
 from a session is a breach of gate 3.
@@ -77,7 +110,9 @@ from a session is a breach of gate 3.
    - `~/.claude/projects/<project-slug>/<session-uuid>/subagents/agent-*.jsonl` — one per subagent,
      and these are where delegation cost hides;
    - if `CLAUDE_CONFIG_DIR` is set and its `projects/` exists and differs, scan that too.
-5. `TaskCreate` one task per phase, M1 through M11.
+5. `TaskCreate` one task per phase: M1, M2, M3, M4, M5, **M5A, M5B, M5C, M5D**, M6, M7, M8, M9, M10,
+   M11. Fifteen tasks — the four emitted-code and intervention phases are tracked like every other
+   phase, because a phase with no task is the one that gets dropped when the run is long.
 
 ---
 
@@ -580,6 +615,12 @@ different projects and contains no path-shaped text, which is what makes it *too
 than user content. Never widen that filter. `line_freq` is pruned at 300 000 entries, so past ~8
 weeks that section is a floor, not a total — say so in the report.
 
+**What this script cannot see, and does not pretend to.** It reads `tool_result` payloads and
+`message.usage`; it never opens `tool_use.input` for the *content* of an edit, and it never reads a
+user turn's text. Those two blind spots are exactly where goals `[accuracy]`, `[modern]` and `[perf]`
+live, and they are measured by the second script in **M5A**. Do not extend this script to cover them —
+it is the measurement of record for payload and must stay byte-comparable with the previous run.
+
 ## M3 — The micro-trim pass: every character in TerseSharp's own responses
 
 M2's trim ledger estimates. This phase **measures with a tokenizer**, because characters are what a
@@ -763,7 +804,457 @@ Look for these classes, each of which has produced a real shipped improvement in
 | **Delegation** | subagent transcripts: what the fan-out cost in tokens versus what its report was worth, and whether the subagent used built-ins on code its parent had an MCP for |
 | **Context** | `cache_read` vs `cache_creation` ratio, a session that re-primed context repeatedly, an enormous system/skill payload loaded for a one-call task |
 | **Productivity** | permission denials and the retry that followed, a plan re-derived because an earlier answer was not written down, a gate the agent skipped and had to redo |
-| **Accuracy** | an answer the agent acted on and later had to undo — a confident wrong result, a stale read, a claim the tool could not prove. This class is scored in M7, because a wrong answer costs more than any payload |
+| **Accuracy** | an answer the agent acted on and later had to undo — a confident wrong result, a stale read, a claim the tool could not prove. This class is scored in M5C and M7, because a wrong answer costs more than any payload |
+| **Emitted code** | the text the agent *sent* to an edit tool: a legacy construct, a sync-over-async call, an allocation on a hot path, a rule the CI format gate kills. Counted in M5A, confirmed in M5B |
+| **Intervention** | a user turn that corrected, re-scoped, re-ran or unblocked the agent — the extra prompt is the cost, and the tool call immediately before it is the defect. Counted in M5A, converted in M5C |
+
+---
+
+## M5A — Measure what the agent *wrote*: the second deterministic script
+
+M2 measures what the agent read and what it paid to read it. It is blind to the other half of the five
+goals: the **code the agent emitted**, and the **turns the user had to spend steering it**. Both sit in
+the same transcripts, in fields M2 never opens — `tool_use.input` on the edit family, and the `user`
+records that carry text rather than a `tool_result`.
+
+Write a **second** script beside the first, in the same temporary directory, over the same window. Two
+scripts and not one, for two reasons: the first is the measurement of record for payload and must stay
+byte-comparable across runs, and a break in this pass must not cost the whole scan. The same two shell
+traps apply — hand `python` the **Windows** path, append the heredoc in chunks, `ast.parse` before
+running it.
+
+**Gate 3 holds here at its strictest.** This is the only script that touches user prompt text. It
+matches cue patterns against that text and prints **counts and cue labels only** — never a matched
+string, never a span, never a length that could identify a prompt. Emitted code is treated the same
+way: class counts and line totals leave the script, source text never does.
+
+```python
+import collections, datetime, json, os, re, sys
+
+WEEKS = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
+CUTOFF = datetime.datetime.now().timestamp() - WEEKS * 7 * 86400
+
+EDIT = {'Edit', 'Write', 'NotebookEdit',
+        'mcp__terse-sharp__replace_symbol', 'mcp__terse-sharp__replace_symbol_body',
+        'mcp__terse-sharp__add_member', 'mcp__terse-sharp__delete_symbol',
+        'mcp__terse-sharp__change_signature', 'mcp__terse-sharp__rename_symbol',
+        'mcp__terse-sharp__extract_interface', 'mcp__terse-sharp__move_type_to_file',
+        'mcp__terse-sharp__edit_text', 'mcp__terse-sharp__write_text'}
+GATE = {'mcp__terse-sharp__build', 'mcp__terse-sharp__run_tests', 'mcp__terse-sharp__rerun_failed',
+        'mcp__terse-sharp__analyze', 'mcp__terse-sharp__get_diagnostics',
+        'mcp__terse-sharp__format', 'mcp__terse-sharp__cleanup'}
+CODE_KEYS = ('newText', 'new_string', 'content', 'body', 'source', 'code', 'members', 'declaration')
+PATH_KEYS = ('path', 'file_path', 'filePath', 'file', 'symbolId', 'symbol')
+CSHARP = re.compile(r'\\b(?:namespace|class|record|struct|interface|readonly|static|public|private|'
+                    r'internal|sealed|var|await)\\b')
+
+LEGACY = (
+    ('collection expression [] (IDE0300/IDE0301)',
+     re.compile(r'new\\s+(?:List|Dictionary|HashSet|Queue|Stack|Collection)\\s*<[^>\\n]{0,80}>\\s*\\(\\s*\\)'
+                r'|\\b(?:Array|Enumerable)\\.Empty\\s*<')),
+    ('is null / is not null (IDE0041)', re.compile(r'[!=]=\\s*null\\b')),
+    ('file-scoped namespace (IDE0161)', re.compile(r'(?m)^namespace\\s+[\\w.]+\\s*\\r?\\n\\{')),
+    ('field keyword / primary ctor (IDE0032)',
+     re.compile(r'(?m)^\\s*(?:private|protected)\\s+(?:readonly\\s+)?[\\w<>,.\\[\\]?]+\\s+_\\w+\\s*;')),
+    ('target-typed new (IDE0090)',
+     re.compile(r'\\b([A-Z][\\w<>,.\\[\\]?]*)\\s+\\w+\\s*=\\s*new\\s+\\1\\s*[(<]')),
+    ('switch expression over else-if (IDE0066)', re.compile(r'(?m)^\\s*else\\s+if\\b')),
+    ('expression body (IDE0022, CI-breaking here)',
+     re.compile(r'(?m)^\\s*(?:public|private|internal|protected)[^\\n{;]*\\)\\s*\\r?\\n\\s*\\{\\s*\\r?\\n\\s*return\\b')),
+    ('explicit IFormatProvider (CA1305)', re.compile(r'\\.ToString\\(\\s*\\)|\\bstring\\.Format\\s*\\(')),
+    ('interpolation as a value converter', re.compile(r'\\$"\\{\\s*[\\w.]+\\s*\\}"')),
+)
+
+SLOW = (
+    ('sync over async (.Result/.Wait)',
+     re.compile(r'\\.Result\\b|\\.Wait\\(\\)|GetAwaiter\\(\\)\\.GetResult\\(\\)')),
+    ('sync file I/O on the request path',
+     re.compile(r'\\bFile\\.(?:ReadAll|WriteAll|AppendAll|ReadLines|Open)\\w*\\s*\\('
+                r'|\\bXDocument\\.Load\\s*\\(|new\\s+StreamReader\\s*\\(')),
+    ('materializing LINQ (.ToList/.ToArray)', re.compile(r'\\.To(?:List|Array)\\(\\)')),
+    ('Substring/Split where a span slices', re.compile(r'\\.Substring\\s*\\(|\\.Split\\s*\\(')),
+    ('ToLower/ToUpper to compare (CA1862)', re.compile(r'\\.To(?:Lower|Upper)(?:Invariant)?\\(\\)')),
+    ('string += in a loop', re.compile(r'(?m)^\\s*\\w+\\s*\\+=\\s*[$"]')),
+    ('interpreted Regex (SYSLIB1045)',
+     re.compile(r'new\\s+Regex\\s*\\(|\\bRegex\\.(?:Match|Matches|Replace|IsMatch)\\s*\\(')),
+    ('LINQ chain per element',
+     re.compile(r'\\.Where\\([^\\n)]{0,80}\\)\\s*\\.\\s*(?:Select|First|FirstOrDefault|Any|Count)\\s*\\(')),
+)
+
+AWAITED = re.compile(r'\\bawait\\s')
+CONFIGURED = re.compile(r'ConfigureAwait\\(')
+RULE = re.compile(r'\\b((?:CA|IDE|CS|SYSLIB|RS)\\d{4})\\b')
+NOOP = re.compile(r'\\b0 files changed\\b|changedLines=0')
+TRAPS = (('compile-gate rollback', 'CompileRegression'),
+         ('hand-written documentation id', 'SymbolNotFound'),
+         ('anchor matched nothing', 'matched 0 times'),
+         ('anchor not unique', 'is not unique'),
+         ('more than one member', 'not exactly one member'),
+         ('workspace ambiguous', 'AmbiguousWorkspace'),
+         ('symbol ambiguous', 'AmbiguousSymbol'),
+         ('server not built', 'build TerseSharp.Server first'),
+         ('format gate red', 'VERIFY_FAILED'),
+         ('edit landed nothing', '0 files changed'))
+CUES = (('correction',
+         re.compile(r"\\b(?:no,|nope|wrong|incorrect|not what i|revert|undo|you broke|regress)", re.I)),
+        ('gate reminder',
+         re.compile(r"\\b(?:hard gate|use terse|terse-sharp|you (?:used|ran) (?:grep|read|bash|glob)"
+                    r"|built-?in|forbidden)", re.I)),
+        ('redo', re.compile(r"\\b(?:try again|re-?run|retry|still (?:red|failing|broken))", re.I)),
+        ('re-scope', re.compile(r"\\b(?:don'?t|do not|stop|only|instead)\\b", re.I)),
+        ('unblock', re.compile(r"\\b(?:continue|proceed|keep going|go ahead)\\b", re.I)))
+
+roots, seen = [], set()
+for candidate in (os.path.expanduser('~/.claude/projects'),
+                  os.path.join(os.environ.get('CLAUDE_CONFIG_DIR', ''), 'projects')):
+    if candidate and os.path.isdir(candidate):
+        real = os.path.realpath(candidate).lower()
+        if real not in seen:
+            seen.add(real)
+            roots.append(candidate)
+
+def walk():
+    files = set()
+    for root in roots:
+        for folder, _, names in os.walk(root):
+            for name in names:
+                if not name.endswith('.jsonl'):
+                    continue
+                path = os.path.join(folder, name)
+                key = os.path.realpath(path).lower()
+                if key in files:
+                    continue
+                try:
+                    if os.path.getmtime(path) >= CUTOFF:
+                        files.add(key)
+                        yield path, os.path.relpath(path, root).split(os.sep)[0]
+                except OSError:
+                    pass
+
+def harvest(node, out):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in CODE_KEYS and isinstance(value, str):
+                out.append(value)
+            else:
+                harvest(value, out)
+    elif isinstance(node, list):
+        for item in node:
+            harvest(item, out)
+
+def where(arguments):
+    for key in PATH_KEYS:
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ''
+
+legacy = collections.Counter(); slow = collections.Counter()
+legacy_tools = collections.defaultdict(collections.Counter)
+legacy_sessions = collections.defaultdict(set); slow_sessions = collections.defaultdict(set)
+edit_calls = collections.Counter(); edit_rejects = collections.Counter()
+wasted_input = collections.Counter(); traps = collections.Counter(); trap_input = collections.Counter()
+rules = collections.Counter(); gate_red = collections.Counter(); after_edit = collections.Counter()
+cues = collections.Counter(); before = collections.Counter(); rework = collections.Counter()
+per_session = []
+emitted_lines = emitted_chars = edits_scanned = 0
+prompts = interventions = sessions_n = 0
+
+for path, project in walk():
+    sessions_n += 1
+    pending = {}
+    edited = collections.Counter()
+    last_tool = None
+    user_turns = assistant_turns = session_edits = session_gates = session_steers = 0
+    for line in open(path, encoding='utf-8', errors='replace'):
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        kind = record.get('type')
+        message = record.get('message')
+        if not isinstance(message, dict):
+            continue
+        blocks = message.get('content')
+        if isinstance(blocks, str):
+            blocks = [{'type': 'text', 'text': blocks}]
+        if not isinstance(blocks, list):
+            continue
+        if kind == 'assistant':
+            assistant_turns += 1
+        spoken = ''.join(b.get('text', '') for b in blocks
+                         if isinstance(b, dict) and b.get('type') == 'text')
+        if kind == 'user' and spoken.strip() and not record.get('isMeta') and assistant_turns:
+            user_turns += 1
+            prompts += 1
+            steered = False
+            for label, pattern in CUES:
+                if pattern.search(spoken):
+                    cues[label] += 1
+                    steered = True
+            if steered:
+                interventions += 1
+                session_steers += 1
+                before[last_tool or 'none'] += 1
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            shape = block.get('type')
+            if shape == 'tool_use':
+                tool = block.get('name') or 'none'
+                arguments = block.get('input') or {}
+                last_tool = tool
+                pending[block.get('id')] = (tool, len(json.dumps(arguments, sort_keys=True)))
+                if tool in GATE:
+                    session_gates += 1
+                if tool not in EDIT:
+                    continue
+                session_edits += 1
+                spot = where(arguments)
+                if spot:
+                    edited[spot] += 1
+                chunks = []
+                harvest(arguments, chunks)
+                body = '\\n'.join(chunks)
+                if not body or not (CSHARP.search(body) or spot.endswith('.cs')):
+                    continue
+                edits_scanned += 1
+                emitted_lines += body.count('\\n') + 1
+                emitted_chars += len(body)
+                for label, pattern in LEGACY:
+                    hits = len(pattern.findall(body))
+                    if hits:
+                        legacy[label] += hits
+                        legacy_tools[label][tool] += hits
+                        legacy_sessions[label].add(path)
+                for label, pattern in SLOW:
+                    hits = len(pattern.findall(body))
+                    if hits:
+                        slow[label] += hits
+                        slow_sessions[label].add(path)
+                gap = len(AWAITED.findall(body)) - len(CONFIGURED.findall(body))
+                if gap > 0:
+                    slow['await without ConfigureAwait(false)'] += gap
+                    slow_sessions['await without ConfigureAwait(false)'].add(path)
+            elif shape == 'tool_result':
+                tool, size = pending.pop(block.get('tool_use_id'), ('none', 0))
+                content = block.get('content')
+                text = content if isinstance(content, str) else json.dumps(content or '')
+                bad = bool(block.get('is_error')) or text.lstrip().startswith('ERROR ')
+                if tool in EDIT:
+                    edit_calls[tool] += 1
+                    if bad or NOOP.search(text):
+                        edit_rejects[tool] += 1
+                        wasted_input[tool] += size
+                        for label, needle in TRAPS:
+                            if needle in text:
+                                traps[label] += 1
+                                trap_input[label] += size
+                if tool in GATE:
+                    for rule in RULE.findall(text):
+                        rules[rule] += 1
+                    if 'FAILED' in text or 'error' in text[:400].lower():
+                        gate_red[tool] += 1
+                        if session_edits:
+                            after_edit[tool] += 1
+    for count in edited.values():
+        if count > 1:
+            rework[min(count, 6)] += 1
+    per_session.append((session_steers, user_turns, assistant_turns,
+                        session_edits, session_gates, str(project)))
+
+def show(label, value):
+    print(f'{label:<34}{value}')
+
+print(f'== emitted-code and intervention pass  weeks={WEEKS}  transcripts={sessions_n}')
+show('edit calls scanned', f'{sum(edit_calls.values()):,} '
+                           f'({edits_scanned:,} carried C#-shaped text)')
+show('emitted C# volume', f'{emitted_lines:,} lines / {emitted_chars:,} chars')
+show('user turns after turn 1', f'{prompts:,} interventions={interventions:,} '
+                                f'({interventions * 100 // max(prompts, 1)}% of prompts, '
+                                f'{interventions / max(sessions_n, 1):.2f}/session)')
+show('edits per user turn', f'{sum(edit_calls.values()) / max(prompts, 1):.2f}')
+
+print('\\n== legacy syntax the agent WROTE (per 1000 emitted lines, HEURISTIC until confirmed)')
+for label, hits in legacy.most_common():
+    rate = hits * 1000 / max(emitted_lines, 1)
+    top = ', '.join(f'{t.rsplit(chr(95), 1)[-1]}x{c}' for t, c in legacy_tools[label].most_common(3))
+    print(f'  {label:<46}{hits:>6} {rate:>7.2f}/kloc sessions={len(legacy_sessions[label]):>3} {top}')
+
+print('\\n== slow constructs the agent WROTE (same units, same caveat)')
+for label, hits in slow.most_common():
+    rate = hits * 1000 / max(emitted_lines, 1)
+    print(f'  {label:<46}{hits:>6} {rate:>7.2f}/kloc sessions={len(slow_sessions[label]):>3}')
+
+print('\\n== edit rejection ledger (input re-paid on every retry)')
+for tool, count in edit_calls.most_common():
+    bad = edit_rejects[tool]
+    print(f'  {tool:<44}{count:>5}x rejected={bad:>4} = {bad * 100 / max(count, 1):>5.1f}% '
+          f'wasted-in={wasted_input[tool]:>9,} ch ~{wasted_input[tool] // 4:>7,} tok')
+
+print('\\n== trap ledger (each one is an extra call nobody asked for)')
+for label, count in traps.most_common():
+    print(f'  {label:<40}{count:>5}x re-paid input {trap_input[label]:>9,} ch '
+          f'~{trap_input[label] // 4:>7,} tok')
+
+print('\\n== intervention cues (labels only - no prompt text ever leaves this script)')
+for label, count in cues.most_common():
+    print(f'  {label:<24}{count:>6}')
+print('  -- tool called immediately before an intervention --')
+for tool, count in before.most_common(12):
+    print(f'  {tool:<44}{count:>6}')
+
+print('\\n== gates red AFTER an edit in the same session (rework the agent caused)')
+for tool, count in after_edit.most_common():
+    print(f'  {tool:<44}{count:>6} red of {gate_red[tool]} red overall')
+print('  -- rule ids named in gate output --')
+print('  ' + ', '.join(f'{r}x{c}' for r, c in rules.most_common(15)))
+
+print('\\n== same target edited N times in one session (rework distribution)')
+print('  ' + '  '.join(f'{n}:{c}' for n, c in sorted(rework.items())))
+
+print('\\n== sessions ranked by interventions')
+for row in sorted(per_session, reverse=True)[:10]:
+    steers, user_turns, assistant_turns, edits, gates, project = row
+    print(f'  {steers:>3} interventions user={user_turns:>3} asst={assistant_turns:>4} '
+          f'edits={edits:>4} gates={gates:>3} {project[:44]}')
+
+print(f'\\n== emitted  weeks={WEEKS} transcripts={sessions_n} '
+      f'editcalls={sum(edit_calls.values())} rejects={sum(edit_rejects.values())} '
+      f'lines={emitted_lines} legacy={sum(legacy.values())} slow={sum(slow.values())} '
+      f'prompts={prompts} interventions={interventions} traps={sum(traps.values())}')
+```
+
+Run it as `python <script> <WEEKS>`. Read the whole output. Four things about it are load-bearing:
+
+1. **`assistant_turns` gates the user counter**, so the first prompt of a session — the task itself —
+   is never counted as an intervention. Every counted prompt arrived *after* the agent had already
+   answered, which is the definition of the cost this command exists to remove.
+2. **`wasted-in` is the real price of a rejected edit**, not the error line. A rolled-back
+   `replace_symbol` re-pays the entire declaration on the retry; `edit_text` re-pays the anchor and the
+   replacement. That column is why `[accuracy]` outranks `[cost]` even measured in `[cost]`'s own unit.
+3. **The `after_edit` counter separates two very different reds.** A gate red with no edit before it in
+   that session is inherited dirt; a gate red *after* an edit is rework the agent caused, and only the
+   second is a finding.
+4. **The rate is per 1000 emitted lines, not per session**, because a session that wrote one method and
+   a session that wrote a whole service are not comparable any other way.
+
+---
+
+## M5B — The emitted-code verdict: modern .NET, and code that is not slow
+
+Two goals live here — `[modern]` and `[perf]` — and both are one step away from a false positive,
+because the instrument is a regex over text with no compiler behind it. So this phase is a
+**confirmation** phase, not a counting one. M5A ranked the classes; here each one either earns
+instrument (d) or dies.
+
+### M5B.1 — Confirm before converting
+
+For every class in M5A's two tables, in count order, take the top three and do exactly one of these —
+and name which one in the row:
+
+| Class M5A counted | Confirm with | Lever, in this repo's ranking order |
+|---|---|---|
+| legacy syntax an analyzer already owns (`IDE0300`, `IDE0161`, `IDE0090`, `IDE0032`, `IDE0066`) | `analyze <file> severity=info` on a file this repo actually has | **mechanism 1** — the edit tools already run a compile gate over the changed declaration; make that gate *report* the info-severity diagnostics the new text introduced, so the agent learns at the write instead of two calls later |
+| syntax the build cannot see and the ubuntu leg kills (`IDE0022`, `IDE0060`) | `cleanup verify=true fix=style` | the same mechanism, plus a `remedy:` naming the rule and the fixed form. This is the highest-value class in the phase: invisible locally, fatal in CI |
+| `CA1305` / interpolation as a value converter | `search_regex` over `src/`, then `get_symbol_source` on one hit | a `SKILL.md` / `[Description]` row — intent is not decidable at the write path, so the lever is teaching, not gating |
+| sync-over-async, sync file I/O, missing `ConfigureAwait(false)` | `analyze` on the named file; the async hard gate in `CLAUDE.md` is the specification | mechanism 1 where an analyzer owns it; otherwise a skill row naming the async gate |
+| allocation classes (`Substring`/`Split`/`ToList`/`ToLower`/interpreted `Regex`) | `analyze` (`CA1859`, `CA1861`, `CA1862`, `SYSLIB1045`), else `get_symbol_source` on the member and say which path it sits on | a row **only** when the path is per-file, per-line, per-element or per-symbol — that is the allocation gate's own scope, and a one-shot startup call is explicitly outside it |
+
+### M5B.2 — The three rules that keep this phase honest
+
+1. **A class an existing gate already catches is a workflow row, not a code row.** If `analyze` at
+   `info` or `cleanup fix=all` would have named it, the defect is that the agent shipped it *to* the
+   gate, not that the gate missed it — so the `Tool` cell names `SKILL.md`, `CLAUDE.md` or the tool
+   `[Description]`, and the saving is the rework calls from M5A's `after_edit` counter, not the
+   construct itself. This repo ranks discoverability rows highest for exactly this reason.
+2. **A class no gate catches, and that the write path could catch, is mechanism 1 and outranks
+   everything else in this phase.** The compile gate is already running over the changed declaration;
+   returning the info-severity diagnostics that declaration introduced costs one pass over a
+   compilation that already exists and deletes an `analyze` round trip per edit. Price it as
+   `edit calls × P(diagnostic) × cost(analyze round trip)` from M5A and M2.
+3. **Never fix a line of C# in this command.** It edits `IMPROVEMENTS.md` and nothing else. A confirmed
+   class becomes a row; the row is implemented by `/ship-improvements`, under the gates that command
+   carries.
+
+### M5B.3 — The floor, and the cap
+
+- **Floor:** ≥5 occurrences across ≥3 sessions, **or** one occurrence of a class that CI kills
+  (`IDE0022`, `IDE0060` here), **or** one occurrence of a class the async or allocation hard gate names
+  explicitly. Below that, aggregate by family into one row exactly as gate 2 requires.
+- **Cap:** a construct is not slow because it is old, and not wrong because it is short. `.Split` on a
+  one-shot startup path is fine and the allocation gate says so at the call; `.ToList()` on a result
+  that must outlive the frame is the correct code. A row that cannot name **the path's multiplicity** —
+  per file, per line, per element, per symbol — is not a `[perf]` row, it is a style opinion, and this
+  command does not log style opinions.
+- **Counter-evidence to check before proposing a `[modern]` row:** the newest form is better here only
+  when the compiler accepts it and the analyzers agree. Where `.editorconfig` carries the rule at
+  `suggestion` and the build escalates warnings only, the rule is *invisible locally and fatal in CI* —
+  that asymmetry is the finding, not the syntax.
+
+---
+
+## M5C — The intervention pass: every extra prompt the user had to type
+
+This is goal `[accuracy]`, and it is the most expensive class in the corpus. One intervention costs a
+whole turn at M2's turn `p50`, plus the re-issued call's input from M5A's `wasted-in` column, plus the
+context already spent going the wrong way — and unlike a payload row it also costs the user's
+attention, which no ledger in this command can price and every one of them therefore under-reports.
+
+### M5C.1 — Rank by what preceded it, never by the cue
+
+The cue histogram says *how* the user steered; the `before` histogram says *what made them*. Only the
+second converts. For the top eight entries of `before`:
+
+1. Open two occurrences in the transcript (M5's method — the file is outside every workspace, so
+   built-ins are legal there) and state the mechanism in one clause. Never paste what you read.
+2. Classify it into one of the five shapes that have produced real shipped rows in this repo:
+
+| Shape | Signature | Lever |
+|---|---|---|
+| **Silent no-op** | the tool answered `applied` / `changedLines=0` and nothing landed | the response must say loudly that it landed nothing — this is the `replace_symbol` drops-extra-members trap, and it is the most expensive shape because the agent *believes* the answer |
+| **Unprovable answer** | `0 results`, `0 properties`, `NOT_RESOLVED` where the truth was "this tool cannot see that" | the response distinguishes "none" from "out of my reach" — the repo's own never-answer-what-you-cannot-prove rule |
+| **Wrong default** | the first call truncated, was too narrow, or omitted the field the agent needed, and the second call fixed it by argument | a default flipped, or the field folded into the first response (mechanism 1) |
+| **Missing remedy** | an `ERROR` whose `remedy:` did not name the next call, so the retry guessed | the `remedy:` gains a worked example — the measured lever is 72% → 90% on complex parameter handling |
+| **Gate breach** | the user had to name the hard gate the agent walked past | a `ToolGuard` row, or a `SKILL.md` swap-table line — never "the agent should have known" |
+
+3. **"The agent should have known which tool to call" is banned as a diagnosis**, exactly as it is in
+   `CLAUDE.md`. If the agent guessed wrong, the schema, the description, the default or the `remedy:`
+   is the defect. An intervention with no product lever behind it is named in the report's Dropped list
+   with its count — never logged as a row that blames the caller.
+
+### M5C.2 — The trap ledger converts one-to-one
+
+Every entry in M5A's trap ledger is already a named, shipped-trap-shaped failure. Each becomes a row
+when it cleared the floor, and its `Expected saving` cell is `count × (recovery calls + re-paid input
+tokens)` from the ledger's own columns. Two constraints:
+
+- a trap already carried in `CLAUDE.md`'s traps section, or already closed in `IMPROVEMENTS.md`, is a
+  **discoverability** row, not a new capability row — the knowledge existed and did not reach the agent
+  at the moment of the call. Its `Tool` cell names the document or the `remedy:`;
+- a trap whose only fix is "be careful" is not implementable and does not become a row. State it in the
+  report so the next run can re-measure it.
+
+### M5C.3 — Two productivity ratios worth tracking across runs
+
+Both come straight from M5A's per-session table, both are single numbers, and both are only meaningful
+as a **trend** — record them in M11 so the next run can compare:
+
+- **interventions per session** — the direct measure of goal `[accuracy]`;
+- **edits per user turn** — the direct measure of goal `[speed]` at the workflow level: how much work
+  the agent completed per prompt it was given. A run where this falls while edit volume stays flat is a
+  run where the agent needed more steering for the same output, and that is a finding even when no
+  single tool looks bad.
+
+---
+
+## M5D — Conversion and the goal ledger
+
+Every candidate leaving M5B and M5C is a row in M9 carrying its goal tag, and M11 carries a **goal
+ledger**: one line per goal, naming the rows it produced. A goal with no rows is legitimate **only**
+when that line states what was measured and why it came back clean — the same standard `CLAUDE.md`
+holds an empty end-of-task review to. "The corpus had none" without the counter that showed zero is not
+an answer; it is a phase that was skipped.
 
 ---
 
@@ -902,12 +1393,22 @@ anything new — goes through M7.3.
 - multi-agent economics: measured token multipliers of fan-out, when delegation is negative-value;
 - harness levers: permission allowlists, `PreToolUse` guards and `updatedInput`, per-subagent model
   choice, tool-surface pruning, instruction-file size against instruction-following accuracy;
+- **code-generation quality**: measured rates of deprecated or superseded API use in LLM completions,
+  what actually moves a model onto the current form (schema wording, an in-response diagnostic, a
+  worked example, an analyzer the tool surfaces at the write), and whether a language's newest syntax
+  is under-represented in training data in a way a tool response can correct — this is goal `[modern]`,
+  and the corpus can only say what *this* agent wrote, never what would have fixed it;
+- **performance-aware generation**: published evidence on whether an agent emits allocating or
+  sync-over-async code by default, and which intervention shape (gate, diagnostic-at-the-write, skill
+  text) measurably changes it — goal `[perf]`;
 - benchmark evidence: token, latency and accuracy numbers from published evaluations of MCP servers
   and semantic code-navigation tools.
 
 ### M7.3 — Method: fan out, then refute
 
-1. Spawn **at least eight** parallel research subagents, one per scope area, each briefed to return
+1. Spawn **at least nine** parallel research subagents, one per scope area — the two code-generation
+   areas are not optional, they are the only outside instrument goals `[modern]` and `[perf]` have —
+   each briefed to return
    claims with sources and dates. Give them **zero** transcript content — the topic only (gate 3).
    A subagent that cannot cite is returning an opinion.
 2. Prefer primary, dated sources: vendor engineering documentation, published evaluations, papers
@@ -967,8 +1468,14 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
 
    `| **I<n>** <the finding> | <tool> | <proposed change> | <expected saving> | <approaches already refuted for this row, or —> |`
 
-   - **Finding** — what was measured, in how many sessions, over which window. Bold the headline
-     number. One row, one line: not a paragraph, not three.
+   - **Finding** — the goal tag first, then what was measured, in how many sessions, over which
+     window. The tag is one of `[accuracy]` `[modern]` `[perf]` `[speed]` `[cost]`, written
+     immediately after the bolded id — `| **I245** [accuracy] …` — so a later run can count coverage
+     per goal without re-reading every row, and it costs one token. Bold the headline number. One row,
+     one line: not a paragraph, not three.
+   - **Instrument** — a `[modern]` or `[perf]` row states inside its `Finding` cell which `analyze` /
+     `search_regex` / `get_symbol_source` call confirmed the class on real source (gate 7). A row
+     carrying only the regex count from M5A is not written.
    - **Tool** — the terse-sharp tool, or the document (`SKILL.md`, `README.md`, `CLAUDE.md`,
      `.claude/commands/…`) when the lever is discoverability or workflow rather than capability.
      There is no separate workflow table; the `Tool` cell carries that distinction.
@@ -982,7 +1489,11 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
    existing tool or response format outranks adding a tool**; within that, M6's mechanism order —
    format change, then a fusing parameter, then a list parameter, then a new tool — decides between
    two rows that address the same chain. A saving that cannot be measured is not accepted. Highest
-   measured cost first.
+   measured cost first — **except that an `[accuracy]` row outranks a `[cost]` row of equal measured
+   size**, because an intervention costs a turn at M2's turn `p50` plus the re-paid input from M5A's
+   `wasted-in` column plus the context already spent, and only the first of those three is in the
+   number. Order within the file: `[accuracy]`, then `[perf]` and `[modern]` where a gate already
+   exists to carry them, then `[speed]`, then `[cost]`.
 4. **No cap, and no silent drop — the floor and the aggregation rule are the discipline.**
    - A candidate clears the floor on its own if it is worth **≥200 tokens per session**, **≥1 call per
      session**, **≥500 ms per call**, or a named accuracy gain.
@@ -1004,8 +1515,11 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
    sequential, and **every row has exactly five cells**. Then `read_text … headings=true`: exactly
    three headings, `# Improvements backlog` / `## Open` / `## Closed`, in that order, nothing else.
 2. **Privacy re-read:** every new row, checked once more against gate 3. No path inside another repo,
-   no type name, no prompt text, no quoted result, no boilerplate line the script suppressed. This is
-   the last chance before the file is public.
+   no type name, no prompt text, no quoted result, no boilerplate line the script suppressed. **M5A–M5C
+   rows get a second look**, because they are the only rows sourced from prompt text and from code the
+   agent wrote: a `[modern]` or `[perf]` row may name the construct class and the rule id, never a
+   line of the emitted source; an `[accuracy]` row may name the cue label, the tool and the count,
+   never a phrase from the prompt. This is the last chance before the file is public.
 3. `changed_files` — `IMPROVEMENTS.md` must be the **only** path this run touched. No build, no test
    run: nothing else changed, and `IMPROVEMENTS.md` is not shipped in the package.
 4. `Bash: git add IMPROVEMENTS.md && git commit -m "Log I<n>–I<m> from the <N>-week session scan"`
@@ -1029,6 +1543,11 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
 | Surface cost | total `[Description]` bytes and `SKILL.md` bytes, and what they cost per request |
 | Latency & memory | slowest tools by `p95` and by total minutes, RSS per workspace and per document, any cold-path trigger named |
 | Research | the methods M7 found worth adopting, each with **the instrument that verified it** (corpus / tokenizer / primary source) and the refutation attempt it survived; the ones dropped as already-true or not actionable here; and an explicit `UNVERIFIED` list of every claim that survived no instrument |
+| Emitted code | legacy-syntax and slow-construct rates per 1000 emitted lines, the top classes with their session counts, which instrument (d) call confirmed each, and the classes dropped as already-caught, out-of-scope for the allocation gate, or deliberately-off in `.editorconfig` |
+| Interventions | interventions per session and as a share of prompts, the cue histogram, the tool immediately before each, and the shape each top entry was classified into (silent no-op / unprovable answer / wrong default / missing remedy / gate breach) |
+| Traps & rework | the trap ledger with counts and re-paid input tokens, the edit rejection rate per tool, gates that came back red after an edit, and the same-target rework distribution |
+| Goal ledger | one line per goal — `[accuracy]` `[modern]` `[perf]` `[speed]` `[cost]` — naming the rows it produced, or what was measured and why it came back clean. A missing line is a degraded run and says so |
+| Productivity trend | interventions per session and edits per user turn, against the previous run's figures when one exists |
 | New rows | every id written, with its one-line finding and expected saving, highest cost first |
 | Strengthened | existing rows given a new measurement instead of a duplicate |
 | Dropped | candidates measured but not logged, with their combined cost and the reason — never silent |
