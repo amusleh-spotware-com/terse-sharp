@@ -34,6 +34,7 @@ public static class McpHost
             {
                 filters.AddCallToolFilter(ToolArgumentFilter.Structured);
                 filters.AddCallToolFilter(RepeatSteer.Filter());
+                filters.AddListToolsFilter(AdvertisedCost.Filter());
                 filters.AddListToolsFilter(SchemaCompactor.Filter());
 
                 if (surface.Advertised is { } advertised)
@@ -41,8 +42,6 @@ public static class McpHost
 
                 if (surface.MarkupDerived)
                     filters.AddListToolsFilter(ToolProfile.MarkupFilter(context));
-
-                filters.AddListToolsFilter(AdvertisedCost.Filter());
             });
 
         var host = builder.Build();

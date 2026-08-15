@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
@@ -192,6 +193,7 @@ public static class ResxValidation
                     "the generated designer does not expose this key - regenerate it before referencing the key from C#"));
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous designer read inside the resx validation pass, which is a synchronous projection over the family set. Removing it means an async index, not a local change.")]
     private static string? DesignerText(ResxFamily family)
     {
         var path = Path.Combine(Path.GetDirectoryName(family.Neutral.Path) ?? string.Empty, Path.GetFileName(family.Designer!));

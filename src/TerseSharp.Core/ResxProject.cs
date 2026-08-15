@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Xml.Linq;
 
 namespace TerseSharp.Core;
@@ -69,6 +70,7 @@ public static class ResxProject
         }
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous project-file leaf inside the resx wiring scan, which is a synchronous projection over the project set.")]
     private static XDocument? Load(string project)
     {
         try

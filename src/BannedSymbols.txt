@@ -1,0 +1,28 @@
+M:System.Threading.Thread.Sleep(System.Int32);await Task.Delay - a wall-clock sleep is banned outright
+M:System.Threading.Thread.Sleep(System.TimeSpan);await Task.Delay - a wall-clock sleep is banned outright
+P:System.Threading.Tasks.Task`1.Result;await the task - sync-over-async deadlocks and burns a pool thread
+P:System.Threading.Tasks.ValueTask`1.Result;await the value task - sync-over-async deadlocks and burns a pool thread
+M:System.Threading.Tasks.Task.Wait();await the task - sync-over-async deadlocks and burns a pool thread
+M:System.Threading.Tasks.Task.Wait(System.Int32);await the task with a CancellationToken instead
+M:System.Threading.Tasks.Task.Wait(System.TimeSpan);await the task with a CancellationToken instead
+M:System.Threading.Tasks.Task.Wait(System.Threading.CancellationToken);await the task instead of blocking on it
+M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[]);await Task.WhenAll - blocking on a set of tasks burns a pool thread per wait
+M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[]);await Task.WhenAny - blocking on a set of tasks burns a pool thread per wait
+M:System.Runtime.CompilerServices.TaskAwaiter.GetResult();await the task - sync-over-async is banned
+M:System.Runtime.CompilerServices.TaskAwaiter`1.GetResult();await the task - sync-over-async is banned
+M:System.Runtime.CompilerServices.ValueTaskAwaiter.GetResult();await the value task - sync-over-async is banned
+M:System.Runtime.CompilerServices.ValueTaskAwaiter`1.GetResult();await the value task - sync-over-async is banned
+M:System.IO.File.ReadAllText(System.String);await File.ReadAllTextAsync - the file system is async on the request path
+M:System.IO.File.ReadAllText(System.String,System.Text.Encoding);await File.ReadAllTextAsync - the file system is async on the request path
+M:System.IO.File.ReadAllLines(System.String);await File.ReadAllLinesAsync - the file system is async on the request path
+M:System.IO.File.ReadAllLines(System.String,System.Text.Encoding);await File.ReadAllLinesAsync - the file system is async on the request path
+M:System.IO.File.ReadLines(System.String);await File.ReadAllLinesAsync, or stream the file - the file system is async on the request path
+M:System.IO.File.ReadAllBytes(System.String);await File.ReadAllBytesAsync - the file system is async on the request path
+M:System.IO.File.WriteAllText(System.String,System.String);AtomicWrite.TextAsync - every write goes through it
+M:System.IO.File.WriteAllText(System.String,System.String,System.Text.Encoding);AtomicWrite.TextAsync - every write goes through it
+M:System.IO.File.WriteAllBytes(System.String,System.Byte[]);AtomicWrite.BytesAsync - every write goes through it
+M:System.IO.File.WriteAllLines(System.String,System.String[]);AtomicWrite.TextAsync - every write goes through it
+M:System.IO.File.AppendAllText(System.String,System.String);AtomicWrite.TextAsync - every write goes through it
+M:System.IO.StreamReader.ReadToEnd();await ReadToEndAsync - the file system is async on the request path
+M:System.Xml.Linq.XDocument.Load(System.String);await XDocument.LoadAsync over an async FileStream - the async gate names this call by name
+M:System.Xml.Linq.XDocument.Load(System.String,System.Xml.Linq.LoadOptions);await XDocument.LoadAsync over an async FileStream - the async gate names this call by name

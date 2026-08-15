@@ -39,13 +39,13 @@ string? contains = null)
     }
 
     public static async Task<Result<string>> TypeAsync(
-LoadedWorkspace workspace,
-ISymbol symbol,
-bool signatures,
-string ids,
-CancellationToken cancellationToken,
-bool parameterNames = true,
-string? contains = null)
+        LoadedWorkspace workspace,
+        ISymbol symbol,
+        bool signatures,
+        string ids,
+        CancellationToken cancellationToken,
+        bool parameterNames = true,
+        string? contains = null)
     {
         if (Rejected(ids) is { } refusal)
             return refusal;
@@ -53,7 +53,11 @@ string? contains = null)
         var reference = symbol.DeclaringSyntaxReferences.FirstOrDefault();
 
         if (reference is null)
-            return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
+        {
+            return symbol is INamedTypeSymbol metadata && MetadataSearch.IsMetadata(symbol)
+                ? Result.Ok(Metadata(metadata, parameterNames, contains))
+                : Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
+        }
 
         var node = await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
         var document = workspace.Solution.GetDocument(node.SyntaxTree);
@@ -347,4 +351,46 @@ string? contains = null)
 
         return ArgumentLine.Ids(references);
     }
+
+    private const int MetadataMembers = 100;
+
+    private static string Metadata(INamedTypeSymbol type, bool parameterNames, string? contains)
+    {
+        var members = Public(type, contains);
+        var response = new ResponseBuilder("get_type_outline", type.Name);
+        var shown = members.Capped(MetadataMembers).ToArray();
+
+        response.Summary(shown.Length, members.Count, "members", "contains=");
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{SymbolId.From(type).Value}  {MetadataSearch.Origin(type)}  metadata - no source, so no line ranges"));
+
+        foreach (var member in shown)
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{SymbolFormat.Kind(member)} {SymbolFormat.Accessibility(member)} {SymbolFormat.Describe(member, parameterNames)}"));
+        }
+
+        return response.ToString();
+    }
+
+    private static List<ISymbol> Public(INamedTypeSymbol type, string? contains)
+    {
+        var members = new List<ISymbol>();
+
+        foreach (var member in type.GetMembers())
+        {
+            if (member.DeclaredAccessibility is Accessibility.Public && Listable(member) && Wanted(member, contains))
+                members.Add(member);
+        }
+
+        return members;
+    }
+
+    private static bool Wanted(ISymbol member, string? contains) =>
+        contains is not { Length: > 0 } text || member.Name.Contains(text, StringComparison.OrdinalIgnoreCase);
+
+    private static bool Listable(ISymbol member) =>
+        !member.IsImplicitlyDeclared && member is not IMethodSymbol { AssociatedSymbol: not null };
 }

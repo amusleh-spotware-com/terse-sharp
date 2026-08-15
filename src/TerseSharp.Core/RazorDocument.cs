@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace TerseSharp.Core;
 
 public enum RazorFileKind
@@ -82,6 +84,7 @@ public sealed class RazorDocument
     public static bool IsRazor(string path) =>
         Extensions.Contains(System.IO.Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous Razor index leaf; the enclosing document cache is a synchronous enumerator, so the async ripple cannot terminate here. Removing it means an async index, not a local change.")]
     public static Result<RazorDocument> Load(string fullPath)
     {
         try

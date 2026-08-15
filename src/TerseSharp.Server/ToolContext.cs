@@ -34,13 +34,14 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     internal void Preload(Task load) => ready = ObserveAsync(load);
 
     public async Task<string> WithSymbolAsync(
-    string? workspace,
-    string? symbolId,
-    Func<LoadedWorkspace, ISymbol, Task<string>> action,
-    CancellationToken cancellationToken,
-    string? path = null,
-    Func<LoadedWorkspace, string?>? guard = null,
-    bool typesOnly = false)
+        string? workspace,
+        string? symbolId,
+        Func<LoadedWorkspace, ISymbol, Task<string>> action,
+        CancellationToken cancellationToken,
+        string? path = null,
+        Func<LoadedWorkspace, string?>? guard = null,
+        bool typesOnly = false,
+        bool referenced = false)
     {
         if (symbolId is not { Length: > 0 } requested)
             return Errors.Blank("symbolId", "symbol").Render();
@@ -61,7 +62,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
             return await AttributedAsync(lease.Workspace, async () =>
             {
-                var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, path, cancellationToken, typesOnly).ConfigureAwait(false);
+                var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, path, cancellationToken, typesOnly, referenced).ConfigureAwait(false);
 
                 return symbol.IsOk
                     ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)

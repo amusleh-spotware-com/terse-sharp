@@ -47,6 +47,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | — | `get_symbol(symbolId)` | signature, kind, accessibility, location and XML doc of one symbol |
 | **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` | `path=` resolves the name inside that file first and only falls back to the solution when the file holds no match — `get_symbol` and `get_type_outline` take it too, `symbolIds=` scopes every id in the batch, and a `path=` naming no document answers `DocumentNotFound` instead of being ignored |
 | **Navigate** | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`); production declarations first, and when the test half also matches it is folded to one `N more in test projects - scope=test` line |
+| **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` | a name **no source declaration** matches falls back to the **referenced assemblies**: `JsonSerializer` and `System.Threading.Lock` answer real signatures tagged `System.Runtime 10.0.0.0` instead of `0 symbols`/`NOT_RESOLVED`. Exact type name only - no CamelHump, no substring - and no source, so members come with no line ranges |
 | **Navigate** | a name the tests declare dozens of times | `search_symbols(query, scope: "src")` | keeps one half of the solution - `src` for the production projects, `test` for the ones referencing a test framework; an unknown value is refused rather than searching everything |
 | **Navigate** | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test`; a usage inside generated code is tagged `gen` — real, but never edit it |
 | **Navigate** | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
@@ -57,6 +58,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` | every ASP.NET Core `Map*` with the member it sits in |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` | a plain file-name substring, case-insensitive, no glob to get right; combines with `glob=`, which selects first, and a glob that matched nothing names it |
 | **Files** | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
+| **Files** | globbing a whole tree to learn its shape | `find_files(glob, depth: 2)` | everything below the 2nd path segment folds into one `src/TerseSharp.Core/**  x94 files` row - 11 rows here against 367; the count line still counts every file, and a single-match directory stays its file |
 | **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell; `glob` takes a **concrete path** as readily as a pattern, so one file's size is one call |
 | **Files** | `Bash: git ls-files` to tell a checked-in file from a scratch one | `find_files(glob, tracked: true)` | only the files git tracks, so build output and another session's untracked notes drop out; the bare `git ls-files` is denied by the guard, every flagged form is not |
 | **Files** | `Grep` in non-code files | `search_text(query)` / `search_regex(query)` | tagged `HEURISTIC` once for the whole response, not per record - these two answer nothing else; the count line counts matching **lines**, at most one per line, and a zero result proves absence only in the files it searched |
@@ -512,7 +514,8 @@ that answers nothing, and the clip always names `next: startLine=`.
    after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
    declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
    Better still, do not earn the rollback: `replace_symbol add=[…]` appends the helper in the same
-   edit. Like `usings=`, it is not held by the token; pass it again on the retry.
+   edit. **`add=`, `addTo=` and `usings=` are held with the token too**, so a retry names the token
+   and nothing else; pass any of them again only to override what is held.
    **When every new error is just a missing import, the remedy names the one-call fix**: a rollback
    whose errors are all `CS0246`/`CS0103` for names the project resolves in exactly one namespace each
    answers `remedy: retry with usings=["System.Collections.Immutable"] and the retryWith token below`.
@@ -524,9 +527,11 @@ that answers nothing, and the clip always names `next: startLine=`.
    batch: OrderRouter.Route(Order)`. Paste them into `replace_symbol symbolIds=` beside the member you
    changed: that is the only ordering that works when the callee is what moved. `dryRun` prints it
    too, and nothing is named when a caller cannot be proven.
-   **A token belongs to the workspace it was rejected in**: replaying it against another one - a
-   sibling worktree where the same symbol id resolves - is refused naming both roots, instead of
-   landing the held declaration in the wrong tree. Every diagnostic a rollback lists names its file
+   **A token belongs to the workspace it was rejected in, and to the tool that issued it**: replaying
+   it against another workspace - a sibling worktree where the same symbol id resolves - is refused
+   naming both roots, instead of landing the held declaration in the wrong tree, and replaying it with
+   the wrong edit tool is refused naming the tool that can apply what it holds, so learning that costs
+   no second call. Every diagnostic a rollback lists names its file
    **workspace-relative**, like every other record.
 6. **Truncation tells you what to do.** `<shown>/<total> <unit> truncated` is followed by
    `- narrow with <parameter>`. Follow that, rather than re-running with a bigger `maxResults` and
@@ -784,7 +789,9 @@ no project or two, and list the candidates; `InvalidArgument` naming a **missing
 parameter means the argument names were wrong, and the remedy lists the ones the tool declares; an
 `InvalidArgument` carrying a `JsonException` also names the **array** parameter it could not convert
 and quotes the ~80 characters around the offending byte, so a 9 000-character `declarations=` is
-located without re-sending it;
+located without re-sending it - and a declaration that reaches the parser and fails there is answered
+the same way, `at offset 27 of 28: public int Unused() => 7 + ;`, prefixed with `declarations[1]:`
+when the call was batched;
 `ReadOnly` means the server runs with `--read-only`.
 
 Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one outcome this server

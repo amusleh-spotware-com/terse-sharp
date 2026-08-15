@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Xml;
 using System.Xml.Linq;
 
@@ -32,6 +33,7 @@ public sealed record XamlDocument(string Path, XDocument Document, string Dialec
     public static bool IsXaml(string path) =>
         Extensions.Contains(System.IO.Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous XAML index leaf, called from the parsed-document cache every xaml_* tool shares; converting it means an async index, not a local change.")]
     public static Result<XamlDocument> Load(string fullPath)
     {
         if (!File.Exists(fullPath))

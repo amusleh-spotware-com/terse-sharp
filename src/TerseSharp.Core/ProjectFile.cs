@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Xml.Linq;
 
 namespace TerseSharp.Core;
@@ -125,6 +126,7 @@ public static class ProjectFile
         return await Save(projectPath, document, before, dryRun, verbose, "project_set_property", name + "=" + value).ConfigureAwait(false);
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous read of Directory.Packages.props inside a synchronous XML edit path; the write beside it already goes through AtomicWrite.TextAsync.")]
     private static async Task<Result<string>> AddCentralPackage(
         string projectPath,
         string centralPath,
@@ -323,6 +325,7 @@ public static class ProjectFile
         }
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous probe of one MSBuild props file from a synchronous walk up the directory tree; converting it means an async walk, not a local change.")]
     private static bool? CentralManagementSetting(string file)
     {
         try
@@ -389,6 +392,7 @@ public static class ProjectFile
         return Path.GetRelativePath(directory, Path.GetFullPath(full)).Replace('\\', '/');
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous project-file leaf shared by every project_* reader; converting it means an async XML layer, not a local change.")]
     private static XDocument? Load(string projectPath)
     {
         var full = Path.GetFullPath(projectPath);

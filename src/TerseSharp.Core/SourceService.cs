@@ -13,7 +13,11 @@ public static class SourceService
         var references = symbol.DeclaringSyntaxReferences;
 
         if (references.Length is 0)
-            return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
+        {
+            return MetadataSearch.IsMetadata(symbol)
+                ? Result.Ok(Metadata(symbol, format))
+                : Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
+        }
 
         var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value).Verbose(format.Verbose);
 
@@ -53,7 +57,7 @@ public static class SourceService
             $"{SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)}"));
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
-            $"at {SymbolFormat.Location(root, symbol)} in {symbol.ContainingNamespace?.ToDisplayString() ?? "-"}"));
+            $"at {Where(root, symbol)} in {symbol.ContainingNamespace?.ToDisplayString() ?? "-"}"));
 
         var documentation = symbol.GetDocumentationCommentXml(CultureInfo.InvariantCulture);
 
@@ -86,7 +90,7 @@ public static class SourceService
     string? path,
     CancellationToken cancellationToken)
     {
-        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken).ConfigureAwait(false);
+        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
 
         if (!resolved.IsOk)
         {
@@ -104,7 +108,7 @@ public static class SourceService
 
         if (references.Length is 0)
         {
-            response.Note("NO_SOURCE " + symbolId + "  it resolves to metadata, so this workspace holds no source for it");
+            response.Note(Metadata(resolved.Value!, format));
             return;
         }
 
@@ -141,5 +145,29 @@ public static class SourceService
         return outlined is null
             ? await OfSymbolAsync(workspace.Root, symbol, format, cancellationToken).ConfigureAwait(false)
             : Result.Ok(outlined);
+    }
+
+    private static string Where(string root, ISymbol symbol)
+    {
+        var location = SymbolFormat.Location(root, symbol);
+
+        return location is "-" && MetadataSearch.IsMetadata(symbol) ? MetadataSearch.Origin(symbol) : location;
+    }
+
+    private static string Metadata(ISymbol symbol, SourceFormat format)
+    {
+        var id = SymbolId.From(symbol).Value;
+        var response = new ResponseBuilder("get_symbol_source", id).Verbose(format.Verbose);
+        var outline = SymbolId.From(symbol as INamedTypeSymbol ?? symbol.ContainingType ?? symbol).Value;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{id}  {MetadataSearch.Origin(symbol)}  metadata - no source to show"));
+        response.Line(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)}"));
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"members: get_type_outline symbolId={outline}"));
+
+        return response.ToString();
     }
 }

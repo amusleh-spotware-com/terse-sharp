@@ -86,27 +86,28 @@ public static class TextSearchService
     }
 
     public static string FindFiles(
-            LoadedWorkspace workspace,
-            string glob,
-            int maxResults,
-            bool stamps,
-            IReadOnlySet<string>? tracked = null,
-            string? name = null)
+        LoadedWorkspace workspace,
+        string glob,
+        int maxResults,
+        bool stamps,
+        IReadOnlySet<string>? tracked = null,
+        string? name = null,
+        int depth = 0)
     {
         var files = Named(Tracked(Matched(workspace, glob), tracked), name);
+        var rows = depth > 0 ? Rolled(files, depth, stamps) : Listed(files, stamps);
         var response = new ResponseBuilder("find_files", glob);
-        var shown = files.Capped(maxResults).ToArray();
+        var shown = rows.Capped(maxResults).ToArray();
 
-        response.Summary(ResultCap.Shown(files.Count, maxResults), files.Count, "files", "a narrower glob= or maxResults=");
+        response.Summary(Covered(shown), files.Count, "files", "a narrower glob=, a smaller depth= or maxResults=");
 
-        foreach (var file in shown)
-            response.Line(stamps ? Stamped(file) : file.RelativePath);
+        foreach (var row in shown)
+            response.Line(row.Text);
 
         if (files.Count is 0 && name is not { Length: > 0 })
             response.Note("no file matched - pass name=<text> to match a file name substring instead of a glob");
 
-        if (ArgumentLine.Paths(shown.Select(file => file.RelativePath)) is { } batch)
-            response.Note(batch);
+        Batch(response, shown);
 
         return response.ToString();
     }
@@ -694,4 +695,110 @@ public static class TextSearchService
     private static int Resumed(TextMatch match, TextSearchRequest request) => request.SeveralPatterns
         ? match.At
         : match.At + Math.Max(match.Length - 1, 0);
+
+    private readonly record struct FileRow(string Text, string? Path, int Files);
+
+    private static List<FileRow> Listed(List<WorkspacePath> files, bool stamps)
+    {
+        var rows = new List<FileRow>(files.Count);
+
+        foreach (var file in files)
+            rows.Add(Row(file, stamps));
+
+        return rows;
+    }
+
+    private static List<FileRow> Rolled(List<WorkspacePath> files, int depth, bool stamps)
+    {
+        var counts = Counted(files, depth);
+        var byPrefix = counts.GetAlternateLookup<ReadOnlySpan<char>>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var folded = seen.GetAlternateLookup<ReadOnlySpan<char>>();
+        var rows = new List<FileRow>(counts.Count);
+
+        foreach (var file in files)
+        {
+            var prefix = Prefix(file.RelativePath, depth);
+
+            if (prefix.IsEmpty || byPrefix[prefix] is 1)
+                rows.Add(Row(file, stamps));
+            else if (folded.Add(prefix))
+                rows.Add(new FileRow(Rollup(prefix, byPrefix[prefix]), null, byPrefix[prefix]));
+        }
+
+        return rows;
+    }
+
+    private static Dictionary<string, int> Counted(List<WorkspacePath> files, int depth)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var byPrefix = counts.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        foreach (var file in files)
+        {
+            var prefix = Prefix(file.RelativePath, depth);
+
+            if (!prefix.IsEmpty && !byPrefix.TryAdd(prefix, 1))
+                byPrefix[prefix] += 1;
+        }
+
+        return counts;
+    }
+
+    private static ReadOnlySpan<char> Prefix(ReadOnlySpan<char> path, int depth)
+    {
+        var at = 0;
+
+        for (var segment = 0; segment < depth; segment++)
+        {
+            var next = path[at..].IndexOfAny('/', '\\');
+
+            if (next < 0)
+                return default;
+
+            at += next + 1;
+        }
+
+        return at is 0 ? default : path[..(at - 1)];
+    }
+
+    private static string Rollup(ReadOnlySpan<char> prefix, int files)
+    {
+        var buffer = prefix.Length <= MaxPrefix ? stackalloc char[MaxPrefix] : new char[prefix.Length];
+        var directory = buffer[..prefix.Length];
+
+        prefix.CopyTo(directory);
+        directory.Replace('\\', '/');
+
+        return string.Create(CultureInfo.InvariantCulture, $"{directory}/**  x{files} files");
+    }
+
+    private static FileRow Row(WorkspacePath file, bool stamps) =>
+        new(stamps ? Stamped(file) : file.RelativePath, file.RelativePath, 1);
+
+    private static int Covered(FileRow[] rows)
+    {
+        var files = 0;
+
+        foreach (var row in rows)
+            files += row.Files;
+
+        return files;
+    }
+
+    private static void Batch(ResponseBuilder response, FileRow[] rows)
+    {
+        var paths = new List<string>(rows.Length);
+
+        foreach (var row in rows)
+        {
+            if (row.Path is { } path)
+                paths.Add(path);
+        }
+
+        if (ArgumentLine.Paths(paths) is { } batch)
+            response.Note(batch);
+    }
+
+    private const int MaxPrefix = 512;
 }

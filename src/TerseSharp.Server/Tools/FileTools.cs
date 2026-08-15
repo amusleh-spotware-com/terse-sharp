@@ -161,18 +161,19 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
         cancellationToken);
 
     [McpServerTool(Name = "find_files", ReadOnly = true)]
-    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell.")]
+    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell. depth=N answers the shape of a tree instead of its files: everything below the Nth path segment folds into one src/Core/**  xN files row, and the count line still counts every file.")]
     public Task<string> FindFiles(
-            [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
-            [Description("Workspace or worktree name.")] string? workspace = null,
-            [Description("Max results (100).")] int maxResults = 0,
-            [Description("Alias for glob.")] string? pattern = null,
-            [Description("Append each listed file's UTC last-write time and byte length. Default false.")] bool stamps = false,
-            [Description("Alias for glob.")] string? query = null,
-            [Description("Alias for glob.")] string? path = null,
-            [Description("List only the files git tracks, so build output and untracked scratch files drop out. Needs a git repository. Default false.")] bool tracked = false,
-            [Description("Keep only the files whose FILE NAME contains this text, case-insensitively - no glob to get right. Used alone it searches every file; with glob= it filters what the glob selected.")] string? name = null,
-            CancellationToken cancellationToken = default)
+        [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Max results (100).")] int maxResults = 0,
+        [Description("Alias for glob.")] string? pattern = null,
+        [Description("Append each listed file's UTC last-write time and byte length. Default false.")] bool stamps = false,
+        [Description("Alias for glob.")] string? query = null,
+        [Description("Alias for glob.")] string? path = null,
+        [Description("List only the files git tracks, so build output and untracked scratch files drop out. Needs a git repository. Default false.")] bool tracked = false,
+        [Description("Keep only the files whose FILE NAME contains this text, case-insensitively - no glob to get right. Used alone it searches every file; with glob= it filters what the glob selected.")] string? name = null,
+        [Description("Fold every file below the Nth path segment into one directory row carrying its file count, so an orientation call answers the shape of the tree rather than every file in it. A directory holding a single match is still printed as that file. 0, the default, lists every file.")] int depth = 0,
+        CancellationToken cancellationToken = default)
     {
         var matcher = glob ?? pattern ?? query ?? path;
 
@@ -183,10 +184,17 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
                 "pass a glob, spelled glob or pattern or query or path, or 'name' to match a file name substring instead").Render());
         }
 
+        if (depth < 0)
+        {
+            return Task.FromResult(Errors.Invalid(
+                "'depth' was negative",
+                "pass depth=0 to list every file, or a positive segment count such as depth=2 to fold below it").Render());
+        }
+
         return context.WithWorkspaceAsync(
             workspace,
             null,
-            loaded => ListedAsync(loaded, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, cancellationToken),
+            loaded => ListedAsync(loaded, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, cancellationToken),
             semantic: false,
             cancellationToken);
     }
@@ -353,21 +361,22 @@ context.RejectWrite() is { } rejection
     private const int MaxStackPath = 512;
 
     private static async Task<string> ListedAsync(
-            LoadedWorkspace loaded,
-            string glob,
-            int maxResults,
-            bool stamps,
-            bool tracked,
-            string? name,
-            CancellationToken cancellationToken)
+        LoadedWorkspace loaded,
+        string glob,
+        int maxResults,
+        bool stamps,
+        bool tracked,
+        string? name,
+        int depth,
+        CancellationToken cancellationToken)
     {
         if (!tracked)
-            return TextSearchService.FindFiles(loaded, glob, maxResults, stamps, null, name);
+            return TextSearchService.FindFiles(loaded, glob, maxResults, stamps, null, name, depth);
 
         var known = await TrackedAsync(loaded, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
-            ? TextSearchService.FindFiles(loaded, glob, maxResults, stamps, known.Value!, name)
+            ? TextSearchService.FindFiles(loaded, glob, maxResults, stamps, known.Value!, name, depth)
             : known.Error!.Render();
     }
 

@@ -14,11 +14,12 @@ public static class SymbolLookup
     ResolveAsync(workspace, symbolId, null, cancellationToken);
 
     public static async Task<Result<ISymbol>> ResolveAsync(
-    LoadedWorkspace workspace,
-    string symbolId,
-    string? path,
-    CancellationToken cancellationToken,
-    bool typesOnly = false)
+        LoadedWorkspace workspace,
+        string symbolId,
+        string? path,
+        CancellationToken cancellationToken,
+        bool typesOnly = false,
+        bool referenced = false)
     {
         var requested = SymbolReference.Unescaped(symbolId);
 
@@ -26,20 +27,21 @@ public static class SymbolLookup
             return await ByIdAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
 
         if (path is not { Length: > 0 } scope)
-            return await ByNameAsync(workspace, requested, typesOnly, cancellationToken).ConfigureAwait(false);
+            return await ByNameAsync(workspace, requested, typesOnly, referenced, cancellationToken).ConfigureAwait(false);
 
         return Typed(await InFileAsync(workspace, requested, scope, cancellationToken).ConfigureAwait(false), typesOnly)
-            ?? await ByNameAsync(workspace, requested, typesOnly, cancellationToken).ConfigureAwait(false);
+            ?? await ByNameAsync(workspace, requested, typesOnly, referenced, cancellationToken).ConfigureAwait(false);
     }
 
     private static Result<ISymbol>? Typed(Result<ISymbol>? found, bool typesOnly) =>
         typesOnly && found is { IsOk: true, Value: not INamedTypeSymbol } ? null : found;
 
     private static async Task<Result<ISymbol>> ByNameAsync(
-LoadedWorkspace workspace,
-string text,
-bool typesOnly,
-CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        string text,
+        bool typesOnly,
+        bool referenced,
+        CancellationToken cancellationToken)
     {
         if (SymbolReference.Parse(text) is not { } query)
             return Unparsed(text);
@@ -56,11 +58,12 @@ CancellationToken cancellationToken)
         var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
 
         if (!typesOnly)
-            return Chosen(text, matches, found);
+            return await Referenced(workspace, query, Chosen(text, matches, found), referenced, cancellationToken).ConfigureAwait(false);
 
         var types = matches.Where(symbol => symbol is INamedTypeSymbol).ToArray();
+        var chosen = OnlyTypes(text, types, matches.Length - types.Length) ?? Chosen(text, types, found);
 
-        return OnlyTypes(text, types, matches.Length - types.Length) ?? Chosen(text, types, found);
+        return await Referenced(workspace, query, chosen, referenced, cancellationToken).ConfigureAwait(false);
     }
 
     private static Result<ISymbol>? OnlyTypes(string text, ISymbol[] types, int dropped) => types.Length is 0 && dropped > 0
@@ -270,4 +273,27 @@ CancellationToken cancellationToken)
         : null;
 
     private const int MaxNearestMembers = 5;
+
+    private static async Task<Result<ISymbol>> Referenced(
+        LoadedWorkspace workspace,
+        SymbolQuery query,
+        Result<ISymbol> source,
+        bool referenced,
+        CancellationToken cancellationToken)
+    {
+        if (!referenced || source.Error is not { Code: TerseErrorCode.SymbolNotFound } || query.Member is not { Length: > 0 } name)
+            return source;
+
+        var matches = await MetadataSearch.FindAsync(workspace, name, 2, cancellationToken).ConfigureAwait(false);
+
+        return matches.Found.Count is 1 && Qualifies(matches.Found[0], query.ContainingType)
+            ? Result.Ok<ISymbol>(matches.Found[0])
+            : source;
+    }
+
+    private static bool Qualifies(INamedTypeSymbol type, string? qualifier) =>
+        qualifier is not { Length: > 0 } wanted
+        || type.ContainingNamespace?.ToDisplayString() is { } space
+        && (string.Equals(space, wanted, StringComparison.Ordinal)
+            || space.EndsWith("." + wanted, StringComparison.Ordinal));
 }

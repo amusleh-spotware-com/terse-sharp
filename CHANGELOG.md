@@ -16,10 +16,58 @@ comma-separated positions before its `: message`. `cleanup verify=true` and `for
 the step to each named file (`Foo.cs  whitespace`). `changed_files` folds a directory contributing more
 than five untracked files into a single `dir/**` row, whose first token is a glob rather than a path -
 it is excluded from the `paths=[...]` batch line for exactly that reason. `project_properties` answers
-MSBuild's evaluated properties and appends the file that set each. Under SemVer this is a breaking
-change expressed, per major-version-zero, as a MINOR bump.
+MSBuild's evaluated properties and appends the file that set each. **The advertised tool schemas no
+longer carry a `default` key**, and a name that matches no source declaration is answered from the
+referenced assemblies instead of `0 symbols`. Under SemVer this is a breaking change expressed, per
+major-version-zero, as a MINOR bump.
 
 ### Added
+
+- **`find_files depth=N` answers the shape of a tree instead of its files.** Everything below the
+  Nth path segment folds into one `src/TerseSharp.Core/**  x94 files` row, the way `changed_files`
+  folds an untracked directory; the count line still counts every file, a directory holding a single
+  match is still printed as that file, and a folded row is a glob rather than a path, so it is left
+  out of the closing `paths=[...]` batch line. Measured on this repository: `find_files
+  glob=**/*.cs depth=2` answers 11 rows where the flat listing answers 367. Closes `I263`.
+- **A name no source declaration matches is now resolved against the workspace's referenced
+  assemblies.** `search_symbols query=JsonSerializer` answered `0 symbols` and
+  `get_type_outline symbolId=System.Threading.Lock` answered `NOT_RESOLVED`, so every question about
+  a framework or NuGet API fell back to the model's own memory - measured at a 25-38 % deprecated-API
+  rate in LLM completion. `search_symbols` now falls back to the referenced assemblies when nothing
+  in source matched, `get_type_outline` lists a metadata type's public members instead of claiming
+  the symbol does not exist, `get_symbol_source` answers the signature plus a `get_type_outline`
+  steer rather than `SymbolNotFound`, and `get_symbol` names the assembly and version
+  (`at System.Runtime 10.0.0.0 in System.Threading`) where it used to print `at -`. The metadata half
+  matches the type name exactly - no CamelHump, no substring - and no body is decompiled. A qualified
+  name is checked against the type's own namespace, so `System.Collections.StringBuilder` is refused
+  rather than answered with `System.Text`'s; the outline names the id that replied; the listing
+  reports what it truncated; and the fallback is wired to the four read tools only, so a name only
+  metadata matches still answers a mutating tool on the name it was given. Closes `I264`.
+- **The async and sync-over-async hard gates are now compiled, not asserted.**
+  `Microsoft.CodeAnalysis.BannedApiAnalyzers` plus a checked-in `src/BannedSymbols.txt` fail the build
+  on `.Result`, `Task.Wait()`, `GetAwaiter().GetResult()`, `Thread.Sleep`, the synchronous
+  `File.ReadAll*`/`ReadLines`/`WriteAll*`/`AppendAllText`, `StreamReader.ReadToEnd` and
+  `XDocument.Load(path)`, each entry naming the replacement to use instead. The rule was written in `CLAUDE.md` and unenforced: 14
+  synchronous `File` sites survived in `src/` and the agent emitted 68 more in one measured week. The
+  18 pre-existing sites are now `[SuppressMessage]` attributes carrying a written justification each -
+  a checked-in, reviewable set ratcheted by `BannedApiTests`, which also asserts every banned symbol
+  names its replacement. It compiles the sync-over-async and synchronous-file halves of the gate, not
+  all of it: a `FileStream` without `FileOptions.Asynchronous`, and `SemaphoreSlim.Wait`, are still
+  prose, and the census row says so. Closes `I265`.
+- **A `retryWith` token now holds `add=`, `addTo=` and `usings=`, and a replay by the wrong edit tool
+  names the tool that can apply it.** The token held only the rejected declarations, so 3 of the 4
+  retries one measured task issued had to re-send the whole payload anyway, and a `replace_symbol_body`
+  given a `replace_symbol` token spent a call learning that tokens are per-tool. The retry is now one
+  call carrying nothing but the token; passing `add=`/`usings=` again overrides what is held, and the
+  refusal reads `retryWith=r3 was issued by replace_symbol, not by replace_symbol_body`. Closes
+  `I267`.
+- **A declaration that does not parse now quotes the text around the fault and names which
+  `declarations=` entry it came from.** `ERROR InvalidArgument: the declaration did not parse: Syntax
+  error, '}' expected` named no position, so two ~2 500-character payloads were re-sent blind to find
+  a JSON-escaping fault. The message now ends `at offset 27 of 28: public int Unused() => 7 + ;` -
+  the same ~80-character window the `JsonException` path already quotes - and a batched
+  `replace_symbol` prefixes every entry's failure with `declarations[1]:`, so the faulty entry never
+  has to be guessed. Closes `I268`.
 
 - **`read_text columns="Finding,Tool"` projects a markdown table down to the named columns.** A file
   whose whole content is two long tables has nothing `headings=true` can narrow, so "which rows does
@@ -60,6 +108,13 @@ change expressed, per major-version-zero, as a MINOR bump.
 
 ### Changed
 
+- **The advertised schemas no longer carry a `default` key.** Every parameter's default is already
+  stated in its own description ("Default false.", "Max results (100)."), so the JSON copy was paid
+  for on every `tools/list` and read by nobody: the server binds from the C# default either way.
+  Measured on this repository's own 88-tool surface: **107 933 -> 105 261 characters**, 2 672 fewer
+  (~668 tokens), and `TokenBudgetE2ETests.TheAdvertisedToolPayload_StaysWithinItsBudget` drops from
+  26 600 to 25 900 tokens so it cannot be given back. Closes `I266`, whose proposed ~40 % is refuted
+  by the measurement recorded against it in `IMPROVEMENTS.md`.
 - **`analyze` folds findings that share an id, a severity and a message onto one line carrying every
   position.** 14 of 19 records for one file were the same `IDE0058` message repeated with a full path
   each; the positions are kept, because they are the fix list, capped at 20 per line with `+N more` so
@@ -112,6 +167,13 @@ change expressed, per major-version-zero, as a MINOR bump.
 
 ### Fixed
 
+- **`workspace_status` reported the *uncompacted* advertised payload until a second `tools/list`
+  arrived.** Its measuring filter was registered innermost, so the first listing was measured before
+  `SchemaCompactor` had run; the compactor then mutated the shared `Tool` instances, and every later
+  listing agreed by accident. The number now comes from the outermost filter, so it is what the
+  client actually receives on the first request and on every one after it. Found by
+  `TokenBudgetE2ETests.TheAdvertisedToolPayload_StaysWithinItsBudget`, whose `reported == measured`
+  assertion only fires on a server that has served exactly one listing.
 - **MSBuild project evaluation is serialized across the process.** `ProjectGlobs` and the new
   `ProjectEvaluation` both load a `ProjectCollection`, and MSBuild's project-root-element cache is not
   safe for concurrent loads of the same project; `project_properties` runs its evaluation off the

@@ -6,17 +6,19 @@ namespace TerseSharp.UnitTests;
 public sealed class SchemaCompactorTests
 {
     [Fact]
-    public void Compact_DropsANullDefaultAndKeepsEveryOtherDefault()
+    public void Compact_DropsEveryDefaultAndKeepsTheRestOfTheProperty()
     {
         var compacted = Compact("""
-            {"properties":{"a":{"type":"string","default":null},"b":{"type":"boolean","default":false},"c":{"type":"integer","default":600}}}
+            {"properties":{"a":{"type":"string","default":null},"b":{"type":"boolean","default":false},"c":{"type":"integer","default":600,"description":"kept"}}}
             """);
 
         var properties = compacted.GetProperty("properties");
 
         Assert.False(properties.GetProperty("a").TryGetProperty("default", out _));
-        Assert.False(properties.GetProperty("b").GetProperty("default").GetBoolean());
-        Assert.Equal(600, properties.GetProperty("c").GetProperty("default").GetInt32());
+        Assert.False(properties.GetProperty("b").TryGetProperty("default", out _));
+        Assert.False(properties.GetProperty("c").TryGetProperty("default", out _));
+        Assert.Equal("integer", properties.GetProperty("c").GetProperty("type").GetString());
+        Assert.Equal("kept", properties.GetProperty("c").GetProperty("description").GetString());
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -407,6 +408,7 @@ public sealed class LoadedWorkspace : IDisposable
         Sync.Dispose();
         Indexes.Dispose();
     }
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "The one-shot lazy bootstrap read the async gate names by name: the solution file is read once to learn the repository's dominant line ending.")]
     private static string DetectLineEnding(string solutionPath)
     {
         try

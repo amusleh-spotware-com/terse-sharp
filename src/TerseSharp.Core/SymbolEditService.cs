@@ -501,13 +501,17 @@ public static class SymbolEditService
         CancellationToken cancellationToken)
     {
         var planned = new PlannedEdit[symbolIds.Count];
+
         for (var index = 0; index < planned.Length; index++)
         {
             var one = await OneAsync(workspace, symbolIds[index], declarations[index], cancellationToken).ConfigureAwait(false);
+
             if (!one.IsOk)
-                return Result.Fail<PlannedEdit[]>(one.Error!);
+                return Result.Fail<PlannedEdit[]>(Attributed(one.Error!, index));
+
             planned[index] = one.Value;
         }
+
         return Result.Ok(planned);
     }
 
@@ -691,6 +695,13 @@ public static class SymbolEditService
         addTo is { Length: > 0 } wanted
             ? "addTo=" + wanted + " names none of the containing types of these targets: " + string.Join(", ", types.Select(Named))
             : "add= appends to the type that contains the replaced member, and these targets do not share one: " + string.Join(", ", types.Select(Named));
+
+    private static TerseError Attributed(TerseError error, int index) => error with
+    {
+        Message = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{(error.Code is TerseErrorCode.InvalidArgument ? "declarations" : "symbolIds")}[{index}]: {error.Message}"),
+    };
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

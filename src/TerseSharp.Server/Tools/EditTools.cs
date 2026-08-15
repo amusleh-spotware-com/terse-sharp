@@ -31,11 +31,12 @@ public sealed class EditTools(ToolContext context)
 
         var target = held is null ? symbolId ?? symbol : Slot(held.Targets, 0);
         var text = held is null ? body : First(held.Payloads, body);
+        var imports = Kept(usings, held?.Usings);
 
         return Supplied(workspace, target, text, "body", (loaded, resolved) => SymbolEditService.ReplaceBodyAsync(
-            loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, usings), cancellationToken),
+            loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, imports), cancellationToken),
             cancellationToken,
-            new Carry("replace_symbol_body", [target ?? string.Empty], [text]),
+            new Carry("replace_symbol_body", [target ?? string.Empty], [text], Usings: imports),
             held?.Root);
     }
 
@@ -68,13 +69,16 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "replace_symbol"));
 
-        var options = Options("replace_symbol", dryRun, allowErrors, verbose, usings, add, addTo);
+        var imports = Kept(usings, held?.Usings);
+        var helpers = Kept(add, held?.Add);
+        var container = addTo ?? held?.AddTo;
+        var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container);
 
         if (held is { Targets.Count: > 1 })
-            return Batched(workspace, [.. held.Targets], [.. held.Payloads], options, cancellationToken, held.Root);
+            return Batched(workspace, [.. held.Targets], [.. held.Payloads], options, cancellationToken, held.Root, helpers, container, imports);
 
         if (held is null && (symbolIds, declarations) is not (null, null))
-            return Batched(workspace, symbolIds ?? [], declarations ?? [], options, cancellationToken);
+            return Batched(workspace, symbolIds ?? [], declarations ?? [], options, cancellationToken, null, helpers, container, imports);
 
         var target = held is null ? symbolId ?? symbol : Slot(held.Targets, 0);
         var text = held is null ? declaration : First(held.Payloads, declaration);
@@ -82,7 +86,7 @@ public sealed class EditTools(ToolContext context)
         return Supplied(workspace, target, text, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
             loaded, resolved, text, options, cancellationToken),
             cancellationToken,
-            new Carry("replace_symbol", [target ?? string.Empty], [text]),
+            new Carry("replace_symbol", [target ?? string.Empty], [text], helpers, container, imports),
             held?.Root);
     }
     [McpServerTool(Name = "add_member")]
@@ -111,8 +115,9 @@ public sealed class EditTools(ToolContext context)
         var container = held is null ? typeSymbolId ?? symbol : Slot(held.Targets, 0);
         var file = held is null ? path : Slot(held.Targets, 1);
         var text = held is null ? declaration : First(held.Payloads, declaration);
+        var imports = Kept(usings, held?.Usings);
 
-        return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose, usings), cancellationToken, held?.Root);
+        return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose, imports), cancellationToken, held?.Root, imports);
     }
 
     private Task<string> Added(
@@ -122,15 +127,16 @@ public sealed class EditTools(ToolContext context)
         string declaration,
         EditOptions options,
         CancellationToken cancellationToken,
-        string? heldRoot = null) => (typeSymbolId, path) switch
+        string? heldRoot = null,
+        string[]? usings = null) => (typeSymbolId, path) switch
         {
             ({ Length: > 0 }, { Length: > 0 }) => Task.FromResult(Errors.Invalid(
                 "both a type symbol id and a path were passed, and they name different containers",
                 "pass typeSymbolId to add members to a type, or path to add namespace-level types to a file - not both").Render()),
-            (_, { Length: > 0 } file) when declaration is { Length: > 0 } => AddToFile(workspace, file, declaration, options, cancellationToken, heldRoot),
+            (_, { Length: > 0 } file) when declaration is { Length: > 0 } => AddToFile(workspace, file, declaration, options, cancellationToken, heldRoot, usings),
             (_, { Length: > 0 }) => Task.FromResult(Errors.Blank("declaration").Render()),
             _ => Supplied(workspace, typeSymbolId, declaration, "declaration", (loaded, resolved) => SymbolEditService.AddMemberAsync(
-                loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration]), heldRoot, typesOnly: true),
+                loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration], Usings: usings), heldRoot, typesOnly: true),
         };
 
     private Task<string> AddToFile(
@@ -139,10 +145,11 @@ public sealed class EditTools(ToolContext context)
         string declaration,
         EditOptions options,
         CancellationToken cancellationToken,
-        string? heldRoot = null)
+        string? heldRoot = null,
+        string[]? usings = null)
     {
         var rejection = context.RejectWrite();
-        var carry = new Carry("add_member", [string.Empty, path], [declaration]);
+        var carry = new Carry("add_member", [string.Empty, path], [declaration], Usings: usings);
 
         return rejection is not null
             ? Task.FromResult(rejection)
@@ -226,10 +233,13 @@ public sealed class EditTools(ToolContext context)
         string[] declarations,
         EditOptions options,
         CancellationToken cancellationToken,
-        string? heldRoot = null)
+        string? heldRoot = null,
+        string[]? add = null,
+        string? addTo = null,
+        string[]? usings = null)
     {
         var rejection = context.RejectWrite();
-        var carry = new Carry("replace_symbol", symbolIds, declarations);
+        var carry = new Carry("replace_symbol", symbolIds, declarations, add, addTo, usings);
 
         return rejection is not null
             ? Task.FromResult(rejection)
@@ -241,9 +251,15 @@ public sealed class EditTools(ToolContext context)
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous CompileRegression, e.g. r3. The rejected declaration is held by the server, so a retry names the token instead of re-sending the text; combine it with allowErrors=true, or send the missing callee first and then retry. usings= is NOT held with it - pass it again on the retry. The token is bound to the workspace the edit was rejected in: a replay that resolves to another one is refused instead of landing there.";
+    private const string RetryHelp = "Token from a previous CompileRegression, e.g. r3. The rejected declaration is held by the server together with its add= and usings=, so a retry names the token instead of re-sending any of them; pass either again to override what is held, combine it with allowErrors=true, or send the missing callee first and then retry. The token is bound to the workspace the edit was rejected in and to the tool that issued it: a replay that resolves to another workspace is refused instead of landing there, and a replay by the wrong edit tool is refused naming the tool that can apply it.";
 
-    private readonly record struct Carry(string? Tool, string[]? Targets, string[]? Payloads);
+    private readonly record struct Carry(
+        string? Tool,
+        string[]? Targets,
+        string[]? Payloads,
+        string[]? Add = null,
+        string? AddTo = null,
+        string[]? Usings = null);
 
     private static string Carried(Result<string> result, Carry carry, string root)
     {
@@ -253,8 +269,9 @@ public sealed class EditTools(ToolContext context)
         var error = result.Error!;
 
         return carry.Tool is { Length: > 0 } tool && error.Code is TerseErrorCode.CompileRegression
-            ? error.Render() + "\nretryWith=" + RejectedEdits.Remember(root, tool, carry.Targets ?? [], carry.Payloads ?? [])
-                + "  the rejected text is held, so the retry names the token instead of re-sending it"
+            ? error.Render() + "\nretryWith=" + RejectedEdits.Remember(
+                root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings)
+                + "  the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them"
             : error.Render();
     }
 
@@ -265,8 +282,12 @@ public sealed class EditTools(ToolContext context)
         : null;
 
     private static string Unknown(string token, string tool) => Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"retryWith={token} names no held rejection of {tool}"),
-        "re-send the text; the server holds only the last 8 rejected edits of this process").Render();
+        RejectedEdits.Recall(token) is { } issued
+            ? string.Create(CultureInfo.InvariantCulture, $"retryWith={token} was issued by {issued.Tool}, not by {tool}")
+            : string.Create(CultureInfo.InvariantCulture, $"retryWith={token} names no held rejection of {tool}"),
+        RejectedEdits.Recall(token) is { } held
+            ? string.Create(CultureInfo.InvariantCulture, $"replay it with {held.Tool}, which is the tool that can apply what it holds")
+            : "re-send the text; the server holds only the last 8 rejected edits of this process").Render();
 
 
     private static RejectedEdit? Held(string? retryWith, string tool) =>
@@ -282,7 +303,7 @@ public sealed class EditTools(ToolContext context)
     private static string? Slot(IReadOnlyList<string> targets, int index) =>
         index < targets.Count && targets[index] is { Length: > 0 } value ? value : null;
 
-    private const string UsingsHelp = "Pass usings to add the namespaces this declaration needs in the SAME compile-gated edit. Replaces one edit_text force=true on the file header plus one retryWith after a CS0246 rollback. Each entry is a namespace such as System.Collections.Immutable; one already present is ignored, an entry that is not a namespace is refused by name, and a new directive is inserted at its sorted position without reordering the ones already there. It is not carried by a retryWith token - pass it again on the retry.";
+    private const string UsingsHelp = "Pass usings to add the namespaces this declaration needs in the SAME compile-gated edit. Replaces one edit_text force=true on the file header plus one retryWith after a CS0246 rollback. Each entry is a namespace such as System.Collections.Immutable; one already present is ignored, an entry that is not a namespace is refused by name, and a new directive is inserted at its sorted position without reordering the ones already there. It is carried by a retryWith token, so a retry need not re-send it.";
 
     private static string? RejectedUsings(string[]? usings)
     {
@@ -317,4 +338,8 @@ public sealed class EditTools(ToolContext context)
 
         return null;
     }
+
+    private static string[]? Kept(string[]? supplied, IReadOnlyList<string>? held) => supplied is not null
+        ? (supplied.Length is 0 ? null : supplied)
+        : held is { Count: > 0 } ? [.. held] : null;
 }

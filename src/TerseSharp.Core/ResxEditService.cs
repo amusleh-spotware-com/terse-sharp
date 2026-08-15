@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -609,6 +610,7 @@ public static class ResxEditService
             $"'{key}' is still referenced in {usages.Count} place(s): {string.Join(", ", usages.Take(5).Select(usage => usage.Relative + ":" + usage.Line.ToString(CultureInfo.InvariantCulture)))}"),
         "remove the references first, or pass force=true");
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous read inside the resx rewrite path, which is a synchronous projection over the family set. Removing it means an async index, not a local change.")]
     private static string? Read(string path)
     {
         try

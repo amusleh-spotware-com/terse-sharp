@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -190,9 +191,11 @@ public static class ClientRegistrar
         return created;
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "terse install reads the client settings file once from a synchronous CLI command, outside the request path.")]
     private static JsonObject Load(string path) =>
         File.Exists(path) && JsonNode.Parse(File.ReadAllText(path)) is JsonObject parsed ? parsed : [];
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "terse install reads the client settings file once from a synchronous CLI command, outside the request path.")]
     private static JsonObject? Parse(string path)
     {
         try

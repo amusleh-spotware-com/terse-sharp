@@ -81,7 +81,8 @@ CancellationToken cancellationToken = default) =>
 context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) =>
     Unwrap(await OutlineService.TypeAsync(loaded, resolved, signatures, ids ?? "short", cancellationToken, parameterNames, contains).ConfigureAwait(false)),
     cancellationToken,
-    path);
+    path,
+    referenced: true);
 
     [McpServerTool(Name = "get_symbol", ReadOnly = true)]
     [Description("Signature, kind, accessibility, location and XML doc of one symbol. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
@@ -93,7 +94,7 @@ context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) 
     [Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
     CancellationToken cancellationToken = default) =>
     context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-        Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken, path);
+        Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken, path, referenced: true);
 
     [McpServerTool(Name = "get_symbol_source", ReadOnly = true)]
     [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
@@ -112,7 +113,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
     {
         [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
         [var only] => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
-            Unwrap(await SourceService.OfSymbolAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken, path),
+            Unwrap(await SourceService.OfSymbolAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken, path, referenced: true),
         _ => context.WithWorkspaceAsync(
             workspace,
             path,
@@ -217,6 +218,10 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken, foldTests: true).ConfigureAwait(false);
         var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
         var declared = scope is "test" ? 0 : components.Count;
+
+        if (declared + found.Total is 0)
+            return await ReferencedAsync(workspace, query, maxResults, cancellationToken).ConfigureAwait(false);
+
         var budget = ResultCap.Shown(declared + found.Total, maxResults);
         var shownComponents = Math.Min(declared, budget);
         var shownSymbols = Math.Min(found.Ranked.Count, budget - shownComponents);
@@ -306,4 +311,29 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
     private static string Outlined(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)
         ? string.Create(CultureInfo.InvariantCulture, $"{(answer.Contains("DocumentNotFound", StringComparison.Ordinal) ? "NOT_FOUND" : "FAILED")} {path}\n{answer}")
         : string.Create(CultureInfo.InvariantCulture, $"{path}\n{answer}");
+
+    private static async Task<string> ReferencedAsync(
+        LoadedWorkspace workspace,
+        string query,
+        int maxResults,
+        CancellationToken cancellationToken)
+    {
+        var cap = Cap(maxResults, 100);
+        var matches = await MetadataSearch.FindAsync(workspace, query, cap, cancellationToken, exhaustive: true).ConfigureAwait(false);
+        var response = new ResponseBuilder("search_symbols", query);
+
+        response.Summary(matches.Found.Count, matches.Total, "symbols", "a narrower query= or maxResults=");
+
+        if (matches.Total > 0)
+            response.Note("from referenced assemblies - no source declaration matched; the name must match exactly");
+
+        foreach (var type in matches.Found)
+        {
+            response.Line(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{MetadataSearch.Origin(type)}  EXACT  {SymbolId.From(type).Value}  {SymbolFormat.Kind(type)} {SymbolFormat.Accessibility(type)} {SymbolFormat.Describe(type)}"));
+        }
+
+        return response.ToString();
+    }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -77,6 +78,7 @@ public static class ResxUsageService
         _ => "member",
     };
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Lazily enumerated lines feeding a synchronous LINQ scan; the async overload would materialize every file of the workspace at once.")]
     private static IEnumerable<string> Lines(string file)
     {
         try

@@ -20,15 +20,17 @@ public static class MemberDeclaration
 
         var errors = parsed.GetDiagnostics().Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error).ToArray();
 
-        return errors.Length is 0 ? Result.Ok(parsed) : Result.Fail<MemberDeclarationSyntax>(Malformed(errors));
+        return errors.Length is 0 ? Result.Ok(parsed) : Result.Fail<MemberDeclarationSyntax>(Malformed(errors, declaration));
     }
 
     private static TerseError Trailing(string trailing) => Errors.Invalid(
         "the declaration is not exactly one member; it is followed by " + Excerpt(trailing),
         "pass one complete member declaration; call the tool once per member");
 
-    private static TerseError Malformed(Diagnostic[] errors) => Errors.Invalid(
-        "the declaration did not parse: " + string.Join("; ", errors.Take(3).Select(diagnostic => diagnostic.GetMessage(CultureInfo.InvariantCulture))),
+    private static TerseError Malformed(Diagnostic[] errors, string declaration) => Errors.Invalid(
+        "the declaration did not parse: "
+            + string.Join("; ", errors.Take(3).Select(diagnostic => diagnostic.GetMessage(CultureInfo.InvariantCulture)))
+            + Where(declaration, errors[0].Location.SourceSpan.Start),
         "pass a complete, syntactically valid member declaration");
 
     private static string Excerpt(string trailing) =>
@@ -47,7 +49,7 @@ public static class MemberDeclaration
                 return Result.Fail<MemberDeclarationSyntax[]>(Unparsed());
 
             if (Fatal(parsed) is { Length: > 0 } errors)
-                return Result.Fail<MemberDeclarationSyntax[]>(Malformed(errors));
+                return Result.Fail<MemberDeclarationSyntax[]>(Malformed(errors, remaining));
 
             members.Add(parsed);
             remaining = remaining[parsed.FullSpan.End..];
@@ -138,4 +140,25 @@ public static class MemberDeclaration
         for (var line = span.Start.Line + 1; line <= span.End.Line; line++)
             inside.Add(line);
     }
+
+    private const int Window = 40;
+
+    private static string Where(string declaration, int at)
+    {
+        if (at < 0 || at > declaration.Length)
+            return string.Empty;
+
+        var from = Math.Max(0, at - Window);
+        var to = Math.Min(declaration.Length, at + Window);
+        var head = from > 0 ? "..." : string.Empty;
+        var tail = to < declaration.Length ? "..." : string.Empty;
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $" at offset {at} of {declaration.Length}: {head}{Flattened(declaration[from..to])}{tail}");
+    }
+
+    private static string Flattened(string excerpt) => excerpt
+        .Replace("\r", string.Empty, StringComparison.Ordinal)
+        .Replace("\n", "\\n", StringComparison.Ordinal);
 }

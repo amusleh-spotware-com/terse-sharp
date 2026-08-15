@@ -79,7 +79,7 @@ public static class SchemaCompactor
 
     private static void WriteProperty(JsonProperty property, Utf8JsonWriter writer)
     {
-        if (property.Value.ValueKind is JsonValueKind.Null && property.NameEquals(Default))
+        if (property.NameEquals(Default))
             return;
 
         if (Union(property) is { } single)

@@ -1,6 +1,14 @@
 namespace TerseSharp.Core;
 
-public sealed record RejectedEdit(string Token, string Root, string Tool, IReadOnlyList<string> Targets, IReadOnlyList<string> Payloads);
+public sealed record RejectedEdit(
+    string Token,
+    string Root,
+    string Tool,
+    IReadOnlyList<string> Targets,
+    IReadOnlyList<string> Payloads,
+    IReadOnlyList<string> Add,
+    string? AddTo,
+    IReadOnlyList<string> Usings);
 
 public static class RejectedEdits
 {
@@ -12,13 +20,20 @@ public static class RejectedEdits
 
     private static int counter;
 
-    public static string Remember(string root, string tool, IReadOnlyList<string> targets, IReadOnlyList<string> payloads)
+    public static string Remember(
+        string root,
+        string tool,
+        IReadOnlyList<string> targets,
+        IReadOnlyList<string> payloads,
+        IReadOnlyList<string>? add = null,
+        string? addTo = null,
+        IReadOnlyList<string>? usings = null)
     {
         lock (Gate)
         {
             var token = "r" + (++counter).ToString(CultureInfo.InvariantCulture);
 
-            Held.Enqueue(new RejectedEdit(token, root, tool, targets, payloads));
+            Held.Enqueue(new RejectedEdit(token, root, tool, targets, payloads, add ?? [], addTo, usings ?? []));
 
             while (Held.Count > Capacity)
                 Held.Dequeue();

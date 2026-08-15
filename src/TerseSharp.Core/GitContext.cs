@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace TerseSharp.Core;
 
 public sealed record GitContext(string Branch, string WorktreeName)
@@ -21,6 +23,7 @@ public sealed record GitContext(string Branch, string WorktreeName)
         return Unknown;
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "One-shot bootstrap read of .git/HEAD at workspace load, outside the request path.")]
     private static string ReadBranch(string gitPath)
     {
         var headFile = Directory.Exists(gitPath) ? Path.Combine(gitPath, "HEAD") : ResolveLinkedHead(gitPath);
@@ -33,6 +36,7 @@ public sealed record GitContext(string Branch, string WorktreeName)
         return head.StartsWith("ref: refs/heads/", StringComparison.Ordinal) ? head[16..] : head;
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "One-shot bootstrap read of a linked worktree's .git file at workspace load, outside the request path.")]
     private static string? ResolveLinkedHead(string gitFile)
     {
         var content = File.ReadAllText(gitFile).Trim();

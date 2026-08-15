@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -39,6 +40,7 @@ public static partial class TestResultParser
 
     private static bool Named(string value) => value.Length > 0;
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous read of a .trx the test run has already finished writing, off the request path.")]
     private static XDocument? Load(string path)
     {
         try

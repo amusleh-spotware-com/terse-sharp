@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace TerseSharp.Core;
 
 public sealed class ResxIndex
@@ -45,6 +47,7 @@ public sealed class ResxIndex
             names.Remove(path);
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous .resx index leaf, called from the parsed-document cache that every resx tool shares. Removing it means an async index, not a local change.")]
     private static Result<ResxDocument> Parse(string path)
     {
         string text;

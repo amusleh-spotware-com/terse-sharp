@@ -1192,4 +1192,215 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("gate=semantic", status, StringComparison.Ordinal);
         Assert.Contains("gate=semantic", edited, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindFiles_WithDepth_FoldsEverythingBelowTheNthSegmentIntoOneRow()
+    {
+        var flat = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs" });
+        var rolled = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["depth"] = 2 });
+        var top = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["depth"] = 1 });
+        var counted = flat[..flat.IndexOf('\n', StringComparison.Ordinal)];
+
+        Assert.StartsWith(counted, rolled, StringComparison.Ordinal);
+        Assert.StartsWith(counted, top, StringComparison.Ordinal);
+        Assert.Contains("src/Fixture.Trading/**  x22 files", rolled, StringComparison.Ordinal);
+        Assert.Contains("src/**  x22 files", top, StringComparison.Ordinal);
+        Assert.Contains("DeliberateOutcomesTests.cs", rolled, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.cs", rolled, StringComparison.Ordinal);
+        Assert.True(rolled.Length * 4 < flat.Length, rolled);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithANegativeDepth_IsRefusedNamingTheRange()
+    {
+        var text = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["depth"] = -1 });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("depth", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WhenNoSourceDeclarationMatches_AnswersFromTheReferencedAssemblies()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["query"] = "StringBuilder" });
+
+        Assert.Contains("T:System.Text.StringBuilder", text, StringComparison.Ordinal);
+        Assert.Contains("from referenced assemblies", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("0 symbols", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_OnATypeFromAReferencedAssembly_ListsItsMembersInsteadOfFailing()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:System.Text.StringBuilder" });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("Append", text, StringComparison.Ordinal);
+        Assert.Contains("metadata - no source", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_ByBareName_ResolvesAgainstTheReferencedAssemblies()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "StringBuilder" });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("Append", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_OnAMemberFromAReferencedAssembly_NamesTheAssemblyInsteadOfClaimingItIsMissing()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "M:System.Text.StringBuilder.AppendLine" });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("metadata - no source", text, StringComparison.Ordinal);
+        Assert.Contains("get_type_outline", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbol_OnAMetadataSymbol_NamesTheAssemblyAndVersion()
+    {
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "T:System.Text.StringBuilder" });
+
+        Assert.Contains("class public StringBuilder", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("at - in", text, StringComparison.Ordinal);
+        Assert.Contains("in System.Text", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TheAdvertisedSchemas_CarryNoDefaultKey()
+    {
+        var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var carrying = surface
+            .Where(tool => tool.JsonSchema.GetRawText().Contains("\"default\"", StringComparison.Ordinal))
+            .Select(tool => tool.Name)
+            .ToArray();
+
+        Assert.NotEmpty(surface);
+        Assert.Empty(carrying);
+        Assert.Contains(surface, tool => tool.JsonSchema.GetRawText().Contains("\"verbose\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RetryWith_HoldsTheUsingsAndTheAddedHelpersOfTheRejectedEdit()
+    {
+        var rejected = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderService.Unused",
+            ["declaration"] = "public int Unused() => Helper() + ImmutableArray<int>.Empty.Length + Absent();",
+            ["add"] = new[] { "private static int Helper() => 7;" },
+            ["usings"] = new[] { "System.Collections.Immutable" },
+        });
+
+        Assert.StartsWith("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+
+        var token = Token(rejected);
+        var replayed = await server.CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = token,
+            ["allowErrors"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("dryRun", replayed, StringComparison.Ordinal);
+        Assert.Contains("using System.Collections.Immutable;", replayed, StringComparison.Ordinal);
+        Assert.Contains("private static int Helper() => 7;", replayed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RetryWith_AgainstTheWrongEditToolNamesTheOneThatHoldsIt()
+    {
+        var rejected = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderService.Unused",
+            ["declaration"] = "public int Unused() => Absent();",
+        });
+
+        Assert.StartsWith("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+
+        var wrong = await server.CallAsync("replace_symbol_body", new() { ["retryWith"] = Token(rejected) });
+
+        Assert.StartsWith("ERROR InvalidArgument", wrong, StringComparison.Ordinal);
+        Assert.Contains("was issued by replace_symbol", wrong, StringComparison.Ordinal);
+    }
+
+    private static string Token(string rejection)
+    {
+        var marker = rejection.IndexOf("retryWith=", StringComparison.Ordinal);
+
+        Assert.True(marker >= 0, rejection);
+
+        var tail = rejection.AsSpan(marker + "retryWith=".Length);
+        var end = tail.IndexOfAny(" \r\n");
+
+        return new string(end < 0 ? tail : tail[..end]);
+    }
+
+    [Fact]
+    public async Task AMalformedDeclaration_QuotesTheTextAroundTheFirstParseError()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderService.Unused",
+            ["declaration"] = "public int Unused() => 7 + ;",
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("did not parse", text, StringComparison.Ordinal);
+        Assert.Contains("at offset ", text, StringComparison.Ordinal);
+        Assert.Contains("public int Unused() => 7 + ;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AMalformedEntryOfDeclarations_NamesWhichEntryItCameFrom()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Unused", "OrderService.NeverCalled" },
+            ["declarations"] = new[] { "public int Unused() => 7;", "private int NeverCalled( => 42;" },
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("declarations[1]", text, StringComparison.Ordinal);
+        Assert.Contains("at offset ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_ByAQualifiedNameNamingTheWrongNamespace_DoesNotAnswerAnotherType()
+    {
+        var wrong = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "System.Collections.StringBuilder" });
+        var right = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "System.Text.StringBuilder" });
+
+        Assert.StartsWith("ERROR", wrong, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", right, StringComparison.Ordinal);
+        Assert.Contains("T:System.Text.StringBuilder", right, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_FromMetadata_ReportsWhatItTruncated()
+    {
+        var all = await server.CallAsync("search_symbols", new() { ["query"] = "Timer" });
+        var one = await server.CallAsync("search_symbols", new() { ["query"] = "Timer", ["maxResults"] = 1 });
+
+        Assert.Contains("from referenced assemblies", all, StringComparison.Ordinal);
+        Assert.Contains("truncated", one, StringComparison.Ordinal);
+        Assert.StartsWith("1/", one, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AMutatingTool_GivenANameOnlyMetadataMatches_AnswersOnTheNameItWasGiven()
+    {
+        var text = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "StringBuilder",
+            ["body"] = "=> 1;",
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR SymbolNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("'StringBuilder' did not resolve", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("T:System.Text.StringBuilder", text, StringComparison.Ordinal);
+    }
 }

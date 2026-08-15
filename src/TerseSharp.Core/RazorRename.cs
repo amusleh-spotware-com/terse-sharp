@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
@@ -90,6 +91,7 @@ public static class RazorRename
         return string.Equals(text, updated, StringComparison.Ordinal) ? null : new Rewrite(file, text, updated);
     }
 
+    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous rename scan leaf, called from a synchronous LINQ projection over the file set. Removing it means an async index, not a local change.")]
     private static string? Read(string file)
     {
         try
