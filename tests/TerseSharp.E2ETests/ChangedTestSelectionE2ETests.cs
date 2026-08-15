@@ -75,6 +75,10 @@ public sealed class ChangedTestSelectionE2ETests
 
             Assert.DoesNotContain("ERROR", built, StringComparison.Ordinal);
 
+            var reloaded = await CallAsync(server, "load_workspace", new() { ["reload"] = true });
+
+            Assert.DoesNotContain("ERROR", reloaded, StringComparison.Ordinal);
+
             var without = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add" });
             var with = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add", ["tests"] = true });
 
