@@ -563,7 +563,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
                 },
             });
 
-            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.False(text.Contains("ERROR", StringComparison.Ordinal), "write_text answered an error, in full: " + text);
             Assert.Contains("GateCaller.cs", text, StringComparison.Ordinal);
             Assert.Contains("GateCallee.cs", text, StringComparison.Ordinal);
             Assert.True(File.Exists(callee));
