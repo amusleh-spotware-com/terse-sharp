@@ -77,4 +77,70 @@ public sealed class MarkdownTableTests
 
         Assert.Contains("a \\| b", answer, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Projected_ForOneKnownAndOneUnknownColumn_RefusesNamingOnlyTheUnknownOne()
+    {
+        var refusal = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Finding", "Severity"]);
+
+        Assert.False(refusal.IsOk);
+        Assert.Contains("Severity", refusal.Error!.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Finding,Severity", refusal.Error!.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Projected_ForARefusal_NamesEachColumnOnce()
+    {
+        var refusal = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Severity"]);
+
+        Assert.Equal(1, Occurrences(refusal.Error!.Remedy, "Finding"));
+        Assert.Equal(1, Occurrences(refusal.Error!.Remedy, "Tool"));
+    }
+
+    [Fact]
+    public void Projected_ForAColumnOnlyOneTableDeclares_ProjectsThatTable()
+    {
+        var answer = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Outcome"]);
+
+        Assert.True(answer.IsOk);
+        Assert.Contains("shipped", answer.Value!, StringComparison.Ordinal);
+    }
+
+    private static int Occurrences(string text, string value)
+    {
+        var count = 0;
+
+        for (var index = text.IndexOf(value, StringComparison.Ordinal); index >= 0; index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+            count++;
+
+        return count;
+    }
+
+    [Fact]
+    public void Projected_WithinALineWindow_ReadsOnlyThatSectionsTable()
+    {
+        var answer = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Finding"], 3, 9).Value!;
+
+        Assert.StartsWith("2 rows", answer, StringComparison.Ordinal);
+        Assert.DoesNotContain("**I0** older", answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Projected_WhenTheRowsExceedTheCap_ReportsWhatItTruncated()
+    {
+        var answer = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Finding"], 0, 0, 2).Value!;
+
+        Assert.StartsWith("2/3 rows truncated", answer, StringComparison.Ordinal);
+        Assert.DoesNotContain("**I0** older", answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Projected_ForARefusalWithinASection_NamesThatSectionAndTheWayOut()
+    {
+        var refusal = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Outcome"], 3, 9, 0, "## Open");
+
+        Assert.False(refusal.IsOk);
+        Assert.Contains("section '## Open' of IMPROVEMENTS.md", refusal.Error!.Message, StringComparison.Ordinal);
+        Assert.Contains("drop section=", refusal.Error!.Remedy, StringComparison.Ordinal);
+    }
 }

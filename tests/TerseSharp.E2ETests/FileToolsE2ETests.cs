@@ -753,4 +753,61 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("&lt;", text, StringComparison.Ordinal);
         Assert.Contains("write_text ref=HEAD", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithColumnsAndASection_ProjectsOnlyThatSectionsTable()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["section"] = "## Open", ["columns"] = "Finding" });
+
+        Assert.StartsWith("3 rows", text, StringComparison.Ordinal);
+        Assert.Contains("**F1** first row", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("**F0** older row", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithColumnsAndMaxLines_ReportsWhatItTruncated()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["columns"] = "Finding", ["maxLines"] = 2 });
+
+        Assert.StartsWith("2/4 rows truncated", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("**F0** older row", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithOneKnownAndOneUnknownColumn_RefusesNamingOnlyTheUnknownOne()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["columns"] = "Finding,Severity" });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("columns=Severity names no column", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithColumnsAndHeadings_RefusesRatherThanIgnoringOne()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["columns"] = "Finding", ["headings"] = true });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("headings=true and columns=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithColumnsAndASectionThatLacksTheColumn_NamesTheSectionItScannedAndTheWayOut()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["section"] = "## Open", ["columns"] = "Outcome" });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("## Open", text, StringComparison.Ordinal);
+        Assert.Contains("drop section=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithColumnsAndALineRange_RefusesRatherThanIgnoringTheRange()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["columns"] = "Finding", ["startLine"] = 15, ["endLine"] = 19 });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("startLine=", text, StringComparison.Ordinal);
+        Assert.Contains("section=", text, StringComparison.Ordinal);
+    }
 }

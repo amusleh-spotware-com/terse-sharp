@@ -853,13 +853,7 @@ public static class FileService
     public static Result<string> Rendered(string path, string label, string text, ReadRequest request)
     {
         if (request.Columns is { Count: > 0 } columns)
-        {
-            return DocumentOutline.IsMarkdown(path)
-                ? MarkdownTable.Projected(label, text, columns)
-                : Result.Fail<string>(Errors.Invalid(
-                    string.Create(CultureInfo.InvariantCulture, $"'{label}' is not markdown, so it has no table columns"),
-                    "drop columns=, or use get_file_outline for a .cs file"));
-        }
+            return Columned(path, label, text, request, columns);
 
         if (request.Headings)
             return Outline(path, label, text, request.Verbose);
@@ -1004,4 +998,51 @@ public static class FileService
             || extension.Equals(".axaml", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".resx", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase));
+
+    private static Result<string> Columned(string path, string label, string text, ReadRequest request, IReadOnlyList<string> columns)
+    {
+        if (Conflicting(path, label, request) is { } refusal)
+            return Result.Fail<string>(refusal);
+
+        var window = Windowed(text, request.Section);
+
+        return window.IsOk
+            ? MarkdownTable.Projected(label, text, columns, window.Value.Start, window.Value.End, request.Range.MaxLines, request.Section)
+            : Result.Fail<string>(window.Error!);
+    }
+
+    private static Result<LineRange> Windowed(string text, string? section)
+    {
+        if (section is not { Length: > 0 } heading)
+            return Result.Ok(default(LineRange));
+
+        var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading);
+
+        return located.IsOk
+            ? Result.Ok(new LineRange(located.Value!.StartLine, located.Value!.EndLine, 0))
+            : Result.Fail<LineRange>(located.Error!);
+    }
+
+    private static TerseError? Conflicting(string path, string label, ReadRequest request)
+    {
+        if (!DocumentOutline.IsMarkdown(path))
+        {
+            return Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{label}' is not markdown, so it has no table columns"),
+                "drop columns=, or use get_file_outline for a .cs file");
+        }
+
+        if (request.Headings)
+        {
+            return Errors.Invalid(
+                "headings=true and columns= narrow the same file two different ways",
+                "pass headings=true for the section map, or columns= for the table rows, not both");
+        }
+
+        return request.Range.Start > 0 || request.Range.End > 0 || request.Tail > 0
+            ? Errors.Invalid(
+                "startLine=, endLine= and tail= do not bound a column projection, which is addressed by table rather than by line",
+                "pass section= to scope the projection to one section's tables, or maxLines= to bound the rows")
+            : null;
+    }
 }

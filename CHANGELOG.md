@@ -72,8 +72,16 @@ major-version-zero, as a MINOR bump.
 - **`read_text columns="Finding,Tool"` projects a markdown table down to the named columns.** A file
   whose whole content is two long tables has nothing `headings=true` can narrow, so "which rows does
   this table hold" cost a clipped read plus a truncated `search_regex matchesOnly` sweep. It now costs
-  one call returning one line per row, and a column no table declares is refused naming the columns
-  that exist. Closes `I255`.
+  one call returning one line per row. A column no table under the read declares is refused naming the
+  columns that exist - **even when the other columns matched**, because a projection that silently drops
+  a mistyped header answers a question the caller never asked; the refusal names only the columns that
+  missed, and each existing column once. It composes with `section=`, which scopes the projection to
+  that section's tables instead of being overridden by it - and a refusal under a section says so
+  (`names no column of section '## Open' of notes.md`) plus how to widen it, because the columns it
+  scanned are that section's, not the file's. `maxLines=` bounds the rows so the summary can report
+  `2/4 rows truncated`, and `headings=true`, `startLine=`, `endLine=` and `tail=` beside it are all
+  refused rather than one of the two silently winning: a projection is addressed by table, not by
+  line. Closes `I255`.
 - **`write_text ref=HEAD` restores a file's content from a git ref.** `undo_last_change` holds Roslyn
   solution snapshots, so a corrupted `.csproj` or `.md` write had no in-server way back and the only
   recovery was `Bash: git checkout --`. The restore goes through the same compile gate and the same
