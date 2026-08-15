@@ -651,4 +651,106 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("neither 'glob' nor 'name' was supplied", text, StringComparison.Ordinal);
         Assert.Contains("'name' to match a file name substring", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithColumns_ProjectsTheMarkdownTableDownToThem()
+    {
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["verbose"] = true });
+        var projected = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["columns"] = "Finding" });
+
+        Assert.Contains("rows", projected.Split('\n')[0], StringComparison.Ordinal);
+        Assert.Contains("first row", projected, StringComparison.Ordinal);
+        Assert.DoesNotContain("read_text", projected, StringComparison.Ordinal);
+        Assert.True(projected.Length * 2 < whole.Length, "columns= did not cost less than the whole file: " + projected);
+    }
+
+    [Fact]
+    public async Task ReadText_WithAColumnTheTableDoesNotDeclare_NamesTheColumnsItHas()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["columns"] = "Severity" });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("Finding", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithPathInsteadOfGlob_AnswersTheSameRecords()
+    {
+        var byGlob = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "**/*.cs" });
+        var byPath = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["path"] = "**/*.cs" });
+
+        Assert.DoesNotContain("ERROR", byPath, StringComparison.Ordinal);
+        Assert.Equal(byGlob, byPath);
+    }
+
+    [Fact]
+    public async Task WriteText_WithRef_RestoresTheFileFromThatRevision()
+    {
+        var original = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["verbose"] = true });
+
+        try
+        {
+            var damaged = await server.CallAsync("write_text", new()
+            {
+                ["path"] = "appsettings.json",
+                ["content"] = "{ \"damaged\": true }\n",
+            });
+
+            Assert.DoesNotContain("ERROR", damaged, StringComparison.Ordinal);
+
+            var restored = await server.CallAsync("write_text", new() { ["path"] = "appsettings.json", ["ref"] = "HEAD" });
+            var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["verbose"] = true });
+
+            Assert.DoesNotContain("ERROR", restored, StringComparison.Ordinal);
+            Assert.DoesNotContain("damaged", text, StringComparison.Ordinal);
+            Assert.Equal(original, text);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = "appsettings.json", ["ref"] = "HEAD" });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_WithRefAndFiles_RefusesInsteadOfIgnoringTheRef()
+    {
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["ref"] = "HEAD",
+            ["files"] = new[] { new Dictionary<string, object?> { ["path"] = "appsettings.json", ["content"] = "{}" } },
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WithRefAndContent_RefusesInsteadOfPickingOne()
+    {
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["ref"] = "HEAD",
+            ["content"] = "{}",
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_OfHtmlEscapedMarkup_WarnsThatItIsNotMarkup()
+    {
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/Fixture.Trading.csproj",
+            ["content"] = "&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;&lt;/Project&gt;\n",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("WARNING", text, StringComparison.Ordinal);
+        Assert.Contains("&lt;", text, StringComparison.Ordinal);
+        Assert.Contains("write_text ref=HEAD", text, StringComparison.Ordinal);
+    }
 }

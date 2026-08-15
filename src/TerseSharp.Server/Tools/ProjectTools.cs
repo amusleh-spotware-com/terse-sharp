@@ -58,12 +58,13 @@ public sealed class ProjectTools(ToolContext context)
             ProjectFile.Create(Resolve(loaded, project), kind ?? "classlib", targetFramework, dryRun, verbose));
 
     [McpServerTool(Name = "project_properties", ReadOnly = true)]
-    [Description("Read the MSBuild properties declared in a project file.")]
+    [Description("Read a project's MSBuild properties as MSBuild itself evaluated them - the winning value of each, with the file that set it - so a property a Directory.Build.props declares is answered, not the empty list the project file's own XML would give. Properties defined outside the workspace root, which is the SDK's own hundreds, are left out.")]
     public Task<string> ProjectProperties(
         [Description("Path to the .csproj.")] string project,
         [Description("Optional property name to filter by.")] string? name = null,
-        [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Reading(workspace, project, loaded => ProjectFile.GetProperties(Resolve(loaded, project), name));
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default) =>
+        ReadingAsync(workspace, project, loaded => ProjectEvaluation.Properties(loaded.Root, Resolve(loaded, project), name, cancellationToken));
 
     [McpServerTool(Name = "project_set_property")]
     [Description("Set or add an MSBuild property in a project file, preserving the rest of the XML.")]
@@ -97,11 +98,26 @@ public sealed class ProjectTools(ToolContext context)
         Guarded(workspace, project, dryRun, loaded => ProjectFile.RemoveReference(Resolve(loaded, project), Resolve(loaded, target), dryRun, verbose));
 
     [McpServerTool(Name = "package_list", ReadOnly = true)]
-    [Description("List the package and project references declared in a project file.")]
+    [Description("Replaces Bash dotnet list package. Lists the package and project references a project declares; vulnerable=true or outdated=true answers from the restored graph instead, which is the question the project file cannot answer - a known advisory or a newer version - so the last dependency question needs no shell. The two are mutually exclusive, exactly as the CLI's own flags are.")]
     public Task<string> PackageList(
         [Description("Path to the .csproj.")] string project,
-        [Description("Workspace or worktree name.")] string? workspace = null) =>
-        Reading(workspace, project, loaded => ProjectFile.ListPackages(Resolve(loaded, project)));
+        [Description("Report packages with a known security advisory, read from the restored graph including transitive ones. Needs a restore. Cannot be combined with outdated. Default false.")] bool vulnerable = false,
+        [Description("Report packages with a newer version available on the configured feeds. Needs a restore and network access. Cannot be combined with vulnerable. Default false.")] bool outdated = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (vulnerable && outdated)
+        {
+            return Task.FromResult(Errors.Invalid(
+                "vulnerable and outdated are mutually exclusive, because dotnet list package refuses both flags together",
+                "call package_list vulnerable=true and package_list outdated=true separately").Render());
+        }
+
+        return vulnerable || outdated
+            ? context.WithTargetAsync(workspace, project, target => DotnetRunner.AuditPackagesAsync(
+                target.Root, Path.IsPathRooted(project) ? project : Path.Combine(target.Root, project), vulnerable, cancellationToken), cancellationToken: cancellationToken)
+            : Reading(workspace, project, loaded => ProjectFile.ListPackages(Resolve(loaded, project)));
+    }
 
     [McpServerTool(Name = "package_add")]
     [Description("Add a PackageReference. Central Package Management aware: with Directory.Packages.props the version is written there and the reference stays version-less.")]

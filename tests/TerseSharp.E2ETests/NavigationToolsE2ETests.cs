@@ -587,6 +587,9 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     [InlineData("Awkward.Weigh((IHandler Left, IHandler Right))", "public int Weigh((IHandler Left, IHandler Right) pair)")]
     [InlineData("Awkward.Weigh((IHandler, IHandler))", "public int Weigh((IHandler Left, IHandler Right) pair)")]
     [InlineData("Awkward.Weigh(Fixture.Trading.Boxed<Fixture.Trading.IHandler>)", "public int Weigh(Boxed<IHandler> boxed)")]
+    [InlineData("Awkward.Weigh(Boxed<IHandler> boxed)", "public int Weigh(Boxed<IHandler> boxed)")]
+    [InlineData("Awkward.Weigh((IHandler Left, IHandler Right) pair)", "public int Weigh((IHandler Left, IHandler Right) pair)")]
+    [InlineData("Awkward.Weigh(int count)", "public int Weigh(int count)")]
     [InlineData("Awkward.Weigh(int)", "public int Weigh(int count)")]
     public async Task GetSymbolSource_ForAnOverloadWhoseParameterCarriesTypeArguments_ResolvesTheShortForm(
         string reference,

@@ -20,6 +20,7 @@ public static class RepeatSteer
         ["run_tests"] = "projects",
         ["write_text"] = "files",
         ["edit_text"] = "edits",
+        ["resx_set"] = "entries",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();

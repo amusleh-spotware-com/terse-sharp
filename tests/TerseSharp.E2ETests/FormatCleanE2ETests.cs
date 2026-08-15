@@ -163,4 +163,57 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
         Assert.Contains("files changed", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("@@", quiet, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task CleanupVerify_WithFixAll_NamesTheStepBesideEachFileAndTheCiEquivalentPair()
+    {
+        const string Path = "src/Fixture.Trading/StepAttribution.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Path,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\ninternal sealed class StepAttribution\n{\n    public int Value   { get; }   \n}\n",
+        });
+
+        try
+        {
+            var text = await server.CallAsync("cleanup", new() { ["verify"] = true, ["fix"] = "all", ["path"] = Path });
+
+            Assert.Contains("VERIFY_FAILED", text, StringComparison.Ordinal);
+            Assert.Contains("StepAttribution.cs  whitespace", text, StringComparison.Ordinal);
+            Assert.Contains("cleanup verify=true fix=style", text, StringComparison.Ordinal);
+            Assert.Contains("cleanup verify=true fix=analyzers", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Path, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task CleanupVerify_WithFixAnalyzers_DoesNotSteerToTheCiPairItAlreadyIs()
+    {
+        const string Path = "src/Fixture.Trading/AnalyzerSteerProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Path,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\ninternal sealed class AnalyzerSteerProbe\n{\n    public int Value   { get; }   \n}\n",
+        });
+
+        try
+        {
+            var reformatting = await server.CallAsync("cleanup", new() { ["verify"] = true, ["fix"] = "all", ["path"] = Path });
+            var ciEquivalent = await server.CallAsync("cleanup", new() { ["verify"] = true, ["fix"] = "analyzers", ["path"] = Path });
+
+            Assert.Contains("byte-equivalent CI pair", reformatting, StringComparison.Ordinal);
+            Assert.DoesNotContain("byte-equivalent CI pair", ciEquivalent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Path, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

@@ -99,6 +99,8 @@ Prefer to configure MCP by hand:
 | Rename it across the solution | ~5,000 tokens, **misses the interface** | `rename_symbol` → **~150**, correct | **30×** |
 | Why is the build red? | **~8,000 tokens** of MSBuild spew | `build` → **~600** | **13×** |
 | What did I just change? | `git diff` → the whole patch | `diff_symbols` → the changed declarations | **10×** |
+| Which rows does this checked-in table hold? | `Read` the whole `.md`, then grep it | `read_text columns="Finding,Tool"` → one line per row | **~10×** |
+| Which tests can this change break? | `Grep` the test tree, then guess | `impact_of tests=true` → ready `run_tests test=` arguments | **2 calls → 1** |
 | Does this `{Binding}` bind? | **no static answer exists in WPF** | `xaml_bindings validate=true` | ∞ |
 
 Asserted by a token-budget suite in CI on every commit, not estimated.
@@ -121,7 +123,7 @@ An agent that has TerseSharp installed and reaches for `Read` and `Grep` out of 
 `terse install --guard` registers a Claude Code `PreToolUse` hook that **denies** the built-in and
 names the tool to use instead — covering `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`,
 `.sln` and friends, the shell text tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them,
-`dotnet build`/`test`/`format`/`clean` and `dotnet watch build`/`test`, and the working-tree half of
+`dotnet build`/`test`/`format`/`clean`, `dotnet watch build`/`test` and `dotnet list package`, and the working-tree half of
 git — `git status` and `git diff`, answered by `changed_files` and `diff_symbols`, plus a bare
 `git ls-files`, answered by `find_files tracked=true`, and only when the directory the command
 actually addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj` — the `-C` target, or a directory
@@ -173,7 +175,7 @@ about 14 tokens, and never emitted when the call already passed the plural.
 | **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
 | **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
-| **Projects & solutions** | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` · `package_add` · `package_remove` |
+| **Projects & solutions** — `package_list` replaces `dotnet list package` | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` (MSBuild's **evaluated** properties, each with the file that set it) · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` (`vulnerable=` / `outdated=`) · `package_add` · `package_remove` |
 | **XAML** — WPF · Avalonia · WinUI · MAUI | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_styles` · `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` · `xaml_set_property` · `xaml_add_element` · `xaml_remove_element` |
 | **Localization** (`.resx`/`.resw`) | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |

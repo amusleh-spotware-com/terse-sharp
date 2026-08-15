@@ -262,4 +262,90 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
 
         return int.Parse(end < 0 ? tail : tail[..end], CultureInfo.InvariantCulture);
     }
+
+    [Fact]
+    public async Task Analyze_WithAnIdNoReferencedAnalyzerDeclares_SaysNotEnabledInsteadOfASilentZero()
+    {
+        var text = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ids"] = "CA9999",
+        });
+
+        Assert.Contains("NOT_ENABLED CA9999", text, StringComparison.Ordinal);
+        Assert.Contains("could not have found it", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithACompilerId_DoesNotClaimItIsNotEnabled()
+    {
+        var text = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ids"] = "CS0219",
+        });
+
+        Assert.DoesNotContain("NOT_ENABLED", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithSeverityInsteadOfMinSeverity_AnswersTheSame()
+    {
+        var named = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["minSeverity"] = "warning",
+        });
+
+        var aliased = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["severity"] = "warning",
+        });
+
+        Assert.DoesNotContain("ERROR", aliased, StringComparison.Ordinal);
+        Assert.Equal(WithoutOneOffNotes(named), WithoutOneOffNotes(aliased));
+    }
+
+    [Fact]
+    public async Task Analyze_WithSinceLast_DoesNotReportAFoldedLineAsFixedWhenAnOccurrenceWasAdded()
+    {
+        const string Path = "src/Fixture.Trading/SinceLastProbe.cs";
+        const string Header = "namespace Fixture.Trading;\n\ninternal sealed class SinceLastProbe\n{\n    public int Value() => 1;\n\n    public void Run()\n    {\n        Value();\n";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Path,
+            ["force"] = true,
+            ["content"] = Header + "    }\n}\n",
+        });
+
+        try
+        {
+            var first = await server.CallAsync("analyze", new() { ["path"] = Path, ["minSeverity"] = "hidden", ["sinceLast"] = true });
+
+            Assert.Contains("SinceLastProbe.cs:9:9", first, StringComparison.Ordinal);
+            Assert.Contains("IDE0058", first, StringComparison.Ordinal);
+
+            await server.CallAsync("write_text", new()
+            {
+                ["path"] = Path,
+                ["force"] = true,
+                ["content"] = Header + "        Value();\n    }\n}\n",
+            });
+
+            var second = await server.CallAsync("analyze", new() { ["path"] = Path, ["minSeverity"] = "hidden", ["sinceLast"] = true });
+
+            Assert.True(second.Contains("SinceLastProbe.cs:10:9", StringComparison.Ordinal), second);
+            Assert.False(second.Contains("FIXED IDE0058", StringComparison.Ordinal), second);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Path, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    private static string WithoutOneOffNotes(string response) => string.Join(
+        "\n",
+        response.Split('\n').Where(line => !line.StartsWith("compilations=", StringComparison.Ordinal)));
 }

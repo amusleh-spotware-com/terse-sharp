@@ -110,11 +110,16 @@ public sealed class GitTools(ToolContext context)
 
     private static string Render(string numstat, string nameStatus, string untracked, string? exclude, int maxResults, string? outside)
     {
-        var lines = Lines(numstat, nameStatus, untracked, Excluded(exclude));
+        var listed = Lines(numstat, nameStatus, untracked, Excluded(exclude));
         var response = new ResponseBuilder("changed_files", string.Empty);
-        var shown = lines.Capped(maxResults).ToArray();
+        var capped = ResultCap.Shown(listed.Rows.Count, maxResults);
+        var shown = listed.Rows.Capped(maxResults).ToArray();
 
-        response.Summary(ResultCap.Shown(lines.Count, maxResults), lines.Count, "files", "path=, exclude=, baseRef= or maxResults=");
+        response.Summary(
+            capped < listed.Rows.Count ? capped : listed.Files,
+            listed.Files,
+            "files",
+            "path=, exclude=, baseRef= or maxResults=");
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
@@ -122,7 +127,7 @@ public sealed class GitTools(ToolContext context)
         foreach (var line in shown)
             response.Line(line);
 
-        if (outside is not { Length: > 0 } && ArgumentLine.Paths(shown) is { } batch)
+        if (outside is not { Length: > 0 } && ArgumentLine.Paths(shown.Where(row => !Folded(row))) is { } batch)
             response.Note(batch);
 
         return response.ToString();
@@ -223,27 +228,24 @@ public sealed class GitTools(ToolContext context)
         CultureInfo.InvariantCulture,
         $"{file.Path}  +{Counted(file.Added)} -{Counted(file.Deleted)}  {statuses.GetValueOrDefault(file.Path, "M")}");
 
-    private static List<string> Lines(string numstat, string nameStatus, string untracked, FileGlob? exclude)
+    private static Listed Lines(string numstat, string nameStatus, string untracked, FileGlob? exclude)
     {
         var statuses = DiffParser.NameStatus(nameStatus);
         var files = DiffParser.NumStat(numstat);
-        var lines = new List<string>(files.Count + 8);
+        var rows = new List<string>(files.Count + 8);
 
         foreach (var file in files)
         {
             if (!Dropped(exclude, file.Path))
-                lines.Add(Described(file, statuses));
+                rows.Add(Described(file, statuses));
         }
 
-        foreach (var line in untracked.AsSpan().EnumerateLines())
-        {
-            var path = line.Trim();
+        var tracked = rows.Count;
+        var kept = Kept(untracked, exclude);
 
-            if (!path.IsWhiteSpace() && !Dropped(exclude, path))
-                lines.Add(new string(path) + "  +? -?  ?");
-        }
+        Untracked(kept, rows);
 
-        return lines;
+        return new Listed(rows, tracked + kept.Count);
     }
 
     private static Result<string> Outside(string root)
@@ -385,5 +387,65 @@ public sealed class GitTools(ToolContext context)
             : Errors.Invalid(
                 "commit= answers one commit, so it cannot be combined with " + string.Join(", ", ignored),
                 "drop commit= to list commits with those filters, or drop the filters to describe that one commit");
+    }
+
+    private const int UntrackedFold = 5;
+
+    private readonly record struct Listed(List<string> Rows, int Files);
+
+    private static List<string> Kept(string untracked, FileGlob? exclude)
+    {
+        var kept = new List<string>();
+
+        foreach (var line in untracked.AsSpan().EnumerateLines())
+        {
+            var path = line.Trim();
+
+            if (!path.IsWhiteSpace() && !Dropped(exclude, path))
+                kept.Add(new string(path));
+        }
+
+        return kept;
+    }
+
+    private static void Untracked(List<string> kept, List<string> rows)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var byDirectory = counts.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        foreach (var path in kept)
+        {
+            var directory = TopDirectory(path);
+
+            if (!directory.IsEmpty && !byDirectory.TryAdd(directory, 1))
+                byDirectory[directory] += 1;
+        }
+
+        var folded = new HashSet<string>(StringComparer.Ordinal);
+        var seen = folded.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        foreach (var path in kept)
+        {
+            var directory = TopDirectory(path);
+
+            if (directory.IsEmpty || byDirectory[directory] <= UntrackedFold)
+                rows.Add(path + "  +? -?  ?");
+            else if (seen.Add(directory))
+                rows.Add(string.Create(CultureInfo.InvariantCulture, $"{directory}/**  +? -?  ?  x{byDirectory[directory]} untracked"));
+        }
+    }
+
+    private static ReadOnlySpan<char> TopDirectory(ReadOnlySpan<char> path)
+    {
+        var separator = path.IndexOfAny('/', '\\');
+
+        return separator > 0 ? path[..separator] : default;
+    }
+
+    private static bool Folded(string row)
+    {
+        var end = row.IndexOf("  ", StringComparison.Ordinal);
+
+        return (end < 0 ? row.AsSpan() : row.AsSpan(0, end)).EndsWith("/**", StringComparison.Ordinal);
     }
 }

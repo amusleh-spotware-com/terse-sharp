@@ -200,8 +200,9 @@ public static class FileService
     private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
+        var escaped = EscapedMarkup(path, after);
 
-        if (!dryRun && !verbose && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
+        if (!dryRun && !verbose && !escaped && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
         {
             return response
                 .Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={quick}"))
@@ -214,6 +215,9 @@ public static class FileService
 
         if (dryRun && !verbose)
             response.Note("dryRun");
+
+        if (escaped)
+            response.Note("WARNING the new content carries &lt; or &gt; and no raw '<' - markup written HTML-escaped is not markup; restore the file with write_text ref=HEAD if that was unintended");
 
         response.Line(report.Text);
         response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}"));
@@ -295,6 +299,7 @@ public static class FileService
             response.Line(line);
 
         AppendContinuation(response, path, selection);
+        AppendMemberBatch(response, path, text, selection);
 
         return response.ToString();
     }
@@ -402,7 +407,7 @@ public static class FileService
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null);
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null);
 
@@ -847,6 +852,15 @@ public static class FileService
 
     public static Result<string> Rendered(string path, string label, string text, ReadRequest request)
     {
+        if (request.Columns is { Count: > 0 } columns)
+        {
+            return DocumentOutline.IsMarkdown(path)
+                ? MarkdownTable.Projected(label, text, columns)
+                : Result.Fail<string>(Errors.Invalid(
+                    string.Create(CultureInfo.InvariantCulture, $"'{label}' is not markdown, so it has no table columns"),
+                    "drop columns=, or use get_file_outline for a .cs file"));
+        }
+
         if (request.Headings)
             return Outline(path, label, text, request.Verbose);
 
@@ -911,7 +925,7 @@ public static class FileService
 
     private static StagedWrite? Introduced(LoadedWorkspace workspace, string full, string content)
     {
-        if (Globbing(workspace, full) is not { } project)
+        if (CompilingProject(workspace, full) is not { } project)
             return null;
 
         var id = Microsoft.CodeAnalysis.DocumentId.CreateNewId(project.Id);
@@ -920,7 +934,7 @@ public static class FileService
         return new StagedWrite(workspace.Solution.AddDocument(id, Path.GetFileName(full), text, filePath: full), id);
     }
 
-    private static Microsoft.CodeAnalysis.Project? Globbing(LoadedWorkspace workspace, string full) =>
+    public static Microsoft.CodeAnalysis.Project? CompilingProject(LoadedWorkspace workspace, string full) =>
         workspace.Solution.Projects
             .Where(project => Compiles(project.FilePath, full))
             .OrderByDescending(project => Path.GetDirectoryName(project.FilePath)!.Length)
@@ -960,8 +974,34 @@ public static class FileService
         if (DocumentLookup.Find(workspace, path) is { } document)
             return new PendingWrite(path, full, before, after, document.Id, false);
 
-        return Globbing(workspace, full) is { } project
+        return CompilingProject(workspace, full) is { } project
             ? new PendingWrite(path, full, before, after, Microsoft.CodeAnalysis.DocumentId.CreateNewId(project.Id), true)
             : new PendingWrite(path, full, before, after, null, false);
     }
+
+    private static void AppendMemberBatch(ResponseBuilder response, string path, string text, LineSelection selection)
+    {
+        if (selection.NextLine is not 0 || selection.CoveredLines != selection.TotalLines || !SourceFile.IsCSharp(Located(path)))
+            return;
+
+        if (OutlineService.BatchFromText(new string(Located(path)), text) is { } batch)
+            response.Note(batch);
+    }
+
+    private static bool EscapedMarkup(string path, string content) =>
+        IsMarkup(path)
+        && content.Contains("&lt;", StringComparison.Ordinal)
+        && !content.Contains('<', StringComparison.Ordinal);
+
+
+    private static bool IsMarkup(ReadOnlySpan<char> path) =>
+        Path.GetExtension(path) is var extension
+        && (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".props", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".targets", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".xml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".axaml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".resx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase));
 }

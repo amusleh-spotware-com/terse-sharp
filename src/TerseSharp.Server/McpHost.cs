@@ -119,7 +119,7 @@ public static class McpHost
             if (await ClientRegistrar.RefreshAsync(cancellationToken).ConfigureAwait(false) is { } refreshed)
                 await Console.Error.WriteLineAsync(refreshed).ConfigureAwait(false);
 
-            if (UpdateSettings.Requested() is { } request)
+            if (UpdateSettings.Enabled() && UpdateSettings.Requested() is { } request)
                 UpdateBanner.Publish(UpdateCheck.Notice(request.Running, await UpdateCheck.RunAsync(request, cancellationToken).ConfigureAwait(false)));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -128,11 +128,8 @@ public static class McpHost
         }
     }
 
-    private static void BeginMaintenance(CancellationToken cancellationToken)
-    {
-        if (UpdateSettings.Enabled())
-            _ = Task.Run(() => MaintainAsync(cancellationToken), cancellationToken);
-    }
+    private static void BeginMaintenance(CancellationToken cancellationToken) =>
+        _ = Task.Run(() => MaintainAsync(cancellationToken), cancellationToken);
 
     private static void BeginSweep(CancellationToken cancellationToken) =>
         _ = Task.Run(ShadowCopyAnalyzerLoader.Sweep, cancellationToken);

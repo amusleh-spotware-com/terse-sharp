@@ -536,6 +536,52 @@ public static partial class DotnetRunner
         foreach (var note in OutputNotes(run.Output, root, target))
             response.Note(note);
     }
+
+    internal static async Task<string> AuditPackagesAsync(
+        string root,
+        string projectPath,
+        bool vulnerable,
+        CancellationToken cancellationToken)
+    {
+        var flag = vulnerable ? "--vulnerable" : "--outdated";
+        var run = await RunAsync(["list", projectPath, "package", flag, "--include-transitive"], root, TimeSpan.FromMinutes(3), cancellationToken).ConfigureAwait(false);
+        var response = new ResponseBuilder("package_list", PositionFormat.Relative(root, projectPath));
+
+        if (run.ExitCode is not 0)
+        {
+            response.Summary(0, 0, "packages examined");
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"FAILED dotnet list package {flag} exited {run.ExitCode}; nothing was examined, so this is not a clean bill of health"));
+
+            foreach (var line in Tail(run.Output))
+                response.Line(line);
+
+            return response.ToString();
+        }
+
+        var lines = Audited(run.Output);
+
+        response.Summary(lines.Length, lines.Length, vulnerable ? "vulnerable packages" : "outdated packages");
+
+        foreach (var line in lines)
+            response.Line(line);
+
+        return response.ToString();
+    }
+
+    private static string[] Audited(string output)
+    {
+        var kept = new List<string>();
+
+        foreach (var line in output.AsSpan().EnumerateLines())
+        {
+            var trimmed = line.Trim();
+
+            if (trimmed.StartsWith("> ", StringComparison.Ordinal))
+                kept.Add(new string(trimmed[2..]));
+        }
+
+        return [.. kept];
+    }
 }
 
 internal sealed record ProcessRun(

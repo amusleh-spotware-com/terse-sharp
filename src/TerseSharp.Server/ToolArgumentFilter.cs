@@ -195,10 +195,10 @@ internal static class ToolArgumentFilter
 
         return request.Params?.Arguments is not { Count: > 0 } supplied
             ? null
-            : Unrecognized(request.Params?.Name, supplied.Keys, () => Required(schema), Accepted(schema));
+            : Unrecognized(request.Params?.Name, supplied.Keys, () => Required(schema), Accepted(schema), Arrays(schema));
     }
 
-    public static TerseError? Unrecognized(string? tool, IEnumerable<string> supplied, Func<string[]> required, string[] accepted)
+    public static TerseError? Unrecognized(string? tool, IEnumerable<string> supplied, Func<string[]> required, string[] accepted, string[]? arrays = null)
     {
         if (accepted.Length is 0)
             return null;
@@ -211,6 +211,14 @@ internal static class ToolArgumentFilter
             ? null
             : Errors.Invalid(
                 tool + " rejected the call: unrecognized " + string.Join(", ", unknown),
-                Remedy(required(), accepted) + ToolExamples.Suffix(tool));
+                Remedy(required(), accepted) + PluralHint(unknown, arrays) + ToolExamples.Suffix(tool));
     }
+
+    private static readonly System.Collections.Frozen.FrozenSet<string> KnownPlurals =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(RepeatSteer.Plural.Values.Append("cultures"), StringComparer.Ordinal);
+
+    private static string PluralHint(string[] unknown, string[]? arrays) =>
+        arrays is { Length: > 0 } declared && Array.Exists(unknown, KnownPlurals.Contains)
+            ? "; this tool's list parameter is " + string.Join(", ", declared)
+            : string.Empty;
 }

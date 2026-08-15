@@ -6,37 +6,37 @@ namespace TerseSharp.Server.Tools;
 public sealed class WorkspaceTools(ToolContext context)
 {
     [McpServerTool(Name = "load_workspace")]
-    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it.")]
+    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it. It also warns when the PreToolUse guard or the skill is not installed.")]
     public Task<string> LoadWorkspace(
-[Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
-[Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared.")] bool reload = false,
-[Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
-[Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
-[Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
-[Description("Max candidates when discover=true (100).")] int maxResults = 0,
-CancellationToken cancellationToken = default) =>
-ToolBoundary.RunAsync(async () =>
-{
-    if (discover)
-        return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
+    [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
+    [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared.")] bool reload = false,
+    [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
+    [Description("List the MSBuild warnings the load reported, not just their count. Default false.")] bool verbose = false,
+    [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
+    [Description("Max candidates when discover=true (100).")] int maxResults = 0,
+    CancellationToken cancellationToken = default) =>
+    ToolBoundary.RunAsync(async () =>
+    {
+        if (discover)
+            return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
 
-    var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
+        var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
 
-    if (target is null)
-        return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
+        if (target is null)
+            return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
 
-    var before = context.Served();
+        var before = context.Served();
 
-    var result = reload
-        ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
-        : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
+        var result = reload
+            ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
+            : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
 
-    var rendered = Render(context.Registry, result, verbose);
+        var rendered = AssetBanner.Appended(Render(context.Registry, result, verbose));
 
-    await context.AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
+        await context.AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
 
-    return rendered;
-});
+        return rendered;
+    });
 
     [McpServerTool(Name = "list_workspaces", ReadOnly = true)]
     [Description("List loaded workspaces with their git branch and worktree, so you can disambiguate several checkouts of one repo. The solution path is absolute here, because it is what unload_workspace takes.")]
@@ -115,7 +115,7 @@ CancellationToken cancellationToken = default) =>
     }
 
     [McpServerTool(Name = "workspace_status", ReadOnly = true)]
-    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. verbose=true adds the server's own doctor self-checks, so diagnosing terse needs no shell-out.")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build. verbose=true adds the server's own doctor self-checks, so diagnosing terse needs no shell-out.")]
     public Task<string> WorkspaceStatus(
     [Description("Workspace or worktree name.")] string? workspace = null,
     [Description("List the MSBuild warnings the load reported, and the roslyn, assets, guard coverage and phases self-checks. Default false.")] bool verbose = false,
@@ -123,15 +123,16 @@ CancellationToken cancellationToken = default) =>
     context.WithWorkspaceAsync(
         workspace,
         null,
-        loaded => RenderStatusAsync(loaded, verbose, context.Surface, context.Served(), cancellationToken),
+        async loaded => AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, context.Surface, context.Served(), cancellationToken).ConfigureAwait(false)),
         cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]
-    [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
+    [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. path=<file> answers the opposite question - which project compiles that file, and whether an edit to it would be compile-gated. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
     public Task<string> ListProjects(
     [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Keep only projects whose name contains this text.")] string? filter = null) =>
-    context.WithWorkspace(workspace, null, loaded => RenderProjects(loaded, filter));
+    [Description("Keep only projects whose name contains this text.")] string? filter = null,
+    [Description("A file to answer about instead of listing: names the project that compiles it, or says no project does.")] string? path = null) =>
+    context.WithWorkspace(workspace, path, loaded => path is { Length: > 0 } file ? RenderOwner(loaded, file) : RenderProjects(loaded, filter));
 
     private static string? Discover() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
@@ -416,4 +417,38 @@ CancellationToken cancellationToken = default) =>
         foreach (var check in await Doctor.SelfChecksAsync(workspace, cancellationToken).ConfigureAwait(false))
             response.Note(check);
     }
+
+    private static string RenderOwner(LoadedWorkspace workspace, string path)
+    {
+        var response = new ResponseBuilder("list_projects", path);
+        var resolved = PathGuard.Resolve(workspace, path);
+
+        if (!resolved.IsOk)
+            return resolved.Error!.Render();
+
+        if (DocumentLookup.Find(workspace, path) is { } document)
+        {
+            response.Summary(1, 1, "projects");
+            response.Line(Owner(workspace, document.Project, "compiles it - an edit is compile-gated"));
+
+            return response.ToString();
+        }
+
+        if (FileService.CompilingProject(workspace, resolved.Value!) is { } globbing)
+        {
+            response.Summary(1, 1, "projects");
+            response.Line(Owner(workspace, globbing, "would compile it once written - a new file there is compile-gated"));
+
+            return response.ToString();
+        }
+
+        response.Summary(0, 0, "projects");
+        response.Note("no project of this solution compiles that path, so an edit to it is not compile-gated");
+
+        return response.ToString();
+    }
+
+    private static string Owner(LoadedWorkspace workspace, Microsoft.CodeAnalysis.Project project, string verdict) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{project.Name}  {PositionFormat.Relative(workspace.Root, project.FilePath)}  {verdict}");
 }

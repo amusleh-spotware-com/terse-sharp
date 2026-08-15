@@ -17,7 +17,7 @@ public static class AnalysisService
         bool changed,
         CancellationToken cancellationToken)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ids, cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
             return collected.Error!.Render();
@@ -27,9 +27,8 @@ public static class AnalysisService
         return Render(
             workspace.Root,
             path,
-            Engines(value.Analyzed, includeDeadCode),
+            value,
             Filter(value.Found, value.Scope, minimum, ids),
-            Keep(value.Extra, ids),
             maxResults,
             sinceLast,
             minimum,
@@ -46,10 +45,12 @@ public static class AnalysisService
         bool changed,
         CancellationToken cancellationToken)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], cancellationToken).ConfigureAwait(false);
 
         return collected.IsOk
-            ? Result.Ok(Grouped(workspace.Root, Filter(collected.Value.Found, collected.Value.Scope, minimum, []), collected.Value.Extra))
+            ? Result.Ok(Grouped(
+                DiagnosticFold.Findings(workspace.Root, Filter(collected.Value.Found, collected.Value.Scope, minimum, []), DiagnosticFormat.Head),
+                collected.Value.Extra))
             : Result.Fail<string[]>(collected.Error!);
     }
 
@@ -58,6 +59,7 @@ public static class AnalysisService
         string? path,
         bool includeDeadCode,
         bool changed,
+        IReadOnlyList<string> ids,
         CancellationToken cancellationToken)
     {
         var unscoped = path is null && !changed;
@@ -80,13 +82,14 @@ public static class AnalysisService
             ? await DeadCodeService.FindAsync(workspace, targets, scope, cancellationToken).ConfigureAwait(false)
             : [];
 
-        return Result.Ok(new Collected(found, analyzed, extra, scope));
+        return Result.Ok(new Collected(found, analyzed, extra, ProjectDiagnostics.Unsupported(targets, ids, found), scope));
     }
 
     private readonly record struct Collected(
         ConcurrentBag<Diagnostic> Found,
         ConcurrentBag<string> Analyzed,
         IReadOnlyList<string> Extra,
+        IReadOnlyList<string> Unsupported,
         DiagnosticScope Scope);
 
     private static List<string> Engines(ConcurrentBag<string> analyzed, bool includeDeadCode)
@@ -152,25 +155,21 @@ public static class AnalysisService
         && (ids.Count is 0 || ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
         && scope.Includes(diagnostic);
 
-    private static string[] Grouped(string root, Diagnostic[] found, IReadOnlyList<string> extra) =>
+    private static string[] Grouped(DiagnosticFold.Finding[] findings, IReadOnlyList<string> extra) =>
     [
-        .. found
-            .Select(diagnostic => DiagnosticFormat.Key(root, diagnostic))
-            .Concat(extra)
-            .GroupBy(text => text, StringComparer.Ordinal)
-            .Select(group => new { Text = group.Key, Count = group.Count() })
-            .OrderBy(entry => entry.Text, StringComparer.Ordinal)
-            .Select(entry => entry.Count is 1
-                ? entry.Text
-                : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}")),
+        .. DiagnosticFold
+            .Lines(findings)
+            .Concat(extra
+                .GroupBy(text => text, StringComparer.Ordinal)
+                .Select(group => DiagnosticFold.Repeated(group.Key, group.Count())))
+            .Order(StringComparer.Ordinal),
     ];
 
     private static string Render(
         string root,
         string? path,
-        List<string> engines,
+        Collected collected,
         Diagnostic[] found,
-        string[] extra,
         int maxResults,
         bool sinceLast,
         DiagnosticSeverity minimum,
@@ -178,19 +177,27 @@ public static class AnalysisService
         bool includeDeadCode,
         bool changed)
     {
-        var lines = Grouped(root, found, extra);
+        var extra = Keep(collected.Extra, ids);
+        var findings = DiagnosticFold.Findings(root, found, DiagnosticFormat.Head);
+        var occurrences = Occurrences(findings, extra);
         var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{changed}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}");
-        var delta = DiagnosticHistory.Record(scope, lines);
-        var shown = sinceLast ? delta.Appeared : lines;
+        var delta = DiagnosticHistory.Record(scope, occurrences);
+        var shown = sinceLast ? delta.Appeared : Grouped(findings, extra);
 
         var response = new ResponseBuilder("analyze", path ?? "solution");
 
         response.Summary(
             ResultCap.Shown(shown.Count, maxResults),
             shown.Count,
-            sinceLast ? "new diagnostics" : "diagnostics",
+            sinceLast ? "new diagnostics, one record per occurrence" : "diagnostics, one record per id and message",
             "minSeverity=, ids= or path=");
-        response.Note("engines=" + string.Join("+", engines));
+        response.Note("engines=" + string.Join("+", Engines(collected.Analyzed, includeDeadCode)));
+
+        if (!sinceLast && occurrences.Length != shown.Count)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"total={occurrences.Length} occurrence(s) folded onto {shown.Count} record(s)"));
+
+        if (collected.Unsupported.Count > 0)
+            response.Note("NOT_ENABLED " + string.Join(", ", collected.Unsupported) + " - no analyzer these projects reference declares it, so this pass could not have found it");
 
         if (changed)
             response.Note("gate runs this, format and cleanup fix=all as one call");
@@ -200,10 +207,10 @@ public static class AnalysisService
             response.Note(delta.Baseline
                 ? string.Create(
                     CultureInfo.InvariantCulture,
-                    $"no previous analyze of this scope: this run is the baseline, all {lines.Length} diagnostic(s) are listed")
+                    $"no previous analyze of this scope: this run is the baseline, all {occurrences.Length} occurrence(s) are listed")
                 : string.Create(
                     CultureInfo.InvariantCulture,
-                    $"since the previous analyze of this scope: appeared={delta.Appeared.Count} fixed={delta.Fixed.Count} unchanged={delta.Unchanged} total={lines.Length}"));
+                    $"since the previous analyze of this scope: appeared={delta.Appeared.Count} fixed={delta.Fixed.Count} unchanged={delta.Unchanged} total={occurrences.Length} occurrence(s)"));
         }
 
         foreach (var line in shown.Capped(maxResults))
@@ -227,13 +234,16 @@ public static class AnalysisService
             "no document under that scope was modified since this workspace started tracking changes",
             "drop changed=true to analyze the whole scope, or pass path= to name the files yourself")
         : Errors.DocumentNotFound(path ?? "solution");
+
+    private static string[] Occurrences(DiagnosticFold.Finding[] findings, IReadOnlyList<string> extra) =>
+        DiagnosticFold.PerOccurrence(findings.Select(finding => finding.Key).Concat(extra));
 }
 
 public static class DiagnosticFormat
 {
-    public static string Key(string root, Diagnostic diagnostic) => string.Create(
+    public static string Head(Diagnostic diagnostic) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{diagnostic.Id} {Severity(diagnostic)} {Category(diagnostic)} {PositionFormat.Describe(root, diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+        $"{diagnostic.Id} {Severity(diagnostic)} {Category(diagnostic)}");
 
     private static string Severity(Diagnostic diagnostic) => diagnostic.Severity.ToString().ToLowerInvariant();
 

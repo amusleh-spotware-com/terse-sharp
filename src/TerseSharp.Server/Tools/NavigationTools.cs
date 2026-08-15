@@ -162,7 +162,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "explore_symbol", ReadOnly = true)]
-    [Description("One call to orient on a symbol: signature, XML doc, location, how many usages it has in src and in tests, how many implementations, how many XAML sites, and the files it is used in. Replaces get_symbol + find_usages + find_implementations when you are learning what something is.")]
+    [Description("Replaces the get_file_outline then get_symbol_source pair, and the search_symbols then get_symbol_source pair, when you are learning what a symbol IS rather than editing it: one call gives its signature, XML doc and location, how many usages it has in src and in tests, how many implementations and XAML sites, and the files it is used in.")]
     public Task<string> ExploreSymbol(
         [Description("Symbol id or name.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -172,15 +172,16 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
             ExploreService.ExploreAsync(loaded, resolved, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "impact_of", ReadOnly = true)]
-    [Description("The blast radius of changing a symbol: every file that references it with a src/test marker, every XAML site, and every project that would recompile. Use before a rename or a signature change.")]
+    [Description("Replaces find_usages then find_implementations then reading the project graph, before a rename or a signature change: one call gives every file that references the symbol with a src/test marker, every XAML site, and every project that would recompile. tests=true adds the test classes that reference it, each as a ready run_tests test= argument, so a targeted suite run needs no second search.")]
     public Task<string> ImpactOf(
         [Description("Symbol id or name.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max records (200).")] int maxResults = 0,
         [Description("Alias for symbolId.")] string? symbol = null,
+        [Description("Also list the test classes that reference this symbol, each as a ready run_tests test= argument. They are the DIRECT references only, so they narrow a run rather than replacing one. Default false.")] bool tests = false,
         CancellationToken cancellationToken = default) =>
         context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-            ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), cancellationToken), cancellationToken);
+            ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_implementations", ReadOnly = true)]
     [Description("Implementations of an interface or abstract member, and derived types of a base type.")]

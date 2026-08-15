@@ -34,18 +34,21 @@ public static class ExploreService
         LoadedWorkspace workspace,
         ISymbol symbol,
         int maxResults,
+        bool tests,
         CancellationToken cancellationToken)
     {
         var reach = await ReachAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
         var projects = Dependents(workspace, symbol);
         var records = reach.Files.Concat(reach.Xaml).ToArray();
         var response = new ResponseBuilder("impact_of", SymbolReference.Brief(symbol));
+        var named = string.Join(", ", projects.Take(8));
 
         response.Summary(ResultCap.Shown(records.Length, maxResults), records.Length, "affected files", "maxResults=");
         response.Note(Counts(reach));
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"projects that would recompile: {projects.Length} ({string.Join(", ", projects.Take(8))})"));
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"projects that would recompile: {projects.Length} ({named})"));
+
+        if (tests)
+            Reaching(response, await TestClassesAsync(workspace, reach.Locations, cancellationToken).ConfigureAwait(false));
 
         foreach (var line in records.Capped(maxResults))
             response.Line(line);
@@ -76,7 +79,8 @@ public static class ExploreService
             locations.Count(location => TestScope.Of(workspace.Root, location.Document) is "test"),
             implementations.Count(),
             [.. Grouped(workspace.Root, locations)],
-            [.. XamlUsageService.Find(workspace, symbol, symbol.Name).Select(Describe)]);
+            [.. XamlUsageService.Find(workspace, symbol, symbol.Name).Select(Describe)],
+            locations);
     }
 
     private static IEnumerable<string> Grouped(string root, IReadOnlyList<ReferenceLocation> locations) => locations
@@ -124,9 +128,78 @@ public static class ExploreService
     }
 
     private readonly record struct Reach(
-        int Usages,
-        int TestUsages,
-        int Implementations,
-        IReadOnlyList<string> Files,
-        IReadOnlyList<string> Xaml);
+            int Usages,
+            int TestUsages,
+            int Implementations,
+            IReadOnlyList<string> Files,
+            IReadOnlyList<string> Xaml,
+            IReadOnlyList<ReferenceLocation> Locations);
+
+    private const int MaxTestClasses = 10;
+
+    private static void Reaching(ResponseBuilder response, IReadOnlyList<string> classes)
+    {
+        if (classes.Count is 0)
+        {
+            response.Note("no test declaration references this symbol directly - run the whole suite, because a test can break without naming it");
+
+            return;
+        }
+
+        foreach (var name in classes.Take(MaxTestClasses))
+            response.Note("tests: run_tests test=" + name);
+
+        if (classes.Count > MaxTestClasses)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"tests: {MaxTestClasses} of {classes.Count} test classes shown - run the whole suite, because the rest are not listed"));
+
+        response.Note("HEURISTIC these are the test classes referencing the symbol DIRECTLY; a test reaching it through a helper is not listed, so this narrows a run, it does not replace one");
+    }
+
+    private static async Task<IReadOnlyList<string>> TestClassesAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<ReferenceLocation> locations,
+        CancellationToken cancellationToken)
+    {
+        var classes = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var location in locations)
+        {
+            if (TestScope.Of(workspace.Root, location.Document) is not "test")
+                continue;
+
+            var root = await location.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+
+            if (DeclaringTestType(root, location.Location.SourceSpan) is { Length: > 0 } type)
+                classes.Add(type);
+        }
+
+        return [.. classes];
+    }
+
+    private static string? DeclaringTestType(SyntaxNode? root, Microsoft.CodeAnalysis.Text.TextSpan span)
+    {
+        var declaration = root?.FindNode(span, getInnermostNodeForTie: true)
+            ?.AncestorsAndSelf()
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax>()
+            .LastOrDefault();
+
+        return declaration is not null && DeclaresATest(declaration) ? declaration.Identifier.ValueText : null;
+    }
+
+    private static readonly string[] TestAttributes = ["Fact", "Theory", "Test", "TestMethod", "TestCase"];
+
+    private static bool DeclaresATest(Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax declaration) =>
+        declaration.Members
+            .SelectMany(member => member.AttributeLists)
+            .SelectMany(list => list.Attributes)
+            .Any(attribute => TestAttributes.Contains(Simple(attribute), StringComparer.Ordinal));
+
+    private static string Simple(Microsoft.CodeAnalysis.CSharp.Syntax.AttributeSyntax attribute)
+    {
+        var name = attribute.Name.ToString();
+        var dot = name.LastIndexOf('.');
+        var trimmed = dot < 0 ? name : name[(dot + 1)..];
+
+        return trimmed.EndsWith("Attribute", StringComparison.Ordinal) ? trimmed[..^9] : trimmed;
+    }
 }

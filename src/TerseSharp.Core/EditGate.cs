@@ -60,10 +60,18 @@ public static class EditGate
 
         return response.ToString();
     }
+    private const int MaxNewWarnings = 5;
+
     private static void Announce(ResponseBuilder response, GateReport report, bool verbose)
     {
         if (Describe(report, verbose) is { Length: > 0 } counters)
             response.Note(counters);
+
+        foreach (var warning in report.NewWarnings.Take(MaxNewWarnings))
+            response.Note("WARNING introduced  " + warning);
+
+        if (report.NewWarnings.Length > MaxNewWarnings)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING introduced {MaxNewWarnings} of {report.NewWarnings.Length} shown - analyze the changed files for the rest"));
 
         if (report.Unresolved.Length > 0)
             Unresolved(response, report);
@@ -145,7 +153,8 @@ public static class EditGate
             current.WarningCount,
             current.WarningCount - baseline.WarningCount,
             await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
-            await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false));
+            await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
+            [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)]);
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -199,6 +208,7 @@ public static class EditGate
     {
         var tally = new Tally(
             new Dictionary<string, int>(StringComparer.Ordinal),
+            new Dictionary<string, int>(StringComparer.Ordinal),
             new Dictionary<string, List<int>>(StringComparer.Ordinal),
             0,
             0);
@@ -225,7 +235,7 @@ public static class EditGate
                 errors += Record(tally.Errors, tally.Lines, diagnostic, root);
 
             if (diagnostic.Severity is DiagnosticSeverity.Warning)
-                warnings++;
+                warnings += Record(tally.Warnings, tally.Lines, diagnostic, root);
         }
 
         return tally with { ErrorCount = errors, WarningCount = warnings };
@@ -260,9 +270,15 @@ public static class EditGate
             int Warnings,
             int WarningDelta,
             string[]? Imports,
-            string[]? Callers);
+            string[]? Callers,
+            string[] NewWarnings);
 
-    private readonly record struct Tally(Dictionary<string, int> Errors, Dictionary<string, List<int>> Lines, int ErrorCount, int WarningCount);
+    private readonly record struct Tally(
+        Dictionary<string, int> Errors,
+        Dictionary<string, int> Warnings,
+        Dictionary<string, List<int>> Lines,
+        int ErrorCount,
+        int WarningCount);
     private static string Compact(ResponseBuilder response, DocumentDiff[] diffs, string root)
     {
         foreach (var diff in diffs)

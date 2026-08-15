@@ -349,13 +349,13 @@ public sealed class WorkspaceSyncE2ETests
         await File.WriteAllTextAsync(path, "# doomed\n", TestContext.Current.CancellationToken);
 
         Assert.True(await PollAsync(
-            () => solution.CallAsync("find_files", new() { ["glob"] = "**/*.md" }),
+            () => solution.CallAsync("find_files", new() { ["glob"] = "**/Doomed*.md" }),
             "DoomedNote.md"));
 
         File.Delete(path);
 
         Assert.True(await PollAsync(
-            () => solution.CallAsync("find_files", new() { ["glob"] = "**/*.md" }),
+            () => solution.CallAsync("find_files", new() { ["glob"] = "**/Doomed*.md" }),
             "0 files"));
     }
 

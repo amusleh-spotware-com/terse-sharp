@@ -277,10 +277,10 @@ public sealed class InstallCommandE2ETests : IDisposable
             "--workspace",
             Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
             "--json",
-            "{\"severity\": \"info\"}");
+            "{\"minSeverityLevel\": \"info\"}");
 
         Assert.Contains("ERROR InvalidArgument", output, StringComparison.Ordinal);
-        Assert.Contains("analyze rejected the call: unrecognized severity", output, StringComparison.Ordinal);
+        Assert.Contains("analyze rejected the call: unrecognized minSeverityLevel", output, StringComparison.Ordinal);
         Assert.Contains("minSeverity", output, StringComparison.Ordinal);
     }
 }

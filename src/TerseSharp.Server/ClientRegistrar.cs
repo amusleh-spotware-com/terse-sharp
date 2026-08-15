@@ -296,7 +296,11 @@ public static class ClientRegistrar
     {
         try
         {
-            return await RewriteAsync(await AssetsAsync(cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+            var state = await AssetsAsync(cancellationToken).ConfigureAwait(false);
+
+            AssetBanner.Publish(state);
+
+            return await RewriteAsync(state).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {

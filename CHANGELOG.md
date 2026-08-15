@@ -8,6 +8,130 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-08-15
+
+**Response formats changed.** `analyze` and `get_diagnostics` now fold findings that share an id, a
+severity and a message onto **one** line carrying every position, so a record line can carry several
+comma-separated positions before its `: message`. `cleanup verify=true` and `format verify=true` append
+the step to each named file (`Foo.cs  whitespace`). `changed_files` folds a directory contributing more
+than five untracked files into a single `dir/**` row, whose first token is a glob rather than a path -
+it is excluded from the `paths=[...]` batch line for exactly that reason. `project_properties` answers
+MSBuild's evaluated properties and appends the file that set each. Under SemVer this is a breaking
+change expressed, per major-version-zero, as a MINOR bump.
+
+### Added
+
+- **`read_text columns="Finding,Tool"` projects a markdown table down to the named columns.** A file
+  whose whole content is two long tables has nothing `headings=true` can narrow, so "which rows does
+  this table hold" cost a clipped read plus a truncated `search_regex matchesOnly` sweep. It now costs
+  one call returning one line per row, and a column no table declares is refused naming the columns
+  that exist. Closes `I255`.
+- **`write_text ref=HEAD` restores a file's content from a git ref.** `undo_last_change` holds Roslyn
+  solution snapshots, so a corrupted `.csproj` or `.md` write had no in-server way back and the only
+  recovery was `Bash: git checkout --`. The restore goes through the same compile gate and the same
+  diff response as any other write. Closes the shell-out half of `I239`.
+- **`write_text` warns when it writes HTML-escaped markup.** Content carrying `&lt;` or `&gt;` and no
+  raw `<`, written to a `.csproj`, `.props`, `.targets`, `.xml`, `.xaml`, `.resx` or `.slnx`, now keeps
+  the full response and names `write_text ref=HEAD` as the way back, instead of answering
+  `changedLines=5` for a file that is no longer markup. Closes the detection half of `I239`.
+- **`list_projects path=<file>` answers which project compiles that file.** The question behind every
+  "will my edit be compile-gated" needed reading `ProjectGlobs`, `DocumentLookup` and the `.csproj` by
+  hand. It now answers from the same evaluated `EnableDefaultItems`/`EnableDefaultCompileItems` the
+  edit path already reads, and says plainly when no project compiles the path. Closes `I241`.
+- **`impact_of tests=true` names the test classes that reference a symbol, each as a ready
+  `run_tests test=` argument.** They are the direct references only, tagged `HEURISTIC`, so the answer
+  narrows a run rather than replacing one; it reuses the reference scan the tool already ran, and only
+  a type that actually declares a test is offered, so a `run_tests test=` argument can never match zero
+  tests. Closes `I249`.
+- **`package_list vulnerable=true` and `outdated=true` answer from the restored graph.** The last
+  dependency question with no tool - a known advisory or a newer version - now runs through the shared
+  child-process runner, and `ToolGuard` denies `dotnet list package`. The two are mutually exclusive,
+  exactly as the CLI's own flags are, and a run that exits non-zero says `FAILED … nothing was examined,
+  so this is not a clean bill of health` with the CLI's own output tail rather than a `0 packages`
+  summary and a guessed cause. Closes `I253`.
+- **`replace_symbol addTo=` names which containing type `add=` lands in.** A batch whose targets do not
+  all share one containing type was refused outright even when every appended member belonged to one of
+  them; `addTo` must name one of the targets' own containers, so a member can never land in a type no
+  target lives in. Closes `I238`.
+- **`path` is an alias for `glob` on `search_text`, `search_regex` and `find_files`, and `severity` for
+  `minSeverity` on `analyze`.** Those four spellings were 43 of the 98 `InvalidArgument` retries measured
+  in a week, on tools whose siblings already accept them. An unknown plural now also names the list
+  parameter the tool actually declares. Closes `I258`.
+
+### Changed
+
+- **`analyze` folds findings that share an id, a severity and a message onto one line carrying every
+  position.** 14 of 19 records for one file were the same `IDE0058` message repeated with a full path
+  each; the positions are kept, because they are the fix list, capped at 20 per line with `+N more` so
+  a rule that fires thousands of times cannot produce a line no argument can narrow. `get_diagnostics`
+  folds the same way, and the summary now names the unit it counts - `N diagnostics, one record per id
+  and message` - with a `total=N occurrence(s) folded onto M record(s)` note whenever the two differ,
+  so a folded count is never mistaken for a diagnostic count. **`sinceLast=true` still diffs per
+  occurrence**: the history records one entry per occurrence, byte-identical entries kept distinct by
+  construction, and the fold happens at render time - so adding a second occurrence of an existing
+  diagnostic can never report the first as `FIXED`. Closes `I252`.
+- **`analyze ids=` reports `NOT_ENABLED <id>` for an id no referenced analyzer declares.** A targeted
+  sweep answering `0 diagnostics` was byte-identical whether the rule ran and found nothing or was never
+  enabled. Compiler ids, `TERSE001`, and any id the pass actually found - a generator's or the
+  analyzer-crash `AD0001` - are never reported, so the note can never contradict the findings beside it.
+  Closes `I246`.
+- **`cleanup verify=true` and `format verify=true` name the step beside each file** - `whitespace`,
+  `fixers` or `fixers+whitespace` - so attributing a `VERIFY_FAILED` costs one call instead of a
+  `cleanup dryRun verbose` plus a `format verify=true`. Closes `I240`.
+- **A `VERIFY_FAILED` from a mode that also reformats now names the byte-equivalent CI pair.** 40 of 57
+  measured `VERIFY_FAILED`s came from `fix=all`, which runs the whitespace formatter the ubuntu leg does
+  not, so the verdict said nothing about whether CI would be red. Closes `I257`.
+- **`changed_files` folds a directory contributing more than five untracked files into one
+  `.research/**  +? -?  ?  x40 untracked` row.** Tracked files stay one per line and the count line still
+  counts every file, so nothing is hidden. Closes `I237`.
+- **Every mutating tool names the warnings its edit introduced**, up to five and saying `5 of 12 shown`
+  when there are more, instead of reporting only `warnings=N (+3)` and leaving an `analyze` that
+  re-realizes the compilations as the only way to learn which three. Closes `I247`.
+- **`project_properties` answers MSBuild's evaluated properties, each with the file that set it.** It
+  read the project file's own XML, so a project whose nine properties come from `Directory.Build.props`
+  answered `0 properties` - indistinguishable from a project that declares none. It reports the
+  **winning** value of each property, not every intermediate one, so a property overridden in the
+  `.csproj` appears once. Properties defined outside the workspace root, which is the SDK's own
+  hundreds, are left out, and the evaluation runs off the request thread because MSBuild has no async
+  overload. Closes `I244`.
+- **`resx_set entries=` refuses a line with no `Key=Value` separator instead of dropping it silently**,
+  naming the line numbers as the caller sent them - blank lines are skipped without shifting the count -
+  and the repeat steer now names `entries` so the plural is discoverable. A measured 299 calls in four
+  runs, the longest 138 consecutive, never used it. Closes `I262`.
+- **`workspace_status` and `load_workspace` warn when the `PreToolUse` guard or the skill is not
+  installed.** The guard was absent for a whole measured week while the corpus paid 884 `Bash` calls it
+  denies, and only 3 of 129 `workspace_status` calls passed `verbose=true`, which was the only place that
+  said so. Closes `I256`.
+- **`read_text` on a `.cs` file returned verbatim ends with the `symbolIds=[...]` batch line**, when the
+  read covered the whole file and it has at most ten members, so the next read is member-scoped. 989 of
+  1 608 `.cs` reads passed `verbose=true` and got no steer at all. Closes `I261`.
+- **`explore_symbol` and `impact_of` are described by the chains they replace.** Both were called zero
+  times in 19 849 measured tool calls while the adjacent navigation pairs they collapse ran 365 times.
+  The next scan re-measures the rate; a shipped tool nobody calls is a defect to fix or delete. Closes
+  `I259`.
+
+### Fixed
+
+- **MSBuild project evaluation is serialized across the process.** `ProjectGlobs` and the new
+  `ProjectEvaluation` both load a `ProjectCollection`, and MSBuild's project-root-element cache is not
+  safe for concurrent loads of the same project; `project_properties` runs its evaluation off the
+  request thread, so the two could overlap. Both now take one shared lock. This is hardening: a
+  `RemoteInvocationException` was observed twice in a full E2E run under the unguarded shape and has
+  not recurred since, but the link was not proven by a deterministic reproduction.
+- **The asset self-check no longer rides on the update check.** `terse` refreshed a stale skill or guard
+  only when update checking was enabled (`TERSE_UPDATE=0` turned both off); the asset half now always
+  runs, which is what makes the new `guard=absent` warning reachable.
+- **A parameter list copied from a signature now resolves when the type carries type arguments or is a
+  tuple.** `Weigh(int count)` resolved and `Weigh(Boxed<IHandler> boxed)` did not, because the generic
+  branch compared the text after the closing bracket with `SequenceEqual` and never stripped a trailing
+  parameter name, and `Normalize` dropped the space after a `)` so a named tuple parameter lost its
+  separator. `EveryReferenceAnOutlinePrints_ResolvesBackToASymbol` and
+  `GetSymbolSource_ForAnOverloadWhoseParameterCarriesTypeArguments_ResolvesTheShortForm` cover it.
+  Closes `I242`.
+- **The advertised-payload budget is asserted against the number `workspace_status` reports**, so the
+  ceiling can no longer be measured on a narrower surface than the agent pays for. Closes `I250`.
+
+
 ## [0.36.0] - 2026-08-14
 
 ### Fixed
@@ -3280,7 +3404,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.37.0
 [0.36.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.36.0
 [0.35.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.35.0
 [0.34.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.34.0

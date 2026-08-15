@@ -63,4 +63,27 @@ public sealed class ChangedTestSelectionE2ETests
 
     private static Task<string> CallAsync(TerseServerProcess server, string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task ImpactOf_WithTests_NamesTheTestClassThatReferencesTheSymbolAsAReadyRunTestsArgument()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var without = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add" });
+            var with = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add", ["tests"] = true });
+
+            Assert.DoesNotContain("run_tests test=", without, StringComparison.Ordinal);
+            Assert.Contains("tests: run_tests test=AdderTests", with, StringComparison.Ordinal);
+            Assert.DoesNotContain("run_tests test=StandaloneTests", with, StringComparison.Ordinal);
+            Assert.DoesNotContain("run_tests test=AdderProbe", with, StringComparison.Ordinal);
+            Assert.Contains("AdderProbe.cs", with, StringComparison.Ordinal);
+            Assert.Contains("HEURISTIC", with, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }

@@ -174,7 +174,7 @@ public static class SymbolReference
         return actualClose > 0
             && requestedClose > 0
             && IsSuffix(actual[..actualOpen], requested[..requestedOpen])
-            && actual[(actualClose + 1)..].SequenceEqual(requested[(requestedClose + 1)..])
+            && Unnamed(actual[(actualClose + 1)..]).SequenceEqual(Unnamed(requested[(requestedClose + 1)..]))
             && SameArguments(actual[(actualOpen + 1)..actualClose], requested[(requestedOpen + 1)..requestedClose]);
     }
 
@@ -250,7 +250,7 @@ public static class SymbolReference
         open < 0 ? Unnamed(text) : text;
 
     private static bool EndsAType(char character) =>
-        char.IsLetterOrDigit(character) || character is '_' or '>' or ']' or '?';
+        char.IsLetterOrDigit(character) || character is '_' or '>' or ')' or ']' or '?';
 
     private static bool StartsAName(char character) =>
         char.IsLetter(character) || character is '_';

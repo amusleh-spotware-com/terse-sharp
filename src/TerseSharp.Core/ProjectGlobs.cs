@@ -19,16 +19,19 @@ public static class ProjectGlobs
 
     private static bool Evaluated(string projectPath)
     {
-        using var collection = new ProjectCollection();
-        var project = collection.LoadProject(projectPath);
+        lock (EvaluationGate)
+        {
+            using var collection = new ProjectCollection();
+            var project = collection.LoadProject(projectPath);
 
-        try
-        {
-            return Sdk(project) && Enabled(project, "EnableDefaultItems") && Enabled(project, "EnableDefaultCompileItems");
-        }
-        finally
-        {
-            collection.UnloadProject(project);
+            try
+            {
+                return Sdk(project) && Enabled(project, "EnableDefaultItems") && Enabled(project, "EnableDefaultCompileItems");
+            }
+            finally
+            {
+                collection.UnloadProject(project);
+            }
         }
     }
 
@@ -74,4 +77,6 @@ public static class ProjectGlobs
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<GlobKey, bool> Verdicts = new();
 
     private readonly record struct GlobKey(string Path, DateTime LastWriteUtc, long Length);
+
+    internal static readonly Lock EvaluationGate = new();
 }

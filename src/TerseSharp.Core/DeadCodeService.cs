@@ -97,7 +97,7 @@ public static class DeadCodeService
 
     private static string Describe(string root, ISymbol symbol) => string.Create(
         CultureInfo.InvariantCulture,
-        $"TERSE001 info DeadCode {SymbolFormat.Location(root, symbol)}: '{symbol.Name}' is never referenced ({SymbolId.From(symbol)})");
+        $"{RuleId} info DeadCode {SymbolFormat.Location(root, symbol)}: '{symbol.Name}' is never referenced ({SymbolId.From(symbol)})");
 
     private static IEnumerable<ISymbol> Candidates(Compilation compilation, DiagnosticScope scope) =>
         Types(compilation.Assembly.GlobalNamespace)
@@ -139,4 +139,6 @@ public static class DeadCodeService
                 yield return deeper;
         }
     }
+
+    public const string RuleId = "TERSE001";
 }

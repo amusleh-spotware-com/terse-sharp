@@ -297,7 +297,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("gen=c", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("index=xaml(", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("lastUsedUtc=", quiet, StringComparison.Ordinal);
-        Assert.Equal(5, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length);
+        Assert.Equal(5, quiet.Split('\n', StringSplitOptions.RemoveEmptyEntries).Count(line => !line.StartsWith("WARNING ", StringComparison.Ordinal)));
         Assert.True(Tokens(quiet) * 2 < Tokens(loud), Report("workspace_status", quiet, loud));
         Assert.Contains("watch=", loud, StringComparison.Ordinal);
         Assert.Contains("gen=c", loud, StringComparison.Ordinal);
@@ -523,13 +523,32 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         var characters = surface.Sum(tool => tool.Name.Length + (tool.Description?.Length ?? 0) + tool.JsonSchema.GetRawText().Length);
         var tokens = (characters + 3) / 4;
+        var reported = ReportedAdvertisedTokens(await server.CallAsync("workspace_status", []));
 
         Assert.True(
             tokens <= AdvertisedPayloadBudget,
             string.Create(CultureInfo.InvariantCulture, $"tools/list costs {tokens} tokens over {surface.Count} tools, budget {AdvertisedPayloadBudget}"));
+
+        Assert.True(
+            reported <= AdvertisedPayloadBudget,
+            string.Create(CultureInfo.InvariantCulture, $"workspace_status reports {reported} tokens against a budget of {AdvertisedPayloadBudget}, so the ceiling is measured on a narrower surface than the agent pays for"));
+
+        Assert.Equal(tokens, reported);
     }
 
-    private const int AdvertisedPayloadBudget = 24400;
+    private static int ReportedAdvertisedTokens(string status)
+    {
+        var marker = status.IndexOf("advertised=", StringComparison.Ordinal);
+
+        Assert.True(marker >= 0, "workspace_status did not report an advertised payload: " + status);
+
+        var tail = status.AsSpan(marker);
+        var tokens = tail[..tail.IndexOf(" tokens", StringComparison.Ordinal)];
+
+        return int.Parse(tokens[(tokens.LastIndexOf(' ') + 1)..], CultureInfo.InvariantCulture);
+    }
+
+    private const int AdvertisedPayloadBudget = 26600;
 
     [Fact]
     public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()

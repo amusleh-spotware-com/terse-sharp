@@ -535,7 +535,7 @@ public static class SymbolEditService
         if (options.Add.IsDefaultOrEmpty)
             return await SwappedManyAsync(workspace, planned, options, null, cancellationToken).ConfigureAwait(false);
 
-        var appended = AppendPlan(planned, options.Add);
+        var appended = AppendPlan(planned, options.Add, options.AddTo);
 
         return appended.IsOk
             ? await SwappedManyAsync(workspace, planned, options, appended.Value, cancellationToken).ConfigureAwait(false)
@@ -607,11 +607,13 @@ public static class SymbolEditService
             TypeDeclarationSyntax Type,
             IReadOnlyList<MemberDeclarationSyntax> Members);
 
-    private static TerseError AddNotShared(BaseTypeDeclarationSyntax?[] types) => Errors.Invalid(
-            types is [var only]
-                ? "add= appends to the type that contains the replaced member, and this target's container is " + Named(only) + ", which cannot take member declarations"
-                : "add= appends to the type that contains the replaced member, and these targets do not share one: " + string.Join(", ", types.Select(Named)),
-            "send one call per containing type, or add the members with add_member first and replace the members afterwards");
+    private static TerseError AddNotShared(BaseTypeDeclarationSyntax?[] types, string? addTo) => Errors.Invalid(
+            addTo is { Length: > 0 } || types is not [_]
+                ? Unshared(types, addTo)
+                : "add= appends to the type that contains the replaced member, and this target's container is " + Named(types[0]) + ", which cannot take member declarations",
+            addTo is { Length: > 0 }
+                ? "pass addTo= naming one of the containing types listed above, or add the members with add_member first and replace the members afterwards"
+                : "pass addTo= to name which of them takes the new members, send one call per containing type, or add the members with add_member first and replace the members afterwards");
 
     private static string Named(BaseTypeDeclarationSyntax? type) => type switch
     {
@@ -635,12 +637,13 @@ public static class SymbolEditService
         return false;
     }
 
-    private static Result<AppendedMembers> AppendPlan(IReadOnlyList<PlannedEdit> planned, System.Collections.Immutable.ImmutableArray<string> add)
+    private static Result<AppendedMembers> AppendPlan(IReadOnlyList<PlannedEdit> planned, System.Collections.Immutable.ImmutableArray<string> add, string? addTo)
     {
         var types = planned.Select(edit => edit.Target.Node.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>()).ToArray();
+        var chosen = Chosen(planned, types, addTo);
 
-        if (types[0] is not TypeDeclarationSyntax container || Scattered(planned, types))
-            return Result.Fail<AppendedMembers>(AddNotShared(types));
+        if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
+            return Result.Fail<AppendedMembers>(AddNotShared(types, addTo));
 
         if (planned.Any(edit => edit.Target.Node.Span == container.Span))
             return Result.Fail<AppendedMembers>(AddReplacesItsOwnType());
@@ -648,7 +651,7 @@ public static class SymbolEditService
         var members = MemberDeclaration.ParseAll(string.Join("\n\n", add));
 
         return members.IsOk
-            ? Result.Ok(new AppendedMembers(planned[0].Target.Document.Id, container, members.Value!))
+            ? Result.Ok(new AppendedMembers(planned[chosen].Target.Document.Id, container, members.Value!))
             : Result.Fail<AppendedMembers>(members.Error!);
     }
 
@@ -659,6 +662,35 @@ public static class SymbolEditService
 
         return current.ReplaceNode(type, Appended(type, appended.Members).WithAdditionalAnnotations(Formatter.Annotation));
     }
+
+    private static int Chosen(IReadOnlyList<PlannedEdit> planned, BaseTypeDeclarationSyntax?[] types, string? addTo)
+    {
+        if (addTo is not { Length: > 0 } wanted)
+            return types[0] is TypeDeclarationSyntax && !Scattered(planned, types) ? 0 : -1;
+
+        for (var index = 0; index < types.Length; index++)
+        {
+            if (types[index] is TypeDeclarationSyntax type && string.Equals(type.Identifier.ValueText, LeafName(wanted), StringComparison.Ordinal))
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static string LeafName(string reference)
+    {
+        var text = reference.AsSpan();
+        var colon = text.IndexOf(':');
+        var name = colon < 0 ? text : text[(colon + 1)..];
+        var dot = name.LastIndexOf('.');
+
+        return new string(dot < 0 ? name : name[(dot + 1)..]);
+    }
+
+    private static string Unshared(BaseTypeDeclarationSyntax?[] types, string? addTo) =>
+        addTo is { Length: > 0 } wanted
+            ? "addTo=" + wanted + " names none of the containing types of these targets: " + string.Join(", ", types.Select(Named))
+            : "add= appends to the type that contains the replaced member, and these targets do not share one: " + string.Join(", ", types.Select(Named));
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

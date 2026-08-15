@@ -7,11 +7,12 @@ namespace TerseSharp.Server.Tools;
 public sealed class AnalysisTools(ToolContext context)
 {
     [McpServerTool(Name = "analyze")]
-    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode.")]
+    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares is named NOT_ENABLED instead of answering a silent zero.")]
     public Task<string> Analyze(
         [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
         [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
-        [Description("Optional comma-separated diagnostic ids to keep, e.g. CA1822,TERSE001.")] string? ids = null,
+        [Description("Alias for minSeverity.")] string? severity = null,
+        [Description("Optional comma-separated diagnostic ids to keep, e.g. CA1822,TERSE001. An id no referenced analyzer declares is reported NOT_ENABLED.")] string? ids = null,
         [Description("Include unreferenced members and unreachable code. Default true; set false on a huge solution to skip the reference scan.")] bool includeDeadCode = true,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (200).")] int maxResults = 0,
@@ -19,7 +20,7 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, loaded => AnalysisService.AnalyzeAsync(
-            loaded, path, Severity(minSeverity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
+            loaded, path, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "format")]

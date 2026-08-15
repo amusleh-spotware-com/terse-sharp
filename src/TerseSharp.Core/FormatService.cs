@@ -28,7 +28,7 @@ public static class FormatService
             : outcome.Solution;
 
         if (request.Verify)
-            return Result.Ok(await VerifyAsync(workspace, updated, documents, options.Tool, outcome, cancellationToken).ConfigureAwait(false));
+            return Result.Ok(await VerifyAsync(workspace, outcome.Solution, updated, documents, options.Tool, outcome, request, cancellationToken).ConfigureAwait(false));
 
         var applied = await EditGate.ApplyAsync(workspace, updated, documents, options, cancellationToken).ConfigureAwait(false);
 
@@ -59,13 +59,15 @@ public static class FormatService
 
     private static async Task<string> VerifyAsync(
         LoadedWorkspace workspace,
+        Solution fixedUp,
         Solution updated,
         IReadOnlyList<DocumentId> documents,
         string tool,
         FixOutcome outcome,
+        FixRequest request,
         CancellationToken cancellationToken)
     {
-        var changed = await ChangedAsync(workspace, updated, documents, cancellationToken).ConfigureAwait(false);
+        var changed = await ChangedAsync(workspace, fixedUp, updated, documents, cancellationToken).ConfigureAwait(false);
 
         if (changed.Length is 0 && outcome.Unfixed.Count is 0)
             return "clean";
@@ -77,29 +79,40 @@ public static class FormatService
         if (changed.Length > 0)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"VERIFY_FAILED {changed.Length} file(s) would change"));
 
+        if (RunsTheFormatterCiDoesNot(request, changed))
+            response.Note("this mode also runs the whitespace formatter, which the CI format step does not - the byte-equivalent CI pair is cleanup verify=true fix=style and cleanup verify=true fix=analyzers");
+
         foreach (var file in changed)
-            response.Line(file);
+            response.Line(file.Path + "  " + file.ChangedBy);
 
         foreach (var line in outcome.Unfixed)
             response.Note(line);
 
         return response.ToString();
     }
-    private static async Task<string[]> ChangedAsync(
+    private static async Task<VerifiedFile[]> ChangedAsync(
         LoadedWorkspace workspace,
+        Solution fixedUp,
         Solution updated,
         IReadOnlyList<DocumentId> documents,
         CancellationToken cancellationToken)
     {
-        var changed = new List<string>();
+        var changed = new List<VerifiedFile>();
 
         foreach (var id in documents)
         {
-            if (await DiffersAsync(workspace.Solution, updated, id, cancellationToken).ConfigureAwait(false))
-                changed.Add(PositionFormat.Relative(workspace.Root, updated.GetDocument(id)?.FilePath));
+            if (!await DiffersAsync(workspace.Solution, updated, id, cancellationToken).ConfigureAwait(false))
+                continue;
+
+            var byFixers = await DiffersAsync(workspace.Solution, fixedUp, id, cancellationToken).ConfigureAwait(false);
+            var byFormatter = await DiffersAsync(fixedUp, updated, id, cancellationToken).ConfigureAwait(false);
+
+            changed.Add(new VerifiedFile(
+                PositionFormat.Relative(workspace.Root, updated.GetDocument(id)?.FilePath),
+                ChangedBy(byFixers, byFormatter)));
         }
 
-        changed.Sort(StringComparer.Ordinal);
+        changed.Sort((left, right) => string.CompareOrdinal(left.Path, right.Path));
 
         return [.. changed];
     }
@@ -201,4 +214,18 @@ public static class FormatService
             "no document under that scope was modified since this workspace started tracking changes",
             "drop changed=true to sweep the whole scope, or pass path= to name the files yourself")
         : Errors.DocumentNotFound(scope.Path ?? "solution");
+
+    private sealed record VerifiedFile(string Path, string ChangedBy);
+
+    private static string ChangedBy(bool byFixers, bool byFormatter) => (byFixers, byFormatter) switch
+    {
+        (true, true) => "fixers+whitespace",
+        (true, false) => "fixers",
+        _ => "whitespace",
+    };
+
+
+    private static bool RunsTheFormatterCiDoesNot(FixRequest request, VerifiedFile[] changed) =>
+        request.Reformats
+        && Array.Exists(changed, file => file.ChangedBy is "whitespace" or "fixers+whitespace");
 }

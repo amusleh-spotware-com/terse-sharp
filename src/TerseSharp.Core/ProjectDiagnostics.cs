@@ -37,17 +37,8 @@ internal static class ProjectDiagnostics
             : await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
     }
 
-    private static bool Produces(DiagnosticAnalyzer analyzer, HashSet<string> ids)
-    {
-        try
-        {
-            return analyzer.SupportedDiagnostics.Any(descriptor => ids.Contains(descriptor.Id));
-        }
-        catch (Exception exception) when (exception is TypeLoadException or MissingMemberException or FileNotFoundException)
-        {
-            return false;
-        }
-    }
+    private static bool Produces(DiagnosticAnalyzer analyzer, HashSet<string> ids) =>
+        Supported(analyzer).Any(descriptor => ids.Contains(descriptor.Id));
 
     public static ImmutableArray<DiagnosticAnalyzer> Producing(Project project, IReadOnlyCollection<string> ids)
     {
@@ -71,4 +62,47 @@ internal static class ProjectDiagnostics
             ? []
             : await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
     }
+
+    private static ImmutableArray<DiagnosticDescriptor> Supported(DiagnosticAnalyzer analyzer)
+    {
+        try
+        {
+            return analyzer.SupportedDiagnostics;
+        }
+        catch (Exception exception) when (exception is TypeLoadException or MissingMemberException or FileNotFoundException)
+        {
+            return [];
+        }
+    }
+
+    public static string[] Unsupported(IEnumerable<Project> projects, IReadOnlyList<string> ids, IEnumerable<Diagnostic> found)
+    {
+        if (ids.Count is 0)
+            return [];
+
+        var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var project in projects)
+        {
+            foreach (var analyzer in Analyzers(project))
+            {
+                foreach (var descriptor in Supported(analyzer))
+                    declared.Add(descriptor.Id);
+            }
+        }
+
+        foreach (var diagnostic in found)
+            declared.Add(diagnostic.Id);
+
+        return [.. ids.Where(id => !declared.Contains(id) && !IsCompilerId(id) && !IsDeadCodeId(id))];
+    }
+
+    private static bool IsCompilerId(string id) =>
+        id.Length > 2
+        && id.StartsWith("CS", StringComparison.OrdinalIgnoreCase)
+        && !id.AsSpan(2).ContainsAnyExceptInRange('0', '9');
+
+
+    private static bool IsDeadCodeId(string id) =>
+        string.Equals(id, DeadCodeService.RuleId, StringComparison.OrdinalIgnoreCase);
 }

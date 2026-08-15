@@ -449,13 +449,31 @@ public static class ResxEditService
 
     private static Result<IReadOnlyList<ResxPair>> Parsed(string entries)
     {
-        var pairs = entries
-            .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries)
-            .Select(Pair)
-            .OfType<ResxPair>()
-            .ToArray();
+        var pairs = new List<ResxPair>();
+        var malformed = new List<int>();
+        var number = 0;
 
-        return pairs.Length is 0
+        foreach (var line in entries.AsSpan().EnumerateLines())
+        {
+            number++;
+
+            if (line.IsWhiteSpace())
+                continue;
+
+            if (Pair(new string(line)) is { } pair)
+                pairs.Add(pair);
+            else
+                malformed.Add(number);
+        }
+
+        if (malformed.Count > 0)
+        {
+            return Result.Fail<IReadOnlyList<ResxPair>>(Errors.Invalid(
+                "entries carried lines with no Key=Value separator: line " + string.Join(", line ", malformed),
+                "write one Key=Value per line; nothing was written, so re-send the whole batch once those lines are fixed"));
+        }
+
+        return pairs.Count is 0
             ? Result.Fail<IReadOnlyList<ResxPair>>(Errors.Invalid(
                 "entries contained no Key=Value line",
                 "pass one Key=Value per line"))

@@ -62,12 +62,12 @@ public sealed class ResxTools(ToolContext context)
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "resx_set")]
-    [Description("Add or update one key, or several as Key=Value lines, in a .resx file. Preserves the file's schema header, ordering, indentation, line endings and byte order mark, and refuses an edit that would produce malformed XML. Use instead of Edit on a .resx file. Not covered by undo_last_change - pass dryRun first if unsure.")]
+    [Description("Add or update one key, or many at once by passing entries as Key=Value lines. Replaces one call per key: they are written in a single pass over the file, and a line with no separator is named and refuses the batch instead of being dropped silently. Preserves the file's schema header, ordering, indentation, line endings and byte order mark, and refuses an edit that would produce malformed XML. Use instead of Edit on a .resx file. Not covered by undo_last_change - pass dryRun first if unsure.")]
     public Task<string> ResxSet(
         [Description("Path to the .resx/.resw file, or to any file of its family when culture is given.")] string path,
         [Description("The key to add or update.")] string? key = null,
         [Description("The value for key.")] string? value = null,
-        [Description("Several entries, one Key=Value per line. Mutually exclusive with key.")] string? entries = null,
+        [Description("Several entries, one Key=Value per line, written as one pass over the file. Mutually exclusive with key.")] string? entries = null,
         [Description("Target culture, e.g. fr. Omitted writes the file named by path; a missing culture file is created from the neutral header.")] string? culture = null,
         [Description("Optional comment for the entry.")] string? comment = null,
         [Description("Return the diff without writing.")] bool dryRun = false,

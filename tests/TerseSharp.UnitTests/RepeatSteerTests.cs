@@ -44,6 +44,7 @@ public sealed class RepeatSteerTests
     [InlineData("run_tests", "projects")]
     [InlineData("write_text", "files")]
     [InlineData("edit_text", "edits")]
+    [InlineData("resx_set", "entries")]
     public void Steer_NamesThePluralParameterOfTheToolItRepeated(string tool, string plural)
     {
         RepeatSteer.Forget();

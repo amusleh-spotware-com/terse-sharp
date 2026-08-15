@@ -219,4 +219,55 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("outside-workspace", byOutsidePath, StringComparison.Ordinal);
         Assert.DoesNotContain("read  ", byWorkspace, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ProjectProperties_AnswersWhatMsBuildEvaluatedNotWhatTheProjectFileDeclares()
+    {
+        var text = await server.CallAsync("project_properties", new() { ["project"] = Project });
+
+        Assert.False(text.StartsWith("0 properties", StringComparison.Ordinal), text);
+        Assert.Contains("TargetFramework = net10.0", text, StringComparison.Ordinal);
+        Assert.Contains("Directory.Build.props", text, StringComparison.Ordinal);
+        Assert.Single(text.Split('\n'), line => line.StartsWith("TargetFramework = ", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProjectProperties_WithAName_KeepsOnlyThatProperty()
+    {
+        var text = await server.CallAsync("project_properties", new() { ["project"] = Project, ["name"] = "TargetFramework" });
+
+        Assert.Contains("TargetFramework = net10.0", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Nullable = ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListProjects_WithAPath_NamesTheProjectThatCompilesIt()
+    {
+        var text = await server.CallAsync("list_projects", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+
+        Assert.Contains("Fixture.Trading", text, StringComparison.Ordinal);
+        Assert.Contains("compile", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListProjects_ForAPathNoProjectCompiles_SaysSoInsteadOfNamingOne()
+    {
+        var text = await server.CallAsync("list_projects", new() { ["path"] = "appsettings.json" });
+
+        Assert.Contains("0 projects", text, StringComparison.Ordinal);
+        Assert.Contains("not compile-gated", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PackageList_WithVulnerable_AnswersFromTheResolvedGraphInsteadOfTheProjectFile()
+    {
+        var declared = await server.CallAsync("package_list", new() { ["project"] = Project });
+        var audited = await server.CallAsync("package_list", new() { ["project"] = Project, ["vulnerable"] = true });
+
+        Assert.Contains("references", declared, StringComparison.Ordinal);
+        Assert.Contains("vulnerable packages", audited, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR Internal", audited, StringComparison.Ordinal);
+        Assert.DoesNotContain("references", audited, StringComparison.Ordinal);
+    }
 }

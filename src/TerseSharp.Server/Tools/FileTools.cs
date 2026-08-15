@@ -7,7 +7,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
+    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. On markdown, headings=true returns the heading map with line ranges, GitHub anchor slugs, and section=\"## Commands\" returns just that section, and columns=\"Finding,Tool\" projects a markdown table down to the named columns, so a checked-in table answers which rows exist without paying for the whole file. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
             [Description("Path, absolute or workspace-relative.")] string? path = null,
             [Description("Several files answered in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
@@ -19,6 +19,7 @@ public sealed class FileTools(ToolContext context)
             [Description("End the answer with the file's byte length as bytes=N, on every shape read_text returns and once per paths= entry. find_files stamps=true answers the same number without reading the file. Default false.")] bool bytes = false,
             [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
             [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
+            [Description("Markdown only: comma-separated column headers to project every markdown table row down to, e.g. 'Finding,Tool'. Answers which rows a checked-in table holds without returning the whole table.")] string? columns = null,
             [Description("Return the file verbatim - every line numbered, blank lines and trailing whitespace kept. On a .cs path this is also the opt-in that returns the text instead of the outline. Default false.")] bool verbose = false,
             [Description("Git ref to read the file at, e.g. main or HEAD~3, instead of shelling out for the file at that revision: the historical text gets the same numbering gutter, line ranges, tail=, section= and maxChars budget as the working tree, and a whole .cs file answers its outline. Takes one path.")] string? @ref = null,
             [Description("Workspace or worktree name.")] string? workspace = null,
@@ -35,9 +36,10 @@ public sealed class FileTools(ToolContext context)
             section,
             verbose,
             Math.Max(0, tail),
-            bytes);
+            bytes,
+            Columns: Columned(columns));
 
-        var whole = WholeRead(startLine, endLine, tail, maxLines, maxChars, section, headings, verbose);
+        var whole = WholeRead(startLine, endLine, tail, maxLines, maxChars, section, headings, verbose) && columns is null;
 
         if (@ref is { Length: > 0 } reference)
         {
@@ -88,22 +90,32 @@ bool verbose) =>
                 cancellationToken);
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically, or delete one with delete=true. Pass files=[{path,content}, ...] to write up to 10 files in ONE call. Replaces one call per file: every .cs document among them goes through ONE compile gate, so a type and the consumer it breaks land together instead of the first write being rolled back on its own, and a rollback names which file introduced the error and writes nothing at all. A successful write answers in one line per file - the file name and changedLines; pass verbose=true for the diff. An entry with empty content is refused exactly as a single write is, unless allowEmpty=true. A .cs file needs force=true, and the write is compile-gated exactly like replace_symbol when it is already a document OR is NEW under an SDK-globbing project - rolled back if it introduces an error, unless allowErrors=true. A .cs file no project globs stays ungated. That gate reads the workspace as it is now, so a file an earlier write_text created is already in the compilation and two new interdependent files land in either order. Deleting a .cs document goes through the same gate, so undo_last_change covers it. Missing directories are created, the file's existing line endings are kept, and the new or changed file is visible to every semantic tool of this workspace on the next call, with no reload. Another loaded workspace over the same root, and another terse process, pick the write up through their own file watcher instead, so their next call may still answer from the pre-write snapshot.")]
+    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD - which is the way back from a bad write to a file undo_last_change cannot cover, because its history holds Roslyn snapshots and a .csproj or .md write is not one. Pass files=[{path,content}, ...] to write up to 10 files in ONE call. Replaces one call per file: every .cs document among them goes through ONE compile gate, so a type and the consumer it breaks land together instead of the first write being rolled back on its own, and a rollback names which file introduced the error and writes nothing at all. A successful write answers in one line per file - the file name and changedLines; pass verbose=true for the diff. An entry with empty content is refused exactly as a single write is, unless allowEmpty=true. A .cs file needs force=true, and the write is compile-gated exactly like replace_symbol when it is already a document OR is NEW under an SDK-globbing project - rolled back if it introduces an error, unless allowErrors=true. A .cs file no project globs stays ungated. That gate reads the workspace as it is now, so a file an earlier write_text created is already in the compilation and two new interdependent files land in either order. Deleting a .cs document goes through the same gate, so undo_last_change covers it. Missing directories are created, the file's existing line endings are kept, and the new or changed file is visible to every semantic tool of this workspace on the next call, with no reload. Another loaded workspace over the same root, and another terse process, pick the write up through their own file watcher instead, so their next call may still answer from the pre-write snapshot.")]
     public Task<string> WriteText(
-[Description("Path, absolute or workspace-relative.")] string? path = null,
-[Description("Full new content. Omit it only with delete=true; an empty write needs allowEmpty=true, so a forgotten argument can never truncate a file.")] string? content = null,
-[Description("Several files written in one call, at most 10, each entry taking path and content. Replaces one call per file, and every .cs document among them shares one compile gate. An entry whose content is empty is refused unless allowEmpty=true. Cannot be combined with a top-level path, content or delete=true.")] FileService.FileWrite[]? files = null,
-[Description("Delete the file instead of writing it. Refused on a path outside the workspace root, and on a .cs file without force=true.")] bool delete = false,
-[Description("Permit writing empty content, which truncates the file. Default false.")] bool allowEmpty = false,
-[Description("Diff only, write nothing.")] bool dryRun = false,
-[Description("Allow writing or deleting a .cs file. The write is still compile-gated when a project compiles it - an existing document, or a new file under an SDK-globbing project.")] bool force = false,
-[Description("Apply a .cs write even if it introduces compile errors.")] bool allowErrors = false,
-[Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
-[Description("Workspace or worktree name.")] string? workspace = null,
-CancellationToken cancellationToken = default) =>
-files is { Length: > 0 } batch
-    ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, new WriteOptions(dryRun, force, allowErrors, verbose), cancellationToken)
-    : WrittenOne(workspace, path, content, delete, allowEmpty, new WriteOptions(dryRun, force, allowErrors, verbose), cancellationToken);
+    [Description("Path, absolute or workspace-relative.")] string? path = null,
+    [Description("Full new content. Omit it only with delete=true or ref=; an empty write needs allowEmpty=true, so a forgotten argument can never truncate a file.")] string? content = null,
+    [Description("Several files written in one call, at most 10, each entry taking path and content. Replaces one call per file, and every .cs document among them shares one compile gate. An entry whose content is empty is refused unless allowEmpty=true. Cannot be combined with a top-level path, content, ref or delete=true.")] FileService.FileWrite[]? files = null,
+    [Description("Delete the file instead of writing it. Refused on a path outside the workspace root, and on a .cs file without force=true.")] bool delete = false,
+    [Description("Git ref to restore the file's content from, e.g. HEAD or main, instead of passing content. Cannot be combined with content, files or delete. The restored write goes through the same compile gate and the same diff response as any other write.")] string? @ref = null,
+    [Description("Permit writing empty content, which truncates the file. Default false.")] bool allowEmpty = false,
+    [Description("Diff only, write nothing.")] bool dryRun = false,
+    [Description("Allow writing or deleting a .cs file. The write is still compile-gated when a project compiles it - an existing document, or a new file under an SDK-globbing project.")] bool force = false,
+    [Description("Apply a .cs write even if it introduces compile errors.")] bool allowErrors = false,
+    [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
+    [Description("Workspace or worktree name.")] string? workspace = null,
+    CancellationToken cancellationToken = default)
+    {
+        if (@ref is { Length: > 0 } && (delete || content is not null || files is { Length: > 0 }))
+        {
+            return Task.FromResult(Errors.Invalid(
+                "ref= restores one file's content, so it cannot be combined with content, files or delete",
+                "pass ref with path alone to restore, or content alone to write new text").Render());
+        }
+
+        return files is { Length: > 0 } batch
+            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, new WriteOptions(dryRun, force, allowErrors, verbose), cancellationToken)
+            : WrittenOne(workspace, path, content, delete, @ref, allowEmpty, new WriteOptions(dryRun, force, allowErrors, verbose), cancellationToken);
+    }
 
     private Task<string> Written(
 string? workspace,
@@ -157,17 +169,18 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
             [Description("Alias for glob.")] string? pattern = null,
             [Description("Append each listed file's UTC last-write time and byte length. Default false.")] bool stamps = false,
             [Description("Alias for glob.")] string? query = null,
+            [Description("Alias for glob.")] string? path = null,
             [Description("List only the files git tracks, so build output and untracked scratch files drop out. Needs a git repository. Default false.")] bool tracked = false,
             [Description("Keep only the files whose FILE NAME contains this text, case-insensitively - no glob to get right. Used alone it searches every file; with glob= it filters what the glob selected.")] string? name = null,
             CancellationToken cancellationToken = default)
     {
-        var matcher = glob ?? pattern ?? query;
+        var matcher = glob ?? pattern ?? query ?? path;
 
         if (matcher is not { Length: > 0 } && name is not { Length: > 0 })
         {
             return Task.FromResult(Errors.Invalid(
                 "neither 'glob' nor 'name' was supplied",
-                "pass a glob, spelled glob or pattern or query, or 'name' to match a file name substring instead").Render());
+                "pass a glob, spelled glob or pattern or query or path, or 'name' to match a file name substring instead").Render());
         }
 
         return context.WithWorkspaceAsync(
@@ -189,11 +202,12 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
     [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
     [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
     [Description("Alias for query.")] string? pattern = null,
+    [Description("Alias for glob.")] string? path = null,
     [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
     [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
     [Description("Pass queries to search several literals in one pass over the same file set, at most 10. Replaces one call per literal. Every record is tagged q1..qN by the position of its literal here, so one call answers where are these N things and no legend is echoed back. A line matching several literals is ONE record tagged with all of them, comma-separated in query order. An entry that spans a line break is reported once, at the line its text starts on, and hides nothing from the other entries. Combines with query, which is taken first; more than 10 entries is refused rather than truncated.")] string?[]? queries = null,
     CancellationToken cancellationToken = default) =>
-    Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries), cancellationToken);
+    Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries), cancellationToken);
 
     [McpServerTool(Name = "search_regex", ReadOnly = true)]
     [Description("Regular-expression search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 expressions in ONE pass over the same file set. Replaces one call per expression, and every record is tagged q1..qN by the position of its expression in queries=, which is what an alternation cannot do: it returns one undifferentiated list. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An expression that spans a line break - a literal newline, [\\s\\S] or (?s). - is reported once, at the line its text starts on, and the scan resumes on the next line, so every other expression still sees the lines it spanned. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC.")]
@@ -206,11 +220,12 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
     [Description("Collapse identical matching lines to one record carrying x<count>. Use on logs and generated output.")] bool unique = false,
     [Description("Absolute directory to search instead of the workspace, e.g. a log folder. The answer is tagged outside-workspace.")] string? root = null,
     [Description("Alias for query.")] string? pattern = null,
+    [Description("Alias for glob.")] string? path = null,
     [Description("Glob of paths to drop after glob= has selected them, e.g. .research/** or **/*.generated.cs.")] string? exclude = null,
     [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
     [Description("Pass queries to search several expressions in one pass over the same file set, at most 10. Replaces one call per expression. Every record is tagged q1..qN by the position of its expression here, so the caller can tell which expression produced which record - which one alternation cannot. A line matching several expressions is ONE record tagged with all of them, comma-separated in query order. An expression that spans a line break is reported once, at the line its text starts on, and hides nothing from the other expressions. Combines with query, which is taken first; more than 10 entries is refused rather than truncated.")] string?[]? queries = null,
     CancellationToken cancellationToken = default) =>
-    Search(new TextQuery(query ?? pattern, glob, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries), cancellationToken);
+    Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries), cancellationToken);
 
     private Task<string> Search(TextQuery request, CancellationToken cancellationToken)
     {
@@ -512,12 +527,16 @@ CancellationToken cancellationToken)
         string? path,
         string? content,
         bool delete,
+        string? reference,
         bool allowEmpty,
         WriteOptions options,
         CancellationToken cancellationToken)
     {
         if (path is not { Length: > 0 } target)
             return Task.FromResult(Errors.Blank("path", "files").Render());
+
+        if (reference is { Length: > 0 } from)
+            return Restored(workspace, target, from, allowEmpty, options, cancellationToken);
 
         return delete
             ? Guarded(workspace, target, async loaded => NavigationTools.Unwrap(
@@ -579,5 +598,44 @@ CancellationToken cancellationToken)
             : Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'files' entry {empty + 1} - {files[empty].Path} - is empty, which would truncate the file"),
                 "pass the full new content; to truncate deliberately pass allowEmpty=true, to remove the file pass delete=true");
+    }
+
+    private static string[]? Columned(string? columns) =>
+        columns is { Length: > 0 }
+            ? [.. columns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
+            : null;
+
+    private Task<string> Restored(
+        string? workspace,
+        string path,
+        string reference,
+        bool allowEmpty,
+        WriteOptions options,
+        CancellationToken cancellationToken) =>
+        Guarded(workspace, path, async loaded => await RestoredAsync(loaded, path, reference, allowEmpty, options, cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken);
+
+    private static async Task<string> RestoredAsync(
+        LoadedWorkspace loaded,
+        string path,
+        string reference,
+        bool allowEmpty,
+        WriteOptions options,
+        CancellationToken cancellationToken)
+    {
+        var relative = PositionFormat.Relative(loaded.Root, Path.IsPathRooted(path) ? path : Path.Combine(loaded.Root, path));
+        var shown = await GitRunner.ShowAsync(loaded.Root, reference, relative, cancellationToken).ConfigureAwait(false);
+
+        if (!shown.IsOk)
+            return shown.Error!.Render();
+
+        if (shown.Value is not { Length: > 0 } && !allowEmpty)
+        {
+            return Errors.Invalid(
+                relative + " is empty at " + reference + ", so restoring it would truncate the file",
+                "pass allowEmpty=true to restore it empty, or delete=true to remove it").Render();
+        }
+
+        return NavigationTools.Unwrap(await FileService.WriteTextAsync(
+            loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, cancellationToken).ConfigureAwait(false));
     }
 }

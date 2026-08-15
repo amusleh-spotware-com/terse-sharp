@@ -326,4 +326,25 @@ string? contains = null)
 
         return outline.IsOk ? Result.Ok(outline.Value! + "\n" + ParsedFromText) : outline;
     }
+
+    public static string? BatchFromText(string path, string text)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: path);
+        var root = tree.GetRoot();
+        var model = CSharpCompilation.Create("terse-batch", [tree]).GetSemanticModel(tree);
+        var references = new List<string>();
+
+        foreach (var declaration in Declarations(root))
+        {
+            var overloaded = Overloaded(declaration, model);
+
+            foreach (var member in Members(declaration))
+            {
+                if (!IsTypeDeclaration(member) && model.GetDeclaredSymbol(member) is { } symbol)
+                    references.Add(Reference(symbol, "short", overloaded));
+            }
+        }
+
+        return ArgumentLine.Ids(references);
+    }
 }

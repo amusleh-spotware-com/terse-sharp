@@ -34,6 +34,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Workspace** | — | `list_workspaces` | every loaded solution with its git branch and worktree, and the absolute path `unload_workspace` takes |
 | **Workspace** | — | `unload_workspace(path)` | releases the MSBuild file locks; addressed by the solution **path**, not a worktree name (`workspace=` is an alias for `path=`) |
 | **Workspace** | — | `list_projects(filter)` | name, language, document count; the name it prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=` |
+| **Workspace** | reading a `.csproj` to learn whether an edit is gated | `list_projects(path: "src/Foo.cs")` | which project compiles that file, from the evaluated `EnableDefaultItems` the edit path reads; no project compiling it is exactly when a write is *not* gated |
 | **Navigate** | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
 | **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` | a path inside the workspace root that belongs to no project — a fixture tree kept outside the solution — is **parsed from its own text**, not refused, and the answer ends `HEURISTIC parsed from the file's own text`. Outside the root it is still refused |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` | up to 10 in one response, each under its own path line; an unresolved path is reported inline as `NOT_FOUND`, never a failed call |
@@ -49,8 +50,9 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | a name the tests declare dozens of times | `search_symbols(query, scope: "src")` | keeps one half of the solution - `src` for the production projects, `test` for the ones referencing a test framework; an unknown value is refused rather than searching everything |
 | **Navigate** | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test`; a usage inside generated code is tagged `gen` — real, but never edit it |
 | **Navigate** | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
-| **Navigate** | orienting on a symbol | `explore_symbol(symbolId)` | signature, doc, reach, implementations, XAML sites in one call |
+| **Navigate** | the `get_file_outline` → `get_symbol_source` pair, when learning what a symbol IS | `explore_symbol(symbolId)` | signature, doc, location, usages split src/test, implementations and XAML sites, in **one** call |
 | **Navigate** | judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
+| **Navigate** | searching for the tests a change can break | `impact_of(symbolId, tests: true)` | the test classes referencing it, each a ready `run_tests test=` argument; DIRECT references only, so it narrows a run and never replaces one |
 | **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` | every ASP.NET Core `Map*` with the member it sits in |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` | a plain file-name substring, case-insensitive, no glob to get right; combines with `glob=`, which selects first, and a glob that matched nothing names it |
@@ -71,6 +73,8 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `wc -c file` for a size you want *while* reading | `read_text(path, bytes: true)` | ends the answer with `bytes=N`, on every shape it returns and once per `paths=` entry |
 | **Files** | a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from, and says `line N was cut mid-way` when the budget ran out **inside** a line — raise `maxChars` for that line, because a line range cannot resume at a character offset |
 | **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
+| **Files** | reading a whole `.md` whose content is one long table | `read_text(path, columns: "Finding,Tool")` | one line per table row, those columns only - what `headings=true` cannot give a file with nothing to narrow by; an unknown column is refused naming the real ones |
+| **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` | restores the file from that ref through the same compile gate as any write - the way back for a `.csproj` or `.md` that `undo_last_change` cannot cover. A write of markup carrying `&lt;` and no raw `<` warns and names this call, because HTML-escaped markup is not markup |
 | **Files** | `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
 | **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line — so a heading occurring 28 times cannot be matched wrongly. Only with `section=`; supply your own blank lines |
@@ -93,6 +97,8 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Refactor** | editing a signature and every call site by hand | `change_signature(symbolId, …)` | reorders, adds and removes parameters and updates the callers |
 | **Projects** | editing a `.csproj` by hand | `project_set_property` · `project_properties` · `project_add_reference` · `project_remove_reference` · `project_create` | CPM-aware, containment-checked |
 | **Projects** | editing `PackageReference` by hand | `package_list` · `package_add` · `package_remove` | central package management aware: the version lands in `Directory.Packages.props` |
+| **Projects** | `Bash: dotnet list package --vulnerable` | `package_list(vulnerable: true)` · `package_list(outdated: true)` | the resolved graph, including transitive packages - the question the project file cannot answer; needs a restore |
+| **Projects** | "which properties does this project really have?" | `project_properties(project)` | MSBuild's **evaluated** properties with the file that set each, so a `Directory.Build.props` value is answered instead of `0 properties` |
 | **Projects** | editing a `.sln`/`.slnx` by hand | `solution_add_project` · `solution_remove_project` | the solution file only, no MSBuild evaluation |
 | **Projects** | "which projects does this solution contain?" for a solution that is **not** loaded | `solution_projects(path: …)` | reads the `.slnx`, `.sln` or `.slnf` directly and loads nothing, so a fixture-scoped question does not cost a `load_workspace` that makes every later un-hinted call ambiguous |
 | **Git** | `Bash: git log` / `git show --stat` | `history` | commits touching a path, one line each - short sha, date, author, subject - `baseRef=` for a ref or a range, `contains=` for git's pickaxe (only the commits whose diff added or removed that literal), `message=` for the subject grep, and `commit=<sha>` for one commit's per-file stat. `git blame` stays on the shell: it ran **once** in 683 sessions |
@@ -110,7 +116,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Analyse** | `dotnet format whitespace` / an IDE inspection | `analyze` | compiler + every referenced analyzer + dead code, down to `info` |
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0`, where `analyzed` counts the **documents** in scope - and keeping only the diagnostics still unfixed |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
-| **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff |
+| **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff; each named file carries the step that would change it - `whitespace`, `fixers` or `fixers+whitespace` - and a mode that also reformats names the byte-equivalent CI pair, so the verdict says whether CI would really be red |
 | **Analyse** | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
 | **Analyse** | reading build output for a consumer you broke | `get_diagnostics` | the solution-wide warning and error sweep a per-file pass cannot see |
 | **XAML** | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
@@ -127,6 +133,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Localization** | `Grep` a resource key | `resx_find(query)` | key, value or comment, across every family |
 | **Localization** | "is this key still used" | `resx_usages(key)` | designer property through Roslyn, plus `GetString`, localizer, `x:Uid`, Razor, with `composedLookups=` so an empty answer is never claimed as proof |
 | **Localization** | "which strings are untranslated" | `resx_validate()` | `RESX001` missing · `RESX002` placeholder mismatch · `RESX003` unused (`includeUnused` only) · `RESX004` duplicate · `RESX005` orphan · `RESX006` empty · `RESX007` trimmed whitespace · `RESX008` unsorted · `RESX009` stale designer |
+| **Localization** | one `resx_set` call per key | `resx_set(entries: "Key=Value\nOther=Second")` | every key in one pass; a line with no separator is named and refuses the batch rather than being dropped |
 | **Localization** | `Edit` a `.resx`/`.resw` | `resx_set` · `resx_remove` · `resx_rename` | one `<data>` element rewritten; header, order, indentation, line endings and BOM kept, and `resx_set` creates a missing culture file from the neutral header |
 | **Razor** | `Read` a `.razor` or `.cshtml` file | `razor_outline(path)` | directives, component tree and `@code` members, each component resolved to its type |
 | **Razor** | "how do I use this component" | `razor_component(name)` | every `[Parameter]`, which are `[EditorRequired]`, from source **or** a referenced package |
@@ -166,8 +173,9 @@ sub-command: `dotnet format analyzers` -> `cleanup fix=analyzers` (`cleanup veri
 for `--verify-no-changes`), `dotnet format style` -> `cleanup fix=style`, a bare `dotnet format` ->
 `format` for whitespace plus `cleanup fix=all`, and `dotnet clean` -> `clean`. Those two verify modes
 check exactly the rule sets the two CI commands check, so there is never a reason to shell out for
-them. `dotnet restore`, `pack`, `publish`, `run` and `tool` are **not** covered: no
-TerseSharp tool replaces them, so shelling out is the right call.
+them. `dotnet list package` is covered too and routes to `package_list`, whose `vulnerable=true` and
+`outdated=true` answer from the same restored graph. `dotnet restore`, `pack`, `publish`, `run` and
+`tool` are **not** covered: no TerseSharp tool replaces them, so shelling out is the right call.
 
 **The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff` and
 `git diff <ref>` are served by `changed_files`, `diff_symbols` and `diff_text` — all three take
@@ -269,6 +277,11 @@ user just created, deleted or renamed is in the answer without a reload — the 
 so it does not wait on a watcher event. When the watcher is off or degraded the index is not trusted
 and the tree is walked again — correct, just slower.
 
+**A `WARNING guard=absent` or `skill=absent` line on `workspace_status` or `load_workspace` is for the
+user.** Without the `PreToolUse` guard nothing stops an agent answering with `Read`, `Grep`, `cat` or
+`dotnet build` - measured at 884 such `Bash` calls in one week. Tell the user to run
+`terse install --guard`; do not run it yourself, because it writes their settings file.
+
 **`failures=` and `warnings=` are different things.** `failures=` counts projects that did not load;
 `warnings=` counts MSBuild diagnostics that did not stop a load — NuGet advisories (NU1903), target
 framework notes (NU1701) and the like. A big solution routinely reports `failures=0 warnings=20` and
@@ -312,6 +325,11 @@ server's own sessions made 356 `analyze` calls and **zero** `gate` calls. Reach 
 tools only when you need one of them on its own, or when `gate` reports `FAILED` and you are
 fixing what it named.
 
+**`analyze` and `get_diagnostics` fold findings sharing an id, a severity and a message onto one line
+carrying every position**, because the positions are the fix list and the message is not. **An id you
+pass to `ids=` that no referenced analyzer declares comes back as `NOT_ENABLED <id>`**, so a sweep
+answering `0 diagnostics` can no longer mean "the rule never ran".
+
 `analyze`'s `changed=true` set is carried across the unload-and-reload `build`/`run_tests` perform on
 a locked output, so an analyze after a build no longer answers `no document under that scope was
 modified`; the end-of-task gate over a task's touched files is **one** call, not one per file.
@@ -334,12 +352,18 @@ whitespace formatter, which `dotnet format style` and `dotnet format analyzers` 
 `VERIFY_FAILED` there can still be a green CI leg. `cleanup verify=true fix=style` and
 `fix=analyzers` are exactly those two CI commands — they apply code fixes only and never reformat —
 while `fix=all` and the default `fix=usings` do reformat, so those two are supersets that may name
-files CI accepts.
+files CI accepts. **You no longer have to work that out**: every file a verify names carries the step
+that would change it — `whitespace`, `fixers` or `fixers+whitespace` — and a mode that also reformats
+names the byte-equivalent CI pair. Every file `whitespace` is a green CI leg; any `fixers` is a red one.
 
 **A missing path is answered, not just refused.** `get_file_outline` and `read_text` on a path named
 after a type the workspace declares elsewhere name the file that declares it, and `add_member path=`
 on a `.cs` file nobody has written yet names `write_text path=… force=true` — neither sends you to
 `find_files`, which cannot find a type that does not name its file.
+
+**A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
+saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
+type; it must name one of the targets' own containers.
 
 **`add_member` and `replace_symbol` accept several declarations in one call**, applied as a single
 compile-gated edit — so a set of members that reference each other needs no dependency ordering, and
@@ -373,8 +397,9 @@ hiding them.
 `2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call` — naming the plural
 parameter that tool declares. It is framing, never payload, it says nothing when the call already
 used the plural parameter, and the counter resets on any different tool. Obey it literally: 571 runs
-of exactly **two** consecutive calls were unreachable while it fired on the third, and the only
-published technique that raises batch width is an imperative naming a count, not a fact.
+of exactly **two** consecutive calls stay unreachable, because a steer can only ride on a response, and
+firing it on the first call was measured to break the one-line success contract on six tools. So batch
+on your own judgement: whenever the next two calls are the same tool and independent, send them as one.
 
 **Git is the other deliberate shell-out beside `build`/`run_tests`**, and the answer to the
 end-of-task review, which is defined over the diff. Start
@@ -388,7 +413,9 @@ hunk onto a declaration needs that directory's Roslyn compilation, so it refuses
 tools that can answer. All three take `baseRef=` (empty compares the working tree against `HEAD`) and
 `path=`, and are scoped to the workspace root with git's own `--relative`, so a workspace nested
 inside a larger repository never reports a file outside it. On a tree shared with other sessions,
-`changed_files(path: "src")` is the difference between reading your own change set and reading
+a directory contributing more than five **untracked** files folds into one
+`.research/**  +? -?  ?  x40 untracked` row - tracked files stay one per line and the count still counts
+every file - and `changed_files(path: "src")` is the difference between reading your own change set and reading
 everybody's, and `changed_files(exclude: ".research/**")` drops the folders a positive pathspec
 cannot leave out. `diff_symbols` tags a hunk `EXACT` only when it sits
 inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.
@@ -405,6 +432,9 @@ an argument the server does not understand is never silently dropped, because a 
 your `maxResults` is a confidently wrong answer you cannot detect. All three skip `bin`, `obj`,
 `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks —
 the same set every index uses, so a nested agent worktree never doubles a result.
+
+**A `.cs` file returned verbatim ends with `symbolIds=[...]`** when the read covered the whole file and
+it has at most ten members, so the *next* read is member-scoped. A line-ranged read gets nothing.
 
 **`read_text` on a `.cs` path asked for whole answers the outline, not the text** — no `startLine`,
 `endLine`, `tail`, `section` or `verbose`. Whole-file `.cs` reads were 71 % of everything this tool
@@ -593,7 +623,9 @@ built at runtime (`GetString("Error_" + code)`) cannot be seen. Never delete a k
 The writers are surgical: only the addressed `<data>` element is rewritten, so the schema header,
 `resheader` rows, entry order, indentation, line endings and byte order mark survive; a result that would
 not parse is refused. Typed and binary entries (`type=`, `mimetype=`) are reported `TYPED`/`BINARY` and
-passed through — `resx_set` on one is refused rather than corrupting it. `resx_remove` covers every file of
+passed through — `resx_set` on one is refused rather than corrupting it. `resx_set(entries: ...)` writes
+every `Key=Value` line in one pass, and a line with no separator is named by number and refuses the
+batch rather than vanishing from it. `resx_remove` covers every file of
 the family unless you pass `culture:`, and refuses while the key is still referenced unless `force: true`.
 `resx_rename` is all-or-nothing across the family plus the references it can prove.
 

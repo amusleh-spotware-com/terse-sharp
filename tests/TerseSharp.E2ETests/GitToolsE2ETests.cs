@@ -338,6 +338,60 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("/21", all, StringComparison.Ordinal);
         Assert.True(picked.Split('\n').Length < all.Split('\n').Length, picked);
     }
+
+    [Fact]
+    public async Task ChangedFiles_FoldsADirectoryContributingManyUntrackedFilesIntoOneRow()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i237");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            for (var index = 0; index < 8; index++)
+            {
+                await File.WriteAllTextAsync(
+                    Path.Combine(scratch, string.Create(CultureInfo.InvariantCulture, $"note{index}.txt")),
+                    "scratch",
+                    TestContext.Current.CancellationToken);
+            }
+
+            var text = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i237" });
+            var rows = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            Assert.Contains("8 files", text, StringComparison.Ordinal);
+            Assert.Contains("scratch-i237/**", text, StringComparison.Ordinal);
+            Assert.Contains("x8 untracked", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("note3.txt", text, StringComparison.Ordinal);
+            Assert.Equal(2, rows.Length);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ChangedFiles_ForFewUntrackedFiles_StillListsThemOneByOne()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i237-small");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, "only.txt"), "scratch", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i237-small" });
+
+            Assert.Contains("only.txt", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("/**", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
 }
 
 internal static class DiffSymbolProbe

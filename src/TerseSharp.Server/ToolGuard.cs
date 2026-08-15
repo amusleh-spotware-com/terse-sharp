@@ -130,6 +130,7 @@ public static class ToolGuard
             "test" or "vstest" => "test",
             "format" => Formatting(tokens),
             "clean" => "clean",
+            "list" => Listing(tokens),
             _ => null,
         };
     }
@@ -152,6 +153,7 @@ public static class ToolGuard
         "format-analyzers" => "use cleanup fix=analyzers, or cleanup verify=true fix=analyzers for --verify-no-changes - that verifies exactly what this command checks",
         "format-style" => "use cleanup fix=style, or cleanup verify=true fix=style for --verify-no-changes - that verifies exactly what this command checks",
         "clean" => "use clean",
+        "list-package" => "use package_list, with vulnerable=true or outdated=true for the resolved-graph answers",
         "status" => "use changed_files, or changed_files root=<that directory> when it is not the loaded workspace",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show; for a directory that is not loaded, diff_text root=<that directory>",
         "ls-files" => "use find_files tracked=true",
@@ -164,6 +166,7 @@ public static class ToolGuard
     private static string Rationale(string subcommand) => subcommand switch
     {
         "format" or "format-analyzers" or "format-style" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, names every diagnostic no fixer covers, and answers a verify in one line instead of a per-file listing.",
+        "list-package" => "package_list answers the declared references from the project file with no restore at all, and vulnerable=true or outdated=true runs the same resolved-graph audit through the shared child-process runner, workspace-relative and without the CLI's table framing.",
         "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, so the end-of-task review costs a listing instead of a diff.",
         "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
@@ -642,6 +645,9 @@ public static class ToolGuard
 
 
     private static JsonObject Payload(string name, string value) => new() { [name] = value };
+
+    private static string? Listing(string[] tokens) =>
+        Array.Exists(tokens, token => token.Equals("package", StringComparison.OrdinalIgnoreCase)) ? "list-package" : null;
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

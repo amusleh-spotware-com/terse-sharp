@@ -46,25 +46,21 @@ public static class DiagnosticsService
 
     private static string Render(string root, string? path, ConcurrentBag<Diagnostic> found, int maxResults)
     {
-        var deduplicated = found
-            .GroupBy(diagnostic => Key(root, diagnostic), StringComparer.Ordinal)
-            .Select(group => new { Text = group.Key, Count = group.Count() })
-            .OrderBy(entry => entry.Text, StringComparer.Ordinal)
-            .ToArray();
+        var deduplicated = DiagnosticFold.Lines(root, found, Head);
 
         var response = new ResponseBuilder("get_diagnostics", path ?? "solution");
 
         response.Summary(ResultCap.Shown(deduplicated.Length, maxResults), deduplicated.Length, "diagnostics");
 
-        foreach (var entry in deduplicated.Capped(maxResults))
-            response.Line(entry.Count is 1 ? entry.Text : string.Create(CultureInfo.InvariantCulture, $"{entry.Text} x{entry.Count}"));
+        foreach (var line in deduplicated.Capped(maxResults))
+            response.Line(line);
 
         return response.ToString();
     }
 
-    private static string Key(string root, Diagnostic diagnostic) => string.Create(
+    private static string Head(Diagnostic diagnostic) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{diagnostic.Id} {Severity(diagnostic)} {PositionFormat.Describe(root, diagnostic.Location)}: {diagnostic.GetMessage(CultureInfo.InvariantCulture)}");
+        $"{diagnostic.Id} {Severity(diagnostic)}");
 
     private static string Severity(Diagnostic diagnostic) => diagnostic.Severity.ToString().ToLowerInvariant();
 }

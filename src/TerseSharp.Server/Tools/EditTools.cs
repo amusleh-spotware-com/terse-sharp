@@ -40,11 +40,12 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit. Pass usings to add the namespaces the new declarations need in the same edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which of the targets' containing types takes them when the targets do not share one. Pass usings to add the namespaces the new declarations need in the same edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
         [Description("Symbol id of the member.")] string? symbolId = null,
         [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
         [Description(AddHelp)] string[]? add = null,
+        [Description("Name of the containing type that add= lands in, e.g. ToolBoundary or T:TerseSharp.Server.ToolBoundary. Only needed when the targets do not all share one containing type; it must name one of their containers, so a member can never land in a type none of the targets lives in.")] string? addTo = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
         [Description(VerboseHelp)] bool verbose = false,
@@ -67,7 +68,7 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "replace_symbol"));
 
-        var options = Options("replace_symbol", dryRun, allowErrors, verbose, usings, add);
+        var options = Options("replace_symbol", dryRun, allowErrors, verbose, usings, add, addTo);
 
         if (held is { Targets.Count: > 1 })
             return Batched(workspace, [.. held.Targets], [.. held.Payloads], options, cancellationToken, held.Root);
@@ -181,8 +182,8 @@ public sealed class EditTools(ToolContext context)
         Supplied(workspace, symbolId ?? symbol, newName, "newName", (loaded, resolved) => RenameService.RenameAsync(
             loaded, resolved, newName, Options("rename_symbol", dryRun, allowErrors: false, verbose), cancellationToken), cancellationToken);
 
-    private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null) =>
-        new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add]);
+    private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null, string? addTo = null) =>
+        new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add], addTo);
 
     private Task<string> Guarded(
     string? workspace,

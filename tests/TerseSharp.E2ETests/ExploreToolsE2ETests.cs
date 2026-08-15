@@ -69,4 +69,24 @@ public sealed class ExploreToolsE2ETests(TerseServerFixture server)
         Assert.Contains("MapPost", text, StringComparison.Ordinal);
         Assert.Contains("in Composition.Routes", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ImpactOf_WithTests_OverASolutionWithNoTestProject_SaysSoRatherThanAnsweringNothing()
+    {
+        var without = await server.CallAsync("impact_of", new() { ["symbolId"] = "OrderService.Submit" });
+        var with = await server.CallAsync("impact_of", new() { ["symbolId"] = "OrderService.Submit", ["tests"] = true });
+
+        Assert.DoesNotContain("no test declaration references this symbol directly", without, StringComparison.Ordinal);
+        Assert.Contains("no test declaration references this symbol directly", with, StringComparison.Ordinal);
+        Assert.Contains("run the whole suite", with, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ImpactOf_WithTests_ForASymbolNoTestNames_SaysSoRatherThanAnsweringNothing()
+    {
+        var text = await server.CallAsync("impact_of", new() { ["symbolId"] = "T:Fixture.Trading.Awkward", ["tests"] = true });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("test", text, StringComparison.Ordinal);
+    }
 }
