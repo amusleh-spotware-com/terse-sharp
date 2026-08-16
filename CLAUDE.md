@@ -802,6 +802,16 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
   against code that no longer exists — and one such round still caught a real regression introduced *by*
   the fix round. Re-verify each finding against the current tree; never dismiss a whole report because
   part of it is stale.
+- **A shared-fixture E2E test that reads state another call produced is order-dependent, and the
+  ordering differs per OS.** `advertised=<n> tools <t> tokens` is recorded by the `tools/list` filter,
+  and the MCP client lists **lazily** - so an assertion on that line passed on windows and macos,
+  where some census test had already listed, and failed on the ubuntu leg, which put it first. Make
+  the test produce the state it asserts on (`server.Client.ListToolsAsync(...)`), never inherit it.
+- **`replace_symbol` replaces the whole declaration, attributes included - so a declaration sent
+  without them silently drops them.** Sending `GitTools.ChangedFiles` without its `[McpServerTool]`
+  **un-advertised the tool**: the build stayed green, `analyze` stayed clean, `get_diagnostics` stayed
+  empty, and only an E2E call answering `Unknown tool` caught it. Copy the attributes into the
+  replacement, or edit the body with `replace_symbol_body`.
 - **Changing a guard means changing the tests that assert the old answer.** A push failed on all three
   runners because a test still asserted `dotnet build` was *allowed* against a guard just taught to deny
   it, while E2E was 330/330 green locally on the stale expectation.
