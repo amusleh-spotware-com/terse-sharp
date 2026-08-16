@@ -233,6 +233,8 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task WorkspaceStatus_Verbose_BreaksTheAdvertisedTotalIntoTheFourThingsItIsSpentOn()
     {
+        await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
         var plain = await server.CallAsync("workspace_status", []);
         var text = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
         var advertised = text.IndexOf("advertised=", StringComparison.Ordinal);
