@@ -20,7 +20,9 @@ public static class DiagnosticsService
             ParallelWork.Options(cancellationToken),
             (project, token) => CollectAsync(project, scope, minimum, found, token)).ConfigureAwait(false);
 
-        return Render(workspace.Root, path, found, maxResults);
+        var declaration = await DiagnosticDeclarations.ResolverAsync(found, cancellationToken).ConfigureAwait(false);
+
+        return Render(workspace.Root, path, found, declaration, maxResults);
     }
 
     private static async ValueTask CollectAsync(
@@ -44,9 +46,14 @@ public static class DiagnosticsService
         && !diagnostic.IsSuppressed
         && scope.Includes(diagnostic);
 
-    private static string Render(string root, string? path, ConcurrentBag<Diagnostic> found, int maxResults)
+    private static string Render(
+        string root,
+        string? path,
+        ConcurrentBag<Diagnostic> found,
+        Func<Location, string?> declaration,
+        int maxResults)
     {
-        var deduplicated = DiagnosticFold.Lines(root, found, Head);
+        var deduplicated = DiagnosticFold.Lines(root, found, Head, declaration);
 
         var response = new ResponseBuilder("get_diagnostics", path ?? "solution");
 

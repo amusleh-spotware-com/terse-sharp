@@ -84,4 +84,23 @@ public sealed class SchemaCompactorTests
 
         return SchemaCompactor.Compact(document.RootElement);
     }
+
+    [Fact]
+    public void Compact_KeepsAMemberNamedDefaultInsideANestedItemSchema()
+    {
+        var compacted = Compact("""
+        {"properties":{"files":{"type":["array","null"],"default":null,"items":{"type":"object","properties":{"path":{"type":"string"},"default":{"type":"string"}}}}}}
+        """);
+
+        var files = compacted.GetProperty("properties").GetProperty("files");
+
+        Assert.False(files.TryGetProperty("default", out _));
+        Assert.Equal("array", files.GetProperty("type").GetString());
+
+        var nested = files.GetProperty("items").GetProperty("properties");
+
+        Assert.True(nested.TryGetProperty("default", out var kept));
+        Assert.Equal("string", kept.GetProperty("type").GetString());
+        Assert.Equal("string", nested.GetProperty("path").GetProperty("type").GetString());
+    }
 }

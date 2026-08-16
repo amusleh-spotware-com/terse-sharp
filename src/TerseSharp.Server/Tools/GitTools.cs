@@ -18,14 +18,16 @@ public sealed class GitTools(ToolContext context)
         [Description("Glob of paths to drop after path= has selected them, e.g. .research/** or **/*.md. Dropped files are not counted.")] string? exclude = null,
         [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
         CancellationToken cancellationToken = default) =>
-        root is { Length: > 0 }
-            ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, cancellationToken))
-            : context.WithWorkspaceAsync(
-                workspace,
-                path,
-                loaded => ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, cancellationToken),
-                semantic: false,
-                cancellationToken);
+        FileGlob.Unsupported(exclude, "exclude") is { } rejected
+            ? Task.FromResult(rejected.Render())
+            : root is { Length: > 0 }
+                ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, cancellationToken))
+                : context.WithWorkspaceAsync(
+                    workspace,
+                    path,
+                    loaded => ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, cancellationToken),
+                    semantic: false,
+                    cancellationToken);
 
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
     [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
@@ -116,7 +118,7 @@ public sealed class GitTools(ToolContext context)
         var shown = listed.Rows.Capped(maxResults).ToArray();
 
         response.Summary(
-            capped < listed.Rows.Count ? capped : listed.Files,
+            capped < listed.Rows.Count ? Covered(shown) : listed.Files,
             listed.Files,
             "files",
             "path=, exclude=, baseRef= or maxResults=");
@@ -447,5 +449,30 @@ public sealed class GitTools(ToolContext context)
         var end = row.IndexOf("  ", StringComparison.Ordinal);
 
         return (end < 0 ? row.AsSpan() : row.AsSpan(0, end)).EndsWith("/**", StringComparison.Ordinal);
+    }
+
+    private static int Covered(IReadOnlyList<string> rows)
+    {
+        var files = 0;
+
+        foreach (var row in rows)
+            files += Files(row);
+
+        return files;
+    }
+
+    private static int Files(string row)
+    {
+        const string Untracked = " untracked";
+
+        if (!Folded(row) || !row.EndsWith(Untracked, StringComparison.Ordinal))
+            return 1;
+
+        var counted = row.AsSpan(0, row.Length - Untracked.Length);
+        var marker = counted.LastIndexOf("  x", StringComparison.Ordinal);
+
+        return marker >= 0 && int.TryParse(counted[(marker + 3)..], CultureInfo.InvariantCulture, out var folded)
+            ? folded
+            : 1;
     }
 }

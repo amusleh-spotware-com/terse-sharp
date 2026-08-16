@@ -272,4 +272,273 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task Section_WhenTheHeadingRepeats_IsPickedWithOccurrenceRatherThanAnAnchor()
+    {
+        const string Probe = "terse-section-occurrence-probe.md";
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Changelog\n\n## [Unreleased]\n\n### Added\n\n- one\n\n## [1.0.0]\n\n### Added\n\n- two\n",
+        });
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["section"] = "### Added",
+                ["place"] = "prepend",
+                ["newText"] = "- fresh\n",
+            });
+
+            Assert.Contains("'### Added' names 2 sections", refused, StringComparison.Ordinal);
+            Assert.Contains("occurrence=1..2", refused, StringComparison.Ordinal);
+            Assert.Contains("1:line 5", refused, StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["section"] = "### Added",
+                ["occurrence"] = 1,
+                ["place"] = "prepend",
+                ["newText"] = "- fresh\n",
+            });
+
+            Assert.Contains("changedLines=", applied, StringComparison.Ordinal);
+
+            var second = await server.CallAsync("read_text", new()
+            {
+                ["path"] = Probe,
+                ["section"] = "### Added",
+                ["occurrence"] = 2,
+                ["verbose"] = true,
+            });
+
+            Assert.Contains("- two", second, StringComparison.Ordinal);
+            Assert.DoesNotContain("- fresh", second, StringComparison.Ordinal);
+
+            var first = await server.CallAsync("read_text", new()
+            {
+                ["path"] = Probe,
+                ["section"] = "### Added",
+                ["occurrence"] = 1,
+                ["verbose"] = true,
+            });
+
+            Assert.Contains("- fresh", first, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_WithAnOccurrenceAndNoSection_RefusesInsteadOfIgnoringIt()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "notes.md",
+            ["occurrence"] = 2,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("no section was passed", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WhereEveryEntryCarriesItsOwnPath_NeedsNoTopLevelPath()
+    {
+        const string First = "terse-i282-first.md";
+        const string Second = "terse-i282-second.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["path"] = First, ["content"] = "alpha\n" },
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["path"] = Second, ["content"] = "beta\n" },
+        },
+        });
+
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new[]
+                {
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["path"] = First, ["oldText"] = "alpha", ["newText"] = "ALPHA" },
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["path"] = Second, ["oldText"] = "beta", ["newText"] = "BETA" },
+            },
+            });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains(First, applied, StringComparison.Ordinal);
+            Assert.Contains(Second, applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["paths"] = new[] { First, Second }, ["verbose"] = true });
+
+            Assert.Contains("ALPHA", read, StringComparison.Ordinal);
+            Assert.Contains("BETA", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = First, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Second, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithAPathlessEntryAndNoTopLevelPath_NamesTheEntryItCannotPlace()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["edits"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["path"] = "notes.md", ["oldText"] = "a", ["newText"] = "b" },
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["oldText"] = "c", ["newText"] = "d" },
+        },
+        });
+
+        Assert.Contains("edits[1] carries no path", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithNeitherAPathNorEdits_StillNamesPath()
+    {
+        var text = await server.CallAsync("edit_text", new() { ["oldText"] = "a", ["newText"] = "b" });
+
+        Assert.Contains("'path' is required", text, StringComparison.Ordinal);
+        Assert.Contains("every entry declares its own path", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithToPath_MovesTheSectionIntoTheOtherFileInOneWrite()
+    {
+        const string Source = "terse-i285-open.md";
+        const string Target = "terse-i285-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding |\n|---|\n| one |\n\n## Notes\n\nkeep me\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding |\n|---|\n",
+            },
+        },
+        });
+
+        try
+        {
+            var moved = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Source,
+                ["section"] = "## Open",
+                ["toPath"] = Target,
+            });
+
+            Assert.DoesNotContain("ERROR", moved, StringComparison.Ordinal);
+            Assert.DoesNotContain("@@", moved, StringComparison.Ordinal);
+            Assert.Contains(Source, moved, StringComparison.Ordinal);
+            Assert.Contains(Target, moved, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", moved, StringComparison.Ordinal);
+
+            var after = await server.CallAsync("read_text", new() { ["paths"] = new[] { Source, Target }, ["verbose"] = true });
+
+            Assert.Contains("## Notes", after, StringComparison.Ordinal);
+            Assert.Contains("keep me", after, StringComparison.Ordinal);
+            Assert.Contains("## Closed", after, StringComparison.Ordinal);
+            Assert.Contains("## Open", after, StringComparison.Ordinal);
+            Assert.Contains("| one |", after, StringComparison.Ordinal);
+
+            var source = await server.CallAsync("read_text", new() { ["path"] = Source, ["verbose"] = true });
+
+            Assert.DoesNotContain("## Open", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("| one |", source, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithToPathAndNoSection_SaysWhatItIsMissing()
+    {
+        var missing = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "notes.md",
+            ["toPath"] = "other.md",
+        });
+        var combined = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "notes.md",
+            ["toPath"] = "other.md",
+            ["oldText"] = "a",
+            ["newText"] = "b",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", missing, StringComparison.Ordinal);
+        Assert.Contains("no section= was passed", missing, StringComparison.Ordinal);
+
+        Assert.Contains("ERROR InvalidArgument", combined, StringComparison.Ordinal);
+        Assert.Contains("cannot be combined with newText, oldText or edits", combined, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithToPathNamingTheSameFile_IsRefusedRatherThanDuplicatingTheSection()
+    {
+        const string Probe = "terse-i285-same.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Backlog\n\n## Open\n\n| one |\n",
+        });
+
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["section"] = "## Open",
+                ["toPath"] = Probe,
+            });
+
+            Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+            Assert.Contains("names the same file as path", refused, StringComparison.Ordinal);
+
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Equal(1, after.Split("## Open", StringSplitOptions.None).Length - 1);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithToPathThatIsNotMarkdown_IsRefused()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "notes.md",
+            ["section"] = "## Open",
+            ["toPath"] = "appsettings.json",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("is not markdown", text, StringComparison.Ordinal);
+    }
 }

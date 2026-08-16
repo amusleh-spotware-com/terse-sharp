@@ -310,6 +310,18 @@ public static class ClientRegistrar
             return null;
         }
     }
+
+    public static async Task<AssetState?> ProbeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await AssetsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
 }
 
 public sealed record ClientTarget(string Name, string ConfigPath);

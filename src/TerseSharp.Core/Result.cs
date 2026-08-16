@@ -142,4 +142,20 @@ public static class Errors
                 : string.Create(
                     CultureInfo.InvariantCulture,
                     $"members of '{type}': {string.Join(", ", members.Take(MaxListedCandidates))}"));
+
+    public static TerseError Transient(Exception exception) => new(
+        TerseErrorCode.Transient,
+        string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),
+        "MSBuild's out-of-process build host dropped the call; the project file was restored, and a file the edit was adding may already be on disk. Retry the same call - and send interdependent new files as one write_text files=[...] batch, which needs only one evaluation");
+
+    public static bool IsBuildHostFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.GetType().Name is "RemoteInvocationException" or "ConnectionLostException" or "RemoteRpcException")
+                return true;
+        }
+
+        return false;
+    }
 }

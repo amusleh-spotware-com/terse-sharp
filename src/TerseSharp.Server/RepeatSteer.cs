@@ -33,19 +33,36 @@ public static class RepeatSteer
     {
         var result = await next(request, cancellationToken).ConfigureAwait(false);
 
-        if (request.Params?.Name is { Length: > 0 } tool && Steer(tool, Batched(request.Params, tool)) is { } note)
+        if (request.Params?.Name is { Length: > 0 } tool
+            && Steer(tool, Batched(request.Params, tool), Unbatchable(request.Params, tool)) is { } note)
+        {
             result.Content.Add(new TextContentBlock { Text = note });
+        }
 
         return result;
     };
+
+    private static readonly string[] PerEntryOnly = ["startLine", "endLine", "tail", "section"];
+
+    public static bool Unbatchable(CallToolRequestParams parameters, string tool) =>
+        string.Equals(tool, "read_text", StringComparison.Ordinal)
+        && parameters.Arguments is { } arguments
+        && Array.Exists(PerEntryOnly, arguments.ContainsKey);
 
     private static bool Batched(CallToolRequestParams parameters, string tool) =>
         Plural.TryGetValue(tool, out var plural)
         && parameters.Arguments is { } arguments
         && arguments.ContainsKey(plural);
 
-    public static string? Steer(string tool, bool batched = false)
+    public static string? Steer(string tool, bool batched = false, bool unbatchable = false)
     {
+        if (unbatchable)
+        {
+            Forget();
+
+            return null;
+        }
+
         var count = Counted(tool);
 
         return !batched && count >= Threshold && Plural.TryGetValue(tool, out var plural)

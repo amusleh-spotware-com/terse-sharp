@@ -59,4 +59,26 @@ public sealed class FileGlobTests
         Assert.True(FileGlob.Compile("Order(1).cs").Matches("Order(1).cs"));
         Assert.False(FileGlob.Compile("Order(1).cs").Matches("Orderx1y.cs"));
     }
+
+    [Fact]
+    public void Unsupported_ForAGlobCarryingABraceExpansion_RefusesInsteadOfMatchingNothing()
+    {
+        var rejected = FileGlob.Unsupported("**/*.{md,yml}", "glob");
+
+        Assert.NotNull(rejected);
+        Assert.Equal(TerseErrorCode.InvalidArgument, rejected.Code);
+        Assert.Contains("'glob'", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("brace", rejected.Message, StringComparison.Ordinal);
+        Assert.Contains("**/*.md", rejected.Remedy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unsupported_ForTheSyntaxTheMatcherImplements_AllowsIt()
+    {
+        Assert.Null(FileGlob.Unsupported("**/Views/*.xaml", "glob"));
+        Assert.Null(FileGlob.Unsupported("*.csproj", "glob"));
+        Assert.Null(FileGlob.Unsupported("src/**/*.cs", "glob"));
+        Assert.Null(FileGlob.Unsupported(null, "exclude"));
+        Assert.Null(FileGlob.Unsupported(string.Empty, "exclude"));
+    }
 }

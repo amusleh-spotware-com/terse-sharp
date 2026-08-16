@@ -64,4 +64,11 @@ public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
 
         return consumed;
     }
+
+    public static TerseError? Unsupported(string? glob, string parameter) =>
+        glob is not null && glob.AsSpan().IndexOfAny('{', '}') >= 0
+            ? Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{parameter}' contains a brace, and brace expansion is not implemented - this glob would match nothing rather than the alternatives it names"),
+                "the supported syntax is ** for any directories and * or ? within one segment; send one call per alternative, or widen the glob - **/*.md rather than **/*.{md,yml}")
+            : null;
 }

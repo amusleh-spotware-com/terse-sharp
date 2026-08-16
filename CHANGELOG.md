@@ -8,7 +8,154 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-08-16
+
+**Response formats changed.** Every position `analyze`, `get_diagnostics` and `gate` print now carries the
+addressable id of the declaration containing it - `OrderService.cs:15:16 OrderService.Unused: …` -
+so a record line has one more token before its `: message`. `workspace_status` gains a
+`WARNING workspace=diverged` line when a document's in-memory text no longer matches disk, and a
+`disk=in-sync` line plus an advertised-cost breakdown under `verbose=true`. A capped `changed_files`
+summary counts **files** on both halves rather than rows against files. A failure carrying an
+MSBuild build-host RPC exception is answered as the new `ERROR Transient` instead of `ERROR Internal`.
+`edit_text`'s `path` is no longer required. Under SemVer these are breaking changes expressed, per
+major-version-zero, as a MINOR bump.
+
+### Added
+
+- **`edit_text section="## Open" toPath=other.md` moves a markdown section between files in one
+  write.** Splitting the 205 KB backlog cost a 13 KB `read_text section=` plus a 9 KB `write_text`
+  that re-sent text the server already held - ~5 500 tokens for a move that changes no content. The
+  section is now cut from `path` and landed in `toPath` as one write, answered as one line per changed
+  file; `place=prepend` puts it at the top of the target, anything else appends it. `occurrence=`
+  picks the source section when the heading repeats, both paths must already exist and be markdown,
+  naming the same file twice is refused rather than duplicating the section, and `toPath` cannot be
+  combined with `oldText`, `newText` or `edits`. Locked by
+  `EditText_WithToPath_MovesTheSectionIntoTheOtherFileInOneWrite` and
+  `EditText_WithToPathNamingTheSameFile_IsRefusedRatherThanDuplicatingTheSection`. (I285)
+
+- **`edit_text` no longer needs a top-level `path` when every batched entry declares its own.** A
+  cross-file batch where each entry carried its own `path` was refused with `missing path`, so the
+  whole payload - ~1 200 tokens on the call that produced this row - had to be re-sent with an
+  arbitrary top-level `path` picked from one of the entries. `path` is now optional; a batch with a
+  path-less entry is still refused, and the refusal names the entry by index. (I282)
+
+- **`ERROR Transient` - a failure that is worth retrying, and says so.** MSBuild's out-of-process
+  build host can drop the RPC that Roslyn's apply path uses when a new `.cs` document is added; that
+  surfaced as `ERROR Internal: RemoteInvocationException`, whose remedy says "this is a server defect
+  ... report it". Any exception chain carrying a `RemoteInvocationException`, `ConnectionLostException`
+  or `RemoteRpcException` now answers `ERROR Transient` with the retry, and says nothing was written.
+  The apply itself is now taken under the same process-wide MSBuild evaluation lock `ProjectGlobs` and
+  `project_properties` already use, so a `ProjectCollection` evaluation and a build-host evaluation can
+  no longer overlap. The remedy says the project file was restored and a file the edit was adding may
+  already be on disk, because that is all the call site can prove. Locked by `TransientFailureTests`
+  and `ConcurrentNewCSharpWrites_IntoOneProject_AnswerOnlyASuccessOrAnEditConflict`. (I281)
+
+- **Two token budgets are re-baselined, with the growth measured.** `edit_text` gained `toPath` and
+  `read_text` gained `occurrence`, so the markup-narrowed `tools/list` grew from 20 250 to **20 379**
+  tokens (+129, 0.6 %) after every description this release touched was trimmed back; `SKILL.md` grew
+  from 21 100 to **21 770** tokens (+670, 3.2 %) for the nine behaviours it now teaches. Both budgets
+  are set to the measured value, so the next change cannot give the trimming back.
+
+- **A census gate over `CHANGELOG.md`'s own version headings and link definitions.**
+  `ChangelogReferenceTests` now asserts that every `## [X.Y.Z]` heading has a link definition, that no
+  definition names a heading that is not there, that `[Unreleased]` compares against the newest
+  version, and that every `git tag --list v*` has a heading - minus `v0.15.1`, a tag created on the
+  0.15.0 commit by mistake, which carries a written reason and a ratchet. It found two live defects on
+  `main`: a `[0.28.0]` link definition with no heading, and the shipped `v0.28.0` release having no
+  section at all. The `## [0.28.0]` section is restored from its own commits and marked as
+  reconstructed. Locked by `EveryVersionHeading_HasALinkDefinition_AndEveryDefinitionNamesAHeading`,
+  `EveryVersionOlderThanTheNewest_NamesATagThatExists`, `EveryTag_HasAVersionHeading` and
+  `TheUnreleasedComparison_PointsAtTheNewestVersion`. (I280)
+
 ### Changed
+
+- **`replace_symbol addTo=` refuses a leaf name that names two containing types.** It matched the leaf
+  name only and returned the first hit, so two targets whose containers are both called `Duplicate` in
+  different namespaces silently landed the new members in whichever came first - undetectable from the
+  response. It now compares the qualified name when the reference carries a `.`, and refuses naming
+  both candidates when a bare leaf matches more than one, so `addTo=Fixture.Broken.Alpha.Duplicate`
+  is the way through. (I279)
+
+- **`read_text ref=` and every other git answer are decoded as UTF-8.** The child process inherited
+  the console code page, so an em dash came back as `ΓÇö` on Windows: a historical read could not be
+  compared with the working tree, and text copied out of one would have written the corruption into
+  the file. `GitRunner` now sets the child's standard-output and standard-error encoding explicitly.
+  `dotnet` is deliberately left on the inherited encoding - MSBuild writes in the console code page,
+  and forcing UTF-8 there would corrupt what it currently gets right. Locked by
+  `ReadText_AtARef_DecodesGitsOutputAsUtf8`, which commits a real UTF-8 file into a temp repository
+  and reads it back. (I284)
+
+- **The batch steer no longer fires on a run of ranged reads.** Three consecutive `read_text` calls
+  that each needed a **different** line range were told to send the next ones as `paths=[...]`, which
+  cannot express a per-entry range - the steer asked for a call that would answer the wrong lines. A
+  `read_text` carrying `startLine`, `endLine`, `tail` or `section` now breaks the run instead of
+  extending it, so it neither steers nor counts. Whole-file reads still steer from the second call.
+  (I283)
+
+- **`changed_files` counts files on both halves of a capped summary.** Once an untracked directory
+  folded, the shown half counted **rows** and the total half counted **files**, so the same summary
+  carried two different units - `1/15 files truncated` for a shown row covering eight of them. The
+  shown half now sums the files each shown row covers, the way `find_files depth=` already does. (I278)
+
+- **The advertised-schema compaction drops `default` at parameter depth only.** It dropped any key
+  named `default` at any depth, so a member called `default` inside the item schema of `files=` or
+  `edits=` would have vanished from the advertised contract without a census gate noticing - the
+  parameter census only reaches top-level properties. The compactor now walks root -> `properties` ->
+  parameter and removes the key there; everything below is copied through. The 2 672 characters per
+  `tools/list` the compaction is worth are unchanged. (I277)
+
+- **`search_symbols` no longer answers a filtered query off-filter.** The referenced-assembly fallback
+  holds named types only and is in neither half of the solution, so `kind=method` fell through to it
+  and could answer with a class the caller had excluded, and `scope=src` could answer with a symbol
+  that is in no project. Both now answer `0 symbols` plus the reason and the parameter to drop; a type
+  kind still reaches the fallback. (I276)
+
+- **The `guard=absent` and `skill=absent` warnings are decided before the transport starts.** They were
+  published by a fire-and-forget maintenance task begun one line above `host.RunAsync`, so the first
+  `workspace_status` of a process - the orientation call the warning exists for - could answer without
+  them. `McpHost` now awaits one asset probe and publishes it before the transport begins; the
+  maintenance pass still refreshes and re-publishes afterwards, and a probe that throws is swallowed
+  rather than failing startup. (I275)
+
+- **`workspace_status` reports a document whose in-memory text no longer matches disk.** A concurrent
+  session reverting a file the workspace still holds is undetectable from inside terse - every read
+  answers from the same snapshot that is wrong - and the only way out was two `Bash: grep -c` calls.
+  The status now compares the documents changed since load against their bytes and answers
+  `WARNING workspace=diverged - N document(s) differ from disk: <paths>` with the reload to run;
+  `verbose=true` adds `disk=in-sync probed=N of M` so a clean check is visible too. It probes only the
+  files **this server wrote**, taken from the undo history and capped at 50, so a read-only session
+  pays nothing at all and `verbose=true` says `disk=not probed` - the orientation call never walks the
+  solution. (I274)
+
+- **`workspace_status verbose=true` breaks the advertised token total into what it is spent on.**
+  `advertised=88 tools 25154 tokens` now gains a second line -
+  `toolDescriptions=N parameterDescriptions=N schemaFrame=N names=N` - so the one number this
+  repository optimises against can be attributed without driving the server over stdio from a python
+  script, which is how the evidence for `I266` had to be gathered (~15 minutes per measurement). It
+  stays behind `verbose=true`: it is a maintainer question, not an agent one. (I273)
+
+- **`section=` takes `occurrence=`, on `edit_text` and on `read_text`.** A heading that deliberately
+  repeats - `### Added`, once per release in `CHANGELOG.md` - answered `'### Added' names 36 sections`
+  with a remedy ("pass the heading with its level") that the call had already followed, and the only
+  way in was an `oldText` anchor. The refusal now names `occurrence=1..N` and the start line of each
+  candidate, so the index is picked without a re-read, an index past the last names the range it could
+  have picked, and `read_text occurrence=` without a `section=` is refused rather than ignored. (I272)
+
+- **A glob carrying `{` or `}` is refused instead of answering `0 matches`.** Brace expansion is not
+  implemented, so `**/*.{md,yml}` matched nothing and read as "the string occurs nowhere" - a
+  confidently wrong negative that cost a call, a retry, and twice nearly a wrong conclusion.
+  `find_files glob=`, `search_text`/`search_regex` `glob=` and `exclude=`, and `changed_files exclude=`
+  now answer `ERROR InvalidArgument` naming the supported syntax. (I270)
+
+- **`analyze` and `get_diagnostics` name the declaration each finding sits in.** Every position is now
+  followed by the addressable id of the declaration containing it -
+  `src/Fixture.Trading/OrderService.cs:15:16 OrderService.Unused` - so the fix list is symbols you can
+  feed straight to `get_symbol_source`, not coordinates you first have to turn into symbols. `gate`
+  carries the tag too, through the same `AnalysisService.FindingsAsync`. Measured
+  on the 12-site `RS0030` sweep that produced this row: the `get_file_outline paths=[5]` it used to
+  cost was ~2 900 tokens, of which nine lines were read. A finding whose location has no source tree is
+  left exactly as it was. `build` is deliberately **not** covered: it releases the workspace lease
+  before shelling out, so no compilation is available to map its positions onto. (I269)
 
 - **The improvements backlog is two files.** `IMPROVEMENTS.md` now carries `## Open` alone, and every
   closed row moved to `IMPROVEMENTS-ARCHIVE.md` under `## Closed`, with a one-line pointer in each file
@@ -1277,6 +1424,29 @@ major-version-zero, as a MINOR bump.
   now resolve the directory the command actually addresses — the `-C` target, then a directory
   operand, then the hook payload's `cwd` — and deny only when *that* sits under a
   `.sln`/`.slnx`/`.slnf`/`.csproj`. `git -C src status` inside the same tree is still denied. (I153)
+
+## [0.28.0] - 2026-08-08
+
+> **Reconstructed.** `v0.28.0` was tagged and released, its link definition was written, and this
+> heading was not - the gap `ChangelogReferenceTests.EveryTag_HasAVersionHeading` now exists to catch.
+> The entries below are the release's own commits, restored from `git log v0.27.0..v0.28.0`; they are
+> a summary of what shipped, not the per-row detail the other sections carry.
+
+### Added
+
+- **`gate`** - the end-of-task quality sweep as one call: `analyze` at `info`, `format`,
+  `cleanup fix=all` and `analyze` again, over the files changed since the workspace loaded, answering
+  one verdict line instead of four responses.
+- **`search_text`/`search_regex` `matchesOnly=true`** - print the matched span instead of the whole
+  line, the way `grep -o` does, composing with `unique=true`.
+- **`search_symbols scope=src|test`** - keep one half of the solution, so a name the tests declare
+  dozens of times stops burying the single production declaration.
+
+### Fixed
+
+- **An honest diff.** `diff_symbols` and `diff_text` no longer report a hunk they could not map as if
+  they had; the repeat-query latency oracle measures after the warm-up call rather than during it, and
+  its settled-versus-cold comparison - which could not fail - was dropped.
 
 ## [0.27.0] - 2026-08-08
 
@@ -3484,7 +3654,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.38.0
 [0.37.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.37.0
 [0.36.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.36.0
 [0.35.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.35.0

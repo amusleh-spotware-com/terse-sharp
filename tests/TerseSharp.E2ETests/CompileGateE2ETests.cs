@@ -337,4 +337,44 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
             await File.WriteAllBytesAsync(project, before, TestContext.Current.CancellationToken);
         }
     }
+
+    [Fact]
+    public async Task GetDiagnostics_NamesTheDeclarationTheErrorSitsIn()
+    {
+        var text = await CallAsync("get_diagnostics", new() { ["minSeverity"] = "error" });
+
+        Assert.Matches(@"Calculator\.cs:\d+:\d+ Calculator\.PreExistingError:", text);
+        Assert.DoesNotContain("Calculator.Healthy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddTo_WhenTwoContainersShareALeafName_RefusesInsteadOfPickingTheFirst()
+    {
+        var ambiguous = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Alpha.Duplicate.Value", "M:Fixture.Broken.Beta.Duplicate.Value" },
+            ["declarations"] = new[] { "public int Value() => Helper();", "public int Value() => 2;" },
+            ["add"] = new[] { "private static int Helper() => 1;" },
+            ["addTo"] = "Duplicate",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", ambiguous, StringComparison.Ordinal);
+        Assert.Contains("addTo=Duplicate names 2 different containing types", ambiguous, StringComparison.Ordinal);
+        Assert.Contains("Fixture.Broken.Alpha.Duplicate", ambiguous, StringComparison.Ordinal);
+        Assert.Contains("Fixture.Broken.Beta.Duplicate", ambiguous, StringComparison.Ordinal);
+
+        var qualified = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Alpha.Duplicate.Value", "M:Fixture.Broken.Beta.Duplicate.Value" },
+            ["declarations"] = new[] { "public int Value() => Helper();", "public int Value() => 2;" },
+            ["add"] = new[] { "private static int Helper() => 1;" },
+            ["addTo"] = "Fixture.Broken.Alpha.Duplicate",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", qualified, StringComparison.Ordinal);
+        Assert.Contains("AlphaDuplicate.cs", qualified, StringComparison.Ordinal);
+        Assert.Contains("Helper", qualified, StringComparison.Ordinal);
+    }
 }

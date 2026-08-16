@@ -4,16 +4,28 @@ namespace TerseSharp.Core;
 
 public static class DiagnosticFold
 {
-    public static Finding[] Findings(string root, IEnumerable<Diagnostic> found, Func<Diagnostic, string> head) =>
+    public static Finding[] Findings(
+        string root,
+        IEnumerable<Diagnostic> found,
+        Func<Diagnostic, string> head,
+        Func<Location, string?>? declaration = null) =>
     [
         .. found.Select(diagnostic => new Finding(
             head(diagnostic),
-            PositionFormat.Describe(root, diagnostic.Location),
+            Positioned(root, diagnostic.Location, declaration),
             diagnostic.GetMessage(CultureInfo.InvariantCulture))),
     ];
 
-    public static string[] Lines(string root, IEnumerable<Diagnostic> found, Func<Diagnostic, string> head) =>
-        Lines(Findings(root, found, head));
+    private static string Positioned(string root, Location location, Func<Location, string?>? declaration) => declaration?.Invoke(location) is { Length: > 0 } containing
+    ? PositionFormat.Describe(root, location) + " " + containing
+    : PositionFormat.Describe(root, location);
+
+    public static string[] Lines(
+        string root,
+        IEnumerable<Diagnostic> found,
+        Func<Diagnostic, string> head,
+        Func<Location, string?>? declaration = null) =>
+        Lines(Findings(root, found, head, declaration));
 
     public static string[] Lines(IEnumerable<Finding> findings) =>
     [

@@ -20,11 +20,14 @@ internal sealed class TerseTempSolution : IAsyncDisposable
 
     public string OrderServicePath => Path.Combine(ProjectDirectory, "OrderService.cs");
 
-    public static async Task<TerseTempSolution> StartAsync(bool watch, CancellationToken cancellationToken)
+    public static async Task<TerseTempSolution> StartAsync(bool watch, CancellationToken cancellationToken, Func<string, Task>? prepare = null)
     {
         var root = Path.Combine(Path.GetTempPath(), "terse-e2e-sync-" + Guid.NewGuid().ToString("N"));
 
         Copy(Path.Combine(TerseServerFixture.FixtureRoot), root);
+
+        if (prepare is not null)
+            await prepare(root);
 
         var server = await TerseServerProcess.StartAsync(root, Arguments(root, watch), cancellationToken);
 

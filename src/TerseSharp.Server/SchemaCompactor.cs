@@ -33,12 +33,74 @@ public static class SchemaCompactor
 
         using (var writer = new Utf8JsonWriter(buffer))
         {
-            Write(schema, writer);
+            WriteRoot(schema, writer);
         }
 
         using var document = JsonDocument.Parse(buffer.WrittenMemory);
 
         return document.RootElement.Clone();
+    }
+
+    private const string Properties = "properties";
+
+    private static void WriteRoot(JsonElement schema, Utf8JsonWriter writer)
+    {
+        if (schema.ValueKind is not JsonValueKind.Object)
+        {
+            Write(schema, writer);
+
+            return;
+        }
+
+        writer.WriteStartObject();
+
+        foreach (var property in schema.EnumerateObject())
+        {
+            if (property.NameEquals(Properties) && property.Value.ValueKind is JsonValueKind.Object)
+            {
+                writer.WritePropertyName(property.Name);
+                WriteParameters(property.Value, writer);
+            }
+            else
+            {
+                WriteProperty(property, writer);
+            }
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteParameters(JsonElement parameters, Utf8JsonWriter writer)
+    {
+        writer.WriteStartObject();
+
+        foreach (var parameter in parameters.EnumerateObject())
+        {
+            writer.WritePropertyName(parameter.Name);
+            WriteParameter(parameter.Value, writer);
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteParameter(JsonElement schema, Utf8JsonWriter writer)
+    {
+        if (schema.ValueKind is not JsonValueKind.Object)
+        {
+            Write(schema, writer);
+
+            return;
+        }
+
+        writer.WriteStartObject();
+
+        foreach (var property in schema.EnumerateObject())
+        {
+            if (!property.NameEquals(Default))
+                WriteProperty(property, writer);
+        }
+
+        writer.WriteEndObject();
     }
 
     private static void Write(JsonElement node, Utf8JsonWriter writer)
@@ -79,9 +141,6 @@ public static class SchemaCompactor
 
     private static void WriteProperty(JsonProperty property, Utf8JsonWriter writer)
     {
-        if (property.NameEquals(Default))
-            return;
-
         if (Union(property) is { } single)
         {
             writer.WriteString(property.Name, single);

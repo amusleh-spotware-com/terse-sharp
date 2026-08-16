@@ -129,4 +129,27 @@ public sealed class DiagnosticFoldTests
             DiagnosticFold.PerOccurrence(["b", "a", "a"]),
             DiagnosticFold.PerOccurrence(["a", "b", "a"]));
     }
+
+    [Fact]
+    public async Task Findings_WithADeclarationResolver_NamesTheDeclarationEachPositionSitsIn()
+    {
+        var found = new[] { At(Repeated, 0), At(Repeated, 23) };
+        var declaration = await DiagnosticDeclarations.ResolverAsync(found, TestContext.Current.CancellationToken);
+
+        var findings = DiagnosticFold.Findings(Root, found, Head, declaration);
+
+        Assert.EndsWith(" Probe", findings[0].Position, StringComparison.Ordinal);
+        Assert.EndsWith(" Probe.One", findings[1].Position, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Findings_ForADiagnosticWithNoSource_LeavesThePositionExactlyAsItWasUntagged()
+    {
+        var found = new[] { Diagnostic.Create(Repeated, Location.None) };
+        var declaration = await DiagnosticDeclarations.ResolverAsync(found, TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            DiagnosticFold.Findings(Root, found, Head)[0].Position,
+            DiagnosticFold.Findings(Root, found, Head, declaration)[0].Position);
+    }
 }

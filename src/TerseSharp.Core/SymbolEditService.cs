@@ -644,6 +644,10 @@ public static class SymbolEditService
     private static Result<AppendedMembers> AppendPlan(IReadOnlyList<PlannedEdit> planned, System.Collections.Immutable.ImmutableArray<string> add, string? addTo)
     {
         var types = planned.Select(edit => edit.Target.Node.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>()).ToArray();
+
+        if (AmbiguousContainer(types, addTo) is { } ambiguous)
+            return Result.Fail<AppendedMembers>(ambiguous);
+
         var chosen = Chosen(planned, types, addTo);
 
         if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
@@ -672,23 +676,79 @@ public static class SymbolEditService
         if (addTo is not { Length: > 0 } wanted)
             return types[0] is TypeDeclarationSyntax && !Scattered(planned, types) ? 0 : -1;
 
+        var reference = Reference(wanted);
+
         for (var index = 0; index < types.Length; index++)
         {
-            if (types[index] is TypeDeclarationSyntax type && string.Equals(type.Identifier.ValueText, LeafName(wanted), StringComparison.Ordinal))
+            if (types[index] is TypeDeclarationSyntax type && Addresses(type, reference))
                 return index;
         }
 
         return -1;
     }
 
-    private static string LeafName(string reference)
+    private static bool Addresses(BaseTypeDeclarationSyntax type, string reference)
     {
-        var text = reference.AsSpan();
-        var colon = text.IndexOf(':');
-        var name = colon < 0 ? text : text[(colon + 1)..];
-        var dot = name.LastIndexOf('.');
+        if (!reference.Contains('.', StringComparison.Ordinal))
+            return string.Equals(type.Identifier.ValueText, reference, StringComparison.Ordinal);
 
-        return new string(dot < 0 ? name : name[(dot + 1)..]);
+        var qualified = Qualified(type).AsSpan();
+
+        return qualified.Equals(reference, StringComparison.Ordinal)
+            || (qualified.Length > reference.Length
+                && qualified[^(reference.Length + 1)] is '.'
+                && qualified[^reference.Length..].Equals(reference, StringComparison.Ordinal));
+    }
+
+    private static string Reference(string wanted)
+    {
+        var text = wanted.AsSpan();
+        var colon = text.IndexOf(':');
+
+        return new string(colon < 0 ? text : text[(colon + 1)..]);
+    }
+
+    private static string Qualified(BaseTypeDeclarationSyntax type)
+    {
+        var parts = new List<string>(4);
+
+        for (SyntaxNode? node = type; node is not null; node = node.Parent)
+        {
+            if (node is BaseTypeDeclarationSyntax declaration)
+                parts.Add(declaration.Identifier.ValueText);
+            else if (node is BaseNamespaceDeclarationSyntax @namespace)
+                parts.Add(@namespace.Name.ToString());
+        }
+
+        parts.Reverse();
+
+        return string.Join(".", parts);
+    }
+
+    private static TerseError? AmbiguousContainer(BaseTypeDeclarationSyntax?[] types, string? addTo)
+    {
+        if (addTo is not { Length: > 0 } wanted)
+            return null;
+
+        var reference = Reference(wanted);
+        var matched = new List<string>(2);
+
+        foreach (var type in types)
+        {
+            if (type is not TypeDeclarationSyntax candidate || !Addresses(candidate, reference))
+                continue;
+
+            var qualified = Qualified(candidate);
+
+            if (!matched.Contains(qualified, StringComparer.Ordinal))
+                matched.Add(qualified);
+        }
+
+        return matched.Count > 1
+            ? Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"addTo={wanted} names {matched.Count} different containing types of these targets"),
+                "qualify it with the namespace so exactly one is addressed: " + string.Join(", ", matched))
+            : null;
     }
 
     private static string Unshared(BaseTypeDeclarationSyntax?[] types, string? addTo) =>

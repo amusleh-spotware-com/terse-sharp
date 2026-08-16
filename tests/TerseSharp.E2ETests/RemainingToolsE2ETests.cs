@@ -229,4 +229,37 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
             ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
         });
     }
+
+    [Fact]
+    public async Task WorkspaceStatus_Verbose_BreaksTheAdvertisedTotalIntoTheFourThingsItIsSpentOn()
+    {
+        var plain = await server.CallAsync("workspace_status", []);
+        var text = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
+        var advertised = text.IndexOf("advertised=", StringComparison.Ordinal);
+
+        Assert.DoesNotContain("toolDescriptions=", plain, StringComparison.Ordinal);
+        Assert.True(advertised >= 0, text);
+
+        var total = Counted(text, " tools ", advertised);
+        var toolDescriptions = Counted(text, "toolDescriptions=", 0);
+        var parameterDescriptions = Counted(text, "parameterDescriptions=", 0);
+        var schemaFrame = Counted(text, "schemaFrame=", 0);
+        var names = Counted(text, "names=", 0);
+        var sum = toolDescriptions + parameterDescriptions + schemaFrame + names;
+
+        Assert.All<int>([toolDescriptions, parameterDescriptions, schemaFrame, names], part => Assert.True(part > 0, text));
+        Assert.InRange(sum, total, total + 3);
+        Assert.True(toolDescriptions + parameterDescriptions > total / 2, text);
+    }
+
+    private static int Counted(string text, string key, int from)
+    {
+        var start = text.IndexOf(key, from, StringComparison.Ordinal) + key.Length;
+        var end = start;
+
+        while (end < text.Length && char.IsAsciiDigit(text[end]))
+            end++;
+
+        return int.Parse(text.AsSpan(start, end - start), CultureInfo.InvariantCulture);
+    }
 }

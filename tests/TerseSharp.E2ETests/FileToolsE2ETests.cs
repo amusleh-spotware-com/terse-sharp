@@ -810,4 +810,23 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("startLine=", text, StringComparison.Ordinal);
         Assert.Contains("section=", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task EveryGlobTakingTool_RefusesABraceExpansionInsteadOfAnsweringZero()
+    {
+        var files = await server.CallAsync("find_files", new() { ["glob"] = "**/*.{cs,md}" });
+        var searched = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "**/*.{cs,md}" });
+        var excluded = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["exclude"] = "**/{bin,obj}/**" });
+        var changed = await server.CallAsync("changed_files", new() { ["exclude"] = "**/*.{md,yml}" });
+
+        foreach (var text in new[] { files, searched, excluded, changed })
+        {
+            Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+            Assert.Contains("brace", text, StringComparison.Ordinal);
+            Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("'exclude'", excluded, StringComparison.Ordinal);
+        Assert.Contains("'glob'", files, StringComparison.Ordinal);
+    }
 }

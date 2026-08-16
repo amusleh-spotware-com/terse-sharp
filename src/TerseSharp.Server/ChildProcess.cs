@@ -13,9 +13,10 @@ internal static class ChildProcess
             string workingDirectory,
             TimeSpan timeout,
             CancellationToken cancellationToken,
-            IReadOnlyList<KeyValuePair<string, string>>? environment = null)
+            IReadOnlyList<KeyValuePair<string, string>>? environment = null,
+            System.Text.Encoding? encoding = null)
     {
-        var start = StartInfo(fileName, arguments, workingDirectory, environment);
+        var start = StartInfo(fileName, arguments, workingDirectory, environment, encoding);
         var stopwatch = Stopwatch.StartNew();
         using var process = Started(start, fileName);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -98,7 +99,8 @@ internal static class ChildProcess
             string fileName,
             IReadOnlyList<string> arguments,
             string workingDirectory,
-            IReadOnlyList<KeyValuePair<string, string>>? environment = null)
+            IReadOnlyList<KeyValuePair<string, string>>? environment = null,
+            System.Text.Encoding? encoding = null)
     {
         var start = new ProcessStartInfo(fileName)
         {
@@ -107,6 +109,8 @@ internal static class ChildProcess
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            StandardOutputEncoding = encoding,
+            StandardErrorEncoding = encoding,
         };
 
         foreach (var argument in arguments)

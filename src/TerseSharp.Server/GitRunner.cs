@@ -9,7 +9,7 @@ internal static class GitRunner
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
-        var run = await ChildProcess.RunAsync("git", arguments, workingDirectory, Deadline, cancellationToken).ConfigureAwait(false);
+        var run = await ChildProcess.RunAsync("git", arguments, workingDirectory, Deadline, cancellationToken, environment: null, Utf8).ConfigureAwait(false);
 
         if (run.TimedOut)
             return Result.Fail<string>(Errors.Invalid("git did not answer within 60 s and was killed", "narrow the request with path=, or run the command yourself"));
@@ -20,6 +20,8 @@ internal static class GitRunner
                 "git exited " + run.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + Head(run.StandardError),
                 "check that this workspace is a git repository and that baseRef names a commit that exists"));
     }
+
+    private static readonly System.Text.UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
 
     private static string Head(string output)
     {

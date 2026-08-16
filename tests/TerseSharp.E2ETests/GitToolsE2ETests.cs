@@ -392,6 +392,117 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             Directory.Delete(scratch, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task ChangedFiles_WhenTheListIsCapped_CountsFilesOnBothHalvesOfTheSummary()
+    {
+        var first = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i278a");
+        var second = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i278b");
+
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+
+        try
+        {
+            await FillAsync(first, 8);
+            await FillAsync(second, 7);
+
+            var whole = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i278*" });
+            var capped = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i278*", ["maxResults"] = 1 });
+
+            Assert.StartsWith("15 files", whole, StringComparison.Ordinal);
+            Assert.StartsWith("8/15 files truncated", capped, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(first, recursive: true);
+            Directory.Delete(second, recursive: true);
+        }
+    }
+
+    private static async Task FillAsync(string directory, int files)
+    {
+        for (var index = 0; index < files; index++)
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(directory, string.Create(CultureInfo.InvariantCulture, $"note{index}.txt")),
+                "scratch",
+                TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_AtARef_DecodesGitsOutputAsUtf8()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            CommittedUnicodeProbeAsync);
+
+        var text = await solution.CallAsync("read_text", new()
+        {
+            ["path"] = "unicode-probe.md",
+            ["ref"] = "HEAD",
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("an em dash — here", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ã", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Γ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("�", text, StringComparison.Ordinal);
+    }
+
+    private static async Task CommittedUnicodeProbeAsync(string root)
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "unicode-probe.md"),
+            "an em dash — here\n",
+            new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            TestContext.Current.CancellationToken);
+
+        await RunGitAsync(root, "init");
+        await RunGitAsync(root, "-c", "core.autocrlf=false", "add", "-A");
+        await RunGitAsync(
+            root,
+            "-c",
+            "user.email=terse@example.com",
+            "-c",
+            "user.name=terse",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--no-verify",
+            "-m",
+            "probe");
+    }
+
+    private static async Task RunGitAsync(string root, params string[] arguments)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("git")
+        {
+            WorkingDirectory = root,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        start.Environment["GIT_TERMINAL_PROMPT"] = "0";
+
+        foreach (var argument in arguments)
+            start.ArgumentList.Add(argument);
+
+        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("git did not start");
+
+        process.StandardInput.Close();
+
+        var output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+        await Task.WhenAll(output, error, process.WaitForExitAsync(TestContext.Current.CancellationToken));
+
+        if (process.ExitCode is not 0)
+            throw new InvalidOperationException("git " + arguments[^1] + " exited " + process.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + await error);
+    }
 }
 
 internal static class DiffSymbolProbe

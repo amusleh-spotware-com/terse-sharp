@@ -547,7 +547,10 @@ public sealed class LoadedWorkspace : IDisposable
 
         try
         {
-            applied = workspace.TryApplyChanges(rebased);
+            lock (ProjectGlobs.EvaluationGate)
+            {
+                applied = workspace.TryApplyChanges(rebased);
+            }
         }
         finally
         {
@@ -603,4 +606,20 @@ public sealed class LoadedWorkspace : IDisposable
 
     public bool TakeRealizedNotice() =>
         Interlocked.CompareExchange(ref realizedNoticeTaken, 1, 0) is 0;
+
+    public IReadOnlyList<string> EditedPaths
+    {
+        get
+        {
+            lock (historyGate)
+            {
+                var edited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var entry in history)
+                    edited.UnionWith(entry.Paths);
+
+                return [.. edited.Order(StringComparer.OrdinalIgnoreCase)];
+            }
+        }
+    }
 }

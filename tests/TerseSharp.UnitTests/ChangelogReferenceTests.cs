@@ -102,4 +102,114 @@ public sealed partial class ChangelogReferenceTests
     [InlineData("Strings.Designer.cs", false)]
     [InlineData("CS7036", false)]
     public void ATestNameIsToldApartFromEveryOtherBackTickedThingTheChangelogCarries(string reference, bool expected) => Assert.Equal(expected, IsTestName(Simple(reference)));
+
+    [Fact]
+    public void EveryVersionHeading_HasALinkDefinition_AndEveryDefinitionNamesAHeading()
+    {
+        var headings = Headings();
+        var definitions = Definitions();
+
+        Assert.NotEmpty(headings);
+        Assert.True(
+            headings.All(definitions.ContainsKey),
+            "version headings with no link definition: " + string.Join(", ", headings.Where(version => !definitions.ContainsKey(version))));
+        Assert.True(
+            definitions.Keys.All(version => version is "Unreleased" || headings.Contains(version)),
+            "link definitions naming no heading: " + string.Join(", ", definitions.Keys.Where(version => version is not "Unreleased" && !headings.Contains(version))));
+    }
+
+    [Fact]
+    public void EveryVersionOlderThanTheNewest_NamesATagThatExists()
+    {
+        var tags = Tags();
+        var missing = Headings().Skip(1).Where(version => !tags.Contains("v" + version)).ToArray();
+
+        Assert.NotEmpty(tags);
+        Assert.True(
+            missing.Length is 0,
+            "the changelog names versions that were never tagged: " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public void EveryTag_HasAVersionHeading()
+    {
+        var headings = Headings().ToHashSet(StringComparer.Ordinal);
+        var orphans = Tags()
+            .Where(tag => !Unreleased.Contains(tag) && !headings.Contains(tag.TrimStart('v')))
+            .ToArray();
+
+        Assert.True(orphans.Length is 0, "tags with no changelog heading: " + string.Join(", ", orphans));
+    }
+
+    [Fact]
+    public void EveryTagWithoutAHeading_CarriesAReasonAndTheSetOnlyEverShrinks()
+    {
+        var tags = Tags();
+
+        Assert.True(Unreleased.Count <= MaxUnreleasedTags, "the set of untagged-by-design versions may only shrink");
+        Assert.All(Unreleased, tag => Assert.Contains(tag, tags));
+        Assert.All(Unreleased, tag => Assert.NotEmpty(UnreleasedReason(tag)));
+    }
+
+    private const int MaxUnreleasedTags = 1;
+    private static readonly HashSet<string> Unreleased = new(StringComparer.Ordinal) { "v0.15.1" };
+
+    private static string UnreleasedReason(string tag) => tag switch
+    {
+        "v0.15.1" => "created on the 0.15.0 commit by mistake; the package is byte-identical to 0.15.0 and the 0.15.2 section says so, so there is nothing for a heading to describe",
+        _ => string.Empty,
+    };
+
+    [Fact]
+    public void TheUnreleasedComparison_PointsAtTheNewestVersion()
+    {
+        var newest = Headings()[0];
+
+        Assert.EndsWith("compare/v" + newest + "...HEAD", Definitions()["Unreleased"], StringComparison.Ordinal);
+    }
+
+    private static string[] Headings() =>
+    [
+        .. Lines
+        .Where(line => line.StartsWith("## [", StringComparison.Ordinal))
+        .Select(line => line[4..line.IndexOf(']', StringComparison.Ordinal)])
+        .Where(version => version is not "Unreleased"),
+];
+
+    private static Dictionary<string, string> Definitions()
+    {
+        var definitions = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var line in Lines)
+        {
+            var separator = line.IndexOf("]: ", StringComparison.Ordinal);
+
+            if (line.StartsWith('[') && separator > 1)
+                definitions[line[1..separator]] = line[(separator + 3)..].Trim();
+        }
+
+        return definitions;
+    }
+
+    private static HashSet<string> Tags()
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("git")
+        {
+            WorkingDirectory = Fixtures.RepositoryRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        start.ArgumentList.Add("tag");
+        start.ArgumentList.Add("--list");
+        start.ArgumentList.Add("v*");
+
+        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("git did not start");
+
+        var output = process.StandardOutput.ReadToEnd();
+
+        process.WaitForExit();
+
+        return [.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(tag => tag.Trim())];
+    }
 }

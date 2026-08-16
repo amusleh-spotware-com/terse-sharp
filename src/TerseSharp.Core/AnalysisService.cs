@@ -23,12 +23,15 @@ public static class AnalysisService
             return collected.Error!.Render();
 
         var value = collected.Value;
+        var found = Filter(value.Found, value.Scope, minimum, ids);
+        var declaration = await DiagnosticDeclarations.ResolverAsync(found, cancellationToken).ConfigureAwait(false);
 
         return Render(
             workspace.Root,
             path,
             value,
-            Filter(value.Found, value.Scope, minimum, ids),
+            found,
+            declaration,
             maxResults,
             sinceLast,
             minimum,
@@ -47,11 +50,15 @@ public static class AnalysisService
     {
         var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], cancellationToken).ConfigureAwait(false);
 
-        return collected.IsOk
-            ? Result.Ok(Grouped(
-                DiagnosticFold.Findings(workspace.Root, Filter(collected.Value.Found, collected.Value.Scope, minimum, []), DiagnosticFormat.Head),
-                collected.Value.Extra))
-            : Result.Fail<string[]>(collected.Error!);
+        if (!collected.IsOk)
+            return Result.Fail<string[]>(collected.Error!);
+
+        var found = Filter(collected.Value.Found, collected.Value.Scope, minimum, []);
+        var declaration = await DiagnosticDeclarations.ResolverAsync(found, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(Grouped(
+            DiagnosticFold.Findings(workspace.Root, found, DiagnosticFormat.Head, declaration),
+            collected.Value.Extra));
     }
 
     private static async Task<Result<Collected>> CollectedAsync(
@@ -170,6 +177,7 @@ public static class AnalysisService
         string? path,
         Collected collected,
         Diagnostic[] found,
+        Func<Location, string?> declaration,
         int maxResults,
         bool sinceLast,
         DiagnosticSeverity minimum,
@@ -178,7 +186,7 @@ public static class AnalysisService
         bool changed)
     {
         var extra = Keep(collected.Extra, ids);
-        var findings = DiagnosticFold.Findings(root, found, DiagnosticFormat.Head);
+        var findings = DiagnosticFold.Findings(root, found, DiagnosticFormat.Head, declaration);
         var occurrences = Occurrences(findings, extra);
         var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{changed}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}");
         var delta = DiagnosticHistory.Record(scope, occurrences);

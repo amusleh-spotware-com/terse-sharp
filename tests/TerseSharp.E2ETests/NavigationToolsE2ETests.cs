@@ -635,4 +635,33 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", source, StringComparison.Ordinal);
         Assert.Contains(expected, source, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task SearchSymbols_WithAFilterTheMetadataFallbackCannotHonour_DeclinesInsteadOfAnsweringOffFilter()
+    {
+        var unfiltered = await server.CallAsync("search_symbols", new() { ["query"] = "JsonSerializer" });
+        var byKind = await server.CallAsync("search_symbols", new() { ["query"] = "JsonSerializer", ["kind"] = "method" });
+        var byScope = await server.CallAsync("search_symbols", new() { ["query"] = "JsonSerializer", ["scope"] = "src" });
+
+        Assert.Contains("from referenced assemblies", unfiltered, StringComparison.Ordinal);
+        Assert.Contains("JsonSerializer", unfiltered, StringComparison.Ordinal);
+
+        Assert.StartsWith("0 symbols", byKind, StringComparison.Ordinal);
+        Assert.Contains("holds types only", byKind, StringComparison.Ordinal);
+        Assert.Contains("kind=method", byKind, StringComparison.Ordinal);
+        Assert.DoesNotContain("EXACT", byKind, StringComparison.Ordinal);
+
+        Assert.StartsWith("0 symbols", byScope, StringComparison.Ordinal);
+        Assert.Contains("neither src nor test", byScope, StringComparison.Ordinal);
+        Assert.DoesNotContain("EXACT", byScope, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithATypeKind_StillReachesTheReferencedAssemblies()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["query"] = "JsonSerializer", ["kind"] = "class" });
+
+        Assert.Contains("from referenced assemblies", text, StringComparison.Ordinal);
+        Assert.Contains("JsonSerializer", text, StringComparison.Ordinal);
+    }
 }

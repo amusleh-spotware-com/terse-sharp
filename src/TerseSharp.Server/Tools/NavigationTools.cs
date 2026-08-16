@@ -220,7 +220,10 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         var declared = scope is "test" ? 0 : components.Count;
 
         if (declared + found.Total is 0)
-            return await ReferencedAsync(workspace, query, maxResults, cancellationToken).ConfigureAwait(false);
+        {
+            return Declined(query, kind, scope)
+                ?? await ReferencedAsync(workspace, query, maxResults, cancellationToken).ConfigureAwait(false);
+        }
 
         var budget = ResultCap.Shown(declared + found.Total, maxResults);
         var shownComponents = Math.Min(declared, budget);
@@ -336,4 +339,35 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
 
         return response.ToString();
     }
+
+    private static string? Declined(string query, string? kind, string? scope)
+    {
+        if (Undeliverable(kind, scope) is not { } reason)
+            return null;
+
+        var response = new ResponseBuilder("search_symbols", query);
+
+        response.Summary(0, 0, "symbols");
+        response.Note(reason);
+
+        return response.ToString();
+    }
+
+    private static string? Undeliverable(string? kind, string? scope) => (NamesAType(kind), scope) switch
+    {
+        (false, _) => string.Create(
+            CultureInfo.InvariantCulture,
+            $"no source declaration matched, and the referenced-assembly fallback holds types only, so it cannot answer kind={kind} - drop kind= to search them"),
+        (_, { Length: > 0 }) => string.Create(
+            CultureInfo.InvariantCulture,
+            $"no source declaration matched, and a referenced assembly is neither src nor test, so scope={scope} excludes the fallback - drop scope= to search referenced assemblies"),
+        _ => null,
+    };
+
+
+    private static bool NamesAType(string? kind) => kind switch
+    {
+        null or "" or "class" or "interface" or "enum" or "struct" or "record" or "delegate" => true,
+        _ => false,
+    };
 }

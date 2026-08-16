@@ -48,6 +48,9 @@ public static class McpHost
 
         context.ToolsChanged = token => Announce(host.Services, token);
 
+        if (await ClientRegistrar.ProbeAsync(cancellationToken).ConfigureAwait(false) is { } assets)
+            AssetBanner.Publish(assets);
+
         Preload(host.Services, workspace, cancellationToken);
         BeginMaintenance(cancellationToken);
         BeginSweep(cancellationToken);

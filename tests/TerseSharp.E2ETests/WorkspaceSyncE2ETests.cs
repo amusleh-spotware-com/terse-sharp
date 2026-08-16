@@ -432,4 +432,82 @@ public sealed class WorkspaceSyncE2ETests
         Assert.Contains("compilations=realized in ", first, StringComparison.Ordinal);
         Assert.DoesNotContain("compilations=", second, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task WorkspaceStatus_WhenDiskNoLongerMatchesTheWorkspace_NamesTheDivergedDocument()
+    {
+        await using var solution = await StartAsync(watch: false);
+
+        var applied = await solution.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Unused",
+            ["body"] = "=> 41;",
+        });
+
+        Assert.Contains("changedLines=", applied, StringComparison.Ordinal);
+
+        var clean = await solution.CallAsync("workspace_status", new() { ["verbose"] = true });
+
+        Assert.Contains("disk=in-sync", clean, StringComparison.Ordinal);
+        Assert.DoesNotContain("workspace=diverged", clean, StringComparison.Ordinal);
+
+        var onDisk = await File.ReadAllTextAsync(solution.OrderServicePath, TestContext.Current.CancellationToken);
+
+        await File.WriteAllTextAsync(
+            solution.OrderServicePath,
+            onDisk.Replace("=> 41;", "=> 7;", StringComparison.Ordinal),
+            TestContext.Current.CancellationToken);
+
+        var diverged = await solution.CallAsync("workspace_status", []);
+
+        Assert.Contains("workspace=diverged", diverged, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", diverged, StringComparison.Ordinal);
+        Assert.Contains("load_workspace reload=true", diverged, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConcurrentNewCSharpWrites_IntoOneProject_AnswerOnlyASuccessOrAnEditConflict()
+    {
+        await using var solution = await StartAsync(watch: true);
+
+        var written = await Task.WhenAll(Enumerable.Range(0, 6).Select(index => WriteConcurrentAsync(solution, index)));
+
+        Assert.All(written, text => Assert.DoesNotContain("ERROR Internal", text, StringComparison.Ordinal));
+        Assert.All(written, text => Assert.DoesNotContain("ERROR Transient", text, StringComparison.Ordinal));
+        Assert.All(written, text => Assert.True(
+            text.Contains("changedLines=", StringComparison.Ordinal) || text.Contains("ERROR EditConflict", StringComparison.Ordinal),
+            text));
+        Assert.Contains(written, text => text.Contains("changedLines=", StringComparison.Ordinal));
+
+        for (var index = 0; index < 6; index++)
+        {
+            var retried = await WriteConcurrentAsync(solution, index);
+
+            Assert.DoesNotContain("ERROR", retried, StringComparison.Ordinal);
+        }
+
+        var outline = await solution.CallAsync("get_file_outline", new()
+        {
+            ["paths"] = Enumerable.Range(0, 6)
+                .Select(index => string.Create(CultureInfo.InvariantCulture, $"src/Fixture.Trading/Concurrent{index}.cs"))
+                .ToArray(),
+        });
+
+        Assert.All(
+            Enumerable.Range(0, 6),
+            index => Assert.Contains(
+                string.Create(CultureInfo.InvariantCulture, $"Concurrent{index}.Value"),
+                outline,
+                StringComparison.Ordinal));
+    }
+
+    private static Task<string> WriteConcurrentAsync(TerseTempSolution solution, int index) =>
+        solution.CallAsync("write_text", new()
+        {
+            ["path"] = string.Create(CultureInfo.InvariantCulture, $"src/Fixture.Trading/Concurrent{index}.cs"),
+            ["content"] = string.Create(
+                CultureInfo.InvariantCulture,
+                $"namespace Fixture.Trading;\n\npublic sealed class Concurrent{index}\n{{\n    public int Value() => {index};\n}}\n"),
+            ["force"] = true,
+        });
 }

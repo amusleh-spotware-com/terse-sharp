@@ -283,4 +283,39 @@ public sealed class InstallCommandE2ETests : IDisposable
         Assert.Contains("analyze rejected the call: unrecognized minSeverityLevel", output, StringComparison.Ordinal);
         Assert.Contains("minSeverity", output, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task TheVeryFirstCallOfAProcess_AlreadyCarriesTheAbsentGuardWarning()
+    {
+        var server = await TerseServerProcess.StartAsync(
+            TerseServerFixture.FixtureRoot,
+            [
+                TerseServerFixture.ServerAssemblyPath(),
+            "serve",
+            "--workspace",
+            Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+            ],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TERSE_HOME"] = home,
+                ["CLAUDE_CONFIG_DIR"] = ConfigDirectory,
+                ["TERSE_UPDATE"] = "0",
+            },
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            var first = await server.CallAsync(
+                "workspace_status",
+                new Dictionary<string, object?>(StringComparer.Ordinal),
+                TestContext.Current.CancellationToken);
+
+            Assert.Contains("WARNING guard=absent", first, StringComparison.Ordinal);
+            Assert.Contains("terse install --guard", first, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }

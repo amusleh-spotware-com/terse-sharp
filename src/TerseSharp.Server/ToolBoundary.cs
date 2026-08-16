@@ -45,6 +45,7 @@ public static class ToolBoundary
         return first switch
         {
             OperationCanceledException => Errors.Cancelled().Render(),
+            _ when Errors.IsBuildHostFailure(exception) => Errors.Transient(first).Render(),
             _ when IsExpected(first) => Describe(first),
             _ => Errors.Internal(first).Render(),
         };

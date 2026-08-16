@@ -96,7 +96,7 @@ public static class FileService
             return Result.Fail<string>(misplaced);
 
         return request.Section is { Length: > 0 } section
-            ? Section(before, section, request.NewText, request.Place)
+            ? Section(before, section, request.NewText, request.Place, request.Occurrence)
             : Snippet(before, request.OldText, request.NewText, request.Occurrence);
     }
 
@@ -119,9 +119,9 @@ public static class FileService
             before.AsSpan(match.Start + match.Length)));
     }
 
-    private static Result<string> Section(string before, string heading, string newText, string? place)
+    private static Result<string> Section(string before, string heading, string newText, string? place, int occurrence)
     {
-        var located = DocumentOutline.Locate(DocumentOutline.Headings(before), heading);
+        var located = DocumentOutline.Locate(DocumentOutline.Headings(before), heading, occurrence);
 
         if (!located.IsOk)
             return Result.Fail<string>(located.Error!);
@@ -271,7 +271,7 @@ public static class FileService
 
     private static Result<string> Slice(string path, string text, string heading, ReadRequest request)
     {
-        var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading);
+        var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading, request.Occurrence);
 
         return located.IsOk
             ? Result.Ok(Render(
@@ -407,9 +407,9 @@ public static class FileService
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters)
     {
@@ -1004,19 +1004,19 @@ public static class FileService
         if (Conflicting(path, label, request) is { } refusal)
             return Result.Fail<string>(refusal);
 
-        var window = Windowed(text, request.Section);
+        var window = Windowed(text, request.Section, request.Occurrence);
 
         return window.IsOk
             ? MarkdownTable.Projected(label, text, columns, window.Value.Start, window.Value.End, request.Range.MaxLines, request.Section)
             : Result.Fail<string>(window.Error!);
     }
 
-    private static Result<LineRange> Windowed(string text, string? section)
+    private static Result<LineRange> Windowed(string text, string? section, int occurrence)
     {
         if (section is not { Length: > 0 } heading)
             return Result.Ok(default(LineRange));
 
-        var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading);
+        var located = DocumentOutline.Locate(DocumentOutline.Headings(text), heading, occurrence);
 
         return located.IsOk
             ? Result.Ok(new LineRange(located.Value!.StartLine, located.Value!.EndLine, 0))
@@ -1045,4 +1045,83 @@ public static class FileService
                 "pass section= to scope the projection to one section's tables, or maxLines= to bound the rows")
             : null;
     }
+
+    public static async Task<Result<string>> MoveSectionAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string toPath,
+        EditRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!DocumentOutline.IsMarkdown(path) || !DocumentOutline.IsMarkdown(toPath))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "toPath moves a markdown section, and one of the two paths is not markdown",
+                "pass two markdown files, or move the text with read_text and write_text"));
+        }
+
+        var source = await OpenedAsync(workspace, path, force: false, cancellationToken).ConfigureAwait(false);
+
+        if (!source.IsOk)
+            return Result.Fail<string>(source.Error!);
+
+        var destination = await OpenedAsync(workspace, toPath, force: false, cancellationToken).ConfigureAwait(false);
+
+        if (!destination.IsOk)
+            return Result.Fail<string>(destination.Error!);
+
+        if (string.Equals(source.Value.Full, destination.Value.Full, StringComparison.OrdinalIgnoreCase))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "toPath names the same file as path, so the move would cut the section and append it straight back",
+                "pass a different file, or move the section inside one file with section= and place="));
+        }
+
+        var cut = Cut(source.Value.Before, request.Section!, request.Occurrence);
+
+        if (!cut.IsOk)
+            return Result.Fail<string>(cut.Error!);
+
+        return await WriteTextManyAsync(
+            workspace,
+            [
+                new FileWrite(path, cut.Value.Remainder),
+                new FileWrite(toPath, Landed(destination.Value.Before, cut.Value.Section, request.Place)),
+            ],
+            request.DryRun,
+            force: false,
+            allowErrors: false,
+            request.Verbose,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static Result<SectionCut> Cut(string before, string heading, int occurrence)
+    {
+        var located = DocumentOutline.Locate(DocumentOutline.Headings(before), heading, occurrence);
+
+        if (!located.IsOk)
+            return Result.Fail<SectionCut>(located.Error!);
+
+        var ending = LineEndings.Dominant(before);
+        var lines = before.ReplaceLineEndings(ending).Split(ending);
+        var start = located.Value.StartLine - 1;
+        var end = Math.Min(located.Value.EndLine, lines.Length);
+        var remainder = string.Join(ending, lines.Take(start).Concat(lines.Skip(end))).TrimEnd();
+
+        return Result.Ok(new SectionCut(
+            string.Join(ending, lines.Skip(start).Take(end - start)).TrimEnd(),
+            remainder.Length is 0 ? remainder : remainder + ending));
+    }
+
+    private static string Landed(string destination, string section, string? place)
+    {
+        var ending = LineEndings.Dominant(destination);
+        var body = LineEndings.Adopt(section, ending);
+
+        return string.Equals(place, Prepend, StringComparison.Ordinal)
+            ? body + ending + ending + destination
+            : destination.TrimEnd() + ending + ending + body + ending;
+    }
+
+    private readonly record struct SectionCut(string Section, string Remainder);
 }

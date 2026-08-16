@@ -27,7 +27,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 
 | Job | Instead of | Use | Why |
 |---|---|---|---|
-| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do |
+| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs - `verbose=true` splits that total into `toolDescriptions`, `parameterDescriptions`, `schemaFrame` and `names`; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do |
 | **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` | the four self-check lines an agent acts on, in-server and without the ~40 s shell-out: `roslyn` (the SDK's Roslyn against the one terse carries — the check that explains a dead Razor generator), `assets`, `guard coverage`, and `phases` measured on the loaded workspace |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` | lists every solution and project under a directory without loading one; auto-discovery only walks *up* from the working directory |
 | **Workspace** | — | `load_workspace` | one call per solution; `targetFramework:` picks the framework every semantic tool answers from, `reload: true` forces a re-read you should almost never need |
@@ -47,7 +47,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | — | `get_symbol(symbolId)` | signature, kind, accessibility, location and XML doc of one symbol |
 | **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` | `path=` resolves the name inside that file first and only falls back to the solution when the file holds no match — `get_symbol` and `get_type_outline` take it too, `symbolIds=` scopes every id in the batch, and a `path=` naming no document answers `DocumentNotFound` instead of being ignored |
 | **Navigate** | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`); production declarations first, and when the test half also matches it is folded to one `N more in test projects - scope=test` line |
-| **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` | a name **no source declaration** matches falls back to the **referenced assemblies**: `JsonSerializer` and `System.Threading.Lock` answer real signatures tagged `System.Runtime 10.0.0.0` instead of `0 symbols`/`NOT_RESOLVED`. Exact type name only - no CamelHump, no substring - and no source, so members come with no line ranges |
+| **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` | a name **no source declaration** matches falls back to the **referenced assemblies**: `JsonSerializer` and `System.Threading.Lock` answer real signatures tagged `System.Runtime 10.0.0.0` instead of `0 symbols`/`NOT_RESOLVED`. Exact type name only - no CamelHump, no substring - and no source, so members come with no line ranges. A `kind=` that is not a type kind, or any `scope=`, declines the fallback and says so rather than answering off-filter |
 | **Navigate** | a name the tests declare dozens of times | `search_symbols(query, scope: "src")` | keeps one half of the solution - `src` for the production projects, `test` for the ones referencing a test framework; an unknown value is refused rather than searching everything |
 | **Navigate** | `Grep` to find callers | `find_usages(symbolId)` | real references, one line per file, each marked `src` or `test`; a usage inside generated code is tagged `gen` — real, but never edit it |
 | **Navigate** | `Grep` for implementers | `find_implementations(symbolId)` | resolved through the interface |
@@ -79,9 +79,10 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` | restores the file from that ref through the same compile gate as any write - the way back for a `.csproj` or `.md` that `undo_last_change` cannot cover. A write of markup carrying `&lt;` and no raw `<` warns and names this call, because HTML-escaped markup is not markup |
 | **Files** | `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
-| **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line — so a heading occurring 28 times cannot be matched wrongly. Only with `section=`; supply your own blank lines |
+| **Edit text** | reading a section out of one file and writing it into another | `edit_text(path, section: "## Open", toPath: "other.md")` | cuts the section and lands it in the other file as **one** write, answered as one changed-line count per file - the whole section text never crosses the wire. `place=prepend` puts it at the top of the target, anything else appends; `occurrence=` picks the source section; both paths must be markdown, **both must already exist**, and naming the same file twice is refused |
+| **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", occurrence: 1, place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line. A heading that repeats needs `occurrence=`: the refusal names `occurrence=1..N` and each candidate's start line, so the index is picked with no re-read. `read_text` takes it too, and refuses it without a `section=`. Only with `section=`; supply your own blank lines |
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch |
-| **Edit text** | one `edit_text` call per file across **several** files | `edit_text(path, edits: [{oldText, newText, path}, …])` | an entry may name its own `path`; entries are grouped by file, applied as one write each, and answered one line per changed file. At most 10 per file and 25 in total |
+| **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` | an entry may name its own `path`, and the top-level `path` may then be omitted entirely; entries are grouped by file, applied as one write each, and answered one line per changed file. A path-less entry with no top-level `path` is refused by index. At most 10 per file and 25 in total |
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` | up to 10 in one call, and every `.cs` document among them shares **one** compile gate — so a type and the consumer it breaks land together instead of the first write being rolled back alone |
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; a multi-match refusal lists the candidate lines with their numbers, so `occurrence=` is picked from the refusal and needs no re-read, and an out-of-range value names the range it could have picked |
 | **Edit text** | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
@@ -116,7 +117,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Build and test** | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | **Build and test** | `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks; `path=` sweeps a `.slnx`/`.sln`/`.slnf`/project that is **not** loaded |
 | **Analyse** | `dotnet format whitespace` / an IDE inspection | `analyze` | compiler + every referenced analyzer + dead code, down to `info` |
-| **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0`, where `analyzed` counts the **documents** in scope - and keeping only the diagnostics still unfixed |
+| **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0`, where `analyzed` counts the **documents** in scope - and keeping only the diagnostics still unfixed, each carrying the declaration it sits in exactly as `analyze` does |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff; each named file carries the step that would change it - `whitespace`, `fixers` or `fixers+whitespace` - and a mode that also reformats names the byte-equivalent CI pair, so the verdict says whether CI would really be red |
 | **Analyse** | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
@@ -279,6 +280,13 @@ user just created, deleted or renamed is in the answer without a reload — the 
 so it does not wait on a watcher event. When the watcher is off or degraded the index is not trusted
 and the tree is walked again — correct, just slower.
 
+**`workspace_status` says when a document it holds no longer matches the file on disk.** After this
+server has applied an edit it compares the files it wrote against their bytes and answers
+`WARNING workspace=diverged - N document(s) differ from disk: <paths>`; that is the one case every
+other read cannot detect, because they all answer from the same in-memory snapshot. Re-apply the edit
+or `load_workspace reload=true`. `verbose=true` prints the clean verdict too - `disk=in-sync`, or
+`disk=not probed` when this server has written nothing since the load.
+
 **A `WARNING guard=absent` or `skill=absent` line on `workspace_status` or `load_workspace` is for the
 user.** Without the `PreToolUse` guard nothing stops an agent answering with `Read`, `Grep`, `cat` or
 `dotnet build` - measured at 884 such `Bash` calls in one week. Tell the user to run
@@ -328,7 +336,10 @@ tools only when you need one of them on its own, or when `gate` reports `FAILED`
 fixing what it named.
 
 **`analyze` and `get_diagnostics` fold findings sharing an id, a severity and a message onto one line
-carrying every position**, because the positions are the fix list and the message is not. **An id you
+carrying every position**, because the positions are the fix list and the message is not. **Each
+position names the declaration containing it** - `OrderService.cs:15:16 OrderService.Unused` - so the
+fix list is ids for `get_symbol_source`, not coordinates. A finding with no source tree keeps the bare
+position; `build` carries no tag, having released the workspace before it shells out. **An id you
 pass to `ids=` that no referenced analyzer declares comes back as `NOT_ENABLED <id>`**, so a sweep
 answering `0 diagnostics` can no longer mean "the rule never ran".
 
@@ -365,7 +376,8 @@ on a `.cs` file nobody has written yet names `write_text path=… force=true` �
 
 **A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
-type; it must name one of the targets' own containers.
+type; it must name one of the targets' own containers, and a bare leaf name that matches two of them
+is refused naming both qualified names rather than resolved to the first.
 
 **`add_member` and `replace_symbol` accept several declarations in one call**, applied as a single
 compile-gated edit — so a set of members that reference each other needs no dependency ordering, and
@@ -398,7 +410,9 @@ hiding them.
 **From the second consecutive call of one tool the response gains one line** —
 `2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call` — naming the plural
 parameter that tool declares. It is framing, never payload, it says nothing when the call already
-used the plural parameter, and the counter resets on any different tool. Obey it literally: 571 runs
+used the plural parameter, and the counter resets on any different tool - and on a `read_text` that
+carried `startLine`, `endLine`, `tail` or `section`, because `paths=` cannot express a per-entry
+range and a steer that asks for the wrong lines is worse than none. Obey it literally: 571 runs
 of exactly **two** consecutive calls stay unreachable, because a steer can only ride on a response, and
 firing it on the first call was measured to break the one-line success contract on six tools. So batch
 on your own judgement: whenever the next two calls are the same tool and independent, send them as one.
@@ -431,7 +445,10 @@ other entry still sees the lines that match spanned; `search_regex` anchors `^` 
 glob — `find_files` accepts `query` too — so the wrong name of the three is never a failed call, while
 a parameter name **no** tool declares is refused before the call runs, naming every accepted spelling:
 an argument the server does not understand is never silently dropped, because a listing that ignored
-your `maxResults` is a confidently wrong answer you cannot detect. All three skip `bin`, `obj`,
+your `maxResults` is a confidently wrong answer you cannot detect. **A glob carrying `{` or `}` is
+refused, not answered `0 matches`** - brace expansion is not implemented, and a zero result you
+cannot tell from absence is the confidently wrong answer. It covers `exclude=` here and on
+`changed_files`. All three skip `bin`, `obj`,
 `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks —
 the same set every index uses, so a nested agent worktree never doubles a result.
 
@@ -792,7 +809,9 @@ and quotes the ~80 characters around the offending byte, so a 9 000-character `d
 located without re-sending it - and a declaration that reaches the parser and fails there is answered
 the same way, `at offset 27 of 28: public int Unused() => 7 + ;`, prefixed with `declarations[1]:`
 when the call was batched;
-`ReadOnly` means the server runs with `--read-only`.
+`ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
+host dropped the call - the project file was restored, a file the edit was adding may already be on
+disk, and the answer is to retry the same call rather than to report a defect.
 
 Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one outcome this server
 exists to prevent.

@@ -32,21 +32,45 @@ public static class DocumentOutline
         return Seal(found, number);
     }
 
-    public static Result<DocumentSection> Locate(IReadOnlyList<DocumentSection> sections, string heading)
+    public static Result<DocumentSection> Locate(IReadOnlyList<DocumentSection> sections, string heading, int occurrence = 0)
     {
         var wanted = heading.TrimStart('#').Trim();
         var matches = sections.Where(section => Matches(section, wanted, heading)).ToArray();
 
-        return matches switch
+        if (matches.Length is 0)
         {
-            [var only] => Result.Ok(only),
-            [] => Result.Fail<DocumentSection>(Errors.Invalid(
+            return Result.Fail<DocumentSection>(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"no section titled '{heading}'"),
-                Nearest(sections))),
-            _ => Result.Fail<DocumentSection>(Errors.Invalid(
+                Nearest(sections)));
+        }
+
+        if (occurrence > 0)
+        {
+            return occurrence <= matches.Length
+                ? Result.Ok(matches[occurrence - 1])
+                : Result.Fail<DocumentSection>(Errors.Invalid(
+                    string.Create(CultureInfo.InvariantCulture, $"occurrence={occurrence} does not exist: '{heading}' names {matches.Length} sections"),
+                    string.Create(CultureInfo.InvariantCulture, $"pass an occurrence between 1 and {matches.Length}")));
+        }
+
+        return matches is [var only]
+            ? Result.Ok(only)
+            : Result.Fail<DocumentSection>(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'{heading}' names {matches.Length} sections"),
-                "pass the heading with its level, e.g. '## Commands', or use startLine/endLine")),
-        };
+                string.Create(CultureInfo.InvariantCulture, $"pass occurrence=1..{matches.Length} to pick one, or a heading that occurs once; they start at {Starts(matches)}")));
+    }
+
+    private const int MaxListedSections = 12;
+
+    private static string Starts(DocumentSection[] matches)
+    {
+        var listed = string.Join(
+            ", ",
+            matches.Take(MaxListedSections).Select((section, index) => string.Create(CultureInfo.InvariantCulture, $"{index + 1}:line {section.StartLine}")));
+
+        return matches.Length <= MaxListedSections
+            ? listed
+            : listed + string.Create(CultureInfo.InvariantCulture, $", +{matches.Length - MaxListedSections} more");
     }
 
     private static bool Matches(DocumentSection section, string wanted, string heading) =>

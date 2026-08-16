@@ -310,4 +310,18 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     private static string WithoutOneOffNotes(string response) => string.Join(
         "\n",
         response.Split('\n').Where(line => !line.StartsWith("compilations=", StringComparison.Ordinal)));
+
+    [Fact]
+    public async Task Analyze_NamesTheDeclarationEachFindingSitsIn()
+    {
+        var text = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["minSeverity"] = "info",
+            ["includeDeadCode"] = false,
+        });
+
+        Assert.Contains("OrderService.cs:15:16 OrderService.Unused", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs:17:17 OrderService.NeverCalled", text, StringComparison.Ordinal);
+    }
 }
