@@ -17,9 +17,9 @@ version is **derived** in P6. Nothing else in this command takes input from the 
 - Declaring a phase done that was not run. If a phase genuinely cannot execute, run the strongest
   substitute, **say so in the final report as DEGRADED with the reason**, and continue.
 - Skipping a row in `## Open` because it looks hard, vague or unmeasurable. Every row leaves the
-  `## Open` table in this run — either **shipped** (moved to the shipped table with its measurement)
-  or **closed as a measured decision** (moved to `## Known limitations` with the evidence that
-  closes it). Deleting a row, or leaving it open, is a failed run.
+  `## Open` table in `IMPROVEMENTS.md` in this run — either **shipped** or **closed as a measured
+  decision**, and either way appended to `## Closed` in `IMPROVEMENTS-ARCHIVE.md` with its
+  measurement or with the evidence that closes it. Deleting a row, or leaving it open, is a failed run.
 - `Read` / `Grep` / `Glob` / `Edit` / `Write` on anything under this repo, and `Bash: git status`,
   `git diff`, `git diff --stat`, `grep`, `rg`, `cat`, `head`, `tail`, `sed`, `awk`, `ls`, `find`,
   `dotnet build`, `dotnet test`, `dotnet clean`, `dotnet format` (one carve-out, P4.6).
@@ -58,8 +58,8 @@ must be identifiable as such: P5 records the ids it added, and the P7 check comp
 list. **Any id not on it blocks the push.**
 
 If a Ledger row genuinely cannot ship, it does not stay open — it closes as a **measured decision**
-into `## Known limitations` with the evidence that closes it (P1 step 6b). Closing is how a row
-leaves; leaving it open is a failed run.
+into `## Closed` in `IMPROVEMENTS-ARCHIVE.md` with the evidence that closes it (P1 step 6b). Closing
+is how a row leaves; leaving it open is a failed run.
 
 ---
 
@@ -101,7 +101,7 @@ For each row:
    under `csharp-feature-implementation` (numbered spec, surface sweep, test per requirement).
 2. **Read the row's own evidence.** It names the tool, the measured cost and the proposed change.
    The proposed change is a *proposal*, not a spec: if the evidence refutes it, the refutation is the
-   deliverable and the row closes into `## Known limitations` (see step 6b).
+   deliverable and the row closes into the archive (see step 6b).
 3. **Reproduce or measure first.** No production edit before the failing test exists and has been
    **observed failing**. Assert **values**, never "did not throw".
 4. **Implement** per `csharp-standards` and this repo's own hard gates: logic in `TerseSharp.Core`
@@ -120,13 +120,17 @@ For each row:
      `RazorSolution` / `GeneratorSolution` where the path demands it), plus unit tests for formatting
      and error paths. **A test the fixture cannot fail is not coverage** — put the case in the
      fixture, watch the test fail, then make it pass.
-6. **Close the row in `IMPROVEMENTS.md`** (`edit_text section=…`, never a remembered `oldText`):
-   - a. **shipped** → move the row into the shipped table, rewritten to state what shipped, the gate
-     that locks it and the **measured** saving. "Improved" without a number is not closure.
-   - b. **closed as a measured decision** → move it to `## Known limitations` with the evidence,
-     the refutation, and the condition under which it should be reopened.
-   In both cases the row **leaves `## Open`**. When the last row leaves, `## Open` says so in one
-   sentence and keeps the heading.
+6. **Close the row: cut it from `IMPROVEMENTS.md` `## Open`, append it to `IMPROVEMENTS-ARCHIVE.md`
+   `## Closed`** (`edit_text section=… place=append`, never a remembered `oldText`). The five open
+   columns collapse to the four closed ones — `Finding`, `Tool`, `Change`, `Outcome` — and a row whose
+   cell count does not match its new table's header fails `BacklogShapeTests`:
+   - a. **shipped** → `Change` states what shipped, `Outcome` names the gate that locks it and the
+     **measured** saving. "Improved" without a number is not closure.
+   - b. **closed as a measured decision** → `Outcome` carries the evidence, the refutation, and the
+     condition under which it should be reopened.
+   In both cases the row **leaves `## Open`** and leaves no note behind — a "closed — see the archive"
+   line is a third state and fails the gate. When the last row leaves, `## Open` keeps its heading and
+   its column header and holds no rows; it says nothing in prose, because prose fails the shape gate.
 7. **Docs gate, same row, all four:** `README.md` (tool table, tool count, replaces-table, numbers
    table, status table), `NUGET_README.md` (separate pure-Markdown copy — it diverges silently),
    `src/TerseSharp.Server/Assets/SKILL.md` (every tool named; swap table, working rules and hard gate
@@ -234,7 +238,7 @@ legitimate only when it names what was checked and why each of the five came bac
 0. **The `## Open` gate, first, before anything else in this phase.**
    `read_text IMPROVEMENTS.md section="## Open"`. Every id it still lists must be on the list P5
    recorded as created by this run's own review. If **any** other id is there — a Ledger row not
-   implemented, not shipped, not closed into `## Known limitations` — **stop this phase**, return to
+   implemented, not shipped, not closed into the archive — **stop this phase**, return to
    **P1**, finish those rows, re-run **P2 → P3 → P4**, and re-enter P7 from this step. Do not spawn
    the reviewer, do not stage, do not commit. Re-run this check before **every** re-entry to P7
    after a P8 CI-failure fix, because a fix round can reopen a row.

@@ -216,7 +216,8 @@ into the markup — but only where an `x:Class` or `x:DataType` *proves* the ref
 
 The easiest way to help: clone the repo and run `/mine-sessions` in Claude Code. It reads your own
 session logs, measures where the tools cost you tokens or round trips, and appends the findings to
-`IMPROVEMENTS.md`. Skim the new rows — keep the ones that look real, drop anything that leaked a path
+`IMPROVEMENTS.md` — the open table; closed rows keep their measurement in `IMPROVEMENTS-ARCHIVE.md`.
+Skim the new rows — keep the ones that look real, drop anything that leaked a path
 or a secret — then open a PR with just that file. We work through the backlog every weekend, so your
 friction becomes next week's release.
 

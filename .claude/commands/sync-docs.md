@@ -23,7 +23,7 @@ Nothing else takes input from the user.
   reviewer rule, and it holds **only** while the change set is documents.
 - **Editing any `.cs`, `.csproj`, `.props`, `.targets`, `.slnx`, `.resx`, `.xaml` or `.razor` file.**
   When a document and the code disagree, the **code wins and the document changes**. If the code is
-  what is wrong, log it as a row in `IMPROVEMENTS.md` `## Open` and say so in P8 — do not fix it
+  what is wrong, log it as a row in `IMPROVEMENTS.md` `## Open` (never in the archive) and say so in P8 — do not fix it
   here. A code edit in this run voids the no-reviewer exception above.
 - `Read` / `Grep` / `Glob` / `Edit` / `Write`, and `Bash: git status`, `git diff`, `grep`, `rg`,
   `cat`, `head`, `tail`, `sed`, `awk`, `ls`, `find`, `dotnet build`, `dotnet test`. All of those are
@@ -89,7 +89,7 @@ Nothing else takes input from the user.
 | `CONTRIBUTING.md` | the build/test/format commands still exist and still pass; the add-a-tool steps match `CLAUDE.md` |
 | `RELEASING.md` | the workflow file names, job steps and nuget trusted-publishing policy fields match `.github/workflows/release.yml` |
 | `SECURITY.md` | supported-version line matches the newest released tag |
-| `IMPROVEMENTS.md` | **`## Known limitations` only** — a limitation the code has since closed is moved, not left. The `## Open` table is `/ship-improvements`' territory; this run only **adds** rows it discovered |
+| `IMPROVEMENTS.md` | **adding rows only** — a doc defect this run found and did not fix becomes a `## Open` row in `IMPROVEMENTS.md`. Closing a row, and therefore writing to the archive, is `/ship-improvements`' territory |
 | `fixtures/*/README.md` | still describes what the fixture actually contains |
 | `.claude/commands/*.md` | still name tools and phases that exist |
 

@@ -19,7 +19,8 @@ Requires the **.NET 10 SDK** (see `global.json`). Nothing else — no IDE, no li
 
 ## Adding a tool
 
-Read `IMPROVEMENTS.md` first. It is the measured backlog of what the current surface costs an agent,
+Read `IMPROVEMENTS.md` first. It is the measured backlog of what the current surface costs an agent —
+the open rows only; closed rows keep their measurement in `IMPROVEMENTS-ARCHIVE.md` —
 and it carries the ranking rule: **improving an existing tool or its response format beats adding a
 tool**, because every tool costs every session in tool-list tokens and in selection accuracy. A new
 tool has to beat the one it splits, with the saving asserted in `TokenBudgetE2ETests`. Anything you

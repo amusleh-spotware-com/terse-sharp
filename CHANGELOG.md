@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **The improvements backlog is two files.** `IMPROVEMENTS.md` now carries `## Open` alone, and every
+  closed row moved to `IMPROVEMENTS-ARCHIVE.md` under `## Closed`, with a one-line pointer in each file
+  to the other — the split Keep a Changelog 2.0.0 prescribes for a history file that has outgrown one
+  document. At `ff4423a` the single file was **205 790 bytes** for **12 open rows and 319 closed ones**,
+  so every read of the work that is still open paid ~51 000 tokens; the open backlog is now **10 475
+  bytes**, **under 6 %** of that. `BacklogShapeTests` reads both files, and additionally asserts each
+  file's pointer line and that the archive is never empty.
+
 ## [0.37.0] - 2026-08-15
 
 **Response formats changed.** `analyze` and `get_diagnostics` now fold findings that share an id, a

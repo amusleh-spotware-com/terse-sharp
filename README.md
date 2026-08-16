@@ -57,7 +57,7 @@ saving is still **2.09M tokens, 1.9×**. `analyze`, `search_text`, every edit to
 to the built-ins, so the real number is above both figures.
 
 **What lost.** `diff_symbols` (13 calls) and `list_tests` (3) cost *more* than the raw command.
-Measured, logged in `IMPROVEMENTS.md`, not hidden.
+Measured, logged in the backlog, not hidden.
 
 **The fallback rate is the real result.** Across the whole week the agent reached for a built-in
 **5 times with `Grep`, 11 with `Edit`** — and 55 of its 88 `Read` calls were PNG screenshots, which
@@ -306,7 +306,9 @@ isn't done**, and **a tool that doesn't beat the built-in it replaces doesn't sh
 
 **The easiest way to help:** clone the repo and run `/mine-sessions` in Claude Code. It reads your own
 session logs, measures where the tools cost you tokens or round trips, and appends the findings to
-[IMPROVEMENTS.md](IMPROVEMENTS.md). Skim the new rows — keep the ones that look real, drop anything
+[IMPROVEMENTS.md](IMPROVEMENTS.md) — the open table; closed rows keep their measurement in
+[IMPROVEMENTS-ARCHIVE.md](IMPROVEMENTS-ARCHIVE.md). Skim the new rows — keep the ones that look
+real, drop anything
 that leaked a path or a secret — then open a PR with just that file. We work through the backlog every
 weekend, so your friction becomes next week's release.
 

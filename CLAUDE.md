@@ -426,55 +426,71 @@ just this once" · "the agent should have known which tool to call" (interface d
 instructions — if the agent guessed wrong, the schema or the description is the defect) · "too small
 to log" · "I'll note it next time".
 
-## 🚫 HARD GATE — `IMPROVEMENTS.md` is two tables and nothing else
+## 🚫 HARD GATE — `IMPROVEMENTS.md` is the open table, `IMPROVEMENTS-ARCHIVE.md` is the closed one
 
-The file is a **backlog**, not a journal. It grew to 380 lines and 102 KB — five per-task review
-narratives, three standalone notes, a separate "Known limitations" section — and became unreadable at
-exactly the moment its whole purpose is to be scanned. So the shape is fixed, and it is enforced
-before any commit that touches it:
+The backlog is a **backlog**, not a journal. It first grew to 380 lines and 102 KB of prose — five
+per-task review narratives, three standalone notes, a separate "Known limitations" section — and became
+unreadable at exactly the moment its whole purpose is to be scanned. The prose was cut; then the closed
+rows grew back past it. At `ff4423a` one file carried **12 open rows and 319 closed ones**, so every
+read of the rows that are still work paid **205 790 bytes** — ~51 000 tokens — to reach the 7 611 bytes
+of them. So the file is split the way Keep a Changelog 2.0.0 says to split a changelog that has stopped
+being manageable: **the entry point keeps its name, the history moves to an archive, and the two link
+to each other** so nothing becomes unfindable. Open-backlog reads now cost **under 5 %** of what they
+did — 10 475 bytes at the split commit, four rows larger than the table it inherited.
 
 ```
-# Improvements backlog
+IMPROVEMENTS.md                                   IMPROVEMENTS-ARCHIVE.md
 
-## Open
+# Improvements backlog                            # Improvements archive
 
-| Finding | Tool | Proposed change | Expected saving | Rejected |
+Closed rows: [IMPROVEMENTS-ARCHIVE.md](…)         Open rows: [IMPROVEMENTS.md](…)
 
-## Closed
+## Open                                           ## Closed
 
-| Finding | Tool | Change | Outcome |
+| Finding | Tool | Proposed change |             | Finding | Tool | Change | Outcome |
+| Expected saving | Rejected |
 ```
 
-**Two `##` sections. Two tables. No third section, no prose anywhere in the file** — no intro
-paragraph, no per-task review write-up, no note between tables, no status legend, no dated heading.
-A file with a third heading, or with a non-blank line that is not a table row, fails this gate.
+**One `##` section per file. One table per file. One pointer line per file, and no other prose** — no
+intro paragraph, no per-task review write-up, no note between the heading and the table, no status
+legend, no dated heading. A second `##` in either file, or a non-blank line that is not a heading, a
+table row or that file's own pointer, fails this gate.
 
-- **Open** is what is not done. `Rejected` carries the approaches already refuted **for that row** —
+- **`IMPROVEMENTS.md` `## Open`** is what is not done, and it is the only file the improvement gates
+  read to decide what to work on. `Rejected` carries the approaches already refuted **for that row** —
   the `FileShare.ReadWrite` that was tried and reverted, the `lines=` half that was declined — so a
   refuted approach is never lost and never re-attempted. Empty is `—`.
-- **Closed** is everything else: shipped, rejected, not-reproducible, not-soundly-implementable. The
-  `Outcome` column says which, and shipped rows **keep their measurement** so a regression is visible.
-  A rejected row keeps the evidence that closed it. Nothing is deleted from this table.
+- **`IMPROVEMENTS-ARCHIVE.md` `## Closed`** is everything else: shipped, rejected, not-reproducible,
+  not-soundly-implementable. The `Outcome` column says which, and shipped rows **keep their
+  measurement** so a regression is visible. A rejected row keeps the evidence that closed it. Nothing
+  is ever deleted from this table, and nothing is ever summarized into it. Rows are only ever appended;
+  an existing `Outcome` may gain a later measurement, and nothing else in the file is rewritten.
 - **A row is one table row.** Not a paragraph, not three. Finding, tool, change, number — if it needs
   more than that, the extra belongs in `CHANGELOG.md`, in the traps section above, or in the task
   report, not here.
-- **The end-of-task review is reported to the user, not written to the file.** Its five answers are
-  prose and prose does not go in `IMPROVEMENTS.md`; only the rows it produces do. Pasting the review
-  into the file is the specific failure that produced the 102 KB version.
-- **Closing a row moves it, it never leaves a note behind.** Cut the row out of `## Open`, rewrite its
-  `Proposed change` as what actually shipped, put the measurement in `Outcome`, and append it to
-  `## Closed`. A "closed — see below" line in the Open table is a third state and is banned.
+- **The end-of-task review is reported to the user, not written to either file.** Its five answers are
+  prose and prose does not go in the backlog; only the rows it produces do. Pasting the review into the
+  file is the specific failure that produced the 102 KB version.
+- **Closing a row moves it across files, and it never leaves a note behind.** Cut the row out of
+  `## Open` in `IMPROVEMENTS.md`, rewrite its `Proposed change` as what actually shipped, put the
+  measurement in `Outcome`, and append it to `## Closed` in `IMPROVEMENTS-ARCHIVE.md` — the five open
+  columns collapse to the four closed ones. A "closed — see the archive" line left in the Open table is
+  a third state and is banned.
+- **Reading the archive is a deliberate act.** Deduplicating a new finding against what is already
+  closed is the one routine reason to open it, and `read_text section=` / `columns=` is how — a whole
+  read of it costs more than most tasks are worth.
 
-Ids are `I<n>`, allocated in sequence, bolded at the start of the `Finding` cell. An unnumbered
-historical row stays unnumbered — do not renumber the table to make it tidy.
+Ids are `I<n>`, allocated in sequence across **both** files, bolded at the start of the `Finding` cell.
+An unnumbered historical row stays unnumbered — do not renumber either table to make it tidy.
 
-Census-gated by `BacklogShapeTests`, which reads the file and fails on a heading that is not one of
-the three at the top in that order — **any** level, so a `###` cannot smuggle a section back in — on
-any non-blank line that is not a heading or a table row, on a missing column header, and on a row
-whose cell count does not match its own table's header. A short row is silently padded by GitHub
-Flavored Markdown and a long one has its excess cells discarded, so the count is the only thing that
-proves the `Rejected` cell is really there. This rule cannot decay into prose the way the file it
-governs did.
+Census-gated by `BacklogShapeTests`, which reads **both** files and fails on a heading that is not the
+one pair each file is allowed, in order — **any** level, so a `###` cannot smuggle a section back in —
+on any non-blank line that is not a heading, a table row or that file's own pointer to the other file,
+on a missing column header, and on a row whose cell count does not match its own table's header. A
+short row is silently padded by GitHub Flavored Markdown and a long one has its excess cells discarded,
+so the count is the only thing that proves the `Rejected` cell is really there. The archive is also
+asserted non-empty, so the split cannot decay into an empty second file. This rule cannot decay into
+prose the way the file it governs did.
 
 ## 🚫 HARD GATE — the file system is async, everywhere
 
@@ -701,7 +717,7 @@ and being absent from it is the point:**
 | Rule | Gate | Discovers its subject from |
 |---|---|---|
 | **the sync-over-async and synchronous-file halves of the async gate are compiled, not asserted** | `Microsoft.CodeAnalysis.BannedApiAnalyzers` + `BannedApiTests` | `src/BannedSymbols.txt`, applied to every project under `src/` by `src/Directory.Build.props`, so `.Result`, `Task.Wait`/`WaitAll`/`WaitAny`, `GetAwaiter().GetResult()`, `Thread.Sleep`, the synchronous `File` reads and writes, `StreamReader.ReadToEnd` and `XDocument.Load(path)` are build errors. It does **not** compile the whole gate - a `FileStream` opened without `FileOptions.Asynchronous`, and `SemaphoreSlim.Wait`, are still prose. Every `RS0030` suppression carries a `Justification` and the set is ratcheted by `MaxSuppressions` |
-| **`IMPROVEMENTS.md` is two tables and nothing else** | `BacklogShapeTests` | the file itself — every heading line must be exactly `# Improvements backlog`, `## Open`, `## Closed` in that order, every non-blank line must open with `#` or `\|`, both mandated column headers must be present, and every row must carry the cell count its own table's header declares |
+| **`IMPROVEMENTS.md` is the open table and `IMPROVEMENTS-ARCHIVE.md` the closed one** | `BacklogShapeTests` | both files themselves — the headings must be exactly `# Improvements backlog` + `## Open` and `# Improvements archive` + `## Closed`, every non-blank line must open with `#` or `\|` or be that file's own one-line pointer to the other, each mandated column header must be present, every row must carry the cell count its own table's header declares, and the archive must hold at least one row so the split cannot decay into an empty second file |
 | **every test the changelog names still exists** | `ChangelogReferenceTests` | the two newest `## [` sections of `CHANGELOG.md` — every back-ticked test-name-shaped identifier resolved against the method declarations of both test projects, with the discriminator itself covered and the referenced set asserted non-empty |
 | **no two advertised tools describe themselves nearly identically** | `ToolCensusE2ETests.NoTwoAdvertisedTools_DescribeThemselvesNearlyIdentically` | `tools/list` — pairwise word overlap of every advertised `[Description]`, failing above 0.45, minus `ToolCensus.SimilarByDesignPairs`: seven reasoned, ratcheted pairs, each still asserted to name two advertised tools |
 | **every question in the reference set is still answered** | `AnswerQualityE2ETests` | its own 17-question set over `fixtures/FixtureSolution`, each with the facts its answer must carry; the set is asserted ≥ 14 questions so it cannot go vacuous, and a second test reports what answering all of it costs |

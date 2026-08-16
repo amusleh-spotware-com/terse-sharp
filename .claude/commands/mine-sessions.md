@@ -80,8 +80,9 @@ payload row of equal token size is worth less than an intervention row. Rank acc
    conventions clause in `CLAUDE.md` — is not a finding; check before logging, because proposing that
    the codebase fight its own configuration is the same defect as a number nobody encoded.
 
-**Also banned:** `AskUserQuestion`, `ExitPlanMode`, editing any file other than `IMPROVEMENTS.md`,
-`git add -A`, a `Co-Authored-By:` trailer, and writing any script anywhere inside the repository.
+**Also banned:** `AskUserQuestion`, `ExitPlanMode`, editing any file other than `IMPROVEMENTS.md` and
+`IMPROVEMENTS-ARCHIVE.md`, `git add -A`, a `Co-Authored-By:` trailer, and writing any script anywhere
+inside the repository.
 
 **No review.** `code-review-gate`, `/code-review`, `caveman:cavecrew-reviewer` and every other review
 path are explicitly waived for this command by standing user instruction. Do not spawn one and do not
@@ -101,8 +102,8 @@ from a session is a breach of gate 3.
 1. Invoke the `terse-sharp` skill. `workspace_status` / `load_workspace TerseSharp.slnx`; pass
    `workspace: "TerseSharp"` on terse-sharp calls.
 2. `Bash: git fetch origin && git pull --ff-only` on `main` (history/index mutation — the one legal
-   `Bash` class here). `changed_files` — record pre-existing dirt; only `IMPROVEMENTS.md` is ever
-   staged by this run.
+   `Bash` class here). `changed_files` — record pre-existing dirt; only `IMPROVEMENTS.md` and
+   `IMPROVEMENTS-ARCHIVE.md` are ever staged by this run.
 3. Resolve the window: `WEEKS` = `$ARGUMENTS` if it parses as a positive number, else `1`.
 4. Locate the corpus. Session transcripts live **outside every workspace**, so `Bash` and built-ins
    are legal here and terse-sharp is not:
@@ -1173,7 +1174,7 @@ and name which one in the row:
    returning the info-severity diagnostics that declaration introduced costs one pass over a
    compilation that already exists and deletes an `analyze` round trip per edit. Price it as
    `edit calls × P(diagnostic) × cost(analyze round trip)` from M5A and M2.
-3. **Never fix a line of C# in this command.** It edits `IMPROVEMENTS.md` and nothing else. A confirmed
+3. **Never fix a line of C# in this command.** It edits `IMPROVEMENTS.md` and `IMPROVEMENTS-ARCHIVE.md` and nothing else. A confirmed
    class becomes a row; the row is implemented by `/ship-improvements`, under the gates that command
    carries.
 
@@ -1229,7 +1230,7 @@ Every entry in M5A's trap ledger is already a named, shipped-trap-shaped failure
 when it cleared the floor, and its `Expected saving` cell is `count × (recovery calls + re-paid input
 tokens)` from the ledger's own columns. Two constraints:
 
-- a trap already carried in `CLAUDE.md`'s traps section, or already closed in `IMPROVEMENTS.md`, is a
+- a trap already carried in `CLAUDE.md`'s traps section, or already closed in `IMPROVEMENTS-ARCHIVE.md`, is a
   **discoverability** row, not a new capability row — the knowledge existed and did not reach the agent
   at the moment of the call. Its `Tool` cell names the document or the `remedy:`;
 - a trap whose only fix is "be careful" is not implementable and does not become a row. State it in the
@@ -1440,9 +1441,12 @@ repo goes in the report's research section, not in the backlog.
 
 ## M8 — Deduplicate against what is already logged
 
-`read_text IMPROVEMENTS.md headings=true`, then read `## Open` and `## Closed` in full. **The file is
-exactly two tables and nothing else** — there is no `Known limitations` section, no per-task narrative,
-no third heading, and adding one fails `BacklogShapeTests`. A candidate that matches an existing row is
+`read_text paths=["IMPROVEMENTS.md", "IMPROVEMENTS-ARCHIVE.md"] headings=true`, then read
+`IMPROVEMENTS.md`'s `## Open` in full. The closed rows now live in `IMPROVEMENTS-ARCHIVE.md`, which is
+~200 KB: read it with `columns="Finding,Outcome"` and open a full row only when a candidate looks like
+a match — a whole read of it costs more than this phase is worth. **Each file is exactly one table,
+one pointer line to the other, and nothing else** — there is no `Known limitations` section, no
+per-task narrative, no third heading, and adding one fails `BacklogShapeTests`. A candidate that matches an existing row is
 **not** a new row:
 
 - already **open** → do not duplicate; if this scan measured it again, **strengthen the existing row**
@@ -1462,7 +1466,10 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
 ## M9 — Write the rows
 
 1. Next id = highest existing `I<number>` + 1, continuing the sequence — never reuse one.
-2. Append to the `## Open` table with `edit_text`, anchored on text read in this run, in the file's own
+2. Append to `IMPROVEMENTS.md`'s `## Open` table with `edit_text` — a **new** row is never appended to
+   the archive, which only ever receives the rows a `/ship-improvements` run closes; strengthening an
+   existing closed row's `Outcome` (M8) is the one write the archive takes from this command —
+   anchored on text read in this run, in the file's own
    **five**-column format — the fifth column is `Rejected` and a row missing it fails
    `BacklogShapeTests`, because GitHub Flavored Markdown pads a short row silently:
 
@@ -1505,24 +1512,27 @@ no third heading, and adding one fails `BacklogShapeTests`. A candidate that mat
    - Anything genuinely dropped is named in the report with its measured cost and the reason.
 5. Record the scan itself in the report — window, transcript count, total tool calls, built-in share,
    total tool-result tokens, trim-ledger tokens, measured wall time — so successive runs are
-   comparable. **It does not go in the file:** prose in `IMPROVEMENTS.md` fails the shape gate.
+   comparable. **It does not go in the file:** prose in either backlog file fails the shape gate.
 
 ---
 
 ## M10 — Verify, commit, push
 
 1. `read_text IMPROVEMENTS.md section="## Open"` — the table still parses, ids are unique and
-   sequential, and **every row has exactly five cells**. Then `read_text … headings=true`: exactly
-   three headings, `# Improvements backlog` / `## Open` / `## Closed`, in that order, nothing else.
+   sequential across both files, and **every row has exactly five cells**. Then
+   `read_text paths=["IMPROVEMENTS.md", "IMPROVEMENTS-ARCHIVE.md"] headings=true`: exactly two headings
+   per file — `# Improvements backlog` / `## Open`, and `# Improvements archive` / `## Closed` —
+   nothing else.
 2. **Privacy re-read:** every new row, checked once more against gate 3. No path inside another repo,
    no type name, no prompt text, no quoted result, no boilerplate line the script suppressed. **M5A–M5C
    rows get a second look**, because they are the only rows sourced from prompt text and from code the
    agent wrote: a `[modern]` or `[perf]` row may name the construct class and the rule id, never a
    line of the emitted source; an `[accuracy]` row may name the cue label, the tool and the count,
    never a phrase from the prompt. This is the last chance before the file is public.
-3. `changed_files` — `IMPROVEMENTS.md` must be the **only** path this run touched. No build, no test
-   run: nothing else changed, and `IMPROVEMENTS.md` is not shipped in the package.
-4. `Bash: git add IMPROVEMENTS.md && git commit -m "Log I<n>–I<m> from the <N>-week session scan"`
+3. `changed_files` — `IMPROVEMENTS.md`, plus `IMPROVEMENTS-ARCHIVE.md` when M8 strengthened a closed
+   row, must be the **only** paths this run touched. No build, no test run: nothing else changed, and
+   neither file is shipped in the package.
+4. `Bash: git add IMPROVEMENTS.md IMPROVEMENTS-ARCHIVE.md && git commit -m "Log I<n>–I<m> from the <N>-week session scan"`
    (body: the corpus line from M9.5). **No `Co-Authored-By`.**
 5. `Bash: git show --stat HEAD` then `git push origin main`. No review, by standing instruction.
 

@@ -4,46 +4,78 @@ public sealed class BacklogShapeTests
 {
     private const int OpenColumns = 5;
     private const int ClosedColumns = 4;
+    private const int RowsTheSplitMoved = 319;
+    private const string ClosedPointer = "Closed rows: [IMPROVEMENTS-ARCHIVE.md](IMPROVEMENTS-ARCHIVE.md).";
+    private const string OpenPointer = "Open rows: [IMPROVEMENTS.md](IMPROVEMENTS.md).";
 
-    private static readonly string[] Lines =
-        File.ReadAllLines(Path.Combine(Fixtures.RepositoryRoot, "IMPROVEMENTS.md"));
+    private static readonly string[] Backlog = LinesOf("IMPROVEMENTS.md");
+    private static readonly string[] Archive = LinesOf("IMPROVEMENTS-ARCHIVE.md");
 
     [Fact]
-    public void TheBacklog_CarriesExactlyTheOpenAndClosedSections()
+    public void TheBacklog_CarriesTheOpenSectionAlone()
     {
-        string[] expected = ["# Improvements backlog", "## Open", "## Closed"];
+        string[] expected = ["# Improvements backlog", "## Open"];
 
-        var headings = Lines.Where(line => line.StartsWith('#')).ToArray();
-
-        Assert.Equal(expected, headings);
+        Assert.Equal(expected, HeadingsOf(Backlog));
     }
 
     [Fact]
-    public void TheBacklog_CarriesNothingButHeadingsAndTableRows()
+    public void TheArchive_CarriesTheClosedSectionAlone()
     {
-        var prose = Lines.Where(line => line.Length is not 0 && line[0] is not '#' and not '|').ToArray();
+        string[] expected = ["# Improvements archive", "## Closed"];
 
-        Assert.Empty(prose);
+        Assert.Equal(expected, HeadingsOf(Archive));
     }
 
     [Fact]
-    public void TheBacklog_KeepsTheColumnsBothTablesAreDefinedBy()
+    public void TheBacklog_CarriesNothingButHeadingsRowsAndThePointerToTheArchive()
     {
-        Assert.Contains("| Finding | Tool | Proposed change | Expected saving | Rejected |", Lines);
-        Assert.Contains("| Finding | Tool | Change | Outcome |", Lines);
+        string[] expected = [ClosedPointer];
+
+        Assert.Equal(expected, ProseOf(Backlog));
     }
 
     [Fact]
-    public void TheBacklog_KeepsEveryRowInTheShapeItsOwnHeaderDeclares()
+    public void TheArchive_CarriesNothingButHeadingsRowsAndThePointerToTheBacklog()
     {
-        var closed = Array.IndexOf(Lines, "## Closed");
+        string[] expected = [OpenPointer];
 
-        Assert.All(RowsOf(Lines[..closed]), row => Assert.Equal(OpenColumns, CellsOf(row)));
-        Assert.All(RowsOf(Lines[closed..]), row => Assert.Equal(ClosedColumns, CellsOf(row)));
+        Assert.Equal(expected, ProseOf(Archive));
     }
 
-    private static IEnumerable<string> RowsOf(IEnumerable<string> lines) =>
-        lines.Where(line => line.StartsWith('|'));
+    [Fact]
+    public void TheBacklogAndTheArchive_KeepTheColumnsTheirOwnTableIsDefinedBy()
+    {
+        Assert.Contains("| Finding | Tool | Proposed change | Expected saving | Rejected |", Backlog);
+        Assert.Contains("| Finding | Tool | Change | Outcome |", Archive);
+    }
+
+    [Fact]
+    public void TheArchive_StillHoldsEveryClosedRowTheSplitMovedIntoIt() =>
+        Assert.True(DataRowsOf(Archive).Length >= RowsTheSplitMoved);
+
+    [Fact]
+    public void TheBacklogAndTheArchive_KeepEveryRowInTheShapeItsOwnHeaderDeclares()
+    {
+        Assert.All(RowsOf(Backlog), row => Assert.Equal(OpenColumns, CellsOf(row)));
+        Assert.All(RowsOf(Archive), row => Assert.Equal(ClosedColumns, CellsOf(row)));
+    }
+
+    private static string[] LinesOf(string name) =>
+        File.ReadAllLines(Path.Combine(Fixtures.RepositoryRoot, name));
+
+    private static string[] HeadingsOf(string[] lines) =>
+        [.. lines.Where(line => line.StartsWith('#'))];
+
+    private static string[] ProseOf(string[] lines) =>
+        [.. lines.Where(line => line.Length is not 0 && line[0] is not '#' and not '|')];
+
+    private static string[] RowsOf(string[] lines) =>
+        [.. lines.Where(line => line.StartsWith('|'))];
+
+    private static string[] DataRowsOf(string[] lines) =>
+        [.. RowsOf(lines).Where(row => row.AsSpan().ContainsAnyExcept('|', '-', ' ') &&
+                                       !row.StartsWith("| Finding |", StringComparison.Ordinal))];
 
     private static int CellsOf(string row)
     {
