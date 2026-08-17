@@ -358,20 +358,44 @@ public sealed class DotnetRunnerTests
     }
 
     [Fact]
-    public void Unfinished_UnderAConcurrentBatch_NamesOnlyTheProjectsThatTimedOut() =>
-        Assert.Equal(
-            ["B.Tests"],
-            DotnetRunner.Unfinished(
-                ["a/A.Tests.csproj", "b/B.Tests.csproj", "c/C.Tests.csproj"],
-                [Finished, TimedOutRun, Finished]));
+    public void Unfinished_UnderAConcurrentBatch_NamesOnlyTheProjectsThatTimedOut()
+    {
+        var results = Slots(3, [0, 2]);
+
+        try
+        {
+            Assert.Equal(
+                ["B.Tests"],
+                DotnetRunner.Unfinished(
+                    ["a/A.Tests.csproj", "b/B.Tests.csproj", "c/C.Tests.csproj"],
+                    [Finished, TimedOutRun, Finished],
+                    results.FullName));
+        }
+        finally
+        {
+            results.Delete(recursive: true);
+        }
+    }
 
     [Fact]
-    public void Unfinished_UnderASerialBatchThatStopped_NamesTheTimedOutProjectAndEveryProjectItNeverStarted() =>
-        Assert.Equal(
-            ["A.Tests", "B.Tests", "C.Tests"],
-            DotnetRunner.Unfinished(
-                ["a/A.Tests.csproj", "b/B.Tests.csproj", "c/C.Tests.csproj"],
-                [TimedOutRun, null, null]));
+    public void Unfinished_UnderASerialBatchThatStopped_NamesTheTimedOutProjectAndEveryProjectItNeverStarted()
+    {
+        var results = Slots(3, []);
+
+        try
+        {
+            Assert.Equal(
+                ["A.Tests", "B.Tests", "C.Tests"],
+                DotnetRunner.Unfinished(
+                    ["a/A.Tests.csproj", "b/B.Tests.csproj", "c/C.Tests.csproj"],
+                    [TimedOutRun, null, null],
+                    results.FullName));
+        }
+        finally
+        {
+            results.Delete(recursive: true);
+        }
+    }
 
     [Fact]
     public void Stopped_ForAConcurrentBatch_SaysTheRestOfTheBatchStillRan() =>
@@ -400,4 +424,19 @@ public sealed class DotnetRunnerTests
         Assert.Equal(
             "every project of the batch timed out; all 3 produced no results",
             DotnetRunner.Stopped(["A.Tests", "B.Tests", "C.Tests"], 3, serial: false));
+
+    private static DirectoryInfo Slots(int count, int[] produced)
+    {
+        var results = Directory.CreateTempSubdirectory("terse-slots-");
+
+        for (var index = 0; index < count; index++)
+        {
+            var slot = results.CreateSubdirectory(index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            if (Array.IndexOf(produced, index) >= 0)
+                File.WriteAllText(Path.Combine(slot.FullName, "results.trx"), "<TestRun />");
+        }
+
+        return results;
+    }
 }

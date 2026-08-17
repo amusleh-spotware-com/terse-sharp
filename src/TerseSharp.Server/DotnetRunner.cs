@@ -581,10 +581,7 @@ public static partial class DotnetRunner
 
     private static string Slot(string resultsDirectory, int index, int invocations)
     {
-        if (invocations is 1)
-            return resultsDirectory;
-
-        var slot = Path.Combine(resultsDirectory, index.ToString(CultureInfo.InvariantCulture));
+        var slot = SlotPath(resultsDirectory, index, invocations);
 
         Directory.CreateDirectory(slot);
 
@@ -622,13 +619,13 @@ public static partial class DotnetRunner
         return elapsed;
     }
 
-    internal static List<string> Unfinished(ImmutableArray<string> targets, ProcessRun?[] runs)
+    internal static List<string> Unfinished(ImmutableArray<string> targets, ProcessRun?[] runs, string resultsDirectory)
     {
         var missing = new List<string>(targets.Length);
 
         for (var index = 0; index < runs.Length; index++)
         {
-            if (runs[index] is null or { TimedOut: true })
+            if (runs[index] is null or { TimedOut: true } || !Produced(SlotPath(resultsDirectory, index, targets.Length)))
                 missing.Add(Path.GetFileNameWithoutExtension(targets[index]));
         }
 
@@ -666,11 +663,11 @@ public static partial class DotnetRunner
         {
             runs[index] = await SlottedAsync(workspace, request, resultsDirectory, index, cancellationToken).ConfigureAwait(false);
 
-            if (runs[index] is { TimedOut: true } || !Produced(Slot(resultsDirectory, index, targets.Length)))
+            if (runs[index] is { TimedOut: true } || !Produced(SlotPath(resultsDirectory, index, targets.Length)))
                 break;
         }
 
-        return (Batched(runs, Elapsed(runs)), Unfinished(targets, runs));
+        return (Batched(runs, Elapsed(runs)), Unfinished(targets, runs, resultsDirectory));
     }
 
     private static async Task<(ProcessRun Run, List<string> Missing)> ConcurrentAsync(
@@ -688,7 +685,7 @@ public static partial class DotnetRunner
         await Parallel.ForAsync(0, targets.Length, options, async (index, token) =>
             runs[index] = await SlottedAsync(workspace, request, resultsDirectory, index, token).ConfigureAwait(false)).ConfigureAwait(false);
 
-        return (Batched(runs, preparedMilliseconds + stopwatch.ElapsedMilliseconds), Unfinished(targets, runs));
+        return (Batched(runs, preparedMilliseconds + stopwatch.ElapsedMilliseconds), Unfinished(targets, runs, resultsDirectory));
     }
 
     private static async Task<PreparedBuild> PreparedAsync(
@@ -756,6 +753,9 @@ public static partial class DotnetRunner
 
     private static bool Produced(string slot) =>
         Directory.Exists(slot) && Directory.EnumerateFiles(slot, "*.trx", SearchOption.AllDirectories).Any();
+
+    private static string SlotPath(string resultsDirectory, int index, int invocations) =>
+        invocations is 1 ? resultsDirectory : Path.Combine(resultsDirectory, index.ToString(CultureInfo.InvariantCulture));
 }
 
 internal sealed record ProcessRun(
