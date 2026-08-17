@@ -1406,21 +1406,6 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task RunTests_WhenABatchsOwnBuildCannotFinish_NamesTheProjectAndNeverOffersNoBuild()
-    {
-        var text = await server.CallAsync("run_tests", new()
-        {
-            ["projects"] = new[] { "Fixture.Trading.Tests", "Fixture.Trading.Tests" },
-            ["timeoutSeconds"] = 1,
-        });
-
-        Assert.DoesNotContain("run_tests PASSED", text, StringComparison.Ordinal);
-        Assert.Contains("the batch build of Fixture.Trading.Tests timed out, so no project ran", text, StringComparison.Ordinal);
-        Assert.Contains("raise timeoutSeconds", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("noBuild=true", text, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task RunTests_WithAParallelOutsideTheAcceptedRange_IsRejectedWithARemedy()
     {
         var text = await server.CallAsync("run_tests", new() { ["parallel"] = 99 });

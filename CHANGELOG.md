@@ -8,27 +8,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-08-17
+
 **Response format changed.** A `run_tests projects=` batch no longer stops at the first timeout by
 default, so the `WARNING the batch stopped at the first timeout; M of N project(s) produced no results`
 line is now emitted only under `parallel=1`. A concurrent batch answers
 `WARNING M of N project(s) timed out; the rest of the batch still ran`, and a batch whose shared build
 fails or times out answers the build's diagnostics followed by
-`WARNING the batch build of <project> timed out, so no project ran`. `elapsedMs` on a concurrent batch
-is now its **wall clock** plus the builds that preceded it, rather than the sum of its test processes.
+`WARNING the batch build of <project> timed out, so no project ran`, and a batch where **every**
+project timed out says so rather than claiming the rest still ran. `elapsedMs` on a successful
+concurrent batch is now its **wall clock** plus the builds that preceded it, rather than the sum of
+its test processes.
 
 ### Added
 
 - **`run_tests` runs a `projects=` batch concurrently, and takes `parallel` to govern it.** `parallel`
   defaults to `0` = one test process per core — the same scheduling an IDE test runner uses — is
-  bounded by the number of projects in the batch, accepts `1`-`64`, and answers
-  `ERROR InvalidArgument` with a remedy outside `0`-`64`. A batch that runs concurrently is built
-  **once** up front and each project is then executed with `--no-build`, because N projects that each
-  rebuild the shared graph at the same time is the MSBuild contention this repo already tracks as its
-  own build flake. `parallel=1` restores the previous serial run, including its stop-at-the-first-timeout
+  bounded by the number of projects in the batch, and answers `ERROR InvalidArgument` with a remedy
+  outside `0`-`10`, the batch cap. Every project of a batch that runs concurrently is built up front,
+  one build per project and scoped to exactly the projects that will run, and each is then executed
+  with `--no-build`, because N projects that each rebuild the shared graph at the same time is the
+  MSBuild contention this repo already tracks as its own build flake. Scoping the build to the batch
+  is what keeps `changed=true` selective and keeps `targetFramework` off projects that never declared
+  it. `parallel=1` restores the previous serial run, including its stop-at-the-first-timeout
   behaviour, and is the only mode that leaves later projects unrun. **A run with a single project
   ignores `parallel` entirely and is byte-for-byte unchanged**, which is every `run_tests` call that
   does not pass `projects=` or reach a multi-project `changed=true` selection.
-  `TestRunRequestTests` covers the degree and the serial/concurrent mode it resolves to, and
+  `TestRunRequestTests` covers the degree and the serial/concurrent mode it resolves to — including a
+  host whose core count resolves the degree to 1, where the mode must stay concurrent — and
   `DotnetRunnerTests` covers the timeout wording and which projects a batch names as unfinished in
   each mode.
   `ChangedTestSelectionE2ETests.RunTests_WithAConcurrentBatchOfTwoProjects_MergesBothIntoTheVerdictParallelOneReaches`
@@ -45,12 +52,13 @@ is now its **wall clock** plus the builds that preceded it, rather than the sum 
   so the variable an external suite reads is unchanged there. The parser already globbed recursively,
   so nothing downstream changed;
   `BacklogClosureE2ETests.RunTests_WithParallelOne_StopsTheBatchAtTheFirstTimeoutAndNamesWhatProducedNoResults`
-  is the rewritten form of the test that pinned the old serial contract.
+  is the rewritten form of the test that pinned the old serial contract. A batch build that fails
+  reports only that build's own `elapsedMs`; the time its predecessors spent is not folded in.
 - **`timeoutSeconds` also bounds each project's pre-fan-out build**, and a build that exceeds it names
   the project rather than surfacing as an unattributed failure. The remedy it offers depends on why it
   failed: `noBuild=true` is never suggested after a compile error, because running the previous
   binaries would answer `run_tests PASSED` for code that does not compile —
-  `BacklogClosureE2ETests.RunTests_WhenABatchsOwnBuildCannotFinish_NamesTheProjectAndNeverOffersNoBuild`.
+  `ChangedTestSelectionE2ETests.RunTests_WhenABatchsOwnBuildCannotFinish_NamesTheProjectAndNeverOffersNoBuild`.
 
 ## [0.38.0] - 2026-08-16
 
@@ -3698,7 +3706,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.39.0
 [0.38.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.38.0
 [0.37.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.37.0
 [0.36.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.36.0

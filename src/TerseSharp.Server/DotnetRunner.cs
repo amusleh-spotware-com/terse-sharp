@@ -55,15 +55,9 @@ public static partial class DotnetRunner
         {
             var prepared = await PreparedAsync(workspace, request, cancellationToken).ConfigureAwait(false);
 
-            if (prepared.Failure is { } failed)
-                return new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked);
-
-            var (run, missing) = await InvokeAsync(workspace, request, results.FullName, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
-            var report = Report(results, workspace.Root);
-            var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
-            var response = Noted(RenderTest(run, report, request, workspace.Root), notes);
-
-            return new TestRunResult(TimedOut(response, missing, request.Invocations.Length, request.IsSerial), report, Locked(run));
+            return prepared.Failure is { } failed
+                ? new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked)
+                : await RanAsync(workspace, request, results, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -77,10 +71,11 @@ public static partial class DotnetRunner
             CultureInfo.InvariantCulture,
             $"{response}\nWARNING {Stopped(missing, invocations, serial)}: {string.Join(", ", missing)}");
 
-    internal static string Stopped(List<string> missing, int invocations, bool serial) => (invocations, serial) switch
+    internal static string Stopped(List<string> missing, int invocations, bool serial) => (invocations, serial, missing.Count == invocations) switch
     {
-        (1, _) => "this run timed out and produced no results",
-        (_, true) => string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first timeout; {missing.Count} of {invocations} project(s) produced no results"),
+        (1, _, _) => "this run timed out and produced no results",
+        (_, true, _) => string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first timeout; {missing.Count} of {invocations} project(s) produced no results"),
+        (_, _, true) => string.Create(CultureInfo.InvariantCulture, $"every project of the batch timed out; all {invocations} produced no results"),
         _ => string.Create(CultureInfo.InvariantCulture, $"{missing.Count} of {invocations} project(s) timed out; the rest of the batch still ran"),
     };
 
@@ -487,7 +482,6 @@ public static partial class DotnetRunner
     [GeneratedRegex(@"(?m)^\s*\S+ -> (?<path>.+\.(?:dll|exe))\s*$")]
     private static partial Regex WrittenOutput();
 
-
     private static string Probe(string assembly, string target) => string.Create(
         CultureInfo.InvariantCulture,
         $"probe: dotnet \"{assembly}\" call <tool> --workspace \"{target}\" --json '{{...}}'  - answers from the binary this build just wrote, not from the connected server");
@@ -702,7 +696,7 @@ public static partial class DotnetRunner
             elapsed += run.ElapsedMilliseconds;
 
             if (run.ExitCode is not 0 || Diagnostics(run.Output).Errors.Length is not 0)
-                return new PreparedBuild(elapsed, SharedBuild(workspace, request, target, run));
+                return new PreparedBuild(elapsed, BatchBuildFailure(workspace, request, target, run));
         }
 
         return new PreparedBuild(elapsed, null);
@@ -710,8 +704,7 @@ public static partial class DotnetRunner
 
     private static string Outcome(ProcessRun run) => run.TimedOut ? "timed out" : "failed";
 
-
-    private static BuildRun SharedBuild(WorkspaceTarget workspace, TestRunRequest request, string target, ProcessRun run) => new(
+    private static BuildRun BatchBuildFailure(WorkspaceTarget workspace, TestRunRequest request, string target, ProcessRun run) => new(
         string.Create(
             CultureInfo.InvariantCulture,
             $"{RenderBuild(target, workspace.Root, run, request.Verbose)}\nWARNING the batch build of {Path.GetFileNameWithoutExtension(target)} {Outcome(run)}, so no project ran; {Recovery(run)}"),
@@ -720,6 +713,21 @@ public static partial class DotnetRunner
     private static string Recovery(ProcessRun run) => run.TimedOut
         ? "raise timeoutSeconds, or pass parallel=1 to build each project inside its own run"
         : "fix the errors above, or pass parallel=1 to build each project inside its own run";
+
+    private static async Task<TestRunResult> RanAsync(
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        DirectoryInfo results,
+        long preparedMilliseconds,
+        CancellationToken cancellationToken)
+    {
+        var (run, missing) = await InvokeAsync(workspace, request, results.FullName, preparedMilliseconds, cancellationToken).ConfigureAwait(false);
+        var report = Report(results, workspace.Root);
+        var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
+        var response = Noted(RenderTest(run, report, request, workspace.Root), notes);
+
+        return new TestRunResult(TimedOut(response, missing, request.Invocations.Length, request.IsSerial), report, Locked(run));
+    }
 }
 
 internal sealed record ProcessRun(

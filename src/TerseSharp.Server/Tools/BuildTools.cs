@@ -64,7 +64,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     [Description("Project path; empty runs every test project.")] string? project = null,
     [Description("Several test projects run in one call, at most 10, each a project name or a path to its .csproj. They run concurrently, governed by parallel. Cannot be combined with project=.")] string?[]? projects = null,
     [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
-    [Description("How many projects of a batch run at once, 0-10. Default 0 is one per core, bounded by the batch; 1 is serial and stops at the first timeout. Ignored for a single project.")] int parallel = 0,
+    [Description("How many projects of a batch run at once. A value outside 0-10 is refused whatever the run; 0 is one per core bounded by the batch, 1 is serial and stops at the first timeout.")] int parallel = 0,
     [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
     [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
     [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
@@ -498,7 +498,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             : Task.FromResult(resolved.Error!.Render());
     }
 
-    internal const int MaxParallel = MaxBatchedProjects;
+    private const int MaxParallel = MaxBatchedProjects;
 
     private static Result<int> Parallelism(int parallel) => parallel is < 0 or > MaxParallel
     ? Result.Fail<int>(Errors.Invalid(

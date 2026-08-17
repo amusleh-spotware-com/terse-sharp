@@ -29,4 +29,16 @@ public sealed class TestRunRequestTests
         TimeSpan.FromMinutes(1),
         Targets: targets.Length is 1 ? default : [.. targets],
         Parallel: parallel);
+
+    [Fact]
+    public void IsSerial_ForASingleTarget_IsTrueWhateverParallelAsksFor() =>
+        Assert.True(Request(64, "one.csproj").IsSerial);
+
+    [Fact]
+    public void IsSerial_ForABatchAskedToRunOneAtATime_IsTrue() =>
+        Assert.True(Request(1, "a.csproj", "b.csproj").IsSerial);
+
+    [Fact]
+    public void IsSerial_ForABatchWithNoParallelAsked_IsFalseEvenWhereTheHostResolvesTheDegreeToOne() =>
+        Assert.False(Request(0, "a.csproj", "b.csproj").IsSerial);
 }

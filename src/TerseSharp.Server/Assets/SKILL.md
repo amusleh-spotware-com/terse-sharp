@@ -620,8 +620,9 @@ that answers nothing, and the clip always names `next: startLine=`.
 
 14. **Independent calls go in one message.** If you intend to call several tools and there are no
     dependencies between them, make all of the independent calls in parallel, in a single assistant
-    message, rather than one after another. `changed_files` and `workspace_status` have nothing to do with each other and belong in the same
-    message. Prioritize calling tools simultaneously whenever the actions can be done in parallel.
+    message, rather than one after another. `changed_files` and `workspace_status` have nothing to do
+    with each other and belong in the same message. Prioritize calling tools simultaneously whenever
+    the actions can be done in parallel.
     **But when a call needs a value a previous call returns — a symbol id from an outline, a path
     from `changed_files`, a `retryWith` token from a rollback — call them sequentially, and never
     guess a parameter to make a call parallel.** A measured week of this server's own sessions
@@ -742,9 +743,9 @@ single-project run is unchanged, and `build` behaves the same way
 line however many warnings it produced, and a build that fails lists errors only. `warnings=` counts
 what that build emitted, so a build that recompiled nothing reports `0`.
 The short form is only ever emitted when there is nothing else to report, so do not pass
-`verbose=true` "to be sure". Anything that is not a clean pass returns the full report: one block per
-failure — the message, expected and actual values, and one workspace-relative `file:line` frame. Fix
-the test from that block — do not shell out to `dotnet test` for the stack trace.
+`verbose=true` "to be sure". Anything that is not a clean pass returns the full report —
+`passed= failed= skipped= total=`, then one block per failure with the message, expected and actual
+values, and one `file:line` frame. Fix the test from that block, never `dotnet test`.
 
 | Goal | Call |
 |---|---|

@@ -1,4 +1,3 @@
-
 namespace TerseSharp.E2ETests;
 
 public sealed class ChangedTestSelectionE2ETests
@@ -118,6 +117,7 @@ public sealed class ChangedTestSelectionE2ETests
             });
 
             Assert.StartsWith("run_tests PASSED", concurrent, StringComparison.Ordinal);
+            Assert.StartsWith("run_tests PASSED", serial, StringComparison.Ordinal);
             Assert.Contains("Selection.Core.Tests:1", concurrent, StringComparison.Ordinal);
             Assert.Contains("Selection.Other.Tests:1", concurrent, StringComparison.Ordinal);
             Assert.Equal("run_tests PASSED  passed=2 skipped=0 total=2 ", Verdict(concurrent));
@@ -130,5 +130,31 @@ public sealed class ChangedTestSelectionE2ETests
     }
 
     private static string Verdict(string response) =>
-        response[..response.IndexOf("durationMs=", StringComparison.Ordinal)];
+        response.IndexOf("durationMs=", StringComparison.Ordinal) is var marker && marker < 0
+            ? response
+            : response[..marker];
+
+    [Fact]
+    public async Task RunTests_WhenABatchsOwnBuildCannotFinish_NamesTheProjectAndNeverOffersNoBuild()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var text = await CallAsync(server, "run_tests", new()
+            {
+                ["projects"] = new[] { "Selection.Core.Tests", "Selection.Other.Tests" },
+                ["timeoutSeconds"] = 1,
+            });
+
+            Assert.DoesNotContain("run_tests PASSED", text, StringComparison.Ordinal);
+            Assert.Contains("timed out, so no project ran", text, StringComparison.Ordinal);
+            Assert.Contains("raise timeoutSeconds", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("noBuild=true", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }
