@@ -602,25 +602,32 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RunTests_WithSeveralProjects_RunsThemAllUnderOneVerdictLine()
     {
-        var once = await server.CallAsync("run_tests", new()
-        {
-            ["project"] = "Fixture.Trading.Tests",
-            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes",
-            ["timeoutSeconds"] = 300,
-        });
+        var batched = await StartedAsync("SelectionSolution");
 
-        var twice = await server.CallAsync("run_tests", new()
+        try
         {
-            ["projects"] = new[] { "Fixture.Trading.Tests", "Fixture.Trading.Tests" },
-            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes",
-            ["timeoutSeconds"] = 300,
-        });
+            var once = await batched.CallAsync(
+                "run_tests",
+                new() { ["project"] = "Selection.Core.Tests", ["timeoutSeconds"] = 300 },
+                TestContext.Current.CancellationToken);
 
-        Assert.StartsWith("run_tests PASSED", once, StringComparison.Ordinal);
-        Assert.StartsWith("run_tests PASSED", twice, StringComparison.Ordinal);
-        Assert.Contains("total=2", once, StringComparison.Ordinal);
-        Assert.Contains("total=4", twice, StringComparison.Ordinal);
-        Assert.DoesNotContain("timed out", twice, StringComparison.Ordinal);
+            var several = await batched.CallAsync(
+                "run_tests",
+                new() { ["projects"] = new[] { "Selection.Core.Tests", "Selection.Other.Tests" }, ["timeoutSeconds"] = 300 },
+                TestContext.Current.CancellationToken);
+
+            Assert.StartsWith("run_tests PASSED", once, StringComparison.Ordinal);
+            Assert.StartsWith("run_tests PASSED", several, StringComparison.Ordinal);
+            Assert.Contains("total=1", once, StringComparison.Ordinal);
+            Assert.Contains("total=2", several, StringComparison.Ordinal);
+            Assert.Contains("Selection.Core.Tests:1", several, StringComparison.Ordinal);
+            Assert.Contains("Selection.Other.Tests:1", several, StringComparison.Ordinal);
+            Assert.DoesNotContain("timed out", several, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await batched.StopAsync();
+        }
     }
 
     [Fact]
@@ -952,24 +959,34 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RunTests_WithParallelOne_StopsTheBatchAtTheFirstTimeoutAndNamesWhatProducedNoResults()
     {
-        var batch = await server.CallAsync("run_tests", new()
-        {
-            ["projects"] = new[] { "Fixture.Trading.Tests", "Fixture.Trading.Tests" },
-            ["parallel"] = 1,
-            ["timeoutSeconds"] = 1,
-        });
+        var hanging = await StartedAsync("HangSolution");
 
-        var alone = await server.CallAsync("run_tests", new()
+        try
         {
-            ["project"] = "Fixture.Trading.Tests",
-            ["timeoutSeconds"] = 1,
-        });
+            var built = await hanging.CallAsync("build", [], TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain("run_tests PASSED", batch, StringComparison.Ordinal);
-        Assert.Contains("the batch stopped at the first timeout; 2 of 2 project(s) produced no results", batch, StringComparison.Ordinal);
-        Assert.Contains("Fixture.Trading.Tests", batch, StringComparison.Ordinal);
-        Assert.DoesNotContain("batch", alone, StringComparison.Ordinal);
-        Assert.Contains("this run timed out and produced no results", alone, StringComparison.Ordinal);
+            var batch = await hanging.CallAsync(
+                "run_tests",
+                new() { ["projects"] = new[] { "Hang.Tests", "Hang.Second.Tests" }, ["parallel"] = 1, ["noBuild"] = true, ["timeoutSeconds"] = 40 },
+                TestContext.Current.CancellationToken);
+
+            var alone = await hanging.CallAsync(
+                "run_tests",
+                new() { ["project"] = "Hang.Tests", ["noBuild"] = true, ["timeoutSeconds"] = 40 },
+                TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", built, StringComparison.Ordinal);
+            Assert.DoesNotContain("run_tests PASSED", batch, StringComparison.Ordinal);
+            Assert.Contains("the batch stopped at the first timeout; 2 of 2 project(s) produced no results", batch, StringComparison.Ordinal);
+            Assert.Contains("Hang.Tests", batch, StringComparison.Ordinal);
+            Assert.DoesNotContain("Hang.Second.Tests.SecondHangingTests.AlsoNeverFinishes", batch, StringComparison.Ordinal);
+            Assert.DoesNotContain("batch", alone, StringComparison.Ordinal);
+            Assert.Contains("this run timed out and produced no results", alone, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await hanging.StopAsync();
+        }
     }
 
     [Fact]
@@ -1413,5 +1430,15 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("outside the accepted range 0-10", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    private static Task<TerseServerProcess> StartedAsync(string fixture)
+    {
+        var root = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", fixture);
+
+        return TerseServerProcess.StartAsync(
+            root,
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", Path.Combine(root, fixture + ".slnx")],
+            TestContext.Current.CancellationToken);
     }
 }

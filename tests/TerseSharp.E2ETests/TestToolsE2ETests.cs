@@ -338,4 +338,27 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
         Assert.DoesNotContain("fixture-host-exit-marker", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task RunTests_WithRunSettings_ReachesVSTestAndBoundsTheRunInsideTheAssembly()
+    {
+        var text = await RunAsync(new()
+        {
+            ["project"] = TestProject,
+            ["runSettings"] = new[] { "xUnit.MaxParallelThreads=1", "xUnit.StopOnFail=true" },
+        });
+
+        Assert.Contains("failed=1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("failed=3", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_WithARunSettingsEntryThatIsNotNameValue_IsRefusedBeforeAnythingRuns()
+    {
+        var text = await RunAsync(new() { ["project"] = TestProject, ["runSettings"] = new[] { "MaxParallelThreads" } });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("runSettings entry MaxParallelThreads is not Name=Value", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
 }

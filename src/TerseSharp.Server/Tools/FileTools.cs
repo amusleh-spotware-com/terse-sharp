@@ -142,10 +142,10 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. With toPath=, section= MOVES the section into another markdown file in one write, so relocating it costs two changed-line counts instead of a read plus a rewrite. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. The top-level path may be omitted entirely when every entry declares its own. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. A successful edit answers in one line per changed file - the file name and changedLines; pass verbose=true for the diff.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. With toPath=, section= MOVES the section into another markdown file in one write, and row=\"I286\" moves ONE table row, matched by its first cell, so the row costs its identifier instead of its text; newText= beside it is what lands in the target. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. The top-level path may be omitted entirely when every entry declares its own. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. A successful edit answers in one line per changed file - the file name and changedLines; pass verbose=true for the diff.")]
     public Task<string> EditText(
     [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry that carries no path of its own - and it may be omitted entirely when every entry declares one.")] string? path = null,
-    [Description("Replacement text. With section=, the whole new section including its heading line, unless place= writes inside it. Omit it when edits= carries the edits.")] string? newText = null,
+    [Description("Replacement text. With section=, the whole new section including its heading line, unless place= writes inside it. With row=, the row as it should read in the target; empty moves it verbatim. Omit it when edits= carries the edits.")] string? newText = null,
     [Description("Exact text to replace; must occur exactly once unless occurrence= picks one. Omit when section= is passed.")] string? oldText = null,
     [Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed. With place=, written inside instead of replaced. With toPath=, cut from this file and written into that one. A heading that repeats - '### Added', once per release in a changelog - is picked with occurrence=.")] string? section = null,
     [Description("Diff only, write nothing.")] bool dryRun = false,
@@ -154,7 +154,8 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
     [Description("Workspace or worktree name.")] string? workspace = null,
     [Description("1-based index of the match to replace when it deliberately occurs more than once - the oldText match, or beside section= the section with that heading. Default 0, which requires exactly one match; a multi-match refusal lists the candidates.")] int occurrence = 0,
     [Description("With section=, lowercase: append writes after its last non-blank line, prepend directly under its heading. With toPath=, prepend puts the moved section at the top of the target, anything else appends it. Empty replaces the section.")] string? place = null,
-    [Description("Markdown only, with section=: an EXISTING file to MOVE that section into. Cut from path, written into toPath as one write, one line per changed file. Naming the same file twice is refused. Not combinable with oldText, newText or edits.")] string? toPath = null,
+    [Description("Markdown only, with section= or row=: an EXISTING file to MOVE that section or row into. Cut from path, written into toPath as one write, one line per changed file. Naming the same file twice is refused. Not with oldText or edits.")] string? toPath = null,
+    [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched against the first cell of each row - e.g. row=\"I286\". It must match exactly one, and the refusal says how many it matched. Not with section=, oldText or edits.")] string? row = null,
     [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place and path. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total.")] FileService.TextEdit[]? edits = null,
     CancellationToken cancellationToken = default)
     {
@@ -171,7 +172,7 @@ CancellationToken cancellationToken) => content is { Length: > 0 } || (allowEmpt
             loaded => EditedAsync(
                 loaded,
                 path ?? target,
-                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath),
+                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row),
                 newText,
                 edits,
                 cancellationToken),
@@ -438,6 +439,13 @@ context.RejectWrite() is { } rejection
     FileService.TextEdit[]? edits,
     CancellationToken cancellationToken)
     {
+        if (request.Row is { Length: > 0 } && request.ToPath is not { Length: > 0 })
+        {
+            return Errors.Invalid(
+                "row= addresses one markdown table row to MOVE, and no toPath= was passed",
+                "pass toPath=<the other markdown file>, or edit the row in place with oldText=").Render();
+        }
+
         if (request.ToPath is { Length: > 0 } moved)
             return await MovedAsync(loaded, path, moved, request, newText, edits, cancellationToken).ConfigureAwait(false);
 
@@ -478,6 +486,9 @@ context.RejectWrite() is { } rejection
     FileService.TextEdit[]? edits,
     CancellationToken cancellationToken)
     {
+        if (request.Row is { Length: > 0 })
+            return await RowMovedAsync(loaded, path, toPath, request, edits, cancellationToken).ConfigureAwait(false);
+
         if (newText is not null || request.OldText is { Length: > 0 } || edits is { Length: > 0 })
         {
             return Errors.Invalid(
@@ -489,7 +500,7 @@ context.RejectWrite() is { } rejection
         {
             return Errors.Invalid(
                 "toPath moves a markdown section and no section= was passed",
-                "pass section=\"## Open\" beside toPath=, or use write_text to replace the whole file").Render();
+                "pass section=\"## Open\" beside toPath=, or row=\"I286\" to move one table row, or use write_text to replace the whole file").Render();
         }
 
         return NavigationTools.Unwrap(
@@ -724,5 +735,24 @@ context.RejectWrite() is { } rejection
 
         return NavigationTools.Unwrap(await FileService.WriteTextAsync(
             loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, cancellationToken).ConfigureAwait(false));
+    }
+
+    private static async Task<string> RowMovedAsync(
+        LoadedWorkspace loaded,
+        string path,
+        string toPath,
+        FileService.EditRequest request,
+        FileService.TextEdit[]? edits,
+        CancellationToken cancellationToken)
+    {
+        if (request.OldText is { Length: > 0 } || request.Section is { Length: > 0 } || edits is { Length: > 0 })
+        {
+            return Errors.Invalid(
+                "row= moves one markdown table row and cannot be combined with oldText, section or edits",
+                "send the move as path=, row=, toPath= and optionally newText= alone").Render();
+        }
+
+        return NavigationTools.Unwrap(
+            await FileService.MoveRowAsync(loaded, path, toPath, request, cancellationToken).ConfigureAwait(false));
     }
 }

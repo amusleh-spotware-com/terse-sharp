@@ -81,6 +81,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
 | **Edit text** | reading a section out of one file and writing it into another | `edit_text(path, section: "## Open", toPath: "other.md")` | cuts the section and lands it in the other file as **one** write, answered as one changed-line count per file - the whole section text never crosses the wire. `place=prepend` puts it at the top of the target, anything else appends; `occurrence=` picks the source section; both paths must be markdown, **both must already exist**, and naming the same file twice is refused |
 | **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", occurrence: 1, place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line. A heading that repeats needs `occurrence=`: the refusal names `occurrence=1..N` and each candidate's start line, so the index is picked with no re-read. `read_text` takes it too, and refuses it without a `section=`. Only with `section=`; supply your own blank lines |
+| **Edit text** | closing a backlog row: cutting one table row out of one markdown file and appending it to another | `edit_text(path, row: "I286", toPath: "IMPROVEMENTS-ARCHIVE.md", newText: "\| … \|")` | the row is matched by its **first cell**, so its old text never crosses the wire; `newText=` is what lands in the target - omit it to move the row verbatim. An identifier matching no row, or more than one, is refused saying which, and `row=` without `toPath=` is refused rather than dropped |
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` | an entry may name its own `path`, and the top-level `path` may then be omitted entirely; entries are grouped by file, applied as one write each, and answered one line per changed file. A path-less entry with no top-level `path` is refused by index. At most 10 per file and 25 in total |
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` | up to 10 in one call, and every `.cs` document among them shares **one** compile gate — so a type and the consumer it breaks land together instead of the first write being rolled back alone |
@@ -105,6 +106,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Projects** | editing a `.sln`/`.slnx` by hand | `solution_add_project` · `solution_remove_project` | the solution file only, no MSBuild evaluation |
 | **Projects** | "which projects does this solution contain?" for a solution that is **not** loaded | `solution_projects(path: …)` | reads the `.slnx`, `.sln` or `.slnf` directly and loads nothing, so a fixture-scoped question does not cost a `load_workspace` that makes every later un-hinted call ambiguous |
 | **Git** | `Bash: git log` / `git show --stat` | `history` | commits touching a path, one line each - short sha, date, author, subject - `baseRef=` for a ref or a range, `contains=` for git's pickaxe (only the commits whose diff added or removed that literal), `message=` for the subject grep, and `commit=<sha>` for one commit's per-file stat. `git blame` stays on the shell: it ran **once** in 683 sessions |
+| **Git** | `Bash: git tag --list` / `git tag -l "v*"` | `history(tags: true)` | every tag newest version first, one line each - name, the short sha it names, its date - bounded by `maxResults`; refused beside `baseRef=`, `path=`, `contains=`, `message=` or `commit=` rather than ignoring them, and creating, annotating or deleting a tag stays on the shell |
 | **Git** | `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, `path=` scopes it to one pathspec on a shared tree, and `exclude=` drops what a pathspec cannot leave out - `exclude: ".research/**"` for another session's notes; an excluded file is not counted |
 | **Git** | `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
 | **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `paths=[...]` takes up to 10 pathspecs in the same git invocation, `maxLines=` caps it at 1000 and a truncated answer names the exact `maxLines=` that returns the rest |
@@ -112,7 +114,8 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Build and test** | `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
 | **Build and test** | `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line, and a run that spanned several projects appends `Name:total/durationMs` per project so "which tier is slow" costs no second run; a failure carries its message, expected/actual and one source frame |
-| **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` | at most 10, run **concurrently**; the timeout applies to **each** project, and one that timed out is named instead of the merged run being reported as passed |
+| **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` | at most 10, run **concurrently**; the timeout applies to **each** project, and one that timed out is named instead of the merged run being reported as passed. Naming the same project twice is refused - two invocations of one assembly race each other and fail tests that pass alone |
+| **Build and test** | bounding parallelism **inside** one test assembly | `run_tests(runSettings: ["xUnit.MaxParallelThreads=1"])` | VSTest RunSettings overrides, passed through as one trailing `-- Name=Value` block - the layer `parallel` deliberately does not touch. `xUnit.StopOnFail`, `MSTest.Parallelize.Workers` and `NUnit.NumberOfTestWorkers` live here too; an entry that is not `Name=Value` is refused before anything runs |
 | **Build and test** | re-running what broke | `rerun_failed` | replays the previous failures only |
 | **Build and test** | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | **Build and test** | `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks; `path=` sweeps a `.slnx`/`.sln`/`.slnf`/project that is **not** loaded |
@@ -187,9 +190,11 @@ re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=t
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
-`git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`. Still on the shell: `git blame`
+`git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`, and a `git tag` **listing** —
+bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. Still on the shell: `git blame`
 — measured at **one** call in 683 sessions — anything that mutates the index or history (`git add`,
-`git commit`, `git push`, `git tag`), and a **scripted extraction** such as
+`git commit`, `git push`, and every `git tag` that creates, annotates or deletes one), and a
+**scripted extraction** such as
 `$(git log -1 --format=%H)`, because `--format=`, `--pretty=`, `-s` and `--name-only` ask for a shape
 `history` does not produce.
 
@@ -360,6 +365,11 @@ nothing is modified; `verbose=true` adds each step's own report. It never replac
 before `run_tests`: those two stay separate on purpose, because a test result read before its build is
 the previous binary's.
 
+**`format` also collapses a run of blank lines between members down to one**, so the double blanks a
+multi-member `add_member` leaves behind never need a shell rewrite. It edits trivia, never token text,
+so a raw string literal is safe. `cleanup fix=all` and `fix=usings` fold too; `fix=style` and
+`fix=analyzers` do not reformat at all.
+
 **`format verify` and `cleanup verify` are not the same gate.** `format` compares against the Roslyn
 whitespace formatter, which `dotnet format style` and `dotnet format analyzers` do not run — a
 `VERIFY_FAILED` there can still be a green CI leg. `cleanup verify=true fix=style` and
@@ -373,6 +383,12 @@ names the byte-equivalent CI pair. Every file `whitespace` is a green CI leg; an
 after a type the workspace declares elsewhere name the file that declares it, and `add_member path=`
 on a `.cs` file nobody has written yet names `write_text path=… force=true` — neither sends you to
 `find_files`, which cannot find a type that does not name its file.
+
+**`replace_symbol` replaces the whole declaration, attributes included, and says when yours dropped
+them** — `WARNING attributes dropped: McpServerTool, Description`. The edit still applies, because
+dropping an attribute is sometimes the intent, but an un-advertised tool is exactly what a clean
+build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, or use
+`replace_symbol_body`.
 
 **A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
@@ -768,6 +784,11 @@ one.
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
 produced no results reports `FAILED …, no test results were produced` and never `0 failures`.
 
+**A run that was stopped names the test that was still running.** Every run passes VSTest's blame
+collector 15 s below `timeoutSeconds` whenever that leaves a usable margin (above 30 s), so a hang answers
+`WARNING the run was stopped while these test(s) were still running: <name>` under the failure. Read
+that instead of bisecting with `test=`; a green run never carries it.
+
 **A batch is concurrent by default**, `parallel` at a time (default per-core); each is built before
 the fan-out then run `--no-build`, and a build that fails runs nothing. `parallel=1` is serial and the
 only mode that stops at the first timeout. **A single project ignores `parallel`.**
@@ -788,8 +809,9 @@ When a locked output file blocks the build that `build`, `run_tests`, `rerun_fai
 the response says so (`WARNING a locked output file blocked the operation`) and, with a single
 workspace loaded, the server unloads it, retries and reloads, then reports which of the three happened
 in a `NOTE`. You do not need to `unload_workspace` by hand first. When the note says the output is
-**still** locked it also lists every process the build named, one `holder pid=… <name> startedUtc=…`
-line each, classified as this terse server, an MSBuild or BuildHost — including one an *earlier*
+**still** locked it also lists every process the build named, one
+`holder pid=… <name> startedUtc=… exe=…` line each - the executable workspace-relative when it lives under the root, which tells a test host
+running out of *this* tree's `bin/` from another session's - classified as this terse server, an MSBuild or BuildHost — including one an *earlier*
 terse load spawned out of this tree's own `bin/` — a live `testhost` you should wait for rather than
 stop, a bare `dotnet` host, or a pid that is already gone. The only holder the note rules out is the
 analyzer and source-generator set, which is mapped from a shadow copy and never from a project's own

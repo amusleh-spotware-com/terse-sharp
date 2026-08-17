@@ -157,4 +157,27 @@ public sealed class ChangedTestSelectionE2ETests
             await server.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task RunTests_WithTheSameProjectTwiceInABatch_IsRefusedInsteadOfRacingTheAssemblyAgainstItself()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var text = await CallAsync(server, "run_tests", new()
+            {
+                ["projects"] = new[] { "Selection.Core.Tests", "Selection.Core.Tests" },
+                ["timeoutSeconds"] = 600,
+            });
+
+            Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+            Assert.Contains("Selection.Core.Tests.csproj twice", text, StringComparison.Ordinal);
+            Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }

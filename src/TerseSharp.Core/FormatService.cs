@@ -155,8 +155,9 @@ public static class FormatService
     private static async Task<Document> FormatOnlyAsync(Document document, CancellationToken cancellationToken)
     {
         var options = await document.GetOptionsAsync(cancellationToken).ConfigureAwait(false);
+        var formatted = await Formatter.FormatAsync(document, options, cancellationToken).ConfigureAwait(false);
 
-        return await Formatter.FormatAsync(document, options, cancellationToken).ConfigureAwait(false);
+        return await CollapsedAsync(formatted, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Document> CleanDocumentAsync(Document document, CancellationToken cancellationToken)
@@ -228,4 +229,51 @@ public static class FormatService
     private static bool RunsTheFormatterCiDoesNot(FixRequest request, VerifiedFile[] changed) =>
         request.Reformats
         && Array.Exists(changed, file => file.ChangedBy is "whitespace" or "fixers+whitespace");
+
+    private static async Task<Document> CollapsedAsync(Document document, CancellationToken cancellationToken)
+    {
+        if (await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is not { } root)
+            return document;
+
+        var collapsed = new BlankLineCollapser().Visit(root);
+
+        return collapsed is null || collapsed == root ? document : document.WithSyntaxRoot(collapsed);
+    }
+
+    private sealed class BlankLineCollapser : CSharpSyntaxRewriter
+    {
+        public override SyntaxToken VisitToken(SyntaxToken token) =>
+            token.HasLeadingTrivia ? token.WithLeadingTrivia(Collapsed(token.LeadingTrivia)) : token;
+
+        private static SyntaxTriviaList Collapsed(SyntaxTriviaList trivia)
+        {
+            var kept = new List<SyntaxTrivia>(trivia.Count);
+            var seen = 0;
+            var allowed = 1;
+
+            foreach (var item in trivia)
+            {
+                if (!Drops(item, ref seen, ref allowed))
+                    kept.Add(item);
+            }
+
+            return kept.Count == trivia.Count ? trivia : SyntaxFactory.TriviaList(kept);
+        }
+
+        private static bool Drops(SyntaxTrivia item, ref int seen, ref int allowed)
+        {
+            if (item.IsKind(SyntaxKind.WhitespaceTrivia))
+                return false;
+
+            if (!item.IsKind(SyntaxKind.EndOfLineTrivia))
+            {
+                seen = 0;
+                allowed = 2;
+
+                return false;
+            }
+
+            return ++seen > allowed;
+        }
+    }
 }

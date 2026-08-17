@@ -12,7 +12,8 @@ internal readonly record struct TestRunRequest(
     bool Verbose = false,
     BuildScope Scope = default,
     ImmutableArray<string> Targets = default,
-    int Parallel = 0)
+    int Parallel = 0,
+    ImmutableArray<string> RunSettings = default)
 {
     public bool WantsDetail => Verbose || IncludePassed || Slowest > 0;
 

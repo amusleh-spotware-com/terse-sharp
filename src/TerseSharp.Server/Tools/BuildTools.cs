@@ -57,24 +57,25 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values, and one source frame, and a build that failed under the run returns error-severity diagnostics only. Pass projects to run several test projects in ONE call, CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each project built up front then run with --no-build, and a project that times out is named without stopping the rest. parallel bounds how many run at once and defaults to one per core; parallel=1 is serial and stops at the first timeout. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. verbose=true gives the full report on a green run and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run as they scope build.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values, and one source frame, and a build that failed under the run returns error-severity diagnostics only. A stopped run names the test that was still running. Pass projects to run several test projects in ONE call, CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each project built up front then run with --no-build, and a project that times out is named without stopping the rest; a duplicate is refused. parallel bounds how many run at once and defaults to one per core; parallel=1 is serial and stops at the first timeout. runSettings passes VSTest RunSettings overrides, which bound parallelism INSIDE one assembly. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. verbose=true gives the full report on a green run and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run as they scope build.")]
     public Task<string> RunTests(
-    [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
-    [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
-    [Description("Project path; empty runs every test project.")] string? project = null,
-    [Description("Several test projects run in one call, at most 10, each a project name or a path to its .csproj. They run concurrently, governed by parallel. Cannot be combined with project=.")] string?[]? projects = null,
-    [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
-    [Description("How many projects of a batch run at once. A value outside 0-10 is refused whatever the run; 0 is one per core bounded by the batch, 1 is serial and stops at the first timeout.")] int parallel = 0,
-    [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
-    [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
-    [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
-    [Description("Run existing binaries; skip the build, including a batch's per-project build.")] bool noBuild = false,
-    [Description("List passing tests too.")] bool includePassed = false,
-    [Description("List the N slowest tests.")] int slowest = 0,
-    [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
-    [Description("Timeout seconds, 1-3600 (600). With projects=, it is the budget for each project rather than for the batch, and it also bounds each project's build.")] int timeoutSeconds = 600,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    CancellationToken cancellationToken = default) => context.WithTargetAsync(
+        [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
+        [Description("Optional VSTest filter expression. Cannot be combined with test.")] string? filter = null,
+        [Description("Project path; empty runs every test project.")] string? project = null,
+        [Description("Several test projects run in one call, at most 10, each a project name or a path to its .csproj. They run concurrently, governed by parallel. A duplicate is refused. Cannot be combined with project=.")] string?[]? projects = null,
+        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
+        [Description("How many projects of a batch run at once. A value outside 0-10 is refused whatever the run; 0 is one per core bounded by the batch, 1 is serial and stops at the first timeout.")] int parallel = 0,
+        [Description("VSTest RunSettings overrides, each Name=Value, sent as one trailing -- block, e.g. [\"xUnit.MaxParallelThreads=1\"] - the parallelism inside one assembly, which parallel does not touch.")] string[]? runSettings = null,
+        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
+        [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
+        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
+        [Description("Run existing binaries; skip the build, including a batch's per-project build.")] bool noBuild = false,
+        [Description("List passing tests too.")] bool includePassed = false,
+        [Description("List the N slowest tests.")] int slowest = 0,
+        [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
+        [Description("Timeout seconds, 1-3600 (600). With projects=, it is the budget for each project rather than for the batch, and it also bounds each project's build. Above 30s it is ALSO a per-test ceiling 15s below it: a test still running then is stopped and named.")] int timeoutSeconds = 600,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        CancellationToken cancellationToken = default) => context.WithTargetAsync(
         workspace,
         project,
         target =>
@@ -94,6 +95,11 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             if (!degree.IsOk)
                 return Task.FromResult(degree.Error!.Render());
 
+            var settings = Overrides(runSettings);
+
+            if (!settings.IsOk)
+                return Task.FromResult(settings.Error!.Render());
+
             return TestedAsync(
                 target,
                 project,
@@ -107,7 +113,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                     Seconds(timeoutSeconds),
                     verbose,
                     scope.Value,
-                    Parallel: degree.Value),
+                    Parallel: degree.Value,
+                    RunSettings: settings.Value),
                 changed,
                 cancellationToken);
         },
@@ -237,7 +244,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         var reloaded = await ReloadAsync(target.SolutionPath, cancellationToken).ConfigureAwait(false);
 
         return second.Response
-            + (second.Locked ? StillLocked(operation, second.Response) : Recovered(operation))
+            + (second.Locked ? StillLocked(operation, second.Response, target.Root) : Recovered(operation))
             + (reloaded ? string.Empty : ReloadFailed);
     }
 
@@ -245,9 +252,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CultureInfo.InvariantCulture,
         $"\nNOTE the workspace held MSBuild file locks; it was unloaded, the {operation} retried, and the workspace reloaded. Symbol ids are unchanged; undo_last_change history was discarded.");
 
-    internal static string StillLocked(string operation, string output)
+    internal static string StillLocked(string operation, string output, string root = "")
     {
-        var holders = LockHolders.Describe(output);
+        var holders = LockHolders.Describe(output, root);
 
         return string.Create(
             CultureInfo.InvariantCulture,
@@ -441,20 +448,13 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     private static Result<ImmutableArray<string>> ResolvedProjects(WorkspaceTarget workspace, string?[] projects)
     {
         if (projects.Length > MaxBatchedProjects)
-        {
-            return Result.Fail<ImmutableArray<string>>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"projects carried {projects.Length} entries, at most {MaxBatchedProjects} run in one call"),
-                string.Create(CultureInfo.InvariantCulture, $"send at most {MaxBatchedProjects} per call - the timeout applies to each project, so a longer batch has no bound")));
-        }
+            return Result.Fail<ImmutableArray<string>>(TooManyProjects(projects.Length));
 
         var resolved = ImmutableArray.CreateBuilder<string>();
 
         foreach (var entry in projects)
         {
-            if (entry is not { Length: > 0 })
-                return Result.Fail<ImmutableArray<string>>(Errors.Invalid("'projects' carries a blank entry", "drop it, or name the project you meant to run"));
-
-            var found = workspace.ResolveProject(entry);
+            var found = Resolved(workspace, entry, resolved);
 
             if (!found.IsOk)
                 return Result.Fail<ImmutableArray<string>>(found.Error!);
@@ -505,4 +505,37 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         string.Create(CultureInfo.InvariantCulture, $"parallel was {parallel}, outside the accepted range 0-{MaxParallel}"),
         string.Create(CultureInfo.InvariantCulture, $"pass 0 for one process per core, 1 to run the projects one at a time, or up to {MaxParallel}")))
     : Result.Ok(parallel);
+
+    private static TerseError TooManyProjects(int count) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"projects carried {count} entries, at most {MaxBatchedProjects} run in one call"),
+        string.Create(CultureInfo.InvariantCulture, $"send at most {MaxBatchedProjects} per call - the timeout applies to each project, so a longer batch has no bound"));
+
+    private static Result<string> Resolved(WorkspaceTarget workspace, string? entry, ImmutableArray<string>.Builder taken)
+    {
+        if (entry is not { Length: > 0 })
+            return Result.Fail<string>(Errors.Invalid("'projects' carries a blank entry", "drop it, or name the project you meant to run"));
+
+        var found = workspace.ResolveProject(entry);
+
+        return found.IsOk && taken.Contains(found.Value!, StringComparer.OrdinalIgnoreCase)
+            ? Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"projects names {Path.GetFileName(found.Value.AsSpan())} twice, as '{entry}'"),
+                "drop the duplicate - two invocations of one test assembly run concurrently against the same output and fail tests that pass on their own"))
+            : found;
+    }
+
+    private static Result<ImmutableArray<string>> Overrides(string[]? runSettings)
+    {
+        foreach (var setting in runSettings ?? [])
+        {
+            if (setting is null || !IsProperty(setting))
+            {
+                return Result.Fail<ImmutableArray<string>>(Errors.Invalid(
+                    "runSettings entry " + (setting ?? "null") + " is not Name=Value",
+                    "pass each RunSettings override as Name=Value, e.g. runSettings=[\"xUnit.MaxParallelThreads=1\"]"));
+            }
+        }
+
+        return Result.Ok(runSettings is null ? ImmutableArray<string>.Empty : [.. runSettings]);
+    }
 }

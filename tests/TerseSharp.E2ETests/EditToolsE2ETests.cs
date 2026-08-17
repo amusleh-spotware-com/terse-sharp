@@ -668,4 +668,71 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Assert.Contains("send these callers in the same replace_symbol symbolIds/declarations batch:", text, StringComparison.Ordinal);
         Assert.Contains("OrderRouter.Route(Order)", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReplaceSymbol_WhenTheReplacementCarriesNoneOfTheAttributesItReplaced_NamesThemInsteadOfUnwiringSilently()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            root => File.WriteAllTextAsync(
+                Path.Combine(root, "src", "Fixture.Trading", "AuditProbe.cs"),
+                "namespace Fixture.Trading;\n\npublic sealed class AuditProbe\n{\n    [System.Obsolete(\"probe\")]\n    public int Tally() => 7;\n}\n",
+                TestContext.Current.CancellationToken));
+
+        var dropped = await solution.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "AuditProbe.Tally",
+            ["declaration"] = "public int Tally() => 7;",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", dropped, StringComparison.Ordinal);
+        Assert.Contains("WARNING attributes dropped: System.Obsolete", dropped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WhenTheReplacementKeepsItsAttributes_SaysNothingAboutThem()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            root => File.WriteAllTextAsync(
+                Path.Combine(root, "src", "Fixture.Trading", "AuditProbe.cs"),
+                "namespace Fixture.Trading;\n\npublic sealed class AuditProbe\n{\n    [System.Obsolete(\"probe\")]\n    public int Tally() => 7;\n}\n",
+                TestContext.Current.CancellationToken));
+
+        var kept = await solution.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "AuditProbe.Tally",
+            ["declaration"] = "[System.Obsolete(\"probe\")]\npublic int Tally() => 7;",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", kept, StringComparison.Ordinal);
+        Assert.DoesNotContain("attributes dropped", kept, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WhenTheReplacementKeepsOneAttributeAndDropsAnother_NamesOnlyTheOneItDropped()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            root => File.WriteAllTextAsync(
+                Path.Combine(root, "src", "Fixture.Trading", "AuditProbe.cs"),
+                "namespace Fixture.Trading;\n\npublic sealed class AuditProbe\n{\n    [System.Obsolete(\"probe\")]\n    [System.Diagnostics.Conditional(\"DEBUG\")]\n    public void Tally()\n    {\n    }\n}\n",
+                TestContext.Current.CancellationToken));
+
+        var text = await solution.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "AuditProbe.Tally",
+            ["declaration"] = "[System.Obsolete(\"probe\")]\npublic void Tally()\n{\n}",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("WARNING attributes dropped: System.Diagnostics.Conditional", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("System.Obsolete,", text, StringComparison.Ordinal);
+    }
 }

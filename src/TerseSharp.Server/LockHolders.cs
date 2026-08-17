@@ -8,7 +8,7 @@ internal static partial class LockHolders
 {
     private const int MaxHolders = 8;
 
-    public static string Describe(string output)
+    public static string Describe(string output, string root = "")
     {
         var seen = new HashSet<int>();
         var builder = new StringBuilder();
@@ -23,7 +23,7 @@ internal static partial class LockHolders
                 if (seen.Count >= MaxHolders || !seen.Add(pid))
                     continue;
 
-                builder.Append("\nholder pid=").Append(pid.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(Resolved(pid));
+                builder.Append("\nholder pid=").Append(pid.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(Resolved(pid, root));
             }
         }
         catch (RegexMatchTimeoutException)
@@ -34,7 +34,7 @@ internal static partial class LockHolders
         return builder.ToString();
     }
 
-    private static string Resolved(int pid)
+    private static string Resolved(int pid, string root)
     {
         try
         {
@@ -42,7 +42,7 @@ internal static partial class LockHolders
 
             return string.Create(
                 CultureInfo.InvariantCulture,
-                $"{process.ProcessName} startedUtc={Started(process)} - {Kind(process.Id, process.ProcessName)}");
+                $"{process.ProcessName} startedUtc={Started(process)}{Executable(process, root)} - {Kind(process.Id, process.ProcessName)}");
         }
         catch (ArgumentException)
         {
@@ -79,9 +79,24 @@ internal static partial class LockHolders
 
         return name.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
             ? "a dotnet host; read its start time before stopping it - it may be another session's build or test"
-            : "not a process this server recognises; read its command line before stopping it";
+            : "not a process this server recognises; the exe above says whether it is running out of this tree's own output";
     }
 
     [GeneratedRegex("\"([^\"()]+?)\\s*\\((\\d+)\\)\"", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
     private static partial Regex Holder();
+
+    private static string Executable(Process process, string root)
+    {
+        try
+        {
+            return process.MainModule?.FileName is { Length: > 0 } path ? " exe=" + Relative(path, root) : string.Empty;
+        }
+        catch (Exception failure) when (failure is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string Relative(string path, string root) =>
+        root.Length > 0 && PathBoundary.Contains(root, path) ? Path.GetRelativePath(root, path) : path;
 }

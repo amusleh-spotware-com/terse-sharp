@@ -8,6 +8,90 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-08-17
+
+**Response format changed.** `format` — and every mode of `cleanup` that reformats — now collapses a
+run of two or more blank lines between members down to one, so a file that `add_member` left with
+double blanks is rewritten by the tool that owns whitespace. `format verify=true` therefore names
+files it used to accept; that is still the wider sweep, not the CI gate, and
+`cleanup verify=true fix=style` / `fix=analyzers` are unchanged and stay byte-equivalent to CI.
+
+### Added
+
+- **`run_tests` names the test that was still running when a run was stopped.** Every run now passes
+  `--blame-hang-timeout` at 80 % of `timeoutSeconds` with `--blame-hang-dump-type none`, so VSTest's
+  blame collector writes its sequence file before the process tree is killed. A run that produces no
+  results ends with `WARNING the run was stopped while these test(s) were still running: <names>`
+  instead of only `no test results were produced` — the bisection that used to cost six `run_tests`
+  calls and about two hours of wall clock is now one call. Covered by `HangSequenceTests` and by
+  `RunTests_WhenATestNeverFinishes_NamesThatTestInsteadOfAnsweringNothing` against the new
+  `fixtures/HangSolution`. Closes **I286**.
+- **`run_tests runSettings=` passes VSTest RunSettings overrides through as one trailing
+  `-- Name=Value` block.** That is the layer governing parallelism *inside* one assembly —
+  `xUnit.MaxParallelThreads`, `xUnit.StopOnFail`, `MSTest.Parallelize.Workers`,
+  `NUnit.NumberOfTestWorkers` — which `parallel` deliberately does not touch. An entry that is not
+  `Name=Value` is refused before anything runs, exactly as `properties` is. Covered by
+  `RunTests_WithRunSettings_ReachesVSTestAndBoundsTheRunInsideTheAssembly`. Closes **I291**.
+- **`history tags=true` lists the repository's tags**, newest version first, one line per tag with the
+  short sha it names and its date, bounded by `maxResults`. It is refused beside `baseRef=`, `path=`,
+  `contains=`, `message=` or `commit=` rather than ignoring them, and `ToolGuard` now denies a
+  `git tag` **listing** (`git tag`, `git tag --list`, `git tag -l "v*"`) while leaving every tag
+  mutation — create, annotate, delete, push — on the shell. Covered by
+  `History_WithTags_ListsTheRepositoryTagsNewestFirstWithTheCommitEachNames` and
+  `Guard_ForAGitTagListing_DeniesItAndNamesHistoryTags`. Closes **I288**.
+- **`edit_text row="I286" toPath=…` moves one markdown table row.** The row is matched by its **first
+  cell**, cut from the source table and appended to the last table of the target, and `newText=`
+  beside it is what lands there — so closing a backlog row costs its identifier plus the rewritten
+  row, not the row's full text twice. An identifier matching no row, or more than one, is refused
+  saying which; `row=` without `toPath=` is refused rather than silently dropped. Covered by
+  `EditText_WithRowAndToPath_MovesThatRowAndRewritesItWithoutSendingItsOldText`. Closes **I289**.
+
+### Changed
+
+- **`replace_symbol` warns when the replacement carries none of the attributes it replaced.** A
+  declaration sent without its `[McpServerTool]` silently un-advertised a tool while the build,
+  `analyze` and `get_diagnostics` all stayed clean; the edit still applies — dropping an attribute is
+  sometimes the intent — but the response now ends `WARNING attributes dropped: McpServerTool,
+  Description`. Covered by
+  `ReplaceSymbol_WhenTheReplacementCarriesNoneOfTheAttributesItReplaced_NamesThemInsteadOfUnwiringSilently`.
+  Closes **I287**.
+- **`run_tests projects=` refuses the same project twice.** Two entries resolving to one `.csproj`
+  answered a merged verdict in which six tests failed purely from two invocations racing the same
+  assembly. The batch is now refused with `ERROR InvalidArgument` naming the duplicate. Covered by
+  `RunTests_WithTheSameProjectTwiceInABatch_IsRefusedInsteadOfRacingTheAssemblyAgainstItself`.
+  Closes **I292**.
+- **A locked-build `holder pid=` line now carries the executable the process is running**, relative to
+  the workspace root when it lives inside it — which is what tells a test host running out of this
+  tree's own `bin/` from another session's. Covered by
+  `LockHolders_ForThisProcess_NamesTheExecutableItRunsSoTheCommandLineNeedsNoShellOut`.
+  Closes **I290**.
+- **`format` collapses a run of blank lines between members.** The fold is syntax-aware — it edits
+  trivia, never token text — so a raw string literal cannot be rewritten by it. Covered by
+  `Format_WithARunOfBlankLinesBetweenMembers_CollapsesThemInsteadOfLeavingThemToTheShell`.
+  Closes **I293**.
+- **Two token budgets were raised to their measured values, and to nothing more.** The three new
+  parameters cost the advertised surface **301 tokens** on the narrowed 57-tool profile
+  (`MarkupProfileE2ETests`, 20 379 → 20 705) and `SKILL.md` **719 tokens** (`DocsCoverageE2ETests`,
+  21 770 → 22 489), after the descriptions and the skill prose were trimmed by 155 and 120 tokens
+  respectively. Against this repo's own break-even — one advertised tool is ~255 tokens and pays for
+  itself at 32 calls per 508 sessions — three parameters that each remove a measured shell fallback
+  clear it. The full-surface budget (25 900) was **not** raised: it absorbed the change.
+- **Review round fixes, all found by the fresh-context reviewer before the push.** `history tags=true`
+  dereferences an **annotated** tag to the commit it names (`%(*objectname:short)` with a lightweight
+  fallback) — it was printing the tag object's sha, which matched nothing `history` lists, on the very
+  release flow the row was written for. The blame window is now `timeoutSeconds - 15s` and is passed
+  only when that leaves a margin (above 30 s), instead of a flat 80 % measured against a different
+  clock than VSTest's per-test timer; `timeoutSeconds` says so. A serial `parallel=1` batch stops when
+  a project produces no results, not only when the tool's own deadline elapses — blame can now end a
+  hung project *before* that deadline, which would have let the rest of a ten-project batch run on.
+  `replace_symbol` compares attribute **sets**, so dropping one of two attributes is named where only
+  dropping all of them was before — which is the original `[McpServerTool]` incident minus one
+  attribute. The `exe=` path uses `PathBoundary.Contains`, so `C:\repo` no longer swallows
+  `C:\repoEvil` and Linux stays case-sensitive.
+
+
+
+
 ## [0.39.0] - 2026-08-17
 
 **Response format changed.** A `run_tests projects=` batch no longer stops at the first timeout by
@@ -3706,7 +3790,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.40.0
 [0.39.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.39.0
 [0.38.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.38.0
 [0.37.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.37.0

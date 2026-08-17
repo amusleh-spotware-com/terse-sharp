@@ -185,9 +185,12 @@ public static class SymbolEditService
 
         var swapped = await SwappedAsync(workspace.Solution, [planned], options.Usings, null, cancellationToken).ConfigureAwait(false);
 
-        return swapped.IsOk
-            ? await EditGate.ApplyAsync(workspace, swapped.Value!, [target.Document.Id], options, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(swapped.Error!);
+        if (!swapped.IsOk)
+            return Result.Fail<string>(swapped.Error!);
+
+        var applied = await EditGate.ApplyAsync(workspace, swapped.Value!, [target.Document.Id], options, cancellationToken).ConfigureAwait(false);
+
+        return Warned(applied, Dropped([planned]));
     }
 
     private static async Task<Result<string>> RemoveAsync(
@@ -568,9 +571,12 @@ public static class SymbolEditService
             changed.Add(group.Key);
         }
 
-        return changed.Count is 0
-            ? Result.Ok(Unchanged(options.Tool))
-            : await EditGate.ApplyAsync(workspace, solution, changed, options, cancellationToken).ConfigureAwait(false);
+        if (changed.Count is 0)
+            return Result.Ok(Unchanged(options.Tool));
+
+        var applied = await EditGate.ApplyAsync(workspace, solution, changed, options, cancellationToken).ConfigureAwait(false);
+
+        return Warned(applied, Dropped(planned));
     }
 
     private static Task<Result<Solution>> GroupedAsync(
@@ -762,6 +768,42 @@ public static class SymbolEditService
             CultureInfo.InvariantCulture,
             $"{(error.Code is TerseErrorCode.InvalidArgument ? "declarations" : "symbolIds")}[{index}]: {error.Message}"),
     };
+
+    private static Result<string> Warned(Result<string> applied, string warning) =>
+        applied.IsOk && warning.Length > 0 ? Result.Ok(applied.Value + warning) : applied;
+
+    private static string Dropped(IReadOnlyList<PlannedEdit> planned)
+    {
+        var names = new List<string>(4);
+
+        foreach (var edit in planned)
+        {
+            var kept = Attributes(edit.Nodes);
+
+            foreach (var name in Attributes([edit.Target.Node]))
+            {
+                if (!kept.Contains(name, StringComparer.Ordinal) && !names.Contains(name, StringComparer.Ordinal))
+                    names.Add(name);
+            }
+        }
+
+        return names.Count is 0
+            ? string.Empty
+            : "\nWARNING attributes dropped: " + string.Join(", ", names);
+    }
+
+    private static List<string> Attributes(IReadOnlyList<SyntaxNode> nodes)
+    {
+        var names = new List<string>(4);
+
+        foreach (var node in nodes)
+        {
+            if (node is MemberDeclarationSyntax member)
+                names.AddRange(member.AttributeLists.SelectMany(list => list.Attributes).Select(attribute => attribute.Name.ToString()));
+        }
+
+        return names;
+    }
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

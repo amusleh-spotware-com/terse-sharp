@@ -163,4 +163,33 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
         Assert.Contains("files changed", quiet, StringComparison.Ordinal);
         Assert.DoesNotContain("@@", quiet, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Format_WithARunOfBlankLinesBetweenMembers_CollapsesThemInsteadOfLeavingThemToTheShell()
+    {
+        const string Probe = "src/Fixture.Trading/BlankLineProbe.cs";
+        var full = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "BlankLineProbe.cs");
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class BlankLineProbe\n{\n    public int One() => 1;\n\n\n\n    public int Two() => 2;\n}\n",
+        });
+
+        try
+        {
+            var formatted = await server.CallAsync("format", new() { ["path"] = Probe });
+            var text = (await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken)).ReplaceLineEndings("\n");
+
+            Assert.DoesNotContain("ERROR", formatted, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", formatted, StringComparison.Ordinal);
+            Assert.DoesNotContain("\n\n\n", text, StringComparison.Ordinal);
+            Assert.Contains("public int One() => 1;\n\n    public int Two() => 2;", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["force"] = true, ["delete"] = true });
+        }
+    }
 }

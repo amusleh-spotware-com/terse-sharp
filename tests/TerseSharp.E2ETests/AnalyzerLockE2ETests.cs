@@ -90,7 +90,7 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
         var unloaded = await CallAsync("unload_workspace", new() { ["path"] = SolutionPath });
 
         Assert.Contains("unloaded", unloaded, StringComparison.Ordinal);
-        Assert.DoesNotContain("still mapped into this server process", unloaded, StringComparison.Ordinal);
+        Assert.False(unloaded.Contains("still mapped into this server process", StringComparison.Ordinal), unloaded);
         Assert.DoesNotContain("Fixture.Generator.dll", unloaded, StringComparison.Ordinal);
         Assert.True(Writable(), "the analyzer assembly stayed mapped after unload_workspace");
     }

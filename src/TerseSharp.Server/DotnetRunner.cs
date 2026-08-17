@@ -115,10 +115,20 @@ public static partial class DotnetRunner
 
     private static string[] Arguments(TestRunRequest request, string resultsDirectory)
     {
-        var arguments = new List<string>(12)
+        var arguments = new List<string>(16)
         {
             "test", request.Target, "-nodeReuse:false", "--nologo", "--logger", "trx", "--results-directory", resultsDirectory,
         };
+
+        if (HangWindow(request.Timeout) is { } window)
+        {
+            arguments.AddRange([
+                "--blame-hang-timeout",
+                string.Create(CultureInfo.InvariantCulture, $"{(long)window.TotalMilliseconds}ms"),
+                "--blame-hang-dump-type",
+                "none",
+            ]);
+        }
 
         if (request.Filter is { Length: > 0 } filter)
             arguments.AddRange(["--filter", filter]);
@@ -126,7 +136,9 @@ public static partial class DotnetRunner
         if (request.NoBuild)
             arguments.Add("--no-build");
 
-        return request.Scope.Applied(arguments);
+        var scoped = request.Scope.Applied(arguments);
+
+        return request.RunSettings.IsDefaultOrEmpty ? scoped : [.. scoped, "--", .. request.RunSettings];
     }
 
     internal static string RenderBuild(string target, string root, ProcessRun run, bool verbose)
@@ -654,7 +666,7 @@ public static partial class DotnetRunner
         {
             runs[index] = await SlottedAsync(workspace, request, resultsDirectory, index, cancellationToken).ConfigureAwait(false);
 
-            if (runs[index] is { TimedOut: true })
+            if (runs[index] is { TimedOut: true } || !Produced(Slot(resultsDirectory, index, targets.Length)))
                 break;
         }
 
@@ -724,10 +736,26 @@ public static partial class DotnetRunner
         var (run, missing) = await InvokeAsync(workspace, request, results.FullName, preparedMilliseconds, cancellationToken).ConfigureAwait(false);
         var report = Report(results, workspace.Root);
         var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
+        var hung = await HangSequence.ActiveAsync(results, cancellationToken).ConfigureAwait(false);
         var response = Noted(RenderTest(run, report, request, workspace.Root), notes);
 
-        return new TestRunResult(TimedOut(response, missing, request.Invocations.Length, request.IsSerial), report, Locked(run));
+        return new TestRunResult(Hung(TimedOut(response, missing, request.Invocations.Length, request.IsSerial), hung), report, Locked(run));
     }
+
+    private static TimeSpan? HangWindow(TimeSpan timeout) =>
+        timeout > HangMargin + HangMargin ? timeout - HangMargin : null;
+
+
+    internal static string Hung(string response, string[] hung) => hung.Length is 0
+        ? response
+        : string.Create(
+            CultureInfo.InvariantCulture,
+            $"{response}\nWARNING the run was stopped while these test(s) were still running: {string.Join(", ", hung)}");
+
+    private static readonly TimeSpan HangMargin = TimeSpan.FromSeconds(15);
+
+    private static bool Produced(string slot) =>
+        Directory.Exists(slot) && Directory.EnumerateFiles(slot, "*.trx", SearchOption.AllDirectories).Any();
 }
 
 internal sealed record ProcessRun(

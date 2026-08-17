@@ -503,6 +503,29 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         if (process.ExitCode is not 0)
             throw new InvalidOperationException("git " + arguments[^1] + " exited " + process.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + await error);
     }
+
+    [Fact]
+    public async Task History_WithTags_ListsTheRepositoryTagsNewestFirstWithTheCommitEachNames()
+    {
+        var tags = await server.CallAsync("history", new() { ["tags"] = true, ["maxResults"] = 5 });
+        var newest = tags.Split('\n').First(line => line.StartsWith('v')).Split(' ');
+        var commits = await server.CallAsync("history", new() { ["root"] = TerseServerFixture.RepositoryRoot, ["maxResults"] = 50 });
+
+        Assert.Contains(" tags", tags, StringComparison.Ordinal);
+        Assert.Matches(@"^v\d+\.\d+\.\d+$", newest[0]);
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}$", newest[2]);
+        Assert.Contains(newest[1], commits, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task History_WithTagsBesideACommitFilter_IsRefusedInsteadOfIgnoringTheFilter()
+    {
+        var text = await server.CallAsync("history", new() { ["tags"] = true, ["contains"] = "OrderService" });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("contains=", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using Microsoft.CodeAnalysis.Text;
 
@@ -409,7 +410,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters)
     {
@@ -1124,4 +1125,153 @@ public static class FileService
     }
 
     private readonly record struct SectionCut(string Section, string Remainder);
+
+    private static readonly SearchValues<char> DelimiterCharacters = SearchValues.Create("|-: ");
+
+    private static bool IsTableRow(ReadOnlySpan<char> line)
+    {
+        var span = line.Trim();
+
+        return span.Length > 1 && span[0] is '|';
+    }
+
+    private static bool IsDelimiterRow(ReadOnlySpan<char> line) =>
+        IsTableRow(line) && line.Trim().IndexOfAnyExcept(DelimiterCharacters) < 0;
+
+    private static ReadOnlySpan<char> FirstCell(ReadOnlySpan<char> line)
+    {
+        var body = line.Trim()[1..];
+        var end = body.IndexOf('|');
+
+        return end < 0 ? body.Trim() : body[..end].Trim();
+    }
+
+    private static List<int> Matching(string[] lines, string identifier)
+    {
+        var matched = new List<int>(2);
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (IsTableRow(lines[index]) && !IsDelimiterRow(lines[index]) && FirstCell(lines[index]).Contains(identifier, StringComparison.Ordinal))
+                matched.Add(index);
+        }
+
+        return matched;
+    }
+
+    private static int LastRowLine(string[] lines)
+    {
+        for (var index = lines.Length - 1; index >= 0; index--)
+        {
+            if (IsTableRow(lines[index]))
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static TerseError NoRow(string identifier, int count) => count is 0
+        ? Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"no markdown table row's first cell contains '{identifier}'"),
+            "pass the identifier exactly as the table's first column spells it - read_text columns= lists them")
+        : Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"'{identifier}' matches the first cell of {count} table rows"),
+            "pass a longer identifier - a row is addressed by a value unique to its first column");
+
+    private static Result<RowCut> CutRow(string before, string identifier)
+    {
+        var ending = LineEndings.Dominant(before);
+        var lines = before.ReplaceLineEndings(ending).Split(ending);
+        var matched = Matching(lines, identifier);
+
+        if (matched.Count is not 1)
+            return Result.Fail<RowCut>(NoRow(identifier, matched.Count));
+
+        var cut = matched[0];
+        var remainder = string.Join(ending, lines.Where((_, index) => index != cut)).TrimEnd();
+
+        return Result.Ok(new RowCut(lines[cut].TrimEnd(), remainder.Length is 0 ? remainder : remainder + ending));
+    }
+
+    private static Result<string> LandedRow(string destination, string row)
+    {
+        var ending = LineEndings.Dominant(destination);
+        var lines = destination.ReplaceLineEndings(ending).Split(ending);
+        var last = LastRowLine(lines);
+
+        if (last < 0)
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "toPath holds no markdown table to append the row to",
+                "give the target file a table header and delimiter row first, then move the row into it"));
+        }
+
+        var landed = lines.Take(last + 1).Append(row.TrimEnd()).Concat(lines.Skip(last + 1));
+
+        return Result.Ok(string.Join(ending, landed).TrimEnd() + ending);
+    }
+
+    private readonly record struct RowCut(string Row, string Remainder);
+
+    private static async Task<Result<(string Source, string Destination)>> PairAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string toPath,
+        string unit,
+        CancellationToken cancellationToken)
+    {
+        if (!DocumentOutline.IsMarkdown(path) || !DocumentOutline.IsMarkdown(toPath))
+        {
+            return Result.Fail<(string, string)>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"toPath moves a markdown {unit}, and one of the two paths is not markdown"),
+                "pass two markdown files, or move the text with read_text and write_text"));
+        }
+
+        var source = await OpenedAsync(workspace, path, force: false, cancellationToken).ConfigureAwait(false);
+
+        if (!source.IsOk)
+            return Result.Fail<(string, string)>(source.Error!);
+
+        var destination = await OpenedAsync(workspace, toPath, force: false, cancellationToken).ConfigureAwait(false);
+
+        if (!destination.IsOk)
+            return Result.Fail<(string, string)>(destination.Error!);
+
+        return string.Equals(source.Value.Full, destination.Value.Full, StringComparison.OrdinalIgnoreCase)
+            ? Result.Fail<(string, string)>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"toPath names the same file as path, so the move would cut the {unit} and append it straight back"),
+                "pass a different markdown file"))
+            : Result.Ok((source.Value.Before, destination.Value.Before));
+    }
+
+    public static async Task<Result<string>> MoveRowAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string toPath,
+        EditRequest request,
+        CancellationToken cancellationToken)
+    {
+        var pair = await PairAsync(workspace, path, toPath, "table row", cancellationToken).ConfigureAwait(false);
+
+        if (!pair.IsOk)
+            return Result.Fail<string>(pair.Error!);
+
+        var cut = CutRow(pair.Value.Source, request.Row!);
+
+        if (!cut.IsOk)
+            return Result.Fail<string>(cut.Error!);
+
+        var landed = LandedRow(pair.Value.Destination, request.NewText is { Length: > 0 } ? request.NewText : cut.Value.Row);
+
+        return landed.IsOk
+            ? await WriteTextManyAsync(
+                workspace,
+                [new FileWrite(path, cut.Value.Remainder), new FileWrite(toPath, landed.Value!)],
+                request.DryRun,
+                force: false,
+                allowErrors: false,
+                request.Verbose,
+                cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(landed.Error!);
+    }
 }

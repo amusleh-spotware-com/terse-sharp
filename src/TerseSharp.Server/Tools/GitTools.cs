@@ -272,14 +272,15 @@ public sealed class GitTools(ToolContext context)
     }
 
     [McpServerTool(Name = "history", ReadOnly = true)]
-    [Description("Replaces Bash git log and git show --stat. Commits touching a path, one line each - short sha, author date, author, subject - workspace-relative and oneline by default. baseRef takes a commit, a branch or a range such as v0.32.0..HEAD; contains= is git's pickaxe, listing only the commits whose diff added or removed that literal; message= greps subject and body. commit= answers one commit instead - its subject and one line per file with added and deleted counts - and is refused beside baseRef=, contains= or message= rather than ignoring them. root= answers about any absolute directory, tagged outside-workspace.")]
+    [Description("Replaces Bash git log and git show --stat and git tag --list. Commits touching a path, one line each - short sha, author date, author, subject - workspace-relative and oneline by default. baseRef takes a commit, a branch or a range such as v0.32.0..HEAD; contains= is git's pickaxe, listing only the commits whose diff added or removed that literal; message= greps subject and body. commit= answers one commit instead - its subject and one line per file with added and deleted counts - and is refused beside baseRef=, contains= or message= rather than ignoring them. tags=true answers the repository's tags instead, newest first, one line each with the commit it names. root= answers about any absolute directory, tagged outside-workspace.")]
     public Task<string> History(
             [Description("Commit, branch or range to list, e.g. main, HEAD~20 or v0.32.0..HEAD. Empty lists from HEAD backwards.")] string? baseRef = null,
             [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
             [Description("Only commits whose diff added or removed this literal - git's pickaxe, which no text search over the working tree can answer.")] string? contains = null,
             [Description("Only commits whose subject or body matches this text.")] string? message = null,
             [Description("One commit instead of a listing: its subject and one line per file with added and deleted counts. Cannot be combined with baseRef=, contains= or message=.")] string? commit = null,
-            [Description("Max commits (50).")] int maxResults = 0,
+            [Description("List tags instead of commits, newest version first - name, short sha, date. Refused beside baseRef=, path=, contains=, message= or commit=.")] bool tags = false,
+            [Description("Max commits, or tags (50).")] int maxResults = 0,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Absolute directory to answer about instead of the loaded workspace. The answer is tagged outside-workspace.")] string? root = null,
             CancellationToken cancellationToken = default)
@@ -287,12 +288,15 @@ public sealed class GitTools(ToolContext context)
         if (Conflicting(commit, baseRef, contains, message) is { } refusal)
             return Task.FromResult(refusal.Render());
 
+        if (Unrelated(tags, commit, baseRef, contains, message, path) is { } tagged)
+            return Task.FromResult(tagged.Render());
+
         return root is { Length: > 0 }
-            ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, NavigationTools.Cap(maxResults, 50), full, cancellationToken))
+            ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, tags, NavigationTools.Cap(maxResults, 50), full, cancellationToken))
             : context.WithWorkspaceAsync(
                 workspace,
                 path,
-                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, NavigationTools.Cap(maxResults, 50), null, cancellationToken),
+                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, tags, NavigationTools.Cap(maxResults, 50), null, cancellationToken),
                 semantic: false,
                 cancellationToken);
     }
@@ -304,38 +308,17 @@ public sealed class GitTools(ToolContext context)
             string? contains,
             string? message,
             string? commit,
+            bool tags,
             int maxResults,
             string? outside,
             CancellationToken cancellationToken)
     {
-        var run = await GitRunner.ReadAsync(root, HistoryArguments(baseRef, path, contains, message, commit, maxResults), cancellationToken).ConfigureAwait(false);
+        var arguments = tags ? TagArguments(maxResults) : HistoryArguments(baseRef, path, contains, message, commit, maxResults);
+        var run = await GitRunner.ReadAsync(root, arguments, cancellationToken).ConfigureAwait(false);
 
-        if (!run.IsOk)
-            return run.Error!.Render();
-
-        var lines = new List<string>();
-
-        foreach (var line in run.Value!.AsSpan().EnumerateLines())
-        {
-            if (!line.IsWhiteSpace())
-                lines.Add(new string(line.Trim()));
-        }
-
-        var response = new ResponseBuilder("history", commit ?? path ?? string.Empty);
-        var shown = Math.Min(lines.Count, maxResults);
-
-        response.Summary(shown, shown, commit is { Length: > 0 } ? "lines" : "commits");
-
-        if (outside is { Length: > 0 })
-            response.Note("outside-workspace  " + outside);
-
-        if (lines.Count > maxResults)
-            response.Note("more commits match than were listed - raise maxResults=, or narrow with path=, contains=, message= or baseRef=");
-
-        foreach (var line in lines.Capped(maxResults))
-            response.Line(line);
-
-        return response.ToString();
+        return run.IsOk
+            ? Rendered(run.Value!, Unit(tags, commit), commit ?? path ?? string.Empty, maxResults, outside)
+            : run.Error!.Render();
     }
 
     private static string[] HistoryArguments(
@@ -474,5 +457,82 @@ public sealed class GitTools(ToolContext context)
         return marker >= 0 && int.TryParse(counted[(marker + 3)..], CultureInfo.InvariantCulture, out var folded)
             ? folded
             : 1;
+    }
+
+    private static string[] TagArguments(int maxResults) =>
+    [
+        "for-each-ref",
+        "--sort=-v:refname",
+        "--count=" + (maxResults + 1).ToString(CultureInfo.InvariantCulture),
+        "--format=%(refname:short) %(if)%(*objectname)%(then)%(*objectname:short)%(else)%(objectname:short)%(end) %(if)%(*committerdate)%(then)%(*committerdate:short)%(else)%(creatordate:short)%(end)",
+        "refs/tags",
+    ];
+
+
+    private static string Unit(bool tags, string? commit) => tags
+        ? "tags"
+        : commit is { Length: > 0 } ? "lines" : "commits";
+
+    private static List<string> Trimmed(string output)
+    {
+        var lines = new List<string>();
+
+        foreach (var line in output.AsSpan().EnumerateLines())
+        {
+            if (!line.IsWhiteSpace())
+                lines.Add(new string(line.Trim()));
+        }
+
+        return lines;
+    }
+
+    private static string Rendered(string output, string unit, string target, int maxResults, string? outside)
+    {
+        var lines = Trimmed(output);
+        var response = new ResponseBuilder("history", target);
+        var shown = Math.Min(lines.Count, maxResults);
+
+        response.Summary(shown, shown, unit);
+
+        if (outside is { Length: > 0 })
+            response.Note("outside-workspace  " + outside);
+
+        if (lines.Count > maxResults)
+            response.Note(More(unit));
+
+        foreach (var line in lines.Capped(maxResults))
+            response.Line(line);
+
+        return response.ToString();
+    }
+
+    private static string More(string unit) => unit is "tags"
+        ? "more tags exist than were listed - raise maxResults="
+        : "more commits match than were listed - raise maxResults=, or narrow with path=, contains=, message= or baseRef=";
+
+    private static TerseError? Unrelated(bool tags, string? commit, string? baseRef, string? contains, string? message, string? path)
+    {
+        if (!tags)
+            return null;
+
+        var ignored = new List<string>(5);
+
+        Ignored(ignored, "commit=", commit);
+        Ignored(ignored, "baseRef=", baseRef);
+        Ignored(ignored, "contains=", contains);
+        Ignored(ignored, "message=", message);
+        Ignored(ignored, "path=", path);
+
+        return ignored.Count is 0
+            ? null
+            : Errors.Invalid(
+                "tags=true lists the repository's tags, so it cannot be combined with " + string.Join(", ", ignored),
+                "drop tags=true to list commits with those filters, or drop the filters to list the tags");
+    }
+
+    private static void Ignored(List<string> ignored, string name, string? value)
+    {
+        if (value is { Length: > 0 })
+            ignored.Add(name);
     }
 }

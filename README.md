@@ -172,14 +172,15 @@ It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and fri
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them, `dotnet build`/`test`/`format`/`clean`,
 `dotnet watch build`/`test`, `msbuild` and `dotnet list package`, and the working-tree half of git — `git status` and
 `git diff`, in every flag and `-C` form, answered by `changed_files` and `diff_symbols`, plus a bare
-`git ls-files`, answered by `find_files tracked=true` — but only
+`git ls-files`, answered by `find_files tracked=true`, and a `git tag` **listing**, answered by
+`history tags=true` — but only
 when the directory the command actually addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`: the
 `-C` target, or a directory operand, before the working directory. The hook is installed user-wide and
 those tools answer about the loaded workspace, so `git -C ../notes status` is allowed — nothing here
 replaces it. A denied command
 also tells the agent not to run it in `Bash` again. Plain `.css`, `.js`,
-`dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git history and mutation
-(`log`, `blame`, `show`, `add`, `commit`, `push`) are allowed — nothing here replaces those. Malformed hook input allows the call, so
+`dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git mutation
+(`blame`, `add`, `commit`, `push`, and every `git tag` that creates, annotates or deletes one) are allowed — nothing here replaces those. Malformed hook input allows the call, so
 a guard fault can never wedge a session, and you remove the guard by deleting the `terse guard` entry
 from Claude Code's `settings.json`.
 
@@ -227,7 +228,7 @@ name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything reg
 | **Localization** (`.resx`/`.resw`) | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Files** — replaces `Glob`/`ls`/`cat` | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
-| **Git** — replaces `git status`/`git diff`/`git log` | `changed_files` · `diff_symbols` · `diff_text` · `history` |
+| **Git** — replaces `git status`/`git diff`/`git log`/`git tag --list` | `changed_files` · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list) |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 Every read tool declares the MCP `readOnlyHint` annotation and every deleting tool declares

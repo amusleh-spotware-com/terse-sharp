@@ -160,6 +160,7 @@ public static class ToolGuard
         "log" => "use history, which takes path=, baseRef=, contains= for the pickaxe and message= for the subject grep",
         "show" => "use history commit=<sha>, which answers the subject and one line per file with added and deleted counts",
         "show-file" => "use read_text ref=<ref> path=<path>, or get_file_outline ref=<ref> path=<path> for a .cs file",
+        "tag" => "use history tags=true, which lists every tag newest-first with the commit it names",
         _ => "use run_tests, rerun_failed or list_tests",
     };
 
@@ -172,6 +173,7 @@ public static class ToolGuard
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
         "log" or "show" => "history answers the same commits workspace-relative and bounded, with the pickaxe and the subject grep as parameters instead of flags. Only git blame and index or history mutation stay on the shell.",
         "show-file" => "read_text ref= gives a revision's text the same numbering gutter, line ranges, tail=, section= and maxChars budget as the working tree, and a whole .cs file answers its outline instead of about three times the tokens.",
+        "tag" => "history tags=true answers the tag list newest-first with the commit each names, bounded by maxResults and through the same runner as every other git answer. Only the listing is replaced: creating, deleting, signing or verifying a tag stays on the shell.",
         _ => "Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.",
     };
 
@@ -327,6 +329,7 @@ public static class ToolGuard
             "ls-files" when IsDotNetTree(directed) && Unflagged(tokens, "ls-files") => "ls-files",
             "log" when IsDotNetTree(directed) && !Shaped(tokens) => "log",
             "show" when IsDotNetTree(directed) && !Scripted(tokens) => Showing(tokens),
+            "tag" when IsDotNetTree(directed) && TagListing(tokens) => "tag",
             _ => null,
         };
     }
@@ -564,6 +567,7 @@ public static class ToolGuard
         "log" => "history",
         "show" => "history",
         "show-file" => "read_text",
+        "tag" => "history",
         _ => "run_tests",
     };
 
@@ -648,6 +652,9 @@ public static class ToolGuard
 
     private static string? Listing(string[] tokens) =>
         Array.Exists(tokens, token => token.Equals("package", StringComparison.OrdinalIgnoreCase)) ? "list-package" : null;
+
+    private static bool TagListing(string[] tokens) =>
+        Array.Exists(tokens, token => token is "--list" or "-l") || Subcommand(tokens, Array.IndexOf(tokens, "tag") + 1) is null;
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

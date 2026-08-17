@@ -347,7 +347,7 @@ public sealed class ToolGuardTests
     [InlineData("git commit -m \"diff status\"")]
     [InlineData("git push origin main")]
     [InlineData("git stash")]
-    [InlineData("git tag --list")]
+    [InlineData("git tag -s v0.40.0 -m \"signed\"")]
     public void Inspect_ForAGitCommandNoToolReplaces_Allows(string command) =>
             Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
@@ -783,4 +783,40 @@ public sealed class ToolGuardTests
     [InlineData("git log --author=amusleh")]
     public void Inspect_ForAGitShapeHistoryCannotProduce_AllowsItBecauseNothingReplacesIt(string command) =>
             Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void LockHolders_ForThisProcess_NamesTheExecutableItRunsSoTheCommandLineNeedsNoShellOut()
+    {
+        var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var output = "MSB3027: Could not copy \"terse.dll\". The file is locked by: \"testhost (" + pid + ")\"";
+        var executable = Environment.ProcessPath!;
+        var described = LockHolders.Describe(output);
+
+        Assert.Contains("exe=" + executable, described, StringComparison.Ordinal);
+        Assert.Contains(
+            "exe=" + Path.GetFileName(executable),
+            LockHolders.Describe(output, Path.GetDirectoryName(executable)!),
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git tag --list")]
+    [InlineData("git tag -l \"v*\"")]
+    [InlineData("git tag")]
+    [InlineData("git tag --sort=-v:refname")]
+    public void Guard_ForAGitTagListing_DeniesItAndNamesHistoryTags(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("history tags=true", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git tag v0.40.0")]
+    [InlineData("git tag -a v0.40.0 -m \"release\"")]
+    [InlineData("git tag -d v0.40.0")]
+    [InlineData("git push origin v0.40.0")]
+    public void Guard_ForAGitTagMutation_LeavesItAlone(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 }

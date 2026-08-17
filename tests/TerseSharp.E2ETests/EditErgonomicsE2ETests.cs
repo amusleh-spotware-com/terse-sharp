@@ -541,4 +541,95 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("is not markdown", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task EditText_WithRowAndToPath_MovesThatRowAndRewritesItWithoutSendingItsOldText()
+    {
+        const string Source = "terse-i289-open.md";
+        const string Target = "terse-i289-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding | Tool | Proposed change |\n|---|---|---|\n| **I900** first | build | do a thing |\n| **I901** second | format | do another |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding | Tool | Change | Outcome |\n|---|---|---|---|\n| **I899** older | clean | shipped | measured |\n",
+            },
+        },
+        });
+
+        try
+        {
+            var moved = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Source,
+                ["row"] = "I900",
+                ["toPath"] = Target,
+                ["newText"] = "| **I900** first | build | shipped the thing | 1 200 tokens per call |",
+            });
+
+            Assert.DoesNotContain("ERROR", moved, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", moved, StringComparison.Ordinal);
+
+            var source = await server.CallAsync("read_text", new() { ["path"] = Source, ["verbose"] = true });
+            var target = await server.CallAsync("read_text", new() { ["path"] = Target, ["verbose"] = true });
+
+            Assert.DoesNotContain("I900", source, StringComparison.Ordinal);
+            Assert.Contains("| **I901** second | format | do another |", source, StringComparison.Ordinal);
+            Assert.Contains("| **I899** older | clean | shipped | measured |", target, StringComparison.Ordinal);
+            Assert.Contains("| **I900** first | build | shipped the thing | 1 200 tokens per call |", target, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithARowIdentifierThatMatchesNothingOrTooMuch_SaysWhichInsteadOfMovingTheWrongRow()
+    {
+        const string Source = "terse-i289-miss.md";
+        const string Target = "terse-i289-miss-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding |\n|---|\n| **I910** one |\n| **I911** two |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding |\n|---|\n| **I800** old |\n",
+            },
+        },
+        });
+
+        try
+        {
+            var absent = await server.CallAsync("edit_text", new() { ["path"] = Source, ["row"] = "I999", ["toPath"] = Target });
+            var many = await server.CallAsync("edit_text", new() { ["path"] = Source, ["row"] = "I91", ["toPath"] = Target });
+            var unrouted = await server.CallAsync("edit_text", new() { ["path"] = Source, ["row"] = "I910" });
+
+            Assert.Contains("no markdown table row's first cell contains 'I999'", absent, StringComparison.Ordinal);
+            Assert.Contains("matches the first cell of 2 table rows", many, StringComparison.Ordinal);
+            Assert.Contains("no toPath= was passed", unrouted, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+        }
+    }
 }
