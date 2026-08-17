@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Server;
@@ -26,9 +28,7 @@ public static partial class DotnetRunner
         CancellationToken cancellationToken)
     {
         var target = project ?? workspace.SolutionPath;
-        var arguments = scope.Applied(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"]);
-        var run = await RunAsync(arguments, workspace.Root, DefaultTimeout, cancellationToken)
-            .ConfigureAwait(false);
+        var run = await BuiltAsync(workspace, target, scope, DefaultTimeout, cancellationToken).ConfigureAwait(false);
 
         return new BuildRun(RenderBuild(target, workspace.Root, run, verbose), Locked(run));
     }
@@ -53,12 +53,17 @@ public static partial class DotnetRunner
 
         try
         {
-            var (run, missing) = await InvokeAsync(workspace, request, results.FullName, cancellationToken).ConfigureAwait(false);
+            var prepared = await PreparedAsync(workspace, request, cancellationToken).ConfigureAwait(false);
+
+            if (prepared.Failure is { } failed)
+                return new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked);
+
+            var (run, missing) = await InvokeAsync(workspace, request, results.FullName, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
             var report = Report(results, workspace.Root);
             var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
             var response = Noted(RenderTest(run, report, request, workspace.Root), notes);
 
-            return new TestRunResult(TimedOut(response, missing, request.Invocations.Length), report, Locked(run));
+            return new TestRunResult(TimedOut(response, missing, request.Invocations.Length, request.IsSerial), report, Locked(run));
         }
         finally
         {
@@ -66,54 +71,27 @@ public static partial class DotnetRunner
         }
     }
 
-    private static string TimedOut(string response, List<string> missing, int invocations) => missing.Count is 0
-    ? response
-    : string.Create(
-        CultureInfo.InvariantCulture,
-        $"{response}\nWARNING {Stopped(missing, invocations)}: {string.Join(", ", missing)}");
+    private static string TimedOut(string response, List<string> missing, int invocations, bool serial) => missing.Count is 0
+        ? response
+        : string.Create(
+            CultureInfo.InvariantCulture,
+            $"{response}\nWARNING {Stopped(missing, invocations, serial)}: {string.Join(", ", missing)}");
 
-    private static string Stopped(List<string> missing, int invocations) => invocations is 1
-        ? "this run timed out and produced no results"
-        : string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first timeout; {missing.Count} of {invocations} project(s) produced no results");
+    internal static string Stopped(List<string> missing, int invocations, bool serial) => (invocations, serial) switch
+    {
+        (1, _) => "this run timed out and produced no results",
+        (_, true) => string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first timeout; {missing.Count} of {invocations} project(s) produced no results"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"{missing.Count} of {invocations} project(s) timed out; the rest of the batch still ran"),
+    };
 
-    private static async Task<(ProcessRun Run, List<string> Missing)> InvokeAsync(
+    private static Task<(ProcessRun Run, List<string> Missing)> InvokeAsync(
         WorkspaceTarget workspace,
         TestRunRequest request,
         string resultsDirectory,
-        CancellationToken cancellationToken)
-    {
-        var combined = default(ProcessRun);
-        var missing = new List<string>();
-        var stopped = false;
-        var environment = new[] { new KeyValuePair<string, string>(ResultsDirectoryVariable, resultsDirectory) };
-
-        foreach (var target in request.Invocations)
-        {
-            if (stopped)
-            {
-                missing.Add(Path.GetFileNameWithoutExtension(target));
-
-                continue;
-            }
-
-            var run = await RunAsync(
-                Arguments(request with { Target = target }, resultsDirectory),
-                workspace.Root,
-                request.Timeout,
-                cancellationToken,
-                environment).ConfigureAwait(false);
-
-            combined = combined is null ? run : Merge(combined, run);
-
-            if (!run.TimedOut)
-                continue;
-
-            missing.Add(Path.GetFileNameWithoutExtension(target));
-            stopped = true;
-        }
-
-        return (combined ?? new ProcessRun(0, string.Empty, 0), missing);
-    }
+        long preparedMilliseconds,
+        CancellationToken cancellationToken) => request.IsSerial
+        ? SequentialAsync(workspace, request, resultsDirectory, cancellationToken)
+        : ConcurrentAsync(workspace, request with { NoBuild = true }, resultsDirectory, preparedMilliseconds, cancellationToken);
 
     internal static ProcessRun Merge(ProcessRun first, ProcessRun next) => new(
         first.ExitCode is 0 ? next.ExitCode : first.ExitCode,
@@ -582,6 +560,166 @@ public static partial class DotnetRunner
 
         return [.. kept];
     }
+
+    private static Task<ProcessRun> BuiltAsync(
+        WorkspaceTarget workspace,
+        string target,
+        BuildScope scope,
+        TimeSpan timeout,
+        CancellationToken cancellationToken) =>
+        RunAsync(
+            scope.Applied(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"]),
+            workspace.Root,
+            timeout,
+            cancellationToken);
+
+    private static string Slot(string resultsDirectory, int index, int invocations)
+    {
+        if (invocations is 1)
+            return resultsDirectory;
+
+        var slot = Path.Combine(resultsDirectory, index.ToString(CultureInfo.InvariantCulture));
+
+        Directory.CreateDirectory(slot);
+
+        return slot;
+    }
+
+    private static KeyValuePair<string, string>[] ResultsEnvironment(string resultsDirectory) =>
+        [new(ResultsDirectoryVariable, resultsDirectory)];
+
+    private static ProcessRun Batched(ProcessRun?[] runs, long elapsedMilliseconds)
+    {
+        var merged = default(ProcessRun);
+
+        foreach (var run in runs)
+        {
+            if (run is not null)
+                merged = merged is null ? run : Merge(merged, run);
+        }
+
+        return merged is null
+            ? new ProcessRun(0, string.Empty, 0)
+            : merged with { ElapsedMilliseconds = elapsedMilliseconds };
+    }
+
+    private static long Elapsed(ProcessRun?[] runs)
+    {
+        var elapsed = 0L;
+
+        foreach (var run in runs)
+        {
+            if (run is not null)
+                elapsed += run.ElapsedMilliseconds;
+        }
+
+        return elapsed;
+    }
+
+    internal static List<string> Unfinished(ImmutableArray<string> targets, ProcessRun?[] runs)
+    {
+        var missing = new List<string>(targets.Length);
+
+        for (var index = 0; index < runs.Length; index++)
+        {
+            if (runs[index] is null or { TimedOut: true })
+                missing.Add(Path.GetFileNameWithoutExtension(targets[index]));
+        }
+
+        return missing;
+    }
+
+    private static Task<ProcessRun> SlottedAsync(
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        string resultsDirectory,
+        int index,
+        CancellationToken cancellationToken)
+    {
+        var targets = request.Invocations;
+        var slot = Slot(resultsDirectory, index, targets.Length);
+
+        return RunAsync(
+            Arguments(request with { Target = targets[index] }, slot),
+            workspace.Root,
+            request.Timeout,
+            cancellationToken,
+            ResultsEnvironment(slot));
+    }
+
+    private static async Task<(ProcessRun Run, List<string> Missing)> SequentialAsync(
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        string resultsDirectory,
+        CancellationToken cancellationToken)
+    {
+        var targets = request.Invocations;
+        var runs = new ProcessRun?[targets.Length];
+
+        for (var index = 0; index < targets.Length; index++)
+        {
+            runs[index] = await SlottedAsync(workspace, request, resultsDirectory, index, cancellationToken).ConfigureAwait(false);
+
+            if (runs[index] is { TimedOut: true })
+                break;
+        }
+
+        return (Batched(runs, Elapsed(runs)), Unfinished(targets, runs));
+    }
+
+    private static async Task<(ProcessRun Run, List<string> Missing)> ConcurrentAsync(
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        string resultsDirectory,
+        long preparedMilliseconds,
+        CancellationToken cancellationToken)
+    {
+        var targets = request.Invocations;
+        var runs = new ProcessRun?[targets.Length];
+        var options = new ParallelOptions { MaxDegreeOfParallelism = request.Degree, CancellationToken = cancellationToken };
+        var stopwatch = Stopwatch.StartNew();
+
+        await Parallel.ForAsync(0, targets.Length, options, async (index, token) =>
+            runs[index] = await SlottedAsync(workspace, request, resultsDirectory, index, token).ConfigureAwait(false)).ConfigureAwait(false);
+
+        return (Batched(runs, preparedMilliseconds + stopwatch.ElapsedMilliseconds), Unfinished(targets, runs));
+    }
+
+    private static async Task<PreparedBuild> PreparedAsync(
+        WorkspaceTarget workspace,
+        TestRunRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.IsSerial || request.NoBuild)
+            return new PreparedBuild(0, null);
+
+        var elapsed = 0L;
+
+        foreach (var target in request.Invocations)
+        {
+            var run = await BuiltAsync(workspace, target, request.Scope, request.Timeout, cancellationToken).ConfigureAwait(false);
+
+            elapsed += run.ElapsedMilliseconds;
+
+            if (run.ExitCode is not 0 || Diagnostics(run.Output).Errors.Length is not 0)
+                return new PreparedBuild(elapsed, SharedBuild(workspace, request, target, run));
+        }
+
+        return new PreparedBuild(elapsed, null);
+    }
+
+    private static string Outcome(ProcessRun run) => run.TimedOut ? "timed out" : "failed";
+
+
+    private static BuildRun SharedBuild(WorkspaceTarget workspace, TestRunRequest request, string target, ProcessRun run) => new(
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{RenderBuild(target, workspace.Root, run, request.Verbose)}\nWARNING the batch build of {Path.GetFileNameWithoutExtension(target)} {Outcome(run)}, so no project ran; {Recovery(run)}"),
+        Locked(run));
+
+    private static string Recovery(ProcessRun run) => run.TimedOut
+        ? "raise timeoutSeconds, or pass parallel=1 to build each project inside its own run"
+        : "fix the errors above, or pass parallel=1 to build each project inside its own run";
 }
 
 internal sealed record ProcessRun(
@@ -599,3 +737,5 @@ public readonly record struct BuildRun(string Response, bool Locked);
 internal readonly record struct BuildDiagnostics(string[] Errors, string[] Warnings);
 
 internal readonly record struct DotnetInstallation(string Selected, string[] Sdks, string[] Runtimes);
+
+internal readonly record struct PreparedBuild(long ElapsedMilliseconds, BuildRun? Failure);

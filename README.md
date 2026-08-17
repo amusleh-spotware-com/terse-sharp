@@ -196,7 +196,9 @@ success that costs nothing — every mutating tool answers in one line per chang
 **Ten of them take a plural.** `read_text paths=`, `get_file_outline paths=`, `diff_text paths=`,
 `get_symbol_source symbolIds=`, `replace_symbol symbolIds=`, `search_text`/`search_regex queries=`,
 `run_tests projects=`, `write_text files=` and `edit_text edits=` each answer in one call what used to
-cost one call per item — and `write_text files=` puts every `.cs` file it writes through **one**
+cost one call per item — `run_tests projects=` also runs them **concurrently**, one process per core
+by default, after building the batch once (`parallel=1` restores the serial run) — and
+`write_text files=` puts every `.cs` file it writes through **one**
 compile gate, so a type and the consumer it breaks land together. From the **second** consecutive call
 of the same tool the response gains **one** extra line — `2 read_text calls in a row - pass paths=[...]
 with the next 2+ in ONE call` — the single documented exception to "a success is one line", worth

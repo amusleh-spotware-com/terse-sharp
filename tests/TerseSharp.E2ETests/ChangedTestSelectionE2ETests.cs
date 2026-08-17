@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 public sealed class ChangedTestSelectionE2ETests
@@ -95,4 +96,39 @@ public sealed class ChangedTestSelectionE2ETests
             await server.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task RunTests_WithAConcurrentBatchOfTwoProjects_MergesBothIntoTheVerdictParallelOneReaches()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var concurrent = await CallAsync(server, "run_tests", new()
+            {
+                ["projects"] = new[] { "Selection.Core.Tests", "Selection.Other.Tests" },
+                ["timeoutSeconds"] = 600,
+            });
+
+            var serial = await CallAsync(server, "run_tests", new()
+            {
+                ["projects"] = new[] { "Selection.Core.Tests", "Selection.Other.Tests" },
+                ["parallel"] = 1,
+                ["timeoutSeconds"] = 600,
+            });
+
+            Assert.StartsWith("run_tests PASSED", concurrent, StringComparison.Ordinal);
+            Assert.Contains("Selection.Core.Tests:1", concurrent, StringComparison.Ordinal);
+            Assert.Contains("Selection.Other.Tests:1", concurrent, StringComparison.Ordinal);
+            Assert.Equal("run_tests PASSED  passed=2 skipped=0 total=2 ", Verdict(concurrent));
+            Assert.Equal(Verdict(serial), Verdict(concurrent));
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    private static string Verdict(string response) =>
+        response[..response.IndexOf("durationMs=", StringComparison.Ordinal)];
 }

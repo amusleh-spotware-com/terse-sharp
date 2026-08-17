@@ -112,7 +112,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Build and test** | `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
 | **Build and test** | `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line, and a run that spanned several projects appends `Name:total/durationMs` per project so "which tier is slow" costs no second run; a failure carries its message, expected/actual and one source frame |
-| **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` | at most 10; one results directory, one merged verdict line; the timeout applies to **each** project, and a project that timed out is named instead of the merged run being reported as passed |
+| **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` | at most 10, run **concurrently**; the timeout applies to **each** project, and one that timed out is named instead of the merged run being reported as passed |
 | **Build and test** | re-running what broke | `rerun_failed` | replays the previous failures only |
 | **Build and test** | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | **Build and test** | `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks; `path=` sweeps a `.slnx`/`.sln`/`.slnf`/project that is **not** loaded |
@@ -620,9 +620,7 @@ that answers nothing, and the clip always names `next: startLine=`.
 
 14. **Independent calls go in one message.** If you intend to call several tools and there are no
     dependencies between them, make all of the independent calls in parallel, in a single assistant
-    message, rather than one after another. Reading three files is three `get_symbol_source` calls
-    issued together; outlining four files is four `get_file_outline` calls issued together;
-    `changed_files` and `workspace_status` have nothing to do with each other and belong in the same
+    message, rather than one after another. `changed_files` and `workspace_status` have nothing to do with each other and belong in the same
     message. Prioritize calling tools simultaneously whenever the actions can be done in parallel.
     **But when a call needs a value a previous call returns — a symbol id from an outline, a path
     from `changed_files`, a `retryWith` token from a rollback — call them sequentially, and never
@@ -738,16 +736,14 @@ server ships. Component and parameter answers are then unavailable rather than e
 `run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371` — so running the suite after every
 change is nearly free. A run that spanned **more than one project** appends `Name:total/durationMs`
 per project to that same line
-(`… durationMs=122371  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms`), so
-"which tier is slow" and "did every tier actually run" are answered by the run you already paid for,
-not by a second one. A single-project run is unchanged. `build` behaves the same way
+(`… durationMs=122371  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms`). A
+single-project run is unchanged, and `build` behaves the same way
 (`build ok  errors=0 warnings=0  elapsedMs=4235`), warnings included: a build that succeeds is one
 line however many warnings it produced, and a build that fails lists errors only. `warnings=` counts
 what that build emitted, so a build that recompiled nothing reports `0`.
 The short form is only ever emitted when there is nothing else to report, so do not pass
-`verbose=true` "to be sure". Anything that is not a clean pass returns the full report:
-`run_tests` reports `passed= failed= skipped= total= durationMs=`, then one block per
-failure: the message, expected and actual values, and one workspace-relative `file:line` frame. Fix
+`verbose=true` "to be sure". Anything that is not a clean pass returns the full report: one block per
+failure — the message, expected and actual values, and one workspace-relative `file:line` frame. Fix
 the test from that block — do not shell out to `dotnet test` for the stack trace.
 
 | Goal | Call |
@@ -756,7 +752,8 @@ the test from that block — do not shell out to `dotnet test` for the stack tra
 | one project | `run_tests(project)` — a project **name** or a path to the `.csproj` |
 | one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
 | a raw VSTest expression | `run_tests(filter)` |
-| only the test projects your change can reach | `run_tests(changed: true)` — selects the test projects that transitively reference a project you changed since the workspace loaded, at **assembly** granularity, and names both what it ran and what it skipped. It falls back to one whole-solution run, saying why, whenever it cannot reason — nothing changed, a changed file belongs to no project, no test project depends on the change — or whenever the change reaches more than 10 test projects, which a selective run does not bound. It never silently runs less than it should. Ignored when `project=` is passed |
+| only the test projects your change can reach | `run_tests(changed: true)` — the test projects that transitively reference a project you changed since the workspace loaded, at **assembly** granularity, naming both what it ran and what it skipped. Falls back to one whole-solution run, saying why, whenever it cannot reason (nothing changed, a changed file belongs to no project, no test project depends on it) or the change reaches more than 10 test projects. It never silently runs less than it should. Ignored when `project=` is passed |
+| several projects at once | `run_tests(projects: [...], parallel: N)` — concurrent; `1` is serial |
 | skip the rebuild | `run_tests(noBuild: true)` |
 | only what just failed | `rerun_failed` |
 | the slowest N | `run_tests(slowest: 10)` |
@@ -770,8 +767,12 @@ one.
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
 produced no results reports `FAILED …, no test results were produced` and never `0 failures`.
 
+**A batch is concurrent by default**, `parallel` at a time (default per-core); each is built before
+the fan-out then run `--no-build`, and a build that fails runs nothing. `parallel=1` is serial and the
+only mode that stops at the first timeout. **A single project ignores `parallel`.**
+
 **A suite can hand you a run-level note.** `run_tests` sets `TERSE_RESULTS_DIRECTORY` on the
-`dotnet test` process, and whatever the run writes to `$TERSE_RESULTS_DIRECTORY/terse-notes*.txt`
+`dotnet test` process — per project in a batch, so `.trx` names cannot collide — and whatever it writes to `$TERSE_RESULTS_DIRECTORY/terse-notes*.txt`
 comes back under `run notes:` when `verbose=true`, bounded to 20 lines. It is the only channel that
 survives a **green** run — a test host's own console output never reaches `run_tests` at any
 verbosity, because the runner captures it per test.

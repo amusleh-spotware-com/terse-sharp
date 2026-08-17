@@ -357,4 +357,46 @@ public sealed class DotnetRunnerTests
 
         Assert.Equal(["wrote bin/Fixture.Trading.dll"], notes.Select(Slashed));
     }
+
+    [Fact]
+    public void Unfinished_UnderAConcurrentBatch_NamesOnlyTheProjectsThatTimedOut() =>
+        Assert.Equal(
+            ["B.Tests"],
+            DotnetRunner.Unfinished(
+                ["a/A.Tests.csproj", "b/B.Tests.csproj", "c/C.Tests.csproj"],
+                [Finished, TimedOutRun, Finished]));
+
+
+    [Fact]
+    public void Unfinished_UnderASerialBatchThatStopped_NamesTheTimedOutProjectAndEveryProjectItNeverStarted() =>
+        Assert.Equal(
+            ["A.Tests", "B.Tests", "C.Tests"],
+            DotnetRunner.Unfinished(
+                ["a/A.Tests.csproj", "b/B.Tests.csproj", "c/C.Tests.csproj"],
+                [TimedOutRun, null, null]));
+
+
+    [Fact]
+    public void Stopped_ForAConcurrentBatch_SaysTheRestOfTheBatchStillRan() =>
+        Assert.Equal(
+            "1 of 3 project(s) timed out; the rest of the batch still ran",
+            DotnetRunner.Stopped(["B.Tests"], 3, serial: false));
+
+
+    [Fact]
+    public void Stopped_ForASerialBatch_SaysItStoppedAtTheFirstTimeout() =>
+        Assert.Equal(
+            "the batch stopped at the first timeout; 3 of 3 project(s) produced no results",
+            DotnetRunner.Stopped(["A.Tests", "B.Tests", "C.Tests"], 3, serial: true));
+
+
+    [Fact]
+    public void Stopped_ForASingleProject_NeverMentionsABatch() =>
+        Assert.Equal(
+            "this run timed out and produced no results",
+            DotnetRunner.Stopped(["A.Tests"], 1, serial: false));
+
+    private static ProcessRun Finished => new(0, string.Empty, 10);
+
+    private static ProcessRun TimedOutRun => new(-1, string.Empty, 10, TimedOut: true);
 }
