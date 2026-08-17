@@ -625,7 +625,7 @@ public static partial class DotnetRunner
 
         for (var index = 0; index < runs.Length; index++)
         {
-            if (runs[index] is null or { TimedOut: true } || !Produced(SlotPath(resultsDirectory, index, targets.Length)))
+            if (runs[index] is null or { TimedOut: true } || !Finished(SlotPath(resultsDirectory, index, targets.Length)))
                 missing.Add(Path.GetFileNameWithoutExtension(targets[index]));
         }
 
@@ -663,7 +663,7 @@ public static partial class DotnetRunner
         {
             runs[index] = await SlottedAsync(workspace, request, resultsDirectory, index, cancellationToken).ConfigureAwait(false);
 
-            if (runs[index] is { TimedOut: true } || !Produced(SlotPath(resultsDirectory, index, targets.Length)))
+            if (runs[index] is { TimedOut: true } || !Finished(SlotPath(resultsDirectory, index, targets.Length)))
                 break;
         }
 
@@ -756,6 +756,12 @@ public static partial class DotnetRunner
 
     private static string SlotPath(string resultsDirectory, int index, int invocations) =>
         invocations is 1 ? resultsDirectory : Path.Combine(resultsDirectory, index.ToString(CultureInfo.InvariantCulture));
+
+    internal static bool Finished(string slot) => Produced(slot) && !Aborted(slot);
+
+
+    private static bool Aborted(string slot) =>
+        Directory.Exists(slot) && Directory.EnumerateFiles(slot, "*Sequence*.xml", SearchOption.AllDirectories).Any();
 }
 
 internal sealed record ProcessRun(

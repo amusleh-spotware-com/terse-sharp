@@ -439,4 +439,23 @@ public sealed class DotnetRunnerTests
 
         return results;
     }
+
+    [Fact]
+    public void Unfinished_WhenABlameAbortLeftAPartialTrxBesideItsSequenceFile_StillCountsThatProjectAsUnfinished()
+    {
+        var results = Slots(2, [0, 1]);
+
+        try
+        {
+            File.WriteAllText(Path.Combine(results.FullName, "0", "run_Sequence.xml"), "<TestSequence />");
+
+            Assert.Equal(
+                ["A.Tests"],
+                DotnetRunner.Unfinished(["a/A.Tests.csproj", "b/B.Tests.csproj"], [Finished, Finished], results.FullName));
+        }
+        finally
+        {
+            results.Delete(recursive: true);
+        }
+    }
 }

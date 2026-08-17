@@ -91,8 +91,11 @@ files it used to accept; that is still the wider sweep, not the CI gate, and
 - **A project that produced no results counts as unfinished, whatever stopped it.** `Unfinished` keyed
   on the tool's own deadline, so once blame could end a hung project *before* that deadline the batch
   under-counted: `1 of 2 project(s)` where two produced nothing. It now also asks whether the
-  project's results slot holds a `.trx`. Caught by CI on **macos and ubuntu only** — windows passed
-  because blame lost the race there, which is exactly the platform split this repo warns about.
+  project's results slot holds a `.trx` **and no blame sequence file** — a blame abort writes a
+  *partial* `.trx`, so the presence of results alone reported a hung project as finished and let the
+  rest of a serial batch run on. Caught by CI on **macos and ubuntu only** — windows passed because
+  the tool's own tree-kill won the race there, which is exactly the platform split this repo warns
+  about, and it took two CI rounds because the first fix keyed on the wrong artifact.
   Covered by `Unfinished_UnderAConcurrentBatch_NamesOnlyTheProjectsThatTimedOut` and
   `Unfinished_UnderASerialBatchThatStopped_NamesTheTimedOutProjectAndEveryProjectItNeverStarted`,
   both now driven by real results slots rather than run objects alone.
