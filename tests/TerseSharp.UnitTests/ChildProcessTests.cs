@@ -27,6 +27,7 @@ public sealed class ChildProcessTests
             .Keys
             .Cast<string>()
             .Where(name => !LocatorVariables.Contains(name, StringComparer.OrdinalIgnoreCase))
+            .Where(name => !MutatedByOtherTests.Contains(name, StringComparer.OrdinalIgnoreCase))
             .ToArray();
 
         var start = ChildProcess.StartInfo("dotnet", [], AppContext.BaseDirectory);
@@ -132,4 +133,6 @@ public sealed class ChildProcessTests
         Assert.Contains("CANCELLED after", run.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("TIMED_OUT", run.Output, StringComparison.Ordinal);
     }
+
+    private static readonly string[] MutatedByOtherTests = ["TERSE_HOME", "CLAUDE_CONFIG_DIR"];
 }

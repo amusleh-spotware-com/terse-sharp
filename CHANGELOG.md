@@ -8,6 +8,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-08-19
+
+**`v0.41.0` was tagged and never published.** Its Release workflow stopped at the `Test` step, before
+the pack and the push, so no `0.41.0` package exists on nuget.org; `0.41.1` is the first published
+build of everything listed under it below. The tag is left where it is - a pushed tag is the identity
+of a build and is never moved.
+
+### Fixed
+
+- **`StartInfo_ForEveryOtherVariable_LeavesItInherited` no longer races the installer tests.** It
+  asserts that every ambient environment variable reaches the child, reading the environment on both
+  sides of the call - so a sibling class that sets or clears `TERSE_HOME` / `CLAUDE_CONFIG_DIR`
+  between those reads failed it. Those two names are now excluded by name. The race was always there;
+  the ~21 s this release adds to `ChildProcessTests` widened the window enough to hit it on the
+  release runner's ubuntu leg.
+
 ## [0.41.0] - 2026-08-19
 
 **Response format changed.** A `run_tests`, `list_tests` or `build` whose process tree is killed now
@@ -3857,7 +3873,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.41.1...HEAD
+[0.41.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.1
 [0.41.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.0
 [0.40.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.40.0
 [0.39.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.39.0
