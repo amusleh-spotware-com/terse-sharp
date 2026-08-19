@@ -8,6 +8,61 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-08-19
+
+**Response format changed.** A `run_tests`, `list_tests` or `build` whose process tree is killed now
+carries the output the run had already printed, followed by `TIMED_OUT after <n> ms` — or
+`CANCELLED after <n> ms` when the caller cancelled — where it used to carry that marker alone.
+
+### Fixed
+
+- **A timed-out run no longer discards everything the child wrote.** `ChildProcess` drained stdout
+  and stderr with `ReadToEndAsync`, so when the deadline cancelled those reads every byte already
+  read was thrown away and the answer was `FAILED with no error-severity diagnostic; last output
+  lines:` followed by nothing but `TIMED_OUT after <n> ms`. The streams are now copied into a
+  buffer as they arrive, the deadline governs the **process** rather than the pipes, and the kill is
+  followed by a bounded drain — so the tail shows how far the run had got. A timed-out run also
+  carries `remedy: … raise timeoutSeconds, or narrow the run with test= or filter=`, because the
+  measured response to a bare timeout was to retry with a bigger number. This is the case
+  **I286**'s blame collector cannot reach: a run that is merely slower than its deadline has no
+  hanging test to name. Covered by
+  `RunAsync_WhenTheDeadlineExpires_KeepsWhatTheChildAlreadyWrote` and
+  `RunTests_WhenTheDeadlineExpiresBeforeAnyResult_KeepsWhatTheRunHadAlreadyPrinted`. Closes **I299**.
+- **A partial capture is never presented as a whole one.** The drain that follows the child's exit is
+  bounded, so a grandchild holding the inherited stream can leave the captured text short. That fact
+  is now carried on the run: `build`, `run_tests` and `list_tests` never condense such a result to
+  their one-line green form and add `WARNING the process exited but its output stream stayed open, so
+  what was captured is incomplete` — a `list_tests` whose capture was cut short would otherwise answer
+  a short list of test names as though it were the whole suite — and a batch keeps the fact rather
+  than losing it in the merge. `changed_files` / `diff_symbols` / `diff_text` / `history`, where the
+  stream **is** the answer, fail instead of returning a truncated one. Covered by
+  `RunAsync_WhenADetachedGrandchildKeepsThePipeOpen_AnswersAndSaysTheCaptureIsIncomplete` and
+  `Merge_WhenOneProjectsCaptureWasIncomplete_NeverLetsTheBatchClaimAWholeOne`.
+- **A cancelled request is no longer reported as a timeout.** The deadline and the caller's
+  `CancellationToken` share one source, so a client cancellation used to answer `TIMED_OUT` — and now
+  a `remedy:` telling the agent to raise `timeoutSeconds`, which is the retry this release exists to
+  stop. A run stopped by its caller answers `CANCELLED after <n> ms`, carries no remedy, and is kept
+  out of the lock recovery exactly as a timed-out one is. Covered by
+  `RunAsync_WhenTheCallerCancels_DoesNotReportItAsADeadlineTimeout` and
+  `RenderNoResults_ForACancelledRunWhoseTailHoldsALockSignature_DoesNotClaimALockedOutputBlockedIt`.
+- **A timed-out run is no longer read as a locked one.** The retained tail can now carry `MSB3021`
+  or `being used by another process`, which is the signature that unloads the workspace and runs the
+  whole thing a second time — so a run that spent its whole deadline could have spent it twice. The
+  lock recovery is now reachable only from a run that actually exited. Covered by
+  `RenderNoResults_ForATimedOutRunWhoseTailHoldsALockSignature_DoesNotClaimALockedOutputBlockedIt`.
+- **A stopped `list_tests` no longer answers a partial name list as the whole suite.** Retaining the
+  output gave `list_tests` names to print, and printing them suppressed the failure block entirely —
+  so a listing killed at its deadline came back as a clean, short, wrong answer. A stopped listing now
+  carries `WARNING the process tree was killed after <n> ms, so this listing is partial and is not the
+  whole suite` and its own remedy. `run_tests` gained the matching half: a batch where one project
+  finished and another was killed reaches the partial-results path, which now carries the deadline
+  remedy too. Covered by
+  `RenderTestNames_ForAStoppedRunThatHadAlreadyPrintedSomeNames_NeverPassesThemOffAsTheWholeSuite`
+  and `RenderTest_ForATimedOutBatchThatAlreadyHasResults_StillCarriesTheDeadlineRemedy`.
+- **A process whose grandchild keeps the inherited pipe open can no longer outlive its answer.** The
+  drain that follows the child's exit is bounded, so a detached grandchild holding stdout ends the
+  wait after the grace instead of holding the call to the deadline.
+
 ## [0.40.0] - 2026-08-17
 
 **Response format changed.** `format` — and every mode of `cleanup` that reformats — now collapses a
@@ -3802,7 +3857,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.0
 [0.40.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.40.0
 [0.39.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.39.0
 [0.38.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.38.0

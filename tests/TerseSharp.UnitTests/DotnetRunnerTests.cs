@@ -1,3 +1,4 @@
+using TerseSharp.Core;
 using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
@@ -457,5 +458,92 @@ public sealed class DotnetRunnerTests
         {
             results.Delete(recursive: true);
         }
+    }
+
+    [Fact]
+    public void RenderNoResults_ForATimedOutRunWhoseTailHoldsALockSignature_DoesNotClaimALockedOutputBlockedIt()
+    {
+        var run = new ProcessRun(
+            -1,
+            "MSB3021: Unable to copy file - it is being used by another process\nTIMED_OUT after 600000 ms; the process tree was killed",
+            600000,
+            TimedOut: true,
+            StandardOutput: "MSB3021: Unable to copy file - it is being used by another process",
+            Stopped: true);
+
+        var text = DotnetRunner.RenderNoResults("A.slnx", run, verbose: false);
+
+        Assert.Contains("FAILED timed out after", text, StringComparison.Ordinal);
+        Assert.Contains("MSB3021", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("a locked output file blocked the operation", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Merge_WhenOneProjectsCaptureWasIncomplete_NeverLetsTheBatchClaimAWholeOne()
+    {
+        var whole = new ProcessRun(0, "first", 10, StandardOutput: "first");
+        var partial = new ProcessRun(0, "second", 20, StandardOutput: "second", Drained: false);
+
+        Assert.False(DotnetRunner.Merge(whole, partial).Drained);
+        Assert.False(DotnetRunner.Merge(partial, whole).Drained);
+        Assert.True(DotnetRunner.Merge(whole, whole).Drained);
+    }
+
+    [Fact]
+    public void RenderNoResults_ForACancelledRunWhoseTailHoldsALockSignature_DoesNotClaimALockedOutputBlockedIt()
+    {
+        var run = new ProcessRun(
+            -1,
+            "MSB3021: Unable to copy file - it is being used by another process\nCANCELLED after 8123 ms; the process tree was killed",
+            8123,
+            StandardOutput: "MSB3021: Unable to copy file - it is being used by another process",
+            Stopped: true);
+
+        var text = DotnetRunner.RenderNoResults("A.slnx", run, verbose: false);
+
+        Assert.Contains("MSB3021", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("a locked output file blocked the operation", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("raise timeoutSeconds", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Merge_WhenOneProjectWasStopped_KeepsThatFactSoTheBatchIsNeverReadAsALockedRun()
+    {
+        var finished = new ProcessRun(0, "first", 10, StandardOutput: "first");
+        var killed = new ProcessRun(-1, "second", 20, StandardOutput: "second", Stopped: true);
+
+        Assert.True(DotnetRunner.Merge(finished, killed).Stopped);
+        Assert.True(DotnetRunner.Merge(killed, finished).Stopped);
+        Assert.False(DotnetRunner.Merge(finished, finished).Stopped);
+    }
+
+    [Fact]
+    public void RenderTestNames_ForAStoppedRunThatHadAlreadyPrintedSomeNames_NeverPassesThemOffAsTheWholeSuite()
+    {
+        var run = new ProcessRun(
+            -1,
+            "    Fixture.Trading.Tests.OrderTests.Submits\n    Fixture.Trading.Tests.OrderTests.Rejects\nTIMED_OUT after 600000 ms; the process tree was killed",
+            600000,
+            TimedOut: true,
+            Stopped: true);
+
+        var text = DotnetRunner.RenderTestNames("A.slnx", run, contains: null);
+
+        Assert.Contains("Fixture.Trading.Tests.OrderTests.Submits", text, StringComparison.Ordinal);
+        Assert.Contains("this listing is partial", text, StringComparison.Ordinal);
+        Assert.Contains("raise timeoutSeconds", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForATimedOutBatchThatAlreadyHasResults_StillCarriesTheDeadlineRemedy()
+    {
+        var report = new TestRunReport(3, 0, 0, 3, 900, [], []);
+        var request = new TestRunRequest("A.slnx", null, false, false, 0, TimeSpan.FromSeconds(600));
+        var run = new ProcessRun(-1, "TIMED_OUT after 600000 ms; the process tree was killed", 600000, TimedOut: true, Stopped: true);
+
+        var text = DotnetRunner.RenderTest(run, report, request, root: string.Empty);
+
+        Assert.Contains("the results below are partial", text, StringComparison.Ordinal);
+        Assert.Contains("raise timeoutSeconds", text, StringComparison.Ordinal);
     }
 }

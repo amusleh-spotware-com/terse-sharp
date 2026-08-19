@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Diagnostics;
+using System.Text;
 
 namespace TerseSharp.Server;
 
@@ -24,9 +26,10 @@ internal static class ChildProcess
         Detach(process);
         deadline.CancelAfter(timeout);
 
-        var run = await DrainAsync(process, stopwatch, deadline.Token).ConfigureAwait(false);
+        var streams = Streaming(process);
+        var run = await DrainAsync(process, stopwatch, streams, deadline.Token).ConfigureAwait(false);
 
-        return run ?? Abandon(process, stopwatch);
+        return run ?? await AbandonAsync(process, stopwatch, streams, !cancellationToken.IsCancellationRequested).ConfigureAwait(false);
     }
 
     private static void Detach(Process process)
@@ -55,44 +58,24 @@ internal static class ChildProcess
         }
     }
 
-    private static async Task<ProcessRun?> DrainAsync(Process process, Stopwatch stopwatch, CancellationToken cancellationToken)
+    private static async Task<ProcessRun?> DrainAsync(
+        Process process,
+        Stopwatch stopwatch,
+        ProcessStreams streams,
+        CancellationToken cancellationToken)
     {
-        var pending = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var errors = process.StandardError.ReadToEndAsync(cancellationToken);
-
         try
         {
-            var output = await pending.ConfigureAwait(false);
-            var error = await errors.ConfigureAwait(false);
-
             await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            stopwatch.Stop();
-
-            return new ProcessRun(
-                process.ExitCode,
-                output + error,
-                stopwatch.ElapsedMilliseconds,
-                StandardOutput: output,
-                StandardError: error);
         }
         catch (OperationCanceledException)
         {
             return null;
         }
-    }
 
-    private static ProcessRun Abandon(Process process, Stopwatch stopwatch)
-    {
         stopwatch.Stop();
 
-        if (!process.HasExited)
-            process.Kill(entireProcessTree: true);
-
-        return new ProcessRun(
-            -1,
-            string.Create(CultureInfo.InvariantCulture, $"TIMED_OUT after {stopwatch.ElapsedMilliseconds} ms; the process tree was killed"),
-            stopwatch.ElapsedMilliseconds,
-            TimedOut: true);
+        return Completed(process.ExitCode, stopwatch.ElapsedMilliseconds, streams, await SettledAsync(process, streams).ConfigureAwait(false));
     }
 
     internal static ProcessStartInfo StartInfo(
@@ -123,5 +106,147 @@ internal static class ChildProcess
             start.Environment[entry.Key] = entry.Value;
 
         return start;
+    }
+
+    private sealed class ProcessText
+    {
+        private readonly StringBuilder text = new();
+        private readonly Lock gate = new();
+
+        public void Append(char[] buffer, int count)
+        {
+            lock (gate)
+                text.Append(buffer, 0, count);
+        }
+
+        public override string ToString()
+        {
+            lock (gate)
+                return text.ToString();
+        }
+    }
+
+    private readonly record struct ProcessStreams(Task Output, Task Error, ProcessText OutputText, ProcessText ErrorText);
+
+    private const int CopyBufferLength = 4096;
+
+    private static async Task CopyAsync(StreamReader reader, ProcessText text)
+    {
+        var buffer = ArrayPool<char>.Shared.Rent(CopyBufferLength);
+
+        try
+        {
+            int read;
+
+            while ((read = await reader.ReadAsync(buffer.AsMemory(), CancellationToken.None).ConfigureAwait(false)) > 0)
+                text.Append(buffer, read);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(buffer);
+        }
+    }
+
+    private static ProcessStreams Streaming(Process process)
+    {
+        var output = new ProcessText();
+        var error = new ProcessText();
+
+        return new ProcessStreams(
+            CopyAsync(process.StandardOutput, output),
+            CopyAsync(process.StandardError, error),
+            output,
+            error);
+    }
+
+    private static ProcessRun Completed(int exitCode, long elapsedMilliseconds, ProcessStreams streams, bool drained)
+    {
+        var output = streams.OutputText.ToString();
+        var error = streams.ErrorText.ToString();
+
+        return new ProcessRun(
+            exitCode,
+            output + error,
+            elapsedMilliseconds,
+            StandardOutput: output,
+            StandardError: error,
+            Drained: drained);
+    }
+
+    private static readonly TimeSpan DrainGrace = TimeSpan.FromSeconds(2);
+
+    private static async Task<bool> SettledAsync(Process process, ProcessStreams streams)
+    {
+        try
+        {
+            await Task.WhenAll(streams.Output, streams.Error).WaitAsync(DrainGrace).ConfigureAwait(false);
+
+            return true;
+        }
+        catch (Exception failure) when (failure is TimeoutException or IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            Release(process);
+            Observe(streams.Output);
+            Observe(streams.Error);
+
+            return false;
+        }
+    }
+
+    private static string Break(string text) => text.Length is 0 || text.EndsWith('\n') ? string.Empty : "\n";
+
+    private static string Stopped(string output, string error, long elapsedMilliseconds, bool timedOut) => string.Concat(
+        output,
+        error,
+        Break(error.Length is 0 ? output : error),
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{(timedOut ? "TIMED_OUT" : "CANCELLED")} after {elapsedMilliseconds} ms; the process tree was killed"));
+
+    private static async Task<ProcessRun> AbandonAsync(Process process, Stopwatch stopwatch, ProcessStreams streams, bool timedOut)
+    {
+        Stop(process);
+        stopwatch.Stop();
+
+        var drained = await SettledAsync(process, streams).ConfigureAwait(false);
+        var output = streams.OutputText.ToString();
+        var error = streams.ErrorText.ToString();
+
+        return new ProcessRun(
+            -1,
+            Stopped(output, error, stopwatch.ElapsedMilliseconds, timedOut),
+            stopwatch.ElapsedMilliseconds,
+            timedOut,
+            output,
+            error,
+            drained,
+            Stopped: true);
+    }
+
+    private static void Observe(Task reader) =>
+        reader.ContinueWith(static faulted => _ = faulted.Exception, TaskScheduler.Default);
+
+    private static void Stop(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (Exception failure) when (failure is InvalidOperationException or Win32Exception or NotSupportedException or AggregateException)
+        {
+        }
+    }
+
+    private static void Release(Process process)
+    {
+        try
+        {
+            process.StandardOutput.Dispose();
+            process.StandardError.Dispose();
+        }
+        catch (Exception failure) when (failure is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+        }
     }
 }

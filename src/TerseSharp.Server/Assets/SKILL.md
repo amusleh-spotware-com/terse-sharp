@@ -782,12 +782,13 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 one.
 
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
-produced no results reports `FAILED …, no test results were produced` and never `0 failures`.
+produced no results says so, and never `0 failures`.
 
-**A run that was stopped names the test that was still running.** Every run passes VSTest's blame
-collector 15 s below `timeoutSeconds` whenever that leaves a usable margin (above 30 s), so a hang answers
-`WARNING the run was stopped while these test(s) were still running: <name>` under the failure. Read
-that instead of bisecting with `test=`; a green run never carries it.
+**A stopped run says why.** Above 30 s, `timeoutSeconds` arms VSTest's blame collector 15 s below it,
+so a *hung* test is named in
+`WARNING the run was stopped while these test(s) were still running: <name>`; a merely *slow* one
+answers `FAILED timed out after <n> ms`, a `remedy:` and the lines it printed.
+`WARNING … output stream stayed open` means the capture is partial.
 
 **A batch is concurrent by default**, `parallel` at a time (default per-core); each is built before
 the fan-out then run `--no-build`, and a build that fails runs nothing. `parallel=1` is serial and the

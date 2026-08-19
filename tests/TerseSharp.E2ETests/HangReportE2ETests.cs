@@ -32,4 +32,28 @@ public sealed class HangReportE2ETests
 
     private static Task<string> CallAsync(TerseServerProcess server, string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task RunTests_WhenTheDeadlineExpiresBeforeAnyResult_KeepsWhatTheRunHadAlreadyPrinted()
+    {
+        var server = await TerseServerProcess.StartAsync(
+            HangRoot,
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", Path.Combine(HangRoot, "HangSolution.slnx")],
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            var built = await CallAsync(server, "build", []);
+            var text = await CallAsync(server, "run_tests", new() { ["project"] = "Hang.Tests", ["noBuild"] = true, ["timeoutSeconds"] = 20 });
+
+            Assert.DoesNotContain("ERROR", built, StringComparison.Ordinal);
+            Assert.Contains("FAILED timed out after", text, StringComparison.Ordinal);
+            Assert.Contains("raise timeoutSeconds", text, StringComparison.Ordinal);
+            Assert.Contains("TERSE_HANG_FIXTURE_MARKER", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }

@@ -11,4 +11,8 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
+  <Target Name="AnnounceHangFixture" BeforeTargets="VSTest">
+    <Message Importance="high" Text="TERSE_HANG_FIXTURE_MARKER" />
+  </Target>
+
 </Project>

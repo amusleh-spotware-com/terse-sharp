@@ -69,4 +69,67 @@ public sealed class ChildProcessTests
 
         return [.. LocatorVariables.Where(variable => Environment.GetEnvironmentVariable(variable) is { Length: > 0 })];
     }
+
+    private const string ChildMarker = "terse-child-marker";
+
+    private static string BlockingShell => OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
+
+    private static string[] BlockingEcho => OperatingSystem.IsWindows()
+        ? ["/c", "echo " + ChildMarker + " & ping -n 60 127.0.0.1"]
+        : ["-c", "echo " + ChildMarker + "; sleep 60"];
+
+    [Fact]
+    public async Task RunAsync_WhenTheDeadlineExpires_KeepsWhatTheChildAlreadyWrote()
+    {
+        var run = await ChildProcess.RunAsync(
+            BlockingShell,
+            BlockingEcho,
+            AppContext.BaseDirectory,
+            TimeSpan.FromSeconds(15),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(run.TimedOut, "the child outlives the deadline, so the run must report a timeout");
+        Assert.Contains(ChildMarker, run.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(ChildMarker, run.Output, StringComparison.Ordinal);
+        Assert.Contains("TIMED_OUT after", run.Output, StringComparison.Ordinal);
+    }
+
+    private static string[] DetachedHolder => OperatingSystem.IsWindows()
+        ? ["/c", "start /b ping -n 60 127.0.0.1 & echo " + ChildMarker]
+        : ["-c", "sleep 60 & echo " + ChildMarker];
+
+    [Fact]
+    public async Task RunAsync_WhenADetachedGrandchildKeepsThePipeOpen_AnswersAndSaysTheCaptureIsIncomplete()
+    {
+        var deadline = TimeSpan.FromSeconds(45);
+
+        var run = await ChildProcess.RunAsync(
+            BlockingShell,
+            DetachedHolder,
+            AppContext.BaseDirectory,
+            deadline,
+            TestContext.Current.CancellationToken);
+
+        Assert.False(run.TimedOut, "the child exited, so only the leaked pipe holder could have kept the run waiting");
+        Assert.True(run.ElapsedMilliseconds < deadline.TotalMilliseconds, "the run waited for the deadline instead of the child");
+        Assert.Contains(ChildMarker, run.Output, StringComparison.Ordinal);
+        Assert.False(run.Drained, "the holder still owns the stream, so the captured text is a partial snapshot and must say so");
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenTheCallerCancels_DoesNotReportItAsADeadlineTimeout()
+    {
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        var run = await ChildProcess.RunAsync(
+            BlockingShell,
+            BlockingEcho,
+            AppContext.BaseDirectory,
+            TimeSpan.FromMinutes(5),
+            caller.Token);
+
+        Assert.False(run.TimedOut, "the deadline still had minutes left, so calling this a timeout would send the agent to raise timeoutSeconds");
+        Assert.Contains("CANCELLED after", run.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("TIMED_OUT", run.Output, StringComparison.Ordinal);
+    }
 }

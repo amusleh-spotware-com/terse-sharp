@@ -32,10 +32,10 @@ public static partial class DotnetRunner
 
         return new BuildRun(RenderBuild(target, workspace.Root, run, verbose), Locked(run));
     }
-    private static bool Locked(ProcessRun run) => IsLockedOutput(run.ExitCode, run.Output);
+    private static bool Locked(ProcessRun run) => !run.Stopped && IsLockedOutput(run.ExitCode, run.Output);
 
     private static bool IsGreen(ProcessRun run, TestRunReport report) =>
-        run.ExitCode is 0 && !run.TimedOut && report.Total > 0 && report.Failures.Length is 0;
+        run.ExitCode is 0 && !run.TimedOut && run.Drained && report.Total > 0 && report.Failures.Length is 0;
 
     private static string QuietTest(TestRunReport report) => string.Create(
     CultureInfo.InvariantCulture,
@@ -94,7 +94,9 @@ public static partial class DotnetRunner
         first.ElapsedMilliseconds + next.ElapsedMilliseconds,
         first.TimedOut || next.TimedOut,
         first.StandardOutput + "\n" + next.StandardOutput,
-        first.StandardError + "\n" + next.StandardError);
+        first.StandardError + "\n" + next.StandardError,
+        first.Drained && next.Drained,
+        first.Stopped || next.Stopped);
 
     private static void Discard(DirectoryInfo results)
     {
@@ -145,7 +147,7 @@ public static partial class DotnetRunner
     {
         var diagnostics = Diagnostics(run.Output);
 
-        if (!verbose && run.ExitCode is 0 && diagnostics.Errors.Length is 0)
+        if (!verbose && run.ExitCode is 0 && run.Drained && diagnostics.Errors.Length is 0)
             return QuietBuild(run, diagnostics.Warnings.Length);
 
         var shown = Shown(diagnostics, verbose);
@@ -158,6 +160,7 @@ public static partial class DotnetRunner
             AppendOutputs(response, run, root, target);
 
         AppendLockWarning(response, run);
+        AppendDrainWarning(response, run);
         AppendHiddenWarnings(response, diagnostics, shown.Length);
 
         foreach (var diagnostic in shown)
@@ -181,7 +184,7 @@ public static partial class DotnetRunner
         response.Note("remedy: see the NOTE below; the operation is retried automatically when one workspace is loaded");
     }
 
-    private static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request, string root)
+    internal static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request, string root)
     {
         if (report.Total is 0 && run.ExitCode is not 0)
             return RenderNoResults(request.Target, run, request.Verbose, root);
@@ -210,6 +213,8 @@ public static partial class DotnetRunner
             : string.Create(CultureInfo.InvariantCulture, $"FAILED exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}, no test results were produced"));
 
         AppendLockWarning(response, run);
+        AppendDrainWarning(response, run);
+        AppendDeadlineRemedy(response, run);
         AppendFailureOutput(response, run, reported: 0, verbose, root);
 
         return response.ToString();
@@ -223,6 +228,8 @@ public static partial class DotnetRunner
         response.Summary(shown, names.Length, "tests");
 
         AppendLockWarning(response, run);
+        AppendDrainWarning(response, run);
+        AppendStoppedWarning(response, run);
 
         for (var index = 0; index < shown; index++)
             response.Line(names[index]);
@@ -239,9 +246,12 @@ public static partial class DotnetRunner
     private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter)
     {
         AppendLockWarning(response, run);
+        AppendDrainWarning(response, run);
 
         if (run.TimedOut)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING timed out after {run.ElapsedMilliseconds} ms; the results below are partial"));
+
+        AppendDeadlineRemedy(response, run);
 
         if (report.Total is 0)
             response.Note(NoMatch(filter));
@@ -414,9 +424,9 @@ public static partial class DotnetRunner
         var runtimes = await RunAsync(["--list-runtimes"], workingDirectory, ProbeTimeout, cancellationToken).ConfigureAwait(false);
 
         return new DotnetInstallation(
-            selected.ExitCode is 0 ? selected.Output.Trim() : string.Empty,
-            sdks.ExitCode is 0 ? Leading(sdks.Output, ' ') : [],
-            runtimes.ExitCode is 0 ? Leading(runtimes.Output, '[') : []);
+            Answered(selected) ? selected.Output.Trim() : string.Empty,
+            Answered(sdks) ? Leading(sdks.Output, ' ') : [],
+            Answered(runtimes) ? Leading(runtimes.Output, '[') : []);
     }
 
     private static string[] Leading(string output, char terminator)
@@ -531,10 +541,10 @@ public static partial class DotnetRunner
         var run = await RunAsync(["list", projectPath, "package", flag, "--include-transitive"], root, TimeSpan.FromMinutes(3), cancellationToken).ConfigureAwait(false);
         var response = new ResponseBuilder("package_list", PositionFormat.Relative(root, projectPath));
 
-        if (run.ExitCode is not 0)
+        if (run.ExitCode is not 0 || !run.Drained)
         {
             response.Summary(0, 0, "packages examined");
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"FAILED dotnet list package {flag} exited {run.ExitCode}; nothing was examined, so this is not a clean bill of health"));
+            response.Note(Unexamined(run, flag));
 
             foreach (var line in Tail(run.Output))
                 response.Line(line);
@@ -762,6 +772,38 @@ public static partial class DotnetRunner
 
     private static bool Aborted(string slot) =>
         Directory.Exists(slot) && Directory.EnumerateFiles(slot, "*Sequence*.xml", SearchOption.AllDirectories).Any();
+
+    private static void AppendDeadlineRemedy(ResponseBuilder response, ProcessRun run)
+    {
+        if (!run.TimedOut)
+            return;
+
+        response.Note("remedy: the run was still going when the deadline expired; raise timeoutSeconds, or narrow the run with test= or filter=");
+    }
+
+    private static void AppendDrainWarning(ResponseBuilder response, ProcessRun run)
+    {
+        if (run.Drained)
+            return;
+
+        response.Note("WARNING the process exited but its output stream stayed open, so what was captured is incomplete");
+    }
+
+    private static bool Answered(ProcessRun run) => run.ExitCode is 0 && run.Drained;
+
+
+    private static string Unexamined(ProcessRun run, string flag) => run.Drained
+        ? string.Create(CultureInfo.InvariantCulture, $"FAILED dotnet list package {flag} exited {run.ExitCode}; nothing was examined, so this is not a clean bill of health")
+        : string.Create(CultureInfo.InvariantCulture, $"FAILED dotnet list package {flag} exited but its output stream stayed open, so the listing is incomplete; this is not a clean bill of health");
+
+    private static void AppendStoppedWarning(ResponseBuilder response, ProcessRun run)
+    {
+        if (!run.Stopped)
+            return;
+
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING the process tree was killed after {run.ElapsedMilliseconds} ms, so this listing is partial and is not the whole suite"));
+        response.Note("remedy: raise timeoutSeconds, or list one project at a time with project=");
+    }
 }
 
 internal sealed record ProcessRun(
@@ -770,7 +812,9 @@ internal sealed record ProcessRun(
     long ElapsedMilliseconds,
     bool TimedOut = false,
     string StandardOutput = "",
-    string StandardError = "");
+    string StandardError = "",
+    bool Drained = true,
+    bool Stopped = false);
 
 internal readonly record struct TestRunResult(string Response, TestRunReport Report, bool Locked);
 
