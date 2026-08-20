@@ -191,4 +191,20 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
             await solution.CallAsync("get_symbol", new() { ["symbolId"] = "T:Fixture.Trading.IHandler" }),
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task MoveTypeToFile_WhenTheSiblingLivesInASubdirectory_WritesTheNewFileBesideIt()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: false, TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("move_type_to_file", new() { ["typeSymbolId"] = "T:Fixture.Trading.Views.ShellView" });
+
+        var beside = Path.Combine(solution.ProjectDirectory, "Views", "ShellView.cs");
+        var flattened = Path.Combine(solution.ProjectDirectory, "ShellView.cs");
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine("Views", "ShellView.cs"), text, StringComparison.Ordinal);
+        Assert.False(File.Exists(flattened), "move_type_to_file flattened the new file onto the project root: " + flattened);
+        Assert.True(File.Exists(beside), "move_type_to_file reported a nested path it never wrote: " + beside);
+    }
 }

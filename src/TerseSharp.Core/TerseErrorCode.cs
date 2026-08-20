@@ -18,6 +18,7 @@ public enum TerseErrorCode
     Cancelled,
     Internal,
     Transient,
+    UnsupportedRunner,
 }
 
 public sealed record TerseError(TerseErrorCode Code, string Message, string Remedy)

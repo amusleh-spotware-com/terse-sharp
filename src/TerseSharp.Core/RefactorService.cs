@@ -152,11 +152,14 @@ public static class RefactorService
     {
         var id = DocumentId.CreateNewId(sibling.Project.Id);
         var directory = Path.GetDirectoryName(sibling.FilePath ?? string.Empty) ?? string.Empty;
+        var full = Path.Combine(directory, name + ".cs");
+
         var updated = solution.AddDocument(
             id,
             name + ".cs",
             unit.NormalizeWhitespace(),
-            filePath: Path.Combine(directory, name + ".cs"));
+            folders: DocumentPlacement.Folders(sibling.Project, full),
+            filePath: full);
 
         return (updated, id);
     }

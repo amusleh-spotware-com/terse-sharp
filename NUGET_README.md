@@ -186,6 +186,13 @@ about 14 tokens, and never emitted when the call already passed the plural.
 | **Git** — replaces `git status`/`git diff`/`git log`/`git tag --list` | `changed_files` · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list) |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
+`run_tests` and `rerun_failed` drive **both** test hosts: VSTest, and Microsoft.Testing.Platform when
+`global.json` selects it (`"test": { "runner": "Microsoft.Testing.Platform" }`, as xunit.v3, MSTest and
+NUnit projects use). That host rejects the whole session over one VSTest-shaped argument, so the
+invocation — target switch, trx reporter, timeout, filter — is rebuilt for it rather than patched.
+`list_tests` is VSTest-only and says so, because the SDK hosts the platform's test application in
+server mode and discards its `--list-tests` output.
+
 Every read tool declares the MCP `readOnlyHint` annotation and every deleting tool declares
 `destructiveHint`, so a client that gates parallel dispatch on those hints — Claude Code does — can
 fan the reads out instead of running them one at a time. The build and test tools are deliberately

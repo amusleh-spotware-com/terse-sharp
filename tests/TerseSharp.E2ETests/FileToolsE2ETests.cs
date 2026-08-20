@@ -829,4 +829,29 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("'exclude'", excluded, StringComparison.Ordinal);
         Assert.Contains("'glob'", files, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task WriteText_CreatingACSharpFileInASubdirectory_LandsItThereRatherThanInTheProjectRoot()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: false, TestContext.Current.CancellationToken);
+
+        var project = await File.ReadAllBytesAsync(solution.ProjectPath, TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/Alpha/Introduced.cs",
+            ["content"] = "namespace Fixture.Trading.Alpha;\n\npublic sealed class Introduced\n{\n    public int Value => 41;\n}\n",
+            ["force"] = true,
+        });
+
+        var nested = Path.Combine(solution.ProjectDirectory, "Alpha", "Introduced.cs");
+        var flattened = Path.Combine(solution.ProjectDirectory, "Introduced.cs");
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains(Path.Combine("Alpha", "Introduced.cs"), text, StringComparison.Ordinal);
+        Assert.False(File.Exists(flattened), "write_text flattened the path onto the project root: " + flattened);
+        Assert.True(File.Exists(nested), "write_text reported a nested path it never wrote: " + nested);
+
+        Assert.Equal(project, await File.ReadAllBytesAsync(solution.ProjectPath, TestContext.Current.CancellationToken));
+    }
 }

@@ -926,7 +926,7 @@ public static class FileService
         var id = Microsoft.CodeAnalysis.DocumentId.CreateNewId(project.Id);
         var text = SourceText.From(content, AtomicWrite.EncodingOf(full));
 
-        return new StagedWrite(workspace.Solution.AddDocument(id, Path.GetFileName(full), text, filePath: full), id);
+        return new StagedWrite(DocumentPlacement.Add(workspace.Solution, id, full, text), id);
     }
 
     public static Microsoft.CodeAnalysis.Project? CompilingProject(LoadedWorkspace workspace, string full) =>
@@ -951,7 +951,7 @@ public static class FileService
         {
             var added = SourceText.From(entry.After, AtomicWrite.EncodingOf(entry.Full));
 
-            return updated.AddDocument(entry.Document!, Path.GetFileName(entry.Full), added, filePath: entry.Full);
+            return DocumentPlacement.Add(updated, entry.Document!, entry.Full, added);
         }
 
         var document = workspace.Solution.GetDocument(entry.Document)!;

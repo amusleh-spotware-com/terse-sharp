@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Mtp.Trading/Mtp.Trading.csproj" />
+  <Project Path="tests/Mtp.Trading.Tests/Mtp.Trading.Tests.csproj" />
+</Solution>

@@ -774,7 +774,7 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 | skip the rebuild | `run_tests(noBuild: true)` |
 | only what just failed | `rerun_failed` |
 | the slowest N | `run_tests(slowest: 10)` |
-| names without running | `list_tests(contains)` |
+| names without running | `list_tests(contains)` — VSTest only |
 | the full report on a green run | `run_tests(verbose: true)` |
 
 `test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs
@@ -793,6 +793,13 @@ answers `FAILED timed out after <n> ms`, a `remedy:` and the lines it printed.
 **A batch is concurrent by default**, `parallel` at a time (default per-core); each is built before
 the fan-out then run `--no-build`, and a build that fails runs nothing. `parallel=1` is serial and the
 only mode that stops at the first timeout. **A single project ignores `parallel`.**
+
+**Microsoft.Testing.Platform needs nothing extra from you.** When `global.json` selects it
+(`"test": { "runner": "Microsoft.Testing.Platform" }`), the whole `dotnet test` invocation is rebuilt
+for that host — it refuses the **entire session** over one VSTest-shaped argument. Two visible
+differences: `list_tests` answers `ERROR UnsupportedRunner`, because the SDK hosts the test
+application in server mode and discards its `--list-tests` output (dotnet/sdk#49754) — narrow with
+`run_tests test="Namespace.Class"` instead — and `runSettings=` is VSTest-only.
 
 **A suite can hand you a run-level note.** `run_tests` sets `TERSE_RESULTS_DIRECTORY` on the
 `dotnet test` process — per project in a batch, so `.trx` names cannot collide — and whatever it writes to `$TERSE_RESULTS_DIRECTORY/terse-notes*.txt`

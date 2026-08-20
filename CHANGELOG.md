@@ -8,6 +8,68 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`run_tests` and `rerun_failed` drive the Microsoft.Testing.Platform runner.** A repository whose
+  `global.json` carries `"test": { "runner": "Microsoft.Testing.Platform" }` is detected on every run,
+  and the invocation is rebuilt for that host: the project is addressed with `--project` / `--solution`
+  instead of a positional path, the report is asked for after the `--` separator with
+  `--report-xunit-trx` (xunit.v3) or `--report-trx` (any project referencing
+  `Microsoft.Testing.Extensions.TrxReport`), the hang window becomes `--timeout <n>s`, and
+  `--ignore-exit-code 8` keeps a zero-test run a terse warning rather than a runner failure. Every
+  VSTest-only argument that the platform rejects — `--logger trx`, `-nodeReuse:false`, `--nologo`,
+  `--blame-hang-timeout`, `--blame-hang-dump-type` — is dropped on that path. Before this, every such
+  run answered `Zero tests ran` / `Exit code: 5`, because the platform host forwards an argument it
+  does not recognise straight to the test application, which then refuses the whole session.
+  `TestingPlatformE2ETests` covers it against the new `fixtures/MtpSolution`.
+- **`test=` and `rerun_failed` select by name under that runner too.** xunit.v3 does not accept the
+  VSTest `--filter` syntax before 4.0.0, so terse's own `FullyQualifiedName=` / `FullyQualifiedName~`
+  selection is translated to `--filter-method`, which both 3.x and 4.x accept: an exact name lands
+  verbatim, a `~` selection is wildcarded at both ends, several are OR'd under one switch, and an
+  expression that is not a name is forwarded unchanged rather than mistranslated.
+
+### Fixed
+
+- **`write_text` creating a `.cs` file in a subdirectory wrote it to the project root.** Roslyn's
+  `MSBuildWorkspace` recomputes an added document's path on disk from its `Name` and `Folders`,
+  ignoring the `filePath` the caller set — so `src/Core/Alpha/Introduced.cs` was reported as written
+  and landed as `src/Core/Introduced.cs`, with the nested path never created at all.
+  `move_type_to_file` had the same defect: a type moved out of `Views/ShellView.xaml.cs` was reported
+  at `Views/ShellView.cs` and written to the project root. All three add-document call sites now go
+  through `DocumentPlacement`, which derives `Name`, `Folders` and `filePath` from one path together.
+- **`list_tests` no longer answers `0 tests` under the Microsoft.Testing.Platform runner.** The SDK
+  hosts the test application in server mode, which discards its `--list-tests` output
+  (dotnet/sdk#49754), so no name can be read. It now answers `ERROR UnsupportedRunner` naming the
+  cause and the way through — `run_tests test="Namespace.Class"` — instead of a confident zero.
+- **A run that produced no results is no longer reported as a timeout.** `Unfinished` marks a project
+  whenever it wrote no `.trx`, which includes a run that failed in three seconds; `Stopped` then said
+  `this run timed out and produced no results`. It now says `produced no results` unless the process
+  hit its deadline or the blame collector recorded a hung test — a blame abort exits 1 rather than
+  being killed, so the process flag alone is not the oracle.
+
+### Changed
+
+- **Three arguments that host would reject are refused up front rather than forwarded**, because one
+  unknown argument costs the whole session there, not just its own option. `run_tests runSettings=`
+  is VSTest-only and names `xunit.runner.json` as the way to bound parallelism instead. A `filter=`
+  that is not a `FullyQualifiedName` expression is refused naming `test=`, because xunit.v3 accepts
+  the VSTest filter syntax only from 4.0.0 — and a compound expression such as
+  `FullyQualifiedName~A&Category=Fast` is refused rather than translated to a `--filter-method` that
+  would silently match nothing. A workspace where **no** project declares a trx reporter answers
+  `ERROR UnsupportedRunner` naming `Microsoft.Testing.Extensions.TrxReport`, instead of guessing
+  `--report-trx` at a host that does not have it.
+- **The xunit detection accepts the split package layout and single-quoted attributes.**
+  `xunit.v3.core` + `xunit.v3.runner.inproc.console` is as much an xunit project as the `xunit.v3`
+  metapackage, and `Include='…'` is as valid as `Include="…"`; both used to fall through to the
+  platform reporter and refuse the session.
+- `MarkupProfileE2ETests`' narrowed-surface budget is raised from 20 705 to 20 740 tokens, for the
+  one clause each that `run_tests`' `filter` and `runSettings` descriptions need to say they behave
+  differently under that runner. Both clauses were cut twice first; what is left is the contract, and
+  a parameter description that does not carry it is how an agent forms a plan the runner will refuse.
+- `DocsCoverageE2ETests.SkillTokenBudget` is raised from 22 489 to 22 700 tokens, for the paragraph
+  `SKILL.md` needs to teach the Microsoft.Testing.Platform behaviour. A skill that does not mention a
+  runner it now drives would send an agent back to `Bash: dotnet test` on every such repository.
+
 ## [0.41.1] - 2026-08-19
 
 **`v0.41.0` was tagged and never published.** Its Release workflow stopped at the `Test` step, before

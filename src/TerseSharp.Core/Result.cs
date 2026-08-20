@@ -158,4 +158,9 @@ public static class Errors
 
         return false;
     }
+
+    public static TerseError UnsupportedRunner(string tool, string reason, string remedy) => new(
+        TerseErrorCode.UnsupportedRunner,
+        string.Create(CultureInfo.InvariantCulture, $"{tool} cannot answer under the Microsoft.Testing.Platform runner: {reason}"),
+        remedy);
 }

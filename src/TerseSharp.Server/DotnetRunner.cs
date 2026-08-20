@@ -49,15 +49,23 @@ public static partial class DotnetRunner
         TestRunRequest request,
         CancellationToken cancellationToken)
     {
+        var reported = request with
+        {
+            Reporter = await TestReporterProbe.DetectAsync(workspace.Root, request.Target, cancellationToken).ConfigureAwait(false),
+        };
+
+        if (Refused(reported) is { } refusal)
+            return new TestRunResult(refusal.Render(), TestRunReport.Empty, false);
+
         var results = Directory.CreateTempSubdirectory("terse-tests-");
 
         try
         {
-            var prepared = await PreparedAsync(workspace, request, cancellationToken).ConfigureAwait(false);
+            var prepared = await PreparedAsync(workspace, reported, cancellationToken).ConfigureAwait(false);
 
             return prepared.Failure is { } failed
                 ? new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked)
-                : await RanAsync(workspace, request, results, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
+                : await RanAsync(workspace, reported, results, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -65,19 +73,24 @@ public static partial class DotnetRunner
         }
     }
 
-    private static string TimedOut(string response, List<string> missing, int invocations, bool serial) => missing.Count is 0
+    private static string Interrupted(string response, List<string> missing, int invocations, bool serial, bool timedOut) => missing.Count is 0
         ? response
         : string.Create(
             CultureInfo.InvariantCulture,
-            $"{response}\nWARNING {Stopped(missing, invocations, serial)}: {string.Join(", ", missing)}");
+            $"{response}\nWARNING {Stopped(missing, invocations, serial, timedOut)}: {string.Join(", ", missing)}");
 
-    internal static string Stopped(List<string> missing, int invocations, bool serial) => (invocations, serial, missing.Count == invocations) switch
+    internal static string Stopped(List<string> missing, int invocations, bool serial, bool timedOut)
     {
-        (1, _, _) => "this run timed out and produced no results",
-        (_, true, _) => string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first timeout; {missing.Count} of {invocations} project(s) produced no results"),
-        (_, _, true) => string.Create(CultureInfo.InvariantCulture, $"every project of the batch timed out; all {invocations} produced no results"),
-        _ => string.Create(CultureInfo.InvariantCulture, $"{missing.Count} of {invocations} project(s) timed out; the rest of the batch still ran"),
-    };
+        var cause = timedOut ? "timed out" : "produced no results";
+
+        return (invocations, serial, missing.Count == invocations) switch
+        {
+            (1, _, _) => timedOut ? "this run timed out and produced no results" : "this run produced no results",
+            (_, true, _) => string.Create(CultureInfo.InvariantCulture, $"the batch stopped at the first project that {cause}; {missing.Count} of {invocations} project(s) produced no results"),
+            (_, _, true) => string.Create(CultureInfo.InvariantCulture, $"every project of the batch {cause}; all {invocations} produced no results"),
+            _ => string.Create(CultureInfo.InvariantCulture, $"{missing.Count} of {invocations} project(s) {cause}; the rest of the batch still ran"),
+        };
+    }
 
     private static Task<(ProcessRun Run, List<string> Missing)> InvokeAsync(
         WorkspaceTarget workspace,
@@ -115,7 +128,12 @@ public static partial class DotnetRunner
     private static TestRunReport Report(DirectoryInfo results, string workspaceRoot) =>
             TestResultParser.Parse(Directory.EnumerateFiles(results.FullName, "*.trx", RecursiveAndTolerant), workspaceRoot);
 
-    private static string[] Arguments(TestRunRequest request, string resultsDirectory)
+    private static string[] Arguments(TestRunRequest request, string resultsDirectory) =>
+        request.Reporter is TestReporter.VsTestLogger
+            ? VsTestArguments(request, resultsDirectory)
+            : TestPlatformArguments.Of(request, resultsDirectory);
+
+    private static string[] VsTestArguments(TestRunRequest request, string resultsDirectory)
     {
         var arguments = new List<string>(16)
         {
@@ -343,6 +361,18 @@ public static partial class DotnetRunner
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
+        var reporter = await TestReporterProbe.DetectAsync(workspace.Root, target, cancellationToken).ConfigureAwait(false);
+
+        if (reporter is not TestReporter.VsTestLogger)
+        {
+            return new BuildRun(
+                Errors.UnsupportedRunner(
+                    "list_tests",
+                    "the SDK hosts the test application in server mode, which discards its --list-tests output (dotnet/sdk#49754)",
+                    "narrow the run instead: run_tests test=\"Namespace.Class\" selects by name, and a green run reports the total").Render(),
+                false);
+        }
+
         var arguments = scope.Applied(["test", target, "-nodeReuse:false", "--nologo", "--list-tests"]);
         var run = await RunAsync(arguments, workspace.Root, timeout, cancellationToken)
             .ConfigureAwait(false);
@@ -745,11 +775,15 @@ public static partial class DotnetRunner
         var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
         var hung = await HangSequence.ActiveAsync(results, cancellationToken).ConfigureAwait(false);
         var response = Noted(RenderTest(run, report, request, workspace.Root), notes);
+        var stopped = run.TimedOut || hung.Length is not 0;
 
-        return new TestRunResult(Hung(TimedOut(response, missing, request.Invocations.Length, request.IsSerial), hung), report, Locked(run));
+        return new TestRunResult(
+            Hung(Interrupted(response, missing, request.Invocations.Length, request.IsSerial, stopped), hung),
+            report,
+            Locked(run));
     }
 
-    private static TimeSpan? HangWindow(TimeSpan timeout) =>
+    internal static TimeSpan? HangWindow(TimeSpan timeout) =>
         timeout > HangMargin + HangMargin ? timeout - HangMargin : null;
 
 
@@ -804,6 +838,24 @@ public static partial class DotnetRunner
         response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING the process tree was killed after {run.ElapsedMilliseconds} ms, so this listing is partial and is not the whole suite"));
         response.Note("remedy: raise timeoutSeconds, or list one project at a time with project=");
     }
+
+    private static TerseError? Refused(TestRunRequest request) => request.Reporter switch
+    {
+        TestReporter.VsTestLogger => null,
+        TestReporter.Unknown => Errors.UnsupportedRunner(
+            "run_tests",
+            "no project under this workspace declares a trx reporter, so the run would produce no results terse can read",
+            "reference Microsoft.Testing.Extensions.TrxReport from the test project, or use xunit.v3, whose runner writes the report itself"),
+        _ when !request.RunSettings.IsDefaultOrEmpty => Errors.UnsupportedRunner(
+            "run_tests runSettings=",
+            "those are VSTest RunSettings overrides, and forwarding them would make the test application refuse the whole session",
+            "bound parallelism with the test framework's own configuration file - xunit.v3 reads xunit.runner.json - and re-run without runSettings="),
+        _ when TestPlatformArguments.Untranslatable(request.Reporter, request.Filter) => Errors.UnsupportedRunner(
+            "run_tests filter=",
+            "xunit.v3 accepts the VSTest filter syntax only from 4.0.0, so this expression cannot be selected on every supported version",
+            "pass test=\"Namespace.Class\" or test=\"Namespace.Class.Method\" instead, which is translated to the --filter-method every xunit.v3 accepts"),
+        _ => null,
+    };
 }
 
 internal sealed record ProcessRun(

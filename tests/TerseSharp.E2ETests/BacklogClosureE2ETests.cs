@@ -977,7 +977,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
             Assert.DoesNotContain("ERROR", built, StringComparison.Ordinal);
             Assert.DoesNotContain("run_tests PASSED", batch, StringComparison.Ordinal);
-            Assert.Contains("the batch stopped at the first timeout; 2 of 2 project(s) produced no results", batch, StringComparison.Ordinal);
+            Assert.Contains("the batch stopped at the first project that timed out; 2 of 2 project(s) produced no results", batch, StringComparison.Ordinal);
             Assert.Contains("Hang.Tests", batch, StringComparison.Ordinal);
             Assert.DoesNotContain("Hang.Second.Tests.SecondHangingTests.AlsoNeverFinishes", batch, StringComparison.Ordinal);
             Assert.DoesNotContain("batch", alone, StringComparison.Ordinal);

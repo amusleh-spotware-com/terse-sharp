@@ -402,19 +402,19 @@ public sealed class DotnetRunnerTests
     public void Stopped_ForAConcurrentBatch_SaysTheRestOfTheBatchStillRan() =>
         Assert.Equal(
             "1 of 3 project(s) timed out; the rest of the batch still ran",
-            DotnetRunner.Stopped(["B.Tests"], 3, serial: false));
+            DotnetRunner.Stopped(["B.Tests"], 3, serial: false, timedOut: true));
 
     [Fact]
     public void Stopped_ForASerialBatch_SaysItStoppedAtTheFirstTimeout() =>
         Assert.Equal(
-            "the batch stopped at the first timeout; 3 of 3 project(s) produced no results",
-            DotnetRunner.Stopped(["A.Tests", "B.Tests", "C.Tests"], 3, serial: true));
+            "the batch stopped at the first project that timed out; 3 of 3 project(s) produced no results",
+            DotnetRunner.Stopped(["A.Tests", "B.Tests", "C.Tests"], 3, serial: true, timedOut: true));
 
     [Fact]
     public void Stopped_ForASingleProject_NeverMentionsABatch() =>
         Assert.Equal(
             "this run timed out and produced no results",
-            DotnetRunner.Stopped(["A.Tests"], 1, serial: false));
+            DotnetRunner.Stopped(["A.Tests"], 1, serial: false, timedOut: true));
 
     private static ProcessRun Finished => new(0, string.Empty, 10);
 
@@ -424,7 +424,7 @@ public sealed class DotnetRunnerTests
     public void Stopped_ForAConcurrentBatchWhereEveryProjectTimedOut_NeverClaimsTheRestStillRan() =>
         Assert.Equal(
             "every project of the batch timed out; all 3 produced no results",
-            DotnetRunner.Stopped(["A.Tests", "B.Tests", "C.Tests"], 3, serial: false));
+            DotnetRunner.Stopped(["A.Tests", "B.Tests", "C.Tests"], 3, serial: false, timedOut: true));
 
     private static DirectoryInfo Slots(int count, int[] produced)
     {
@@ -546,4 +546,17 @@ public sealed class DotnetRunnerTests
         Assert.Contains("the results below are partial", text, StringComparison.Ordinal);
         Assert.Contains("raise timeoutSeconds", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Stopped_WhenNothingTimedOut_NeverClaimsATimeout() =>
+        Assert.Equal(
+            "this run produced no results",
+            DotnetRunner.Stopped(["A.Tests"], 1, serial: false, timedOut: false));
+
+
+    [Fact]
+    public void Stopped_ForABatchWhereNothingTimedOut_NamesTheMissingResultsRatherThanATimeout() =>
+        Assert.Equal(
+            "1 of 3 project(s) produced no results; the rest of the batch still ran",
+            DotnetRunner.Stopped(["B.Tests"], 3, serial: false, timedOut: false));
 }
