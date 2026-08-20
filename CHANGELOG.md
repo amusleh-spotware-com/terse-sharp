@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-08-20
+
 ### Added
 
 - **`run_tests` and `rerun_failed` drive the Microsoft.Testing.Platform runner.** A repository whose
@@ -21,7 +23,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `--blame-hang-timeout`, `--blame-hang-dump-type` — is dropped on that path. Before this, every such
   run answered `Zero tests ran` / `Exit code: 5`, because the platform host forwards an argument it
   does not recognise straight to the test application, which then refuses the whole session.
-  `TestingPlatformE2ETests` covers it against the new `fixtures/MtpSolution`.
+  `RunTests_OnATestingPlatformSolution_ReportsTheCountersAndThenRerunsOnlyTheFailure` covers it
+  against the new `fixtures/MtpSolution`, and
+  `RunTests_OnATestingPlatformSolutionWhereTheSelectorMatchesNothing_IsAWarningRatherThanAGreenRun`
+  pins that a zero-test run stays a warning rather than becoming a green one.
 - **`test=` and `rerun_failed` select by name under that runner too.** xunit.v3 does not accept the
   VSTest `--filter` syntax before 4.0.0, so terse's own `FullyQualifiedName=` / `FullyQualifiedName~`
   selection is translated to `--filter-method`, which both 3.x and 4.x accept: an exact name lands
@@ -37,6 +42,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `move_type_to_file` had the same defect: a type moved out of `Views/ShellView.xaml.cs` was reported
   at `Views/ShellView.cs` and written to the project root. All three add-document call sites now go
   through `DocumentPlacement`, which derives `Name`, `Folders` and `filePath` from one path together.
+  `WriteText_CreatingACSharpFileInASubdirectory_LandsItThereRatherThanInTheProjectRoot` and
+  `MoveTypeToFile_WhenTheSiblingLivesInASubdirectory_WritesTheNewFileBesideIt` were observed failing
+  first, and the former also asserts the `.csproj` stays byte-identical.
 - **`list_tests` no longer answers `0 tests` under the Microsoft.Testing.Platform runner.** The SDK
   hosts the test application in server mode, which discards its `--list-tests` output
   (dotnet/sdk#49754), so no name can be read. It now answers `ERROR UnsupportedRunner` naming the
@@ -3935,7 +3943,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.41.1...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.42.0
 [0.41.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.1
 [0.41.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.0
 [0.40.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.40.0
