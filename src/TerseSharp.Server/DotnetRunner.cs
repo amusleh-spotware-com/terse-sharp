@@ -237,25 +237,8 @@ public static partial class DotnetRunner
 
         return response.ToString();
     }
-    internal static string RenderTestNames(string target, ProcessRun run, string? contains, string root = "")
-    {
-        var names = TestNameList.Parse(run.Output, contains);
-        var shown = Math.Min(names.Length, MaxTestNames);
-        var response = new ResponseBuilder("list_tests", target);
-
-        response.Summary(shown, names.Length, "tests");
-
-        AppendLockWarning(response, run);
-        AppendDrainWarning(response, run);
-        AppendStoppedWarning(response, run);
-
-        for (var index = 0; index < shown; index++)
-            response.Line(names[index]);
-
-        AppendFailureOutput(response, run, names.Length, verbose: false, root);
-
-        return response.ToString();
-    }
+    internal static string RenderTestNames(string target, ProcessRun run, string? contains, string root = "") =>
+        RenderTestNames(target, run, TestNameList.Parse(run.Output, contains), root);
 
     private static string Counters(TestRunReport report, ProcessRun run) => string.Create(
     CultureInfo.InvariantCulture,
@@ -364,18 +347,10 @@ public static partial class DotnetRunner
         var reporter = await TestReporterProbe.DetectAsync(workspace.Root, target, cancellationToken).ConfigureAwait(false);
 
         if (reporter is not TestReporter.VsTestLogger)
-        {
-            return new BuildRun(
-                Errors.UnsupportedRunner(
-                    "list_tests",
-                    "the SDK hosts the test application in server mode, which discards its --list-tests output (dotnet/sdk#49754)",
-                    "narrow the run instead: run_tests test=\"Namespace.Class\" selects by name, and a green run reports the total").Render(),
-                false);
-        }
+            return await ListedFromModulesAsync(workspace, target, contains, scope, timeout, cancellationToken).ConfigureAwait(false);
 
         var arguments = scope.Applied(["test", target, "-nodeReuse:false", "--nologo", "--list-tests"]);
-        var run = await RunAsync(arguments, workspace.Root, timeout, cancellationToken)
-            .ConfigureAwait(false);
+        var run = await RunAsync(arguments, workspace.Root, timeout, cancellationToken).ConfigureAwait(false);
 
         return new BuildRun(RenderTestNames(target, run, contains, workspace.Root), Locked(run));
     }
@@ -856,6 +831,111 @@ public static partial class DotnetRunner
             "pass test=\"Namespace.Class\" or test=\"Namespace.Class.Method\" instead, which is translated to the --filter-method every xunit.v3 accepts"),
         _ => null,
     };
+
+    internal static string RenderTestNames(string target, ProcessRun run, string[] names, string root)
+    {
+        var shown = Math.Min(names.Length, MaxTestNames);
+        var response = new ResponseBuilder("list_tests", target);
+
+        response.Summary(shown, names.Length, "tests");
+
+        AppendLockWarning(response, run);
+        AppendDrainWarning(response, run);
+        AppendStoppedWarning(response, run);
+
+        for (var index = 0; index < shown; index++)
+            response.Line(names[index]);
+
+        AppendFailureOutput(response, run, names.Length, verbose: false, root);
+
+        return response.ToString();
+    }
+
+    private static async Task<BuildRun> ListedFromModulesAsync(
+        WorkspaceTarget workspace,
+        string target,
+        string? contains,
+        BuildScope scope,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var build = await BuiltAsync(workspace, target, scope, timeout, cancellationToken).ConfigureAwait(false);
+
+        if (build.ExitCode is not 0 || Diagnostics(build.Output).Errors.Length is not 0)
+            return new BuildRun(RenderBuild(target, workspace.Root, build, verbose: false), Locked(build));
+
+        var projects = await TestReporterProbe.TestProjectsAsync(workspace.Root, target, cancellationToken).ConfigureAwait(false);
+        var modules = await ModulesAsync(workspace, projects, scope, timeout, cancellationToken).ConfigureAwait(false);
+
+        return modules.Length is 0
+            ? new BuildRun(NoTestModule(target).Render(), Locked(build))
+            : await ListedFromAsync(workspace, target, contains, modules, timeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<BuildRun> ListedFromAsync(
+        WorkspaceTarget workspace,
+        string target,
+        string? contains,
+        string[] modules,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var merged = await ListedAsync(workspace, modules[0], timeout, cancellationToken).ConfigureAwait(false);
+        var outputs = new List<string>(modules.Length) { merged.Output };
+
+        for (var index = 1; index < modules.Length; index++)
+        {
+            var run = await ListedAsync(workspace, modules[index], timeout, cancellationToken).ConfigureAwait(false);
+
+            outputs.Add(run.Output);
+            merged = Merge(merged, run);
+        }
+
+        return new BuildRun(RenderTestNames(target, merged, TestNameList.Parse(outputs, contains), workspace.Root), Locked(merged));
+    }
+
+    private static Task<ProcessRun> ListedAsync(WorkspaceTarget workspace, string module, TimeSpan timeout, CancellationToken cancellationToken) =>
+        RunAsync([module, "--list-tests"], workspace.Root, timeout, cancellationToken);
+
+
+    private static TerseError NoTestModule(string target) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"the build of {Path.GetFileName(target)} wrote no test module, so there is nothing to list"),
+        "pass project= naming a test project, or check that the target really contains one");
+
+    private static async Task<string[]> ModulesAsync(
+        WorkspaceTarget workspace,
+        ImmutableArray<string> projects,
+        BuildScope scope,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var modules = new List<string>(projects.Length);
+
+        foreach (var project in projects)
+        {
+            var arguments = scope.AsProperties(["msbuild", project, "-getProperty:TargetPath", "-nologo"]);
+            var run = await RunAsync(arguments, workspace.Root, timeout, cancellationToken).ConfigureAwait(false);
+            var path = LastLine(run.StandardOutput);
+
+            if (run.ExitCode is 0 && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && File.Exists(path))
+                modules.Add(path);
+        }
+
+        return [.. modules.Distinct(PathBoundary.Comparer)];
+    }
+
+    private static string LastLine(string output)
+    {
+        var last = ReadOnlySpan<char>.Empty;
+
+        foreach (var line in output.AsSpan().EnumerateLines())
+        {
+            if (!line.IsWhiteSpace())
+                last = line.Trim();
+        }
+
+        return last.ToString();
+    }
 }
 
 internal sealed record ProcessRun(

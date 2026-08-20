@@ -6,9 +6,12 @@ public static class TestNameList
 
     private const string FoundMarker = "found ";
 
-    public static string[] Parse(string output, string? contains) =>
+    public static string[] Parse(string output, string? contains) => Parse([output], contains);
+
+    public static string[] Parse(IEnumerable<string> outputs, string? contains) =>
     [
-        .. Listed(output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        .. outputs
+            .SelectMany(output => Listed(output.Split('\n', StringSplitOptions.RemoveEmptyEntries)))
             .Select(line => line.Trim())
             .Where(name => Matches(name, contains))
             .Distinct(StringComparer.Ordinal)

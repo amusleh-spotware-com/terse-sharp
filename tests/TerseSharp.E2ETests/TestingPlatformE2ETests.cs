@@ -1,6 +1,6 @@
 namespace TerseSharp.E2ETests;
 
-[Collection(nameof(TerseServerCollection))]
+[Collection(nameof(MtpSolutionCollection))]
 public sealed class TestingPlatformE2ETests
 {
     [Fact]
@@ -52,7 +52,7 @@ public sealed class TestingPlatformE2ETests
     }
 
     [Fact]
-    public async Task ListTests_UnderTheTestingPlatformRunner_SaysWhyItCannotAnswerInsteadOfListingZero()
+    public async Task ListTests_UnderTheTestingPlatformRunner_ListsTheNamesByRunningTheTestModuleItself()
     {
         var server = await StartedAsync();
 
@@ -60,10 +60,28 @@ public sealed class TestingPlatformE2ETests
         {
             var text = await CallAsync(server, "list_tests", []);
 
-            Assert.StartsWith("ERROR UnsupportedRunner", text, StringComparison.Ordinal);
-            Assert.Contains("dotnet/sdk#49754", text, StringComparison.Ordinal);
-            Assert.Contains("remedy:", text, StringComparison.Ordinal);
-            Assert.DoesNotContain("0 tests", text, StringComparison.Ordinal);
+            Assert.Contains("5 tests", text, StringComparison.Ordinal);
+            Assert.Contains("Mtp.Trading.Tests.LedgerTests.Balance_SubtractsTheDebitsFromTheCredits", text, StringComparison.Ordinal);
+            Assert.Contains("Mtp.Trading.Tests.DeliberateMtpOutcomesTests.SkippedByDesign", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ListTests_UnderTheTestingPlatformRunnerWithContains_KeepsOnlyTheMatchingNames()
+    {
+        var server = await StartedAsync();
+
+        try
+        {
+            var text = await CallAsync(server, "list_tests", new() { ["contains"] = "LedgerTests" });
+
+            Assert.Contains("3 tests", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("DeliberateMtpOutcomesTests", text, StringComparison.Ordinal);
         }
         finally
         {

@@ -231,12 +231,13 @@ name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything reg
 | **Git** — replaces `git status`/`git diff`/`git log`/`git tag --list` | `changed_files` · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list) |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
-`run_tests` and `rerun_failed` drive **both** test hosts: VSTest, and Microsoft.Testing.Platform when
+`build`, `run_tests`, `rerun_failed` and `list_tests` drive **both** test hosts: VSTest, and Microsoft.Testing.Platform when
 `global.json` selects it (`"test": { "runner": "Microsoft.Testing.Platform" }`, as xunit.v3, MSTest and
 NUnit projects use). That host rejects the whole session over one VSTest-shaped argument, so the
 invocation — target switch, trx reporter, timeout, filter — is rebuilt for it rather than patched.
-`list_tests` is VSTest-only and says so, because the SDK hosts the platform's test application in
-server mode and discards its `--list-tests` output.
+`list_tests` answers under both: the SDK hosts the platform's test application in server mode and
+discards its `--list-tests` output, so terse resolves each test project's `TargetPath` and runs the
+test module itself.
 
 Every read tool declares the MCP `readOnlyHint` annotation and every deleting tool declares
 `destructiveHint`, so a client that gates parallel dispatch on those hints — Claude Code does — can

@@ -2,7 +2,7 @@
 
 namespace TerseSharp.E2ETests;
 
-[Collection(nameof(TerseServerCollection))]
+[Collection(nameof(WarningSolutionCollection))]
 public sealed class BuildWarningsE2ETests : IAsyncLifetime
 {
     private const string SourceProject = "Fixture.Warning";

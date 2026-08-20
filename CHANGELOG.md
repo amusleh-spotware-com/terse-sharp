@@ -8,6 +8,53 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **The SDK terse binds to is the one `global.json` selects, not the newest one installed.**
+  `MsBuildBootstrap.Best` sorted MSBuildLocator's candidates by version and took the highest, which
+  threw away the ordering the locator had already computed: it yields the `global.json`-resolved SDK
+  **first** and the rest newest-first. On a machine carrying a newer feature band than the repository
+  pins, terse therefore loaded MSBuild from the wrong SDK, exported its `MSBUILD_EXE_PATH` to every
+  child process, and ran the IDE analyzers of a Roslyn ahead of the one this build references — the
+  condition `doctor` reports as `FAIL roslyn` (`I217`). It now takes the first candidate whose major
+  matches the running runtime, which is the pinned SDK whenever one resolves, and falls back to the
+  previous choice when none does. `MsBuildBootstrapTests` covers the ordering rule directly.
+  This is what turned the ubuntu CI leg red when the `ubuntu-24.04` image rolled from `20260810.271`
+  to `20260816.277` and added SDK `10.0.400` beside the pinned `10.0.3xx`.
+- **`fixtures/FixtureSolution` carries its own `global.json`.** `TerseTempSolution` copies that
+  fixture into `%TEMP%`, where nothing above it pins an SDK, so an E2E assertion on analyzer output
+  floated to whatever SDK the machine happened to have newest. `FixtureSdkPinTests` asserts the
+  fixture pins the same band as the repository root, so the two cannot drift apart.
+
+### Added
+
+- **`list_tests` answers under the Microsoft.Testing.Platform runner.** The SDK launches the test
+  application with `--server dotnettestcli` and MTP's `TerminalOutputDevice` discards `--list-tests`
+  in server mode (dotnet/sdk#49754), so the tool used to refuse with `ERROR UnsupportedRunner`. It
+  now builds the target, resolves each test project's `TargetPath` with `dotnet msbuild
+  -getProperty:TargetPath` — an evaluation, so it is correct on an incremental build that recompiled
+  nothing — and runs each test module directly with `--list-tests`, parsing the names it already knew
+  how to parse. Closes **I302**. `TestingPlatformE2ETests.ListTests_UnderTheTestingPlatformRunner_ListsTheNamesByRunningTheTestModuleItself`
+  and `ListTests_UnderTheTestingPlatformRunnerWithContains_KeepsOnlyTheMatchingNames` assert the names
+  and the filter.
+
+### Changed
+
+- **The E2E suite serializes per fixture instead of globally.** Every class that spawns a build shared
+  one `TerseServerCollection`, which made those 775 tests a **551 s serial critical path** — measured
+  from the CI `.trx` of run 32352033133, where the whole E2E leg was 723 s and 41 % of it ran with
+  exactly one test in flight. `BuildWarningsE2ETests` (`WarningSolution`) and `TestingPlatformE2ETests`
+  (`MtpSolution`) build fixtures no other class touches, so they now have their own collections;
+  `HangReportE2ETests` stays put because `BacklogClosureE2ETests` uses `HangSolution` too.
+  `E2ECollectionCensusTests` enforces the real invariant instead of one collection name — a fixture
+  used by more than one class keeps every builder of it in `TerseServerCollection`, and it discovers
+  both sides from the E2E sources. Measured locally: **576.7 s → 476.9 s**, 960 tests green.
+- **The E2E suite runs `2x` parallel lanes.** 53 % of the CI leg's wall time sat pinned at exactly 4
+  concurrent tests on a 4-vCPU runner while the work is dominated by waiting on child processes.
+  `tests/TerseSharp.E2ETests/xunit.runner.json` sets `maxParallelThreads` to `2x`; collection
+  membership is untouched, so no pair of fixture builders can newly overlap.
+
+
 ## [0.42.0] - 2026-08-20
 
 ### Added

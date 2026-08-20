@@ -24,4 +24,23 @@ public readonly record struct BuildScope(string? Configuration, string? TargetFr
 
         return [.. scoped];
     }
+
+    public string[] AsProperties(IReadOnlyList<string> arguments)
+    {
+        var properties = Properties ?? [];
+        var scoped = new List<string>(arguments.Count + 2 + properties.Count);
+
+        scoped.AddRange(arguments);
+
+        if (Configuration is { Length: > 0 } configuration)
+            scoped.Add("-p:Configuration=" + configuration);
+
+        if (TargetFramework is { Length: > 0 } framework)
+            scoped.Add("-p:TargetFramework=" + framework);
+
+        foreach (var property in properties)
+            scoped.Add("-p:" + property);
+
+        return [.. scoped];
+    }
 }

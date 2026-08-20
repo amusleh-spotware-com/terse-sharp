@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 
 namespace TerseSharp.Core;
@@ -121,4 +122,22 @@ public static class TestReporterProbe
             return string.Empty;
         }
     }
+
+    public static async Task<ImmutableArray<string>> TestProjectsAsync(string root, string target, CancellationToken cancellationToken)
+    {
+        var found = ImmutableArray.CreateBuilder<string>();
+
+        foreach (var project in Projects(root, target))
+        {
+            if (DeclaresATestFramework(await ReadAsync(project, cancellationToken).ConfigureAwait(false)))
+                found.Add(project);
+        }
+
+        return found.ToImmutable();
+    }
+
+    private static bool DeclaresATestFramework(string text) =>
+        Declares(text, TrxExtension)
+        || Declares(text, MsTestSdk)
+        || text.Contains(XunitPackage, StringComparison.OrdinalIgnoreCase);
 }

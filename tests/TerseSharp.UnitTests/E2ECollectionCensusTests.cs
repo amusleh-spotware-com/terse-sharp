@@ -22,16 +22,66 @@ public sealed class E2ECollectionCensusTests
         Path.Combine(Fixtures.RepositoryRoot, "tests", "TerseSharp.E2ETests");
 
     [Fact]
-    public void EveryE2ETestClassThatSpawnsABuild_JoinsTheCollectionThatSerializesThem()
+    public void EveryE2ETestClassThatSpawnsABuild_JoinsTheCollectionThatSerializesTheFixtureItBuilds()
     {
+        var all = Sources();
         var building = Building();
         var missing = building
-            .Where(file => !Excluded.ContainsKey(file.Name) && !file.Text.Contains(Membership, StringComparison.Ordinal))
-            .Select(file => file.Name);
+            .Where(file => !Excluded.ContainsKey(file.Name) && !file.Text.Contains(Expected(file, all), StringComparison.Ordinal))
+            .Select(file => file.Name + " needs " + Expected(file, all));
 
         Assert.NotEmpty(building);
         Assert.Empty(missing);
     }
+
+    [Fact]
+    public void AFixtureUsedByMoreThanOneE2EClass_KeepsEveryBuilderOfItInTheOneSerializingCollection()
+    {
+        var all = Sources();
+        var shared = all
+            .SelectMany(file => OwnFixtures(file.Text))
+            .GroupBy(fixture => fixture, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+
+        Assert.NotEmpty(shared);
+        Assert.All(shared, fixture => Assert.All(
+            Building().Where(file => !Excluded.ContainsKey(file.Name) && OwnFixtures(file.Text).Contains(fixture, StringComparer.Ordinal)),
+            file => Assert.Contains(Membership, file.Text, StringComparison.Ordinal)));
+    }
+
+    private static string Expected((string Name, string Text) file, (string Name, string Text)[] all)
+    {
+        if (UsesTheSharedFixture(file.Text))
+            return Membership;
+
+        var owned = OwnFixtures(file.Text)
+            .Where(fixture => all.Count(other => OwnFixtures(other.Text).Contains(fixture, StringComparer.Ordinal)) is 1)
+            .ToArray();
+
+        return owned is [var single] ? "[Collection(nameof(" + single + "Collection))]" : Membership;
+    }
+
+    private static bool UsesTheSharedFixture(string text) =>
+        text.Contains("TerseServerFixture.FixtureRoot", StringComparison.Ordinal)
+        || text.Contains("(TerseServerFixture ", StringComparison.Ordinal);
+
+
+    private static string[] OwnFixtures(string text) =>
+    [
+        .. text.Split('"')
+            .Where(part => part.Length > SolutionSuffix.Length && part.EndsWith(SolutionSuffix, StringComparison.Ordinal))
+            .Where(name => !string.Equals(name, "FixtureSolution", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal),
+    ];
+
+
+    private static (string Name, string Text)[] Sources() =>
+    [
+        .. Directory.EnumerateFiles(Root, "*.cs")
+            .Select(file => (Name: Path.GetFileName(file), Text: File.ReadAllText(file))),
+    ];
 
     [Fact]
     public void TheExclusionSetCarriesAReasonPerEntryAndOnlyEverShrinks()
@@ -53,4 +103,6 @@ public sealed class E2ECollectionCensusTests
     private static bool Builds(string text) =>
         text.Contains("[Fact]", StringComparison.Ordinal)
         && BuildingCalls.Any(call => text.Contains(call, StringComparison.Ordinal));
+
+    private const string SolutionSuffix = "Solution";
 }
