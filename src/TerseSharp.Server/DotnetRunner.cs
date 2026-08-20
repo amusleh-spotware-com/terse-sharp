@@ -761,7 +761,6 @@ public static partial class DotnetRunner
     internal static TimeSpan? HangWindow(TimeSpan timeout) =>
         timeout > HangMargin + HangMargin ? timeout - HangMargin : null;
 
-
     internal static string Hung(string response, string[] hung) => hung.Length is 0
         ? response
         : string.Create(
@@ -777,7 +776,6 @@ public static partial class DotnetRunner
         invocations is 1 ? resultsDirectory : Path.Combine(resultsDirectory, index.ToString(CultureInfo.InvariantCulture));
 
     internal static bool Finished(string slot) => Produced(slot) && !Aborted(slot);
-
 
     private static bool Aborted(string slot) =>
         Directory.Exists(slot) && Directory.EnumerateFiles(slot, "*Sequence*.xml", SearchOption.AllDirectories).Any();
@@ -799,7 +797,6 @@ public static partial class DotnetRunner
     }
 
     private static bool Answered(ProcessRun run) => run.ExitCode is 0 && run.Drained;
-
 
     private static string Unexamined(ProcessRun run, string flag) => run.Drained
         ? string.Create(CultureInfo.InvariantCulture, $"FAILED dotnet list package {flag} exited {run.ExitCode}; nothing was examined, so this is not a clean bill of health")
@@ -897,10 +894,9 @@ public static partial class DotnetRunner
     private static Task<ProcessRun> ListedAsync(WorkspaceTarget workspace, string module, TimeSpan timeout, CancellationToken cancellationToken) =>
         RunAsync([module, "--list-tests"], workspace.Root, timeout, cancellationToken);
 
-
     private static TerseError NoTestModule(string target) => Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"the build of {Path.GetFileName(target)} wrote no test module, so there is nothing to list"),
-        "pass project= naming a test project, or check that the target really contains one");
+        string.Create(CultureInfo.InvariantCulture, $"the build of {Path.GetFileName(target)} wrote no test module under the workspace root, so there is nothing to list"),
+        "pass project= naming a test project; a multi-targeted test project needs targetFramework= too, because its TargetPath does not resolve without one");
 
     private static async Task<string[]> ModulesAsync(
         WorkspaceTarget workspace,
@@ -917,12 +913,17 @@ public static partial class DotnetRunner
             var run = await RunAsync(arguments, workspace.Root, timeout, cancellationToken).ConfigureAwait(false);
             var path = LastLine(run.StandardOutput);
 
-            if (run.ExitCode is 0 && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) && File.Exists(path))
+            if (run.ExitCode is 0 && IsTestModule(workspace.Root, path))
                 modules.Add(path);
         }
 
         return [.. modules.Distinct(PathBoundary.Comparer)];
     }
+
+    private static bool IsTestModule(string root, string path) =>
+        path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+        && PathBoundary.Contains(root, path)
+        && File.Exists(path);
 
     private static string LastLine(string output)
     {

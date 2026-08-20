@@ -39,17 +39,17 @@ public static class MsBuildBootstrap
 
     private static VisualStudioInstance? Best(IEnumerable<VisualStudioInstance> candidates)
     {
-        VisualStudioInstance[] ordered = [.. candidates];
+        VisualStudioInstance[] asLocated = [.. candidates];
 
-        if (ordered.Length is 0)
+        if (asLocated.Length is 0)
             return null;
 
-        var versions = new Version[ordered.Length];
+        var versions = new Version[asLocated.Length];
 
-        for (var index = 0; index < ordered.Length; index++)
-            versions[index] = ordered[index].Version;
+        for (var index = 0; index < asLocated.Length; index++)
+            versions[index] = asLocated[index].Version;
 
-        return ordered[Preferred(versions, Environment.Version.Major)];
+        return asLocated[Preferred(versions, Environment.Version.Major)];
     }
 
     public static string? SdkPath { get; private set; }

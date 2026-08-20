@@ -49,10 +49,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `E2ECollectionCensusTests` enforces the real invariant instead of one collection name — a fixture
   used by more than one class keeps every builder of it in `TerseServerCollection`, and it discovers
   both sides from the E2E sources. Measured locally: **576.7 s → 476.9 s**, 960 tests green.
-- **The E2E suite runs `2x` parallel lanes.** 53 % of the CI leg's wall time sat pinned at exactly 4
+- **The E2E suite runs `1.5x` parallel lanes.** 53 % of the CI leg's wall time sat pinned at exactly 4
   concurrent tests on a 4-vCPU runner while the work is dominated by waiting on child processes.
-  `tests/TerseSharp.E2ETests/xunit.runner.json` sets `maxParallelThreads` to `2x`; collection
-  membership is untouched, so no pair of fixture builders can newly overlap.
+  `tests/TerseSharp.E2ETests/xunit.runner.json` sets `maxParallelThreads` to `1.5x`; collection
+  membership is untouched, so no pair of fixture builders can newly overlap. **This is the knob to back
+  off** if the Windows-only `TimeoutException: Initialization timed out` returns: a lane starts a
+  `terse` server whose Roslyn solution load is CPU- and memory-bound, and it races the fixed 60 s MCP
+  handshake ceiling that `MCP_TIMEOUT` does not raise. `2x` was measured first and lowered to `1.5x`
+  for that margin.
 
 
 ## [0.42.0] - 2026-08-20

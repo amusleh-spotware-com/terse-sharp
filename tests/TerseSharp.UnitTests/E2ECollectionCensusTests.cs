@@ -67,7 +67,6 @@ public sealed class E2ECollectionCensusTests
         text.Contains("TerseServerFixture.FixtureRoot", StringComparison.Ordinal)
         || text.Contains("(TerseServerFixture ", StringComparison.Ordinal);
 
-
     private static string[] OwnFixtures(string text) =>
     [
         .. text.Split('"')
@@ -75,7 +74,6 @@ public sealed class E2ECollectionCensusTests
             .Where(name => !string.Equals(name, "FixtureSolution", StringComparison.Ordinal))
             .Distinct(StringComparer.Ordinal),
     ];
-
 
     private static (string Name, string Text)[] Sources() =>
     [

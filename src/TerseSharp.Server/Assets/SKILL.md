@@ -799,8 +799,8 @@ only mode that stops at the first timeout. **A single project ignores `parallel`
 for that host — it refuses the **entire session** over one VSTest-shaped argument. `list_tests`
 answers there too: the SDK hosts the test application in server mode and discards its `--list-tests`
 output (dotnet/sdk#49754), so terse builds the target, resolves each test project's `TargetPath`, and
-runs the test module itself with `--list-tests`. The one visible difference is that `runSettings=` is
-VSTest-only.
+runs the test module itself with `--list-tests`. There, `timeoutSeconds` bounds **each** child rather
+than the call, and a multi-targeted project needs `targetFramework=`. `runSettings=` stays VSTest-only.
 
 **A suite can hand you a run-level note.** `run_tests` sets `TERSE_RESULTS_DIRECTORY` on the
 `dotnet test` process — per project in a batch, so `.trx` names cannot collide — and whatever it writes to `$TERSE_RESULTS_DIRECTORY/terse-notes*.txt`

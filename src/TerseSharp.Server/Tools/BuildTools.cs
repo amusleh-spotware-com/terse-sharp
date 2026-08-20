@@ -411,11 +411,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CultureInfo.InvariantCulture,
         $"NOTE changed=true ran every test project - {tests.FullRunReason}");
 
-
     private static string SelectedNote(string root, TestSelection tests) => string.Create(
         CultureInfo.InvariantCulture,
         $"NOTE changed=true ran {Named(root, tests.Run)}; skipped {Named(root, tests.Skipped)}");
-
 
     private static string Named(string root, ImmutableArray<string> projects) => projects.IsDefaultOrEmpty
         ? "nothing"

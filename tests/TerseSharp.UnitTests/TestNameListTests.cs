@@ -100,4 +100,34 @@ public sealed class TestNameListTests
         "\r\n" +
         "Test discovery summary: found 5 test(s) - C:\\repo\\Mtp.Trading.Tests.dll (net10.0|x64)\r\n" +
         "  duration: 140ms\r\n";
+
+    [Fact]
+    public void Parse_OfTwoTestModulesEachWithItsOwnDiscoverySummary_KeepsTheNamesOfBoth()
+    {
+        string[] outputs =
+        [
+            "  Alpha.Tests.OneTests.First\n  Alpha.Tests.OneTests.Second\n\nTest discovery summary: found 2 test(s) - Alpha.Tests.dll (net10.0|x64)\n",
+        "  Beta.Tests.TwoTests.Third\n\nTest discovery summary: found 1 test(s) - Beta.Tests.dll (net10.0|x64)\n",
+    ];
+
+        var names = TestNameList.Parse(outputs, null);
+
+        Assert.Equal(
+            ["Alpha.Tests.OneTests.First", "Alpha.Tests.OneTests.Second", "Beta.Tests.TwoTests.Third"],
+            names);
+    }
+
+    [Fact]
+    public void Parse_OfTwoTestModules_AppliesContainsAcrossBoth()
+    {
+        string[] outputs =
+        [
+            "  Alpha.Tests.OneTests.First\n\nTest discovery summary: found 1 test(s) - Alpha.Tests.dll (net10.0|x64)\n",
+        "  Beta.Tests.TwoTests.First\n  Beta.Tests.TwoTests.Skipped\n\nTest discovery summary: found 2 test(s) - Beta.Tests.dll (net10.0|x64)\n",
+    ];
+
+        Assert.Equal(
+            ["Alpha.Tests.OneTests.First", "Beta.Tests.TwoTests.First"],
+            TestNameList.Parse(outputs, "First"));
+    }
 }
