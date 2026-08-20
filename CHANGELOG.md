@@ -49,14 +49,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `E2ECollectionCensusTests` enforces the real invariant instead of one collection name — a fixture
   used by more than one class keeps every builder of it in `TerseServerCollection`, and it discovers
   both sides from the E2E sources. Measured locally: **576.7 s → 476.9 s**, 960 tests green.
-- **The E2E suite runs `1.5x` parallel lanes.** 53 % of the CI leg's wall time sat pinned at exactly 4
-  concurrent tests on a 4-vCPU runner while the work is dominated by waiting on child processes.
-  `tests/TerseSharp.E2ETests/xunit.runner.json` sets `maxParallelThreads` to `1.5x`; collection
-  membership is untouched, so no pair of fixture builders can newly overlap. **This is the knob to back
-  off** if the Windows-only `TimeoutException: Initialization timed out` returns: a lane starts a
-  `terse` server whose Roslyn solution load is CPU- and memory-bound, and it races the fixed 60 s MCP
-  handshake ceiling that `MCP_TIMEOUT` does not raise. `2x` was measured first and lowered to `1.5x`
-  for that margin.
+- **The lane count stays at the xUnit default**, and raising it is now a *refuted* approach rather than
+  an untried one. 53 % of the CI leg's wall sat pinned at exactly 4 concurrent tests on a 4-vCPU
+  runner, so `maxParallelThreads: "1.5x"` looked free — it is not. Measured on CI run 32369954276 it
+  made the leg **slower**: E2E 723 s → 773 s and the unit assembly, which `dotnet test` runs beside it,
+  305 s → 482 s. A lane is not an idle wait on a child process: it starts a `terse` server whose Roslyn
+  solution load is CPU- and memory-bound, so extra lanes starve the work already running. A 32-core
+  development box cannot show this, because there the serial collection is the whole critical path.
 
 
 ## [0.42.0] - 2026-08-20
