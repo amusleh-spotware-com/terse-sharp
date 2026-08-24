@@ -548,7 +548,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         return int.Parse(tokens[(tokens.LastIndexOf(' ') + 1)..], CultureInfo.InvariantCulture);
     }
 
-    private const int AdvertisedPayloadBudget = 26450;
+    private const int AdvertisedPayloadBudget = 26490;
 
     [Fact]
     public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()
@@ -566,4 +566,18 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     private static string WithoutAssetWarnings(string response) => string.Join(
         "\n",
         response.Split('\n').Where(line => !line.StartsWith("WARNING guard=", StringComparison.Ordinal) && !line.StartsWith("WARNING skill=", StringComparison.Ordinal)));
+
+    [Fact]
+    public async Task GetSymbolSource_OnACompactType_CostsLessThanTheSteerItReplaces()
+    {
+        var widest = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Tag" });
+        var wide = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Wide" });
+        var documented = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Money" });
+        var inlined = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Money", ["verbose"] = true });
+
+        Assert.DoesNotContain("steer: get_symbol_source", widest, StringComparison.Ordinal);
+        Assert.Contains("steer: get_symbol_source", wide, StringComparison.Ordinal);
+        Assert.True(Tokens(widest) < Tokens(wide), Report("get_symbol_source", widest, wide));
+        Assert.True(Tokens(documented) < Tokens(inlined), Report("get_symbol_source", documented, inlined));
+    }
 }

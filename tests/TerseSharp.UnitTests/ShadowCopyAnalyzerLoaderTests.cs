@@ -39,7 +39,7 @@ public sealed class ShadowCopyAnalyzerLoaderTests
         var diagnostics = await AnalyzerDiagnosticsAsync(Consumer(forked));
 
         Assert.Contains(diagnostics, diagnostic => diagnostic.Id is "FIX001");
-        Assert.Empty(MappedAnalyzers.Of(forked));
+        Assert.Empty(MappedAnalyzers.Of(forked, lease.Workspace.Root));
     }
 
     private static async Task EnsureBuiltAsync()
@@ -108,5 +108,31 @@ public sealed class ShadowCopyAnalyzerLoaderTests
         {
             return false;
         }
+    }
+
+    [Fact]
+    public async Task MappedAnalyzers_ReportsAReferenceInsideTheRootAndNeverOneOutsideIt()
+    {
+        await EnsureBuiltAsync();
+
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(GeneratorSolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+
+        var forked = AnalyzerRebind.Rebound(lease.Workspace.Solution, ShadowCopyAnalyzerLoader.Shared);
+        var mapped = typeof(ShadowCopyAnalyzerLoaderTests).Assembly.Location;
+        var probed = Consumer(forked).AddAnalyzerReference(new AnalyzerFileReference(mapped, ShadowCopyAnalyzerLoader.Shared)).Solution;
+
+        foreach (var project in forked.Projects)
+            await AnalyzerDiagnosticsAsync(project);
+
+        Assert.Contains(
+            forked.Projects.SelectMany(project => project.AnalyzerReferences),
+            reference => reference.FullPath?.Contains(".nuget", StringComparison.OrdinalIgnoreCase) is true);
+        Assert.Empty(MappedAnalyzers.Of(forked, lease.Workspace.Root));
+        Assert.Empty(MappedAnalyzers.Of(probed, lease.Workspace.Root));
+        Assert.Contains(mapped, MappedAnalyzers.Of(probed, Path.GetDirectoryName(mapped)!), StringComparer.OrdinalIgnoreCase);
     }
 }

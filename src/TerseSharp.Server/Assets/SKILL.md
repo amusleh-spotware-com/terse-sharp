@@ -40,7 +40,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` | up to 10 in one response, each under its own path line; an unresolved path is reported inline as `NOT_FOUND`, never a failed call |
 | **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too, and an unfiltered outline of 25+ members ends with `104 members - narrow with contains=`, because an outline never truncates and so never earned the truncation steer |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
-| **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id | answers `get_type_outline`'s member list plus a steer to one member, not the whole file's text; `verbose: true` opts back into the source |
+| **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id | answers `get_type_outline`'s member list plus a steer to one member, not the whole file's text; `verbose: true` opts back into the source. A type with ONE declaring reference whose **rendered source** - the declaration *plus* its doc comment, which is what the response carries - is at most 4 lines and 200 characters answers that source instead, because withholding something shorter than the steer saves nothing |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
 | **Navigate** | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` | all of them in one response; an id that does not resolve is reported `NOT_RESOLVED <id>`, never a failed call |
 | **Navigate** | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
@@ -405,14 +405,17 @@ overload whose parameter list differs still lands.
 **A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
 type; it must name one of the targets' own containers, and a bare leaf name that matches two of them
-is refused naming both qualified names rather than resolved to the first.
+is refused naming both qualified names rather than resolved to the first. **`addTo=` is comma-separated**,
+paired with `add=`: `add=[a, b] addTo="Alpha,Beta"` puts `a` in `Alpha` and `b` in `Beta`. One name
+takes every entry; any other count is refused.
 
 **`add_member` and `replace_symbol` accept several declarations in one call**, applied as a single
 compile-gated edit — so a set of members that reference each other needs no dependency ordering, and
 `replace_symbol` can split a member into overloads. On a member that is already expression-bodied,
 `replace_symbol_body` accepts a bare expression as well as `=> expr` and a statement block.
 
-**`usings=` lands the import in the same edit.** `replace_symbol_body`, `replace_symbol` and
+**`usings=` lands the import in the same edit, and is the first thing all three descriptions name.**
+`replace_symbol_body`, `replace_symbol` and
 `add_member` take `usings: ["System.Collections.Immutable"]`, added to the file's using block —
 sorted System-first, one already present ignored — inside the **same** compile-gated write as the
 declaration. That is the answer to a `CS0246` rollback: pass the namespace instead of paying a
@@ -605,8 +608,10 @@ that answers nothing, and the clip always names `next: startLine=`.
    `list_projects` prints each project's workspace-relative path, so the name it lists and the
    `project=` argument you feed to `build`/`run_tests` come from the same line.
    `workspace_status` prints `mapped=N` **only** when this process is holding analyzer or
-   source-generator assemblies (or under `verbose=true`); a non-zero count means an external
-   `dotnet build` over those files will fail `MSB3027` until the server restarts.
+   source-generator assemblies **inside the workspace root** (or under `verbose=true`); a non-zero
+   count means an external `dotnet build` over those files will fail `MSB3027` until the server
+   restarts. One mapped from **outside** the root — the NuGet package cache, an SDK component — is
+   not counted: no build writes there, so it cannot raise `MSB3027`.
 7. **Several worktrees or repos open?** Pass `workspace:`. An ambiguous request returns
    `AmbiguousWorkspace` listing the candidates rather than guessing — never assume it picked right.
 8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT`, `HEURISTIC`,

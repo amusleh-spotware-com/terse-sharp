@@ -175,18 +175,18 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> SwapAsync(
-        LoadedWorkspace workspace,
-        EditTarget target,
-        IReadOnlyList<SyntaxNode> replacements,
-        EditOptions options,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            EditTarget target,
+            IReadOnlyList<SyntaxNode> replacements,
+            EditOptions options,
+            CancellationToken cancellationToken)
     {
         var planned = new PlannedEdit(target, replacements);
 
         if (Identical(planned) && options.Usings.IsDefaultOrEmpty)
             return Result.Ok(Unchanged(options.Tool));
 
-        var swapped = await SwappedAsync(workspace.Solution, [planned], options.Usings, null, cancellationToken).ConfigureAwait(false);
+        var swapped = await SwappedAsync(workspace.Solution, [planned], options.Usings, [], cancellationToken).ConfigureAwait(false);
 
         if (!swapped.IsOk)
             return Result.Fail<string>(swapped.Error!);
@@ -455,10 +455,10 @@ public static class SymbolEditService
     private static bool Identical(PlannedEdit planned) =>
         planned.Nodes is [var only] && only.ToFullString().Equals(planned.Target.Node.ToFullString(), StringComparison.Ordinal);
 
-    private static SyntaxNode? Applied(SyntaxNode root, IReadOnlyList<PlannedEdit> planned, AppendedMembers? appended)
+    private static SyntaxNode? Applied(SyntaxNode root, IReadOnlyList<PlannedEdit> planned, IReadOnlyList<AppendedMembers> appended)
     {
         var targets = planned.Select(edit => edit.Target.Node);
-        var current = root.TrackNodes(appended is { } tracked ? targets.Append(tracked.Type) : targets);
+        var current = root.TrackNodes(appended.Count is 0 ? targets : targets.Concat(appended.Select(plan => (SyntaxNode)plan.Type)));
 
         foreach (var edit in planned)
         {
@@ -468,15 +468,15 @@ public static class SymbolEditService
             current = current.ReplaceNode(node, edit.Nodes.Select(replacement => replacement.WithAdditionalAnnotations(Formatter.Annotation)));
         }
 
-        return appended is { } grow ? Grown(current, grow) : current;
+        return Grown(current, appended);
     }
 
     private static async Task<Result<Solution>> SwappedAsync(
-        Solution solution,
-        IReadOnlyList<PlannedEdit> planned,
-        System.Collections.Immutable.ImmutableArray<string> usings,
-        AppendedMembers? appended,
-        CancellationToken cancellationToken)
+            Solution solution,
+            IReadOnlyList<PlannedEdit> planned,
+            System.Collections.Immutable.ImmutableArray<string> usings,
+            IReadOnlyList<AppendedMembers> appended,
+            CancellationToken cancellationToken)
     {
         var document = planned[0].Target.Document;
 
@@ -534,31 +534,31 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> BatchedAsync(
-        LoadedWorkspace workspace,
-        PlannedEdit[] planned,
-        EditOptions options,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            PlannedEdit[] planned,
+            EditOptions options,
+            CancellationToken cancellationToken)
     {
         if (options.Add.IsDefaultOrEmpty)
-            return await SwappedManyAsync(workspace, planned, options, null, cancellationToken).ConfigureAwait(false);
+            return await SwappedManyAsync(workspace, planned, options, [], cancellationToken).ConfigureAwait(false);
 
         var appended = AppendPlan(planned, options.Add, options.AddTo);
 
         return appended.IsOk
-            ? await SwappedManyAsync(workspace, planned, options, appended.Value, cancellationToken).ConfigureAwait(false)
+            ? await SwappedManyAsync(workspace, planned, options, appended.Value!, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(appended.Error!);
     }
 
     private static async Task<Result<string>> SwappedManyAsync(
-            LoadedWorkspace workspace,
-            IReadOnlyList<PlannedEdit> planned,
-            EditOptions options,
-            AppendedMembers? appended,
-            CancellationToken cancellationToken)
+                LoadedWorkspace workspace,
+                IReadOnlyList<PlannedEdit> planned,
+                EditOptions options,
+                IReadOnlyList<AppendedMembers> appended,
+                CancellationToken cancellationToken)
     {
         var solution = workspace.Solution;
         var changed = new List<DocumentId>(planned.Count);
-        var forced = !options.Usings.IsDefaultOrEmpty || appended is not null;
+        var forced = !options.Usings.IsDefaultOrEmpty || appended.Count > 0;
 
         foreach (var group in planned.Where(edit => forced || !Identical(edit)).GroupBy(edit => edit.Target.Document.Id))
         {
@@ -580,17 +580,17 @@ public static class SymbolEditService
     }
 
     private static Task<Result<Solution>> GroupedAsync(
-        Solution solution,
-        IGrouping<DocumentId, PlannedEdit> group,
-        System.Collections.Immutable.ImmutableArray<string> usings,
-        AppendedMembers? appended,
-        CancellationToken cancellationToken) =>
-        SwappedAsync(
-            solution,
-            [.. group],
-            usings,
-            appended is { } plan && group.Key.Equals(plan.Document) ? appended : null,
-            cancellationToken);
+            Solution solution,
+            IGrouping<DocumentId, PlannedEdit> group,
+            System.Collections.Immutable.ImmutableArray<string> usings,
+            IReadOnlyList<AppendedMembers> appended,
+            CancellationToken cancellationToken) =>
+            SwappedAsync(
+                solution,
+                [.. group],
+                usings,
+                [.. appended.Where(plan => group.Key.Equals(plan.Document))],
+                cancellationToken);
 
     private static TerseError Overlapping(string file) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"two of the batched edits in {file} overlap - one declaration contains the other, so applying the outer one removes the inner"),
@@ -647,26 +647,13 @@ public static class SymbolEditService
         return false;
     }
 
-    private static Result<AppendedMembers> AppendPlan(IReadOnlyList<PlannedEdit> planned, System.Collections.Immutable.ImmutableArray<string> add, string? addTo)
+    private static Result<AppendedMembers[]> AppendPlan(IReadOnlyList<PlannedEdit> planned, System.Collections.Immutable.ImmutableArray<string> add, string? addTo)
     {
-        var types = planned.Select(edit => edit.Target.Node.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>()).ToArray();
+        var routed = Routed(add, addTo);
 
-        if (AmbiguousContainer(types, addTo) is { } ambiguous)
-            return Result.Fail<AppendedMembers>(ambiguous);
-
-        var chosen = Chosen(planned, types, addTo);
-
-        if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
-            return Result.Fail<AppendedMembers>(AddNotShared(types, addTo));
-
-        if (planned.Any(edit => edit.Target.Node.Span == container.Span))
-            return Result.Fail<AppendedMembers>(AddReplacesItsOwnType());
-
-        var members = MemberDeclaration.ParseAll(string.Join("\n\n", add));
-
-        return members.IsOk
-            ? Result.Ok(new AppendedMembers(planned[chosen].Target.Document.Id, container, members.Value!))
-            : Result.Fail<AppendedMembers>(members.Error!);
+        return routed.IsOk
+            ? RoutedPlans(planned, routed.Value!)
+            : Result.Fail<AppendedMembers[]>(routed.Error!);
     }
 
     private static SyntaxNode? Grown(SyntaxNode current, AppendedMembers appended)
@@ -844,6 +831,112 @@ public static class SymbolEditService
             specifier is null && !modifiers.Any(SyntaxKind.PartialKeyword);
 
     private static string Arity(int arity) => arity is 0 ? string.Empty : string.Create(CultureInfo.InvariantCulture, $"`{arity}");
+
+    private readonly record struct AddRoute(string? Container, IReadOnlyList<string> Members);
+
+    private static List<string> Containers(string? addTo)
+    {
+        var found = new List<string>(2);
+
+        if (addTo is not { Length: > 0 })
+            return found;
+
+        foreach (var part in addTo.AsSpan().Split(','))
+        {
+            var name = addTo.AsSpan()[part].Trim();
+
+            if (!name.IsEmpty)
+                found.Add(new string(name));
+        }
+
+        return found;
+    }
+
+    private static TerseError RouteMismatch(int containers, int members) => Errors.Invalid(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"addTo= names {containers} containing types but add= has {members} {(members is 1 ? "entry" : "entries")}"),
+            "pass one addTo= per add= entry, comma-separated and in the same order, or a single addTo= that takes all of them");
+
+    private static AddRoute[] Merged(List<string> containers, System.Collections.Immutable.ImmutableArray<string> add) =>
+            [.. add
+                .Select((declaration, index) => (Container: containers[index], Declaration: declaration))
+                .GroupBy(entry => entry.Container, StringComparer.Ordinal)
+                .Select(group => new AddRoute(group.Key, [.. group.Select(entry => entry.Declaration)]))];
+
+    private static Result<AddRoute[]> Routed(System.Collections.Immutable.ImmutableArray<string> add, string? addTo)
+    {
+        var containers = Containers(addTo);
+
+        if (containers.Count is 0)
+        {
+            return addTo is { Length: > 0 }
+                ? Result.Fail<AddRoute[]>(BlankContainer(addTo))
+                : Result.Ok<AddRoute[]>([new AddRoute(null, [.. add])]);
+        }
+
+        if (containers.Count is 1)
+            return Result.Ok<AddRoute[]>([new AddRoute(containers[0], [.. add])]);
+
+        return containers.Count == add.Length
+            ? Result.Ok(Merged(containers, add))
+            : Result.Fail<AddRoute[]>(RouteMismatch(containers.Count, add.Length));
+    }
+
+    private static Result<AppendedMembers> RoutePlan(IReadOnlyList<PlannedEdit> planned, BaseTypeDeclarationSyntax?[] types, AddRoute route)
+    {
+        if (AmbiguousContainer(types, route.Container) is { } ambiguous)
+            return Result.Fail<AppendedMembers>(ambiguous);
+
+        var chosen = Chosen(planned, types, route.Container);
+
+        if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
+            return Result.Fail<AppendedMembers>(AddNotShared(types, route.Container));
+
+        if (planned.Any(edit => edit.Target.Node.Span == container.Span))
+            return Result.Fail<AppendedMembers>(AddReplacesItsOwnType());
+
+        var members = MemberDeclaration.ParseAll(string.Join("\n\n", route.Members));
+
+        return members.IsOk
+            ? Result.Ok(new AppendedMembers(planned[chosen].Target.Document.Id, container, members.Value!))
+            : Result.Fail<AppendedMembers>(members.Error!);
+    }
+
+    private static Result<AppendedMembers[]> RoutedPlans(IReadOnlyList<PlannedEdit> planned, IReadOnlyList<AddRoute> routes)
+    {
+        var types = planned.Select(edit => edit.Target.Node.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>()).ToArray();
+        var plans = new AppendedMembers[routes.Count];
+
+        for (var index = 0; index < routes.Count; index++)
+        {
+            var one = RoutePlan(planned, types, routes[index]);
+
+            if (!one.IsOk)
+                return Result.Fail<AppendedMembers[]>(one.Error!);
+
+            plans[index] = one.Value;
+        }
+
+        return Result.Ok(plans);
+    }
+
+    private static SyntaxNode? Grown(SyntaxNode current, IReadOnlyList<AppendedMembers> appended)
+    {
+        foreach (var plan in appended)
+        {
+            if (Grown(current, plan) is not { } grown)
+                return null;
+
+            current = grown;
+        }
+
+        return current;
+    }
+
+    private static TerseError BlankContainer(string addTo) => Errors.Invalid(
+            "addTo=" + addTo + " names no containing type - every comma-separated entry was blank",
+            "name one containing type per add= entry, or drop addTo= to append to the container the targets share");
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

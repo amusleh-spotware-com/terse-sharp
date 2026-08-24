@@ -16,6 +16,7 @@ public static class DocumentOutline
     public static IReadOnlyList<DocumentSection> Headings(string text)
     {
         var found = new List<DocumentSection>();
+        var open = new List<int>();
         var fenced = false;
         var number = 0;
 
@@ -26,7 +27,7 @@ public static class DocumentOutline
             if (IsFence(line))
                 fenced = !fenced;
             else if (!fenced && Level(line) is var level and > 0)
-                found.Add(Close(found, new DocumentSection(new string(line.TrimEnd()), level, number, number)));
+                Begin(found, open, new DocumentSection(new string(line.TrimEnd()), level, number, int.MaxValue));
         }
 
         return Seal(found, number);
@@ -81,17 +82,16 @@ public static class DocumentOutline
         ? "the file has no markdown headings; use startLine/endLine"
         : "headings: " + string.Join(" | ", sections.Take(12).Select(section => section.Heading));
 
-    private static DocumentSection Close(List<DocumentSection> found, DocumentSection opened)
+    private static void Begin(List<DocumentSection> found, List<int> open, DocumentSection opened)
     {
-        for (var index = found.Count - 1; index >= 0; index--)
+        while (open.Count > 0 && found[open[^1]].Level >= opened.Level)
         {
-            if (found[index].EndLine is not int.MaxValue || found[index].Level < opened.Level)
-                break;
-
-            found[index] = found[index] with { EndLine = opened.StartLine - 1 };
+            found[open[^1]] = found[open[^1]] with { EndLine = opened.StartLine - 1 };
+            open.RemoveAt(open.Count - 1);
         }
 
-        return opened with { EndLine = int.MaxValue };
+        open.Add(found.Count);
+        found.Add(opened);
     }
 
     private static List<DocumentSection> Seal(List<DocumentSection> found, int lastLine)

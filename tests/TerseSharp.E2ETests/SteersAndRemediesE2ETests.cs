@@ -158,4 +158,25 @@ public sealed class SteersAndRemediesE2ETests(TerseServerFixture server)
         Assert.Contains("is not a namespace", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbolSource_OnATypeShorterThanItsOwnSteer_AnswersTheDeclarationInstead()
+    {
+        var compact = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Order" });
+        var widest = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Tag" });
+        var documented = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Money" });
+        var wide = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Wide" });
+
+        Assert.Contains("public sealed record Order(string Symbol, decimal Volume);", compact, StringComparison.Ordinal);
+        Assert.DoesNotContain("steer: get_symbol_source", compact, StringComparison.Ordinal);
+
+        Assert.Contains("public bool IsEmpty", widest, StringComparison.Ordinal);
+        Assert.DoesNotContain("steer: get_symbol_source", widest, StringComparison.Ordinal);
+
+        Assert.Contains("steer: get_symbol_source symbolId=Money.Member", documented, StringComparison.Ordinal);
+        Assert.DoesNotContain("The ISO 4217 code", documented, StringComparison.Ordinal);
+
+        Assert.Contains("steer: get_symbol_source symbolId=Wide.Member", wide, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeliberatelyLongPropertyNameThree.Length", wide, StringComparison.Ordinal);
+    }
 }

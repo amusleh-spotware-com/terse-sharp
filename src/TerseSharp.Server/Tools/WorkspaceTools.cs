@@ -95,7 +95,7 @@ CancellationToken cancellationToken = default) =>
         foreach (var loaded in context.Registry.All())
         {
             if (string.Equals(Path.GetFullPath(loaded.SolutionPath), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase))
-                return MappedAnalyzers.Of(loaded.Solution);
+                return MappedAnalyzers.Of(loaded.Solution, loaded.Root);
         }
 
         return [];
@@ -349,7 +349,7 @@ CancellationToken cancellationToken = default) =>
 
     private static void AppendMappedAnalyzers(ResponseBuilder response, LoadedWorkspace workspace, bool verbose)
     {
-        var mapped = MappedAnalyzers.Of(workspace.Solution);
+        var mapped = MappedAnalyzers.Of(workspace.Solution, workspace.Root);
 
         if (mapped.Length is 0 && !verbose)
             return;

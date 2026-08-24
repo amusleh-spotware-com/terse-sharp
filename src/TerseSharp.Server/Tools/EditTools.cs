@@ -8,18 +8,18 @@ public sealed class EditTools(ToolContext context)
     private const string VerboseHelp = "Return the full diff instead of the one-line summary. Default false.";
 
     [McpServerTool(Name = "replace_symbol_body")]
-    [Description("Replace a method, constructor or accessor body, addressed by symbol id. No line numbers and no surrounding context needed. Pass usings to add the namespaces the new body needs in the same compile-gated edit. Replaces one call per missing import. Rolled back if it introduces a compile error, and the rejection then names a retryWith token that holds the body, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a method, constructor or accessor body, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. No line numbers and no surrounding context needed. Replaces one call per missing import. Rolled back if it introduces a compile error, and the rejection then names a retryWith token that holds the body, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbolBody(
-    [Description("Symbol id of the member.")] string? symbolId = null,
-    [Description("New body: statements with or without the surrounding braces, or an expression body as '=> expr'. On a member that is already expression-bodied, a bare expression is accepted and stays expression-bodied.")] string body = "",
-    [Description("Diff only, write nothing.")] bool dryRun = false,
-    [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
-    [Description(VerboseHelp)] bool verbose = false,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Alias for symbolId.")] string? symbol = null,
-    [Description(UsingsHelp)] string[]? usings = null,
-    [Description(RetryHelp)] string? retryWith = null,
-    CancellationToken cancellationToken = default)
+        [Description("Symbol id of the member.")] string? symbolId = null,
+        [Description("New body: statements with or without the surrounding braces, or an expression body as '=> expr'. On a member that is already expression-bodied, a bare expression is accepted and stays expression-bodied.")] string body = "",
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description(VerboseHelp)] bool verbose = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Alias for symbolId.")] string? symbol = null,
+        [Description(UsingsHelp)] string[]? usings = null,
+        [Description(RetryHelp)] string? retryWith = null,
+        CancellationToken cancellationToken = default)
     {
         if (RejectedUsings(usings) is { } rejected)
             return Task.FromResult(rejected);
@@ -41,22 +41,22 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which of the targets' containing types takes them when the targets do not share one. Pass usings to add the namespaces the new declarations need in the same edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
-        [Description("Symbol id of the member.")] string? symbolId = null,
-        [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
-        [Description(AddHelp)] string[]? add = null,
-        [Description("Name of the containing type that add= lands in, e.g. ToolBoundary or T:TerseSharp.Server.ToolBoundary. Only needed when the targets do not all share one containing type; it must name one of their containers, so a member can never land in a type none of the targets lives in.")] string? addTo = null,
-        [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
-        [Description(VerboseHelp)] bool verbose = false,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Alias for symbolId.")] string? symbol = null,
-        [Description("Symbol ids of the members to replace together, paired positionally with declarations. Replaces one call per member. Several entries per file are allowed; two entries where one declaration contains the other are refused.")] string[]? symbolIds = null,
-        [Description("One complete declaration per entry of symbolIds, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
-        [Description(UsingsHelp)] string[]? usings = null,
-        [Description(RetryHelp)] string? retryWith = null,
-        CancellationToken cancellationToken = default)
+            [Description("Symbol id of the member.")] string? symbolId = null,
+            [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
+            [Description(AddHelp)] string[]? add = null,
+            [Description("Name of the containing type that add= lands in, e.g. ToolBoundary or T:TerseSharp.Server.ToolBoundary. Only needed when the targets do not all share one containing type; it must name one of their containers, so a member can never land in a type none of the targets lives in. Comma-separated routes each add= entry to its own container, in the same order; one name takes them all, and any other count is refused naming both.")] string? addTo = null,
+            [Description("Diff only, write nothing.")] bool dryRun = false,
+            [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+            [Description(VerboseHelp)] bool verbose = false,
+            [Description("Workspace or worktree name.")] string? workspace = null,
+            [Description("Alias for symbolId.")] string? symbol = null,
+            [Description("Symbol ids of the members to replace together, paired positionally with declarations. Replaces one call per member. Several entries per file are allowed; two entries where one declaration contains the other are refused.")] string[]? symbolIds = null,
+            [Description("One complete declaration per entry of symbolIds, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
+            [Description(UsingsHelp)] string[]? usings = null,
+            [Description(RetryHelp)] string? retryWith = null,
+            CancellationToken cancellationToken = default)
     {
         if (RejectedUsings(usings) is { } rejected)
             return Task.FromResult(rejected);
@@ -90,19 +90,19 @@ public sealed class EditTools(ToolContext context)
             held?.Root);
     }
     [McpServerTool(Name = "add_member")]
-    [Description("Add one or more members to a type, addressed by the type's symbol id - or, with path=, add namespace-level types to an existing .cs file. An enum symbol id takes enum members. Several declarations in one call land as a single compile-gated edit, so a set of members that reference each other needs no dependency ordering. Pass usings to add the namespaces they need in that same edit. Replaces one call per missing import. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. Replaces one call per missing import. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> AddMember(
-    [Description("Symbol id of the containing type, or of an enum when adding enum members. Cannot be combined with path.")] string? typeSymbolId = null,
-    [Description("One complete member declaration, or several in sequence; they are added together as one edit. With an enum container, one or more enum member names.")] string declaration = "",
-    [Description("Path of a .cs file to append namespace-level type declarations to, instead of a type symbol id.")] string? path = null,
-    [Description("Diff only, write nothing.")] bool dryRun = false,
-    [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
-    [Description(VerboseHelp)] bool verbose = false,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Alias for typeSymbolId.")] string? symbol = null,
-    [Description(UsingsHelp)] string[]? usings = null,
-    [Description(RetryHelp)] string? retryWith = null,
-    CancellationToken cancellationToken = default)
+        [Description("Symbol id of the containing type, or of an enum when adding enum members. Cannot be combined with path.")] string? typeSymbolId = null,
+        [Description("One complete member declaration, or several in sequence; they are added together as one edit. With an enum container, one or more enum member names.")] string declaration = "",
+        [Description("Path of a .cs file to append namespace-level type declarations to, instead of a type symbol id.")] string? path = null,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+        [Description(VerboseHelp)] bool verbose = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Alias for typeSymbolId.")] string? symbol = null,
+        [Description(UsingsHelp)] string[]? usings = null,
+        [Description(RetryHelp)] string? retryWith = null,
+        CancellationToken cancellationToken = default)
     {
         if (RejectedUsings(usings) is { } rejected)
             return Task.FromResult(rejected);
@@ -289,13 +289,11 @@ public sealed class EditTools(ToolContext context)
             ? string.Create(CultureInfo.InvariantCulture, $"replay it with {held.Tool}, which is the tool that can apply what it holds")
             : "re-send the text; the server holds only the last 8 rejected edits of this process").Render();
 
-
     private static RejectedEdit? Held(string? retryWith, string tool) =>
         retryWith is { Length: > 0 } token && RejectedEdits.Recall(token) is { } edit
         && string.Equals(edit.Tool, tool, StringComparison.Ordinal)
             ? edit
             : null;
-
 
     private static string First(IReadOnlyList<string> values, string fallback) =>
         values is [var only, ..] ? only : fallback;

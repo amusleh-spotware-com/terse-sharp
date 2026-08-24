@@ -8,6 +8,89 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-08-24
+
+**Response formats changed.** `get_symbol_source` on a **type** id that has one declaring reference
+and whose rendered source - the declaration *plus* its doc comment - is at most four lines and 200
+characters now answers that source instead of `get_type_outline`'s member list plus the
+`steer: get_symbol_source symbolId=<Type>.Member ...` line. A partial type, a documented one-liner
+and a four-line type with long lines all keep the outline and the steer, unchanged.
+`unload_workspace` and `workspace_status` no longer count - or name under `verbose=true` - an
+analyzer or source-generator assembly this process mapped from **outside** the workspace root, so
+the `still mapped into this server process` WARNING and the `mapped=` counter now cover only the
+files an external build of that solution can rewrite. `read_text section=` and `edit_text section=`
+now end a section at the next heading of its own level even when it has more than one subsection,
+which previously read to the end of the file.
+
+### Added
+
+- **`replace_symbol addTo=` accepts a comma-separated list**, paired positionally with `add=`, so a
+  batch whose helpers belong in *different* containing types lands as one compile-gated edit:
+  `add=[a, b] addTo="Alpha,Beta"` puts `a` in `Alpha` and `b` in `Beta`. A single name still takes
+  every entry, and any other count is refused naming both counts rather than routing part of the
+  batch. Before this, `addTo=` named exactly one container, so a multi-container batch had to fall
+  back to one `add_member` call per type — measured at 2 extra round trips in one session.
+  `CompileGateE2ETests.AddTo_WithOneContainerPerAddEntry_LandsEachHelperInItsOwnType` and
+  `CompileGateE2ETests.AddTo_WithADifferentNumberOfContainersThanAddEntries_RefusesNamingBothCounts`
+  lock both directions.
+
+### Changed
+
+- **`usings=` is now named in the opening sentence of `replace_symbol_body`, `replace_symbol` and
+  `add_member`.** It was documented in the parameter and in the third-to-eighth sentence of the tool
+  description, which a long session does not re-read, so a `CompileRegression` whose only error was a
+  missing import still cost three round trips — the rejection, the retry and the held payload — three
+  times in one session. `SKILL.md` says the same thing in the same place.
+
+- **`get_symbol_source` on a type whose rendered source is 4 lines or fewer answers that source, not
+  the outline plus a steer.** Withholding a one-line `public sealed record Order(string Symbol,
+  decimal Volume);` behind a 110-character `steer: … verbose=true for the whole type` cost a second
+  call and saved nothing — measured at 3 wasted calls in one session, on `FileService.FileWrite`,
+  `PendingWrite` and `RowCut`. The measure is what the response actually carries — the declaration
+  **plus its leading doc comment**, since `get_symbol_source` emits `ToFullString()` — so a one-line
+  `record` carrying a five-line `///` block keeps the outline rather than costing more than the steer
+  it would have replaced. There is a second gate on **characters** (200), so a 4-line type with very
+  long lines cannot slip through the line count, and a **partial** type always keeps the outline.
+  Anything longer keeps the outline and the steer, which is the whole point on a 200-line class.
+  `SteersAndRemediesE2ETests.GetSymbolSource_OnATypeShorterThanItsOwnSteer_AnswersTheDeclarationInstead`
+  covers all four shapes against `Order`, `Tag`, the documented `Money` and the wide-lined `Wide`
+  added to the fixture, and
+  `TokenBudgetE2ETests.GetSymbolSource_OnACompactType_CostsLessThanTheSteerItReplaces` budgets the
+  **widest** compact shape.
+
+
+
+### Fixed
+
+- **`read_text section=` and `edit_text section=` no longer run to the end of the file** when the
+  addressed section has more than one subsection. `DocumentOutline.Close` walked the heading list
+  backwards and stopped at the first already-closed sibling, so a `## [Unreleased]` carrying
+  `### Added` and `### Fixed` was never given an end line and read to the character cap — measured at
+  531 lines and ~13 000 tokens for a 120-line section of this repo's own `CHANGELOG.md`. The walk is
+  now an explicit stack of open headings, which is also O(n) rather than O(n²) over a file with many
+  headings. `DocumentOutlineTests.Headings_ForASectionWithMoreThanOneChild_StillEndsItAtTheNextSectionOfItsOwnLevel`
+  and `FileToolsE2ETests.ReadText_ForASectionWithMoreThanOneSubsection_StopsAtTheNextSectionOfItsOwnLevel`
+  lock it; the fenced-block path is asserted by the same fixture, which carries a fence holding a
+  line that looks like a heading.
+
+- **`unload_workspace` and `workspace_status` no longer count an analyzer mapped from outside the
+  workspace root.** On this repository's own machine `unload_workspace` deterministically warned that
+  `Microsoft.CodeAnalysis.Analyzers.dll` and `Microsoft.CodeAnalysis.CSharp.Analyzers.dll` — from the
+  **NuGet global-packages cache**, not from any project's `bin/` — were still mapped, and told the
+  user to restart the server. The warning exists to predict `MSB3027`, which only a build *writing*
+  the file can raise, and no build writes into the package cache. `MappedAnalyzers.Of` now takes the
+  workspace root and reports only references inside it, which is exactly the set an external build of
+  that solution can rewrite. The `still locked` NOTE that claimed analyzers were "mapped from a shadow
+  copy under the temp directory and never from a project's own output" was measured to be false — a
+  shadow copy that cannot be made falls back to mapping the file in place — and now says so instead of
+  ruling the set out. `ShadowCopyAnalyzerLoaderTests.MappedAnalyzers_ReportsAReferenceInsideTheRootAndNeverOneOutsideIt`
+  reproduces it in-process and locks the fix, asserting the predicate in both directions against an
+  analyzer reference to an assembly already mapped at its original path; the pre-existing test could
+  not fail, because it ran the analyzers of one project only and that project references no analyzer
+  package.
+
+
+
 ## [0.43.0] - 2026-08-24
 
 **Response formats changed.** A whole-file `read_text` of a markdown file now ends with a
@@ -4129,7 +4212,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.43.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.44.0...HEAD
+[0.44.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.44.0
 [0.43.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.43.0
 [0.42.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.42.0
 [0.41.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.1

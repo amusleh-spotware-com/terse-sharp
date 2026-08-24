@@ -117,13 +117,17 @@ public static class SourceService
     }
 
     private static async Task<string?> OutlinedAsync(
-        LoadedWorkspace workspace,
-        ISymbol symbol,
-        SourceFormat format,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            ISymbol symbol,
+            SourceFormat format,
+            CancellationToken cancellationToken)
     {
-        if (format.Verbose || symbol is not INamedTypeSymbol { TypeKind: not TypeKind.Delegate })
+        if (format.Verbose
+            || symbol is not INamedTypeSymbol { TypeKind: not TypeKind.Delegate } type
+            || await CompactAsync(type, format, cancellationToken).ConfigureAwait(false))
+        {
             return null;
+        }
 
         var outline = await OutlineService.TypeAsync(workspace, symbol, true, "short", cancellationToken).ConfigureAwait(false);
 
@@ -170,4 +174,30 @@ public static class SourceService
 
         return response.ToString();
     }
+
+    private const int MaxInlinedTypeLines = 4;
+
+    private static async Task<bool> CompactAsync(INamedTypeSymbol type, SourceFormat format, CancellationToken cancellationToken)
+    {
+        if (type.DeclaringSyntaxReferences is not [var only])
+            return false;
+
+        var declared = only.SyntaxTree.GetLineSpan(only.Span, cancellationToken);
+
+        if (declared.EndLinePosition.Line - declared.StartLinePosition.Line + 1 > MaxInlinedTypeLines)
+            return false;
+
+        var node = await only.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
+
+        return Inlinable(TextCompressor.Source(format.Comments ? node.ToFullString() : CommentStripper.Without(node)));
+    }
+
+    private static bool Inlinable(ReadOnlySpan<char> text)
+    {
+        var trimmed = text.Trim();
+
+        return trimmed.Count('\n') + 1 <= MaxInlinedTypeLines && trimmed.Length <= MaxInlinedTypeChars;
+    }
+
+    private const int MaxInlinedTypeChars = 200;
 }

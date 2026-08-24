@@ -6,14 +6,14 @@ namespace TerseSharp.Core;
 
 public static class MappedAnalyzers
 {
-    public static string[] Of(Solution solution)
+    public static string[] Of(Solution solution, string root)
     {
-        var referenced = Referenced(solution);
+        var referenced = Referenced(solution, root);
 
         return referenced.Count is 0 ? [] : Loaded(referenced);
     }
 
-    private static HashSet<string> Referenced(Solution solution)
+    private static HashSet<string> Referenced(Solution solution, string root)
     {
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -21,8 +21,8 @@ public static class MappedAnalyzers
         {
             foreach (var reference in project.AnalyzerReferences.OfType<AnalyzerFileReference>())
             {
-                if (reference.FullPath is { Length: > 0 } path)
-                    paths.Add(Path.GetFullPath(path));
+                if (reference.FullPath is { Length: > 0 } path && Path.GetFullPath(path) is var full && PathBoundary.Contains(root, full))
+                    paths.Add(full);
             }
         }
 

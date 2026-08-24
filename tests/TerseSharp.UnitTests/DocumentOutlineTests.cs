@@ -71,4 +71,45 @@ public sealed class DocumentOutlineTests
         Assert.Contains("occurrence=1..15", located.Error!.Remedy, StringComparison.Ordinal);
         Assert.Contains("+3 more", located.Error!.Remedy, StringComparison.Ordinal);
     }
+
+    private const string Nested = """
+        # Notes
+
+        ## [Unreleased]
+
+        ### Added
+
+        ```text
+        ## not a heading
+        ```
+
+        ### Fixed
+
+        - two
+
+        ## [1.0.0]
+
+        ### Added
+
+        - three
+        """;
+
+    [Fact]
+    public void Headings_ForASectionWithMoreThanOneChild_StillEndsItAtTheNextSectionOfItsOwnLevel()
+    {
+        var sections = DocumentOutline.Headings(Nested);
+
+        Assert.Equal(6, sections.Count);
+        Assert.Equal((3, 14), Bounds(sections, "## [Unreleased]"));
+        Assert.Equal((5, 10), Bounds(sections, "### Added", 1));
+        Assert.Equal((11, 14), Bounds(sections, "### Fixed"));
+        Assert.Equal((15, 19), Bounds(sections, "## [1.0.0]"));
+    }
+
+    private static (int StartLine, int EndLine) Bounds(IReadOnlyList<DocumentSection> sections, string heading, int occurrence = 0)
+    {
+        var located = DocumentOutline.Locate(sections, heading, occurrence).Value;
+
+        return (located.StartLine, located.EndLine);
+    }
 }

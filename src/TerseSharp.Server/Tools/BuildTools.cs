@@ -258,7 +258,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. The one holder ruled out is the analyzer and source-generator set, which is mapped from a shadow copy under the temp directory and never from a project's own output; everything else is still in play, including an MSBuild BuildHost this or an earlier terse load spawned out of this tree's own bin/. This server is pid {Environment.ProcessId}. {(holders.Length is 0 ? "The build named no holding process, so nothing below identifies one - list the holders yourself before stopping anything." : "Resolve each holder below before stopping it.")}{holders}");
+            $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. Analyzer and source-generator assemblies are normally mapped from a shadow copy under the per-user analyzer cache rather than from a project's own output, so they are the least likely holder - but a copy that could not be made falls back to mapping the file in place, so they are not ruled out either. This server is pid {Environment.ProcessId}, and an MSBuild BuildHost this or an earlier terse load spawned out of this tree's own bin/ is also in play. {(holders.Length is 0 ? "The build named no holding process, so nothing below identifies one - list the holders yourself before stopping anything." : "Resolve each holder below before stopping it.")}{holders}");
     }
 
     private static string NotRecovered(string operation) => string.Create(

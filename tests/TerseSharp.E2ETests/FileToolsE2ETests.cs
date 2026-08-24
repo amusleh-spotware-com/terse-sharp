@@ -856,4 +856,30 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         Assert.Equal(project, await File.ReadAllBytesAsync(solution.ProjectPath, TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public async Task ReadText_ForASectionWithMoreThanOneSubsection_StopsAtTheNextSectionOfItsOwnLevel()
+    {
+        const string Probe = "src/Fixture.Trading/section-probe.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Notes\n\n## [Unreleased]\n\n### Added\n\n- one\n\n### Fixed\n\n- two\n\n## [1.0.0]\n\n- shipped\n",
+        });
+
+        try
+        {
+            var text = await server.CallAsync("read_text", new() { ["path"] = Probe, ["section"] = "## [Unreleased]" });
+
+            Assert.Contains("- one", text, StringComparison.Ordinal);
+            Assert.Contains("- two", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("## [1.0.0]", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("- shipped", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }

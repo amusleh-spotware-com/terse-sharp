@@ -377,4 +377,58 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("AlphaDuplicate.cs", qualified, StringComparison.Ordinal);
         Assert.Contains("Helper", qualified, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AddTo_WithOneContainerPerAddEntry_LandsEachHelperInItsOwnType()
+    {
+        var applied = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Alpha.Duplicate.Value", "M:Fixture.Broken.Beta.Duplicate.Value" },
+            ["declarations"] = new[] { "public int Value() => AlphaHelper();", "public int Value() => BetaHelper();" },
+            ["add"] = new[] { "private static int AlphaHelper() => 1;", "private static int BetaHelper() => 2;" },
+            ["addTo"] = "Fixture.Broken.Alpha.Duplicate,Fixture.Broken.Beta.Duplicate",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+        Assert.DoesNotContain("would be rolled back", applied, StringComparison.Ordinal);
+
+        var alphaFile = applied.IndexOf("AlphaDuplicate.cs", StringComparison.Ordinal);
+        var betaFile = applied.IndexOf("BetaDuplicate.cs", StringComparison.Ordinal);
+        var alphaHelper = applied.IndexOf("AlphaHelper() => 1", StringComparison.Ordinal);
+        var betaHelper = applied.IndexOf("BetaHelper() => 2", StringComparison.Ordinal);
+
+        Assert.True(alphaFile >= 0 && betaFile >= 0 && alphaHelper >= 0 && betaHelper >= 0, applied);
+        Assert.True(alphaFile < betaFile, applied);
+        Assert.InRange(alphaHelper, alphaFile, betaFile);
+        Assert.True(betaHelper > betaFile, applied);
+    }
+
+    [Fact]
+    public async Task AddTo_WithADifferentNumberOfContainersThanAddEntries_RefusesNamingBothCounts()
+    {
+        var refused = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Alpha.Duplicate.Value", "M:Fixture.Broken.Beta.Duplicate.Value" },
+            ["declarations"] = new[] { "public int Value() => 1;", "public int Value() => 2;" },
+            ["add"] = new[] { "private static int One() => 1;", "private static int Two() => 2;", "private static int Three() => 3;" },
+            ["addTo"] = "Fixture.Broken.Alpha.Duplicate,Fixture.Broken.Beta.Duplicate",
+            ["dryRun"] = true,
+        });
+
+        var blank = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Alpha.Duplicate.Value", "M:Fixture.Broken.Beta.Duplicate.Value" },
+            ["declarations"] = new[] { "public int Value() => 1;", "public int Value() => 2;" },
+            ["add"] = new[] { "private static int One() => 1;" },
+            ["addTo"] = " , ",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.Contains("addTo= names 2 containing types but add= has 3 entries", refused, StringComparison.Ordinal);
+
+        Assert.Contains("ERROR InvalidArgument", blank, StringComparison.Ordinal);
+        Assert.Contains("names no containing type", blank, StringComparison.Ordinal);
+    }
 }
