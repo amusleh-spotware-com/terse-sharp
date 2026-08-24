@@ -14,7 +14,6 @@ public static class TextSearchService
 
     private const long MaxSearchableBytes = 16L * 1024 * 1024;
 
-
     private static readonly FrozenSet<string> BinaryExtensions = new[]
     {
         ".dll", ".exe", ".pdb", ".so", ".dylib", ".lib", ".obj", ".res", ".resources", ".cache",
@@ -37,7 +36,7 @@ public static class TextSearchService
         var candidates = Outside(request.Root ?? string.Empty, request.Glob);
 
         return candidates.IsOk
-            ? await ScannedAsync(Kept(candidates.Value!, request.Exclude), request, cancellationToken).ConfigureAwait(false)
+            ? await ScannedAsync(Kept([.. candidates.Value!.Where(IsSearchableFile)], request.Exclude), request, cancellationToken).ConfigureAwait(false)
             : candidates.Error!.Render();
     }
     private static async Task<string> ScannedAsync(
@@ -78,7 +77,7 @@ public static class TextSearchService
         {
             var relative = Path.GetRelativePath(full, file);
 
-            if (matcher.MatchesRelative(relative) && IsSearchableFile(new WorkspacePath(file, relative)))
+            if (matcher.MatchesRelative(relative))
                 matched.Add(new WorkspacePath(file, relative));
         }
 
@@ -86,31 +85,14 @@ public static class TextSearchService
     }
 
     public static string FindFiles(
-        LoadedWorkspace workspace,
-        string glob,
-        int maxResults,
-        bool stamps,
-        IReadOnlySet<string>? tracked = null,
-        string? name = null,
-        int depth = 0)
-    {
-        var files = Named(Tracked(Matched(workspace, glob), tracked), name);
-        var rows = depth > 0 ? Rolled(files, depth, stamps) : Listed(files, stamps);
-        var response = new ResponseBuilder("find_files", glob);
-        var shown = rows.Capped(maxResults).ToArray();
-
-        response.Summary(Covered(shown), files.Count, "files", "a narrower glob=, a smaller depth= or maxResults=");
-
-        foreach (var row in shown)
-            response.Line(row.Text);
-
-        if (files.Count is 0 && name is not { Length: > 0 })
-            response.Note("no file matched - pass name=<text> to match a file name substring instead of a glob");
-
-        Batch(response, shown);
-
-        return response.ToString();
-    }
+            LoadedWorkspace workspace,
+            string glob,
+            int maxResults,
+            bool stamps,
+            IReadOnlySet<string>? tracked = null,
+            string? name = null,
+            int depth = 0) =>
+            Rendered(Tracked(Matched(workspace, glob), tracked), glob, maxResults, stamps, name, depth, null);
 
     private static List<WorkspacePath> Named(List<WorkspacePath> files, string? name)
     {
@@ -786,14 +768,14 @@ public static class TextSearchService
         return files;
     }
 
-    private static void Batch(ResponseBuilder response, FileRow[] rows)
+    private static void Batch(ResponseBuilder response, FileRow[] rows, string? root)
     {
         var paths = new List<string>(rows.Length);
 
         foreach (var row in rows)
         {
             if (row.Path is { } path)
-                paths.Add(path);
+                paths.Add(root is { Length: > 0 } ? Path.Combine(root, path) : path);
         }
 
         if (ArgumentLine.Paths(paths) is { } batch)
@@ -801,4 +783,49 @@ public static class TextSearchService
     }
 
     private const int MaxPrefix = 512;
+
+    private static string Rendered(
+            List<WorkspacePath> matched,
+            string glob,
+            int maxResults,
+            bool stamps,
+            string? name,
+            int depth,
+            string? root)
+    {
+        var files = Named(matched, name);
+        var rows = depth > 0 ? Rolled(files, depth, stamps) : Listed(files, stamps);
+        var response = new ResponseBuilder("find_files", glob);
+        var shown = rows.Capped(maxResults).ToArray();
+
+        response.Summary(Covered(shown), files.Count, "files", "a narrower glob=, a smaller depth= or maxResults=");
+
+        foreach (var row in shown)
+            response.Line(row.Text);
+
+        if (root is { Length: > 0 })
+            response.Note("outside-workspace  " + root);
+
+        if (files.Count is 0 && name is not { Length: > 0 })
+            response.Note("no file matched - pass name=<text> to match a file name substring instead of a glob");
+
+        Batch(response, shown, root);
+
+        return response.ToString();
+    }
+
+    public static Result<string> FindFilesOutside(
+            string root,
+            string glob,
+            int maxResults,
+            bool stamps,
+            string? name = null,
+            int depth = 0)
+    {
+        var candidates = Outside(root, glob);
+
+        return candidates.IsOk
+            ? Result.Ok(Rendered(candidates.Value!, glob, maxResults, stamps, name, depth, Path.GetFullPath(root)))
+            : Result.Fail<string>(candidates.Error!);
+    }
 }

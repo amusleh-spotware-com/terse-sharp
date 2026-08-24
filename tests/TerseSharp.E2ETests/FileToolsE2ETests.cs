@@ -812,22 +812,24 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task EveryGlobTakingTool_RefusesABraceExpansionInsteadOfAnsweringZero()
+    public async Task EveryGlobTakingTool_ExpandsABraceExpansionIntoItsAlternatives()
     {
-        var files = await server.CallAsync("find_files", new() { ["glob"] = "**/*.{cs,md}" });
+        var files = await server.CallAsync("find_files", new() { ["glob"] = "**/*.{cs,md}", ["maxResults"] = 200 });
         var searched = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "**/*.{cs,md}" });
         var excluded = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["exclude"] = "**/{bin,obj}/**" });
         var changed = await server.CallAsync("changed_files", new() { ["exclude"] = "**/*.{md,yml}" });
 
         foreach (var text in new[] { files, searched, excluded, changed })
-        {
-            Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-            Assert.Contains("brace", text, StringComparison.Ordinal);
-            Assert.Contains("remedy:", text, StringComparison.Ordinal);
-        }
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
 
-        Assert.Contains("'exclude'", excluded, StringComparison.Ordinal);
-        Assert.Contains("'glob'", files, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", files, StringComparison.Ordinal);
+        Assert.Contains("notes.md", files, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", searched, StringComparison.Ordinal);
+
+        var onlyMarkdown = await server.CallAsync("find_files", new() { ["glob"] = "**/*.{md}" });
+
+        Assert.Contains("notes.md", onlyMarkdown, StringComparison.Ordinal);
+        Assert.DoesNotContain(".cs", onlyMarkdown, StringComparison.Ordinal);
     }
 
     [Fact]

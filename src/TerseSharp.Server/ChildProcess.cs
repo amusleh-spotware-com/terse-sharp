@@ -28,8 +28,9 @@ internal static class ChildProcess
 
         var streams = Streaming(process);
         var run = await DrainAsync(process, stopwatch, streams, deadline.Token).ConfigureAwait(false);
+        var finished = run ?? await AbandonAsync(process, stopwatch, streams, !cancellationToken.IsCancellationRequested).ConfigureAwait(false);
 
-        return run ?? await AbandonAsync(process, stopwatch, streams, !cancellationToken.IsCancellationRequested).ConfigureAwait(false);
+        return finished with { Command = Rendered(fileName, arguments) };
     }
 
     private static void Detach(Process process)
@@ -249,4 +250,7 @@ internal static class ChildProcess
         {
         }
     }
+
+    internal static string Rendered(string fileName, IReadOnlyList<string> arguments) =>
+            arguments.Count is 0 ? fileName : fileName + " " + string.Join(' ', arguments);
 }

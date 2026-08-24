@@ -171,7 +171,8 @@ write failure never changes the verdict.
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends, the shell text
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them, `dotnet build`/`test`/`format`/`clean`,
 `dotnet watch build`/`test`, `msbuild` and `dotnet list package`, and the working-tree half of git — `git status` and
-`git diff`, in every flag and `-C` form, answered by `changed_files` and `diff_symbols`, plus a bare
+`git diff`, in every flag and `-C` form, answered by `changed_files` and `diff_symbols`, with
+`git diff --cached` routed to `changed_files staged=true` by name, plus a bare
 `git ls-files`, answered by `find_files tracked=true`, and a `git tag` **listing**, answered by
 `history tags=true` — but only
 when the directory the command actually addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`: the
@@ -228,7 +229,7 @@ name. `terse serve --tools all` (or `TERSE_TOOLS=all`) advertises everything reg
 | **Localization** (`.resx`/`.resw`) | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Files** — replaces `Glob`/`ls`/`cat` | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
-| **Git** — replaces `git status`/`git diff`/`git log`/`git tag --list` | `changed_files` · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list) |
+| **Git** — replaces `git status`/`git diff`/`git diff --cached`/`git log`/`git tag --list` | `changed_files` (`staged=true`, `untracked=false`) · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list) |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 `build`, `run_tests`, `rerun_failed` and `list_tests` drive **both** test hosts: VSTest, and Microsoft.Testing.Platform when

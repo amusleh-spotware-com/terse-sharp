@@ -41,21 +41,20 @@ public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
     {
         var text = new StringBuilder("^");
         var normalized = glob.Replace('\\', '/');
-        var index = 0;
 
-        while (index < normalized.Length)
-            index += Append(text, normalized, index);
+        Fragment(text, normalized.AsSpan(), 0);
 
         return text.Append('$').ToString();
     }
 
-    private static int Append(StringBuilder text, string glob, int index) => glob.AsSpan(index) switch
+    private static int Append(StringBuilder text, ReadOnlySpan<char> glob, int depth) => glob switch
     {
         ['*', '*', '/', ..] => Write(text, "(?:.*/)?", 3),
         ['*', '*', ..] => Write(text, ".*", 2),
         ['*', ..] => Write(text, "[^/]*", 1),
         ['?', ..] => Write(text, "[^/]", 1),
-        var remaining => Write(text, Regex.Escape(remaining[0].ToString()), 1),
+        ['{', ..] when depth < MaxBraceDepth => Alternation(text, glob, depth),
+        _ => Write(text, Regex.Escape(glob[0].ToString()), 1),
     };
 
     private static int Write(StringBuilder text, string value, int consumed)
@@ -65,10 +64,78 @@ public readonly record struct FileGlob(Regex Pattern, bool MatchesPath)
         return consumed;
     }
 
-    public static TerseError? Unsupported(string? glob, string parameter) =>
-        glob is not null && glob.AsSpan().IndexOfAny('{', '}') >= 0
-            ? Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"'{parameter}' contains a brace, and brace expansion is not implemented - this glob would match nothing rather than the alternatives it names"),
-                "the supported syntax is ** for any directories and * or ? within one segment; send one call per alternative, or widen the glob - **/*.md rather than **/*.{md,yml}")
-            : null;
+    private static void Fragment(StringBuilder text, ReadOnlySpan<char> glob, int depth)
+    {
+        var index = 0;
+
+        while (index < glob.Length)
+            index += Append(text, glob[index..], depth);
+    }
+
+    private static int Alternation(StringBuilder text, ReadOnlySpan<char> glob, int depth)
+    {
+        var close = Closing(glob);
+
+        if (close < 0)
+            return Write(text, Regex.Escape("{"), 1);
+
+        text.Append("(?:");
+        Alternatives(text, glob[1..close], depth + 1);
+        text.Append(')');
+
+        return close + 1;
+    }
+
+    private static void Alternatives(StringBuilder text, ReadOnlySpan<char> body, int depth)
+    {
+        var remaining = body;
+
+        while (true)
+        {
+            var cut = Separator(remaining);
+
+            if (cut < 0)
+            {
+                Fragment(text, remaining, depth);
+
+                return;
+            }
+
+            Fragment(text, remaining[..cut], depth);
+            text.Append('|');
+            remaining = remaining[(cut + 1)..];
+        }
+    }
+
+    private static int Separator(ReadOnlySpan<char> body)
+    {
+        var depth = 0;
+
+        for (var index = 0; index < body.Length; index++)
+        {
+            if (body[index] is ',' && depth is 0)
+                return index;
+
+            depth += body[index] switch { '{' => 1, '}' => -1, _ => 0 };
+        }
+
+        return -1;
+    }
+
+    private static int Closing(ReadOnlySpan<char> glob)
+    {
+        var depth = 0;
+
+        for (var index = 0; index < glob.Length; index++)
+        {
+            depth += glob[index] switch { '{' => 1, '}' => -1, _ => 0 };
+
+            if (depth is 0)
+                return index;
+        }
+
+        return -1;
+    }
+
+    private const int MaxBraceDepth = 16;
 }

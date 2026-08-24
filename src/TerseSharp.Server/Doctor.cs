@@ -74,7 +74,6 @@ public static class Doctor
     private static string Selected(string version) =>
         version.Length is 0 ? "none - the SDK the effective global.json pins is missing" : version;
 
-
     private static string Listed(string[] values) =>
         values.Length is 0 ? "none reported" : string.Join(", ", values);
 
@@ -365,12 +364,13 @@ public static class Doctor
     }
 
     public static async Task<string[]> SelfChecksAsync(LoadedWorkspace workspace, CancellationToken cancellationToken) =>
-    [
-        Guarded("roslyn", RoslynLine),
-        await GuardedAsync("assets", () => AssetsLineAsync(cancellationToken)).ConfigureAwait(false),
-        Guarded("guard coverage", () => GuardCoverageLine(workspace.SolutionPath)),
-        await GuardedAsync("phases", async () => PhaseLine(await PhaseProbe.MeasureAsync(workspace, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false),
-    ];
+        [
+            Guarded("roslyn", RoslynLine),
+            await GuardedAsync("assets", () => AssetsLineAsync(cancellationToken)).ConfigureAwait(false),
+            Guarded("guard coverage", () => GuardCoverageLine(workspace.SolutionPath)),
+            Guarded("memory", MemoryLine),
+            await GuardedAsync("phases", async () => PhaseLine(await PhaseProbe.MeasureAsync(workspace, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false),
+        ];
 
     private static string Guarded(string name, Func<string> check)
     {
@@ -401,4 +401,44 @@ public static class Doctor
         string.Create(CultureInfo.InvariantCulture, $"the check itself failed - {exception.GetType().Name}: {exception.Message}"),
         false,
         "run terse doctor for the full report; the rest of this status is unaffected");
+
+    private static string MemoryLine()
+    {
+        using var self = Process.GetCurrentProcess();
+        var mine = Resident(self);
+        var servers = 1;
+        var total = mine;
+
+        foreach (var process in Processes("terse"))
+        {
+            using (process)
+            {
+                if (process.Id == self.Id)
+                    continue;
+
+                servers++;
+                total += Resident(process);
+            }
+        }
+
+        return Check(
+            "memory",
+            string.Create(CultureInfo.InvariantCulture, $"this server {mine / BytesPerMegabyte}MB, {servers} live terse server(s) holding {total / BytesPerMegabyte}MB"),
+            total < MemoryCeilingBytes,
+            "a loaded solution costs roughly 3 GB on a 148-project tree - unload_workspace on the ones you are done with, or lower --max-workspaces");
+    }
+
+    private static long Resident(Process process)
+    {
+        try
+        {
+            return process.WorkingSet64;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or Win32Exception)
+        {
+            return 0;
+        }
+    }
+
+    private const long MemoryCeilingBytes = 8L * 1024 * 1024 * 1024;
 }

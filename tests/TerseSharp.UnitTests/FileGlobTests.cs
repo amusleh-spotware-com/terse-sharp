@@ -61,24 +61,43 @@ public sealed class FileGlobTests
     }
 
     [Fact]
-    public void Unsupported_ForAGlobCarryingABraceExpansion_RefusesInsteadOfMatchingNothing()
+    public void Compile_ForABraceExpansion_MatchesEveryAlternativeAndNothingElse()
     {
-        var rejected = FileGlob.Unsupported("**/*.{md,yml}", "glob");
+        var matcher = FileGlob.Compile("**/*.{md,yml}");
 
-        Assert.NotNull(rejected);
-        Assert.Equal(TerseErrorCode.InvalidArgument, rejected.Code);
-        Assert.Contains("'glob'", rejected.Message, StringComparison.Ordinal);
-        Assert.Contains("brace", rejected.Message, StringComparison.Ordinal);
-        Assert.Contains("**/*.md", rejected.Remedy, StringComparison.Ordinal);
+        Assert.True(matcher.MatchesRelative("docs/guide.md"));
+        Assert.True(matcher.MatchesRelative("ci.yml"));
+        Assert.False(matcher.MatchesRelative("docs/guide.txt"));
+        Assert.False(matcher.MatchesRelative("docs/guide.mdyml"));
     }
 
     [Fact]
-    public void Unsupported_ForTheSyntaxTheMatcherImplements_AllowsIt()
+    public void Compile_ForANestedBraceExpansion_MatchesEveryLeafAlternative()
     {
-        Assert.Null(FileGlob.Unsupported("**/Views/*.xaml", "glob"));
-        Assert.Null(FileGlob.Unsupported("*.csproj", "glob"));
-        Assert.Null(FileGlob.Unsupported("src/**/*.cs", "glob"));
-        Assert.Null(FileGlob.Unsupported(null, "exclude"));
-        Assert.Null(FileGlob.Unsupported(string.Empty, "exclude"));
+        var matcher = FileGlob.Compile("{src,tests/{unit,e2e}}/**/*.cs");
+
+        Assert.True(matcher.MatchesRelative("src/Core/Order.cs"));
+        Assert.True(matcher.MatchesRelative("tests/unit/OrderTests.cs"));
+        Assert.True(matcher.MatchesRelative("tests/e2e/OrderTests.cs"));
+        Assert.False(matcher.MatchesRelative("tests/perf/OrderTests.cs"));
+    }
+
+    [Fact]
+    public void Compile_ForAnUnclosedBrace_TreatsItAsALiteralRatherThanSwallowingTheGlob()
+    {
+        var matcher = FileGlob.Compile("a{b.cs");
+
+        Assert.True(matcher.MatchesRelative("a{b.cs"));
+        Assert.False(matcher.MatchesRelative("ab.cs"));
+    }
+
+    [Fact]
+    public void Compile_ForABraceAlternativeCarryingASeparator_StillAnchorsOnThePath()
+    {
+        var matcher = FileGlob.Compile("{src/**/*.cs,notes.md}");
+
+        Assert.True(matcher.MatchesRelative("src/Core/Order.cs"));
+        Assert.True(matcher.MatchesRelative("notes.md"));
+        Assert.False(matcher.MatchesRelative("tests/Core/Order.cs"));
     }
 }

@@ -21,6 +21,7 @@ public static class RepeatSteer
         ["write_text"] = "files",
         ["edit_text"] = "edits",
         ["resx_set"] = "entries",
+        ["analyze"] = "paths",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();

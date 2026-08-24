@@ -28,7 +28,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | Job | Instead of | Use | Why |
 |---|---|---|---|
 | **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs - `verbose=true` splits that total into `toolDescriptions`, `parameterDescriptions`, `schemaFrame` and `names`; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do |
-| **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` | the four self-check lines an agent acts on, in-server and without the ~40 s shell-out: `roslyn` (the SDK's Roslyn against the one terse carries — the check that explains a dead Razor generator), `assets`, `guard coverage`, and `phases` measured on the loaded workspace |
+| **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` | the five self-check lines an agent acts on, in-server and without the ~40 s shell-out: `roslyn` (the SDK's Roslyn against the one terse carries — the check that explains a dead Razor generator), `assets`, `guard coverage`, `memory` - what this server and every live terse server hold, which is the number no other call can answer - and `phases` measured on the loaded workspace |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` | lists every solution and project under a directory without loading one; auto-discovery only walks *up* from the working directory |
 | **Workspace** | — | `load_workspace` | one call per solution; `targetFramework:` picks the framework every semantic tool answers from, `reload: true` forces a re-read you should almost never need |
 | **Workspace** | — | `list_workspaces` | every loaded solution with its git branch and worktree, and the absolute path `unload_workspace` takes |
@@ -57,6 +57,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` | every ASP.NET Core `Map*` with the member it sits in |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` | a plain file-name substring, case-insensitive, no glob to get right; combines with `glob=`, which selects first, and a glob that matched nothing names it |
+| **Files** | `ls` in a directory outside the workspace | `find_files(glob, root: "C:/Users/me/AppData/Local/terse-analyzers")` | any absolute directory, tagged `outside-workspace`, with full paths on its `paths=[...]` line; refused beside `tracked=true`, which needs a repository this tool did not load |
 | **Files** | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
 | **Files** | globbing a whole tree to learn its shape | `find_files(glob, depth: 2)` | everything below the 2nd path segment folds into one `src/TerseSharp.Core/**  x94 files` row - 11 rows here against 367; the count line still counts every file, and a single-match directory stays its file |
 | **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell; `glob` takes a **concrete path** as readily as a pattern, so one file's size is one call |
@@ -77,10 +78,12 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
 | **Files** | reading a whole `.md` whose content is one long table | `read_text(path, columns: "Finding,Tool")` | one line per table row, those columns only - what `headings=true` cannot give a file with nothing to narrow by. `section=` scopes it to that section's tables and is named in a refusal, `maxLines=` bounds the rows; a column no table under the read declares is refused naming the real ones even when the others matched, and `headings=`/`startLine=`/`endLine=`/`tail=` beside it are refused rather than silently winning |
 | **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` | restores the file from that ref through the same compile gate as any write - the way back for a `.csproj` or `.md` that `undo_last_change` cannot cover. A write of markup carrying `&lt;` and no raw `<` warns and names this call, because HTML-escaped markup is not markup |
+| **Files** | a scratch `.cs` probe outside every workspace root | `write_text(path, content, force: true)` | an absolute path under no loaded root is written with `force=true`, tagged `outside-workspace` and never compile-gated, because no project of this workspace compiles it - the read half already worked |
 | **Files** | `Bash: rm file` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change` |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
 | **Edit text** | reading a section out of one file and writing it into another | `edit_text(path, section: "## Open", toPath: "other.md")` | cuts the section and lands it in the other file as **one** write, answered as one changed-line count per file - the whole section text never crosses the wire. `place=prepend` puts it at the top of the target, anything else appends; `occurrence=` picks the source section; both paths must be markdown, **both must already exist**, and naming the same file twice is refused |
 | **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", occurrence: 1, place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line. A heading that repeats needs `occurrence=`: the refusal names `occurrence=1..N` and each candidate's start line, so the index is picked with no re-read. `read_text` takes it too, and refuses it without a `section=`. Only with `section=`; supply your own blank lines |
+| **Edit text** | one `edit_text row=` call per row when closing a whole backlog | `edit_text(path, rows: [{row, newText}, ...], toPath: "IMPROVEMENTS-ARCHIVE.md")` | up to 25 rows cut and landed in order as ONE write per file; a row identifier matching nothing refuses the batch, so a partial move cannot happen |
 | **Edit text** | closing a backlog row: cutting one table row out of one markdown file and appending it to another | `edit_text(path, row: "I286", toPath: "IMPROVEMENTS-ARCHIVE.md", newText: "\| … \|")` | the row is matched by its **first cell**, so its old text never crosses the wire; `newText=` is what lands in the target - omit it to move the row verbatim. An identifier matching no row, or more than one, is refused saying which, and `row=` without `toPath=` is refused rather than dropped |
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` | an entry may name its own `path`, and the top-level `path` may then be omitted entirely; entries are grouped by file, applied as one write each, and answered one line per changed file. A path-less entry with no top-level `path` is refused by index. At most 10 per file and 25 in total |
@@ -107,6 +110,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Projects** | "which projects does this solution contain?" for a solution that is **not** loaded | `solution_projects(path: …)` | reads the `.slnx`, `.sln` or `.slnf` directly and loads nothing, so a fixture-scoped question does not cost a `load_workspace` that makes every later un-hinted call ambiguous |
 | **Git** | `Bash: git log` / `git show --stat` | `history` | commits touching a path, one line each - short sha, date, author, subject - `baseRef=` for a ref or a range, `contains=` for git's pickaxe (only the commits whose diff added or removed that literal), `message=` for the subject grep, and `commit=<sha>` for one commit's per-file stat. `git blame` stays on the shell: it ran **once** in 683 sessions |
 | **Git** | `Bash: git tag --list` / `git tag -l "v*"` | `history(tags: true)` | every tag newest version first, one line each - name, the short sha it names, its date - bounded by `maxResults`; refused beside `baseRef=`, `path=`, `contains=`, `message=` or `commit=` rather than ignoring them, and creating, annotating or deleting a tag stays on the shell |
+| **Git** | `Bash: git diff --cached` / `git status --untracked-files=no` | `changed_files(staged: true)` · `changed_files(untracked: false)` | `staged=true` reads the INDEX against `HEAD` - or against `baseRef=` - which is what a pre-commit check asks; `untracked=false` answers tracked changes only |
 | **Git** | `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, `path=` scopes it to one pathspec on a shared tree, and `exclude=` drops what a pathspec cannot leave out - `exclude: ".research/**"` for another session's notes; an excluded file is not counted |
 | **Git** | `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
 | **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `paths=[...]` takes up to 10 pathspecs in the same git invocation, `maxLines=` caps it at 1000 and a truncated answer names the exact `maxLines=` that returns the rest |
@@ -119,6 +123,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Build and test** | re-running what broke | `rerun_failed` | replays the previous failures only |
 | **Build and test** | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | **Build and test** | `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks; `path=` sweeps a `.slnx`/`.sln`/`.slnf`/project that is **not** loaded |
+| **Analyse** | one `analyze` call per touched file | `analyze(paths: [...])` | up to 10 files, directories or globs in one pass, so the end-of-task per-file sweep is one call; an entry carrying a comma or a brace is refused by name rather than mis-scoped |
 | **Analyse** | `dotnet format whitespace` / an IDE inspection | `analyze` | compiler + every referenced analyzer + dead code, down to `info` |
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0`, where `analyzed` counts the **documents** in scope - and keeping only the diagnostics still unfixed, each carrying the declaration it sits in exactly as `analyze` does |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
@@ -183,8 +188,10 @@ them. `dotnet list package` is covered too and routes to `package_list`, whose `
 `outdated=true` answer from the same restored graph. `dotnet restore`, `pack`, `publish`, `run` and
 `tool` are **not** covered: no TerseSharp tool replaces them, so shelling out is the right call.
 
-**The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff` and
-`git diff <ref>` are served by `changed_files`, `diff_symbols` and `diff_text` — all three take
+**The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff`,
+`git diff <ref>` and the whole `git diff --cached` family are served by `changed_files`
+(`staged=true` for the index, `untracked=false` for `--untracked-files=no`), `diff_symbols` and
+`diff_text` — all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
@@ -390,6 +397,11 @@ dropping an attribute is sometimes the intent, but an un-advertised tool is exac
 build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, or use
 `replace_symbol_body`.
 
+**`add_member` refuses a duplicate member from syntax, before anything is compiled.** A declaration
+whose name and parameter list the type already declares answers `ERROR NameTaken` naming that member
+and its line - it used to cost a full compile round trip and the whole rejected declaration. An
+overload whose parameter list differs still lands.
+
 **A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
 type; it must name one of the targets' own containers, and a bare leaf name that matches two of them
@@ -433,6 +445,15 @@ of exactly **two** consecutive calls stay unreachable, because a steer can only 
 firing it on the first call was measured to break the one-line success contract on six tools. So batch
 on your own judgement: whenever the next two calls are the same tool and independent, send them as one.
 
+**A whole markdown read ends with its section map** - `sections=N - address one with read_text or
+edit_text section="..."`, naming up to six of them - so the anchor a `read_text` was paid for is
+replaced by an address. It rides only on a read that carried no `headings=`, `section=`, `columns=`
+or line range.
+
+**A `changed_files` listing carrying both kinds says how many of each** (`tracked=N untracked=N`), so
+a capped listing can never read as though the tracked half was all of it, and one carrying tracked
+changes ends with the exact `next: diff_symbols ...` call for them - take that before `diff_text`.
+
 **Git is the other deliberate shell-out beside `build`/`run_tests`**, and the answer to the
 end-of-task review, which is defined over the diff. Start
 with `changed_files`, then `diff_symbols` to turn the hunks into declaration ids, then
@@ -461,10 +482,10 @@ other entry still sees the lines that match spanned; `search_regex` anchors `^` 
 glob — `find_files` accepts `query` too — so the wrong name of the three is never a failed call, while
 a parameter name **no** tool declares is refused before the call runs, naming every accepted spelling:
 an argument the server does not understand is never silently dropped, because a listing that ignored
-your `maxResults` is a confidently wrong answer you cannot detect. **A glob carrying `{` or `}` is
-refused, not answered `0 matches`** - brace expansion is not implemented, and a zero result you
-cannot tell from absence is the confidently wrong answer. It covers `exclude=` here and on
-`changed_files`. All three skip `bin`, `obj`,
+your `maxResults` is a confidently wrong answer you cannot detect. **A glob expands `{a,b}`**,
+nested and across separators - `**/*.{md,yml}`, `{src,tests}/**/*.cs`, `{src/**/*.cs,notes.md}` -
+everywhere a glob is taken, `exclude=` and every `path=` scope included; an unclosed brace is a
+literal rather than a swallowed glob. All three skip `bin`, `obj`,
 `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks —
 the same set every index uses, so a nested agent worktree never doubles a result.
 
@@ -750,9 +771,12 @@ server ships. Component and parameter answers are then unavailable rather than e
 ## Running tests
 
 **A green run answers in one line** —
-`run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371` — so running the suite after every
-change is nearly free. A run that spanned **more than one project** appends `Name:total/durationMs`
-per project to that same line
+`run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371 elapsedMs=476900` — where
+`durationMs` is summed test time and `elapsedMs` is wall clock — so running the suite after every
+change is nearly free. A run that spanned **more than one project** appends `concurrency=<summed/wall>x` plus
+`Name:total/durationMs`
+per project to that same line - and a run that already prints its counters in full adds the slowest
+test when concurrency is under 2x
 (`… durationMs=122371  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms`). A
 single-project run is unchanged, and `build` behaves the same way
 (`build ok  errors=0 warnings=0  elapsedMs=4235`), warnings included: a build that succeeds is one
@@ -783,6 +807,10 @@ one.
 
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
 produced no results says so, and never `0 failures`.
+
+**A run that produced no results, and a build that failed, echo the command line they ran** -
+`command: dotnet test ...` - because that is exactly the case where the arguments are the answer and
+the payload is otherwise empty. `verbose=true` echoes it on any run.
 
 **A stopped run says why.** Above 30 s, `timeoutSeconds` arms VSTest's blame collector 15 s below it,
 so a *hung* test is named in

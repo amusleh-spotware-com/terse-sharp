@@ -37,9 +37,9 @@ public static partial class DotnetRunner
     private static bool IsGreen(ProcessRun run, TestRunReport report) =>
         run.ExitCode is 0 && !run.TimedOut && run.Drained && report.Total > 0 && report.Failures.Length is 0;
 
-    private static string QuietTest(TestRunReport report) => string.Create(
+    private static string QuietTest(TestRunReport report, ProcessRun run) => string.Create(
     CultureInfo.InvariantCulture,
-    $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs}") + PerProject(report);
+    $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}") + PerProject(report);
 
     internal static bool IsLockedOutput(int exitCode, string output) =>
         exitCode is not 0 && LockedOutput().IsMatch(output);
@@ -174,6 +174,9 @@ public static partial class DotnetRunner
         response.Summary(shown.Length, Parsed(diagnostics), "diagnostics");
         response.Note(string.Create(CultureInfo.InvariantCulture, $"exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}"));
 
+        if (verbose || run.ExitCode is not 0 || !run.Drained)
+            AppendCommand(response, run);
+
         if (verbose)
             AppendOutputs(response, run, root, target);
 
@@ -205,10 +208,10 @@ public static partial class DotnetRunner
     internal static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request, string root)
     {
         if (report.Total is 0 && run.ExitCode is not 0)
-            return RenderNoResults(request.Target, run, request.Verbose, root);
+            return RenderNoResults(request.Target, run, request.Verbose, root, request.Timeout);
 
         if (IsGreen(run, report) && !request.WantsDetail)
-            return QuietTest(report);
+            return QuietTest(report, run);
 
         var shown = Math.Min(report.Failures.Length, MaxFailures);
         var response = new ResponseBuilder("run_tests", request.Target).Verbose(request.Verbose);
@@ -216,13 +219,16 @@ public static partial class DotnetRunner
         response.Summary(shown, report.Failures.Length, "failures");
         response.Note(Counters(report, run));
 
+        if (request.Verbose)
+            AppendCommand(response, run);
+
         AppendWarnings(response, run, report, request.Filter);
         AppendFailures(response, report, shown);
         AppendTimings(response, report, request);
 
         return response.ToString();
     }
-    internal static string RenderNoResults(string target, ProcessRun run, bool verbose, string root = "")
+    internal static string RenderNoResults(string target, ProcessRun run, bool verbose, string root = "", TimeSpan deadline = default)
     {
         var response = new ResponseBuilder("run_tests", target).Verbose(verbose);
 
@@ -230,9 +236,10 @@ public static partial class DotnetRunner
             ? string.Create(CultureInfo.InvariantCulture, $"FAILED timed out after {run.ElapsedMilliseconds} ms, no test results were produced")
             : string.Create(CultureInfo.InvariantCulture, $"FAILED exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}, no test results were produced"));
 
+        AppendCommand(response, run);
         AppendLockWarning(response, run);
         AppendDrainWarning(response, run);
-        AppendDeadlineRemedy(response, run);
+        AppendDeadlineRemedy(response, run, deadline);
         AppendFailureOutput(response, run, reported: 0, verbose, root);
 
         return response.ToString();
@@ -241,8 +248,8 @@ public static partial class DotnetRunner
         RenderTestNames(target, run, TestNameList.Parse(run.Output, contains), root);
 
     private static string Counters(TestRunReport report, ProcessRun run) => string.Create(
-    CultureInfo.InvariantCulture,
-    $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}") + PerProject(report);
+        CultureInfo.InvariantCulture,
+        $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}{Slowest(report, run)}") + PerProject(report);
 
     private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter)
     {
@@ -780,12 +787,12 @@ public static partial class DotnetRunner
     private static bool Aborted(string slot) =>
         Directory.Exists(slot) && Directory.EnumerateFiles(slot, "*Sequence*.xml", SearchOption.AllDirectories).Any();
 
-    private static void AppendDeadlineRemedy(ResponseBuilder response, ProcessRun run)
+    private static void AppendDeadlineRemedy(ResponseBuilder response, ProcessRun run, TimeSpan deadline = default)
     {
-        if (!run.TimedOut)
+        if (!run.TimedOut && !Deadlined(run, deadline))
             return;
 
-        response.Note("remedy: the run was still going when the deadline expired; raise timeoutSeconds, or narrow the run with test= or filter=");
+        response.Note("remedy: the run reached its deadline before it finished; raise timeoutSeconds, or narrow the run with test= or filter=");
     }
 
     private static void AppendDrainWarning(ResponseBuilder response, ProcessRun run)
@@ -937,6 +944,35 @@ public static partial class DotnetRunner
 
         return last.ToString();
     }
+
+    private static void AppendCommand(ResponseBuilder response, ProcessRun run)
+    {
+        if (run.Command is { Length: > 0 } command)
+            response.Note("command: " + command);
+    }
+
+    private static bool Deadlined(ProcessRun run, TimeSpan deadline) =>
+        HangWindow(deadline) is { } window && run.ElapsedMilliseconds >= (long)window.TotalMilliseconds;
+
+    private static string Concurrency(TestRunReport report, ProcessRun run) =>
+            report.Projects.Length < 2 || run.ElapsedMilliseconds <= 0 || report.DurationMs <= 0
+                ? string.Empty
+                : string.Create(CultureInfo.InvariantCulture, $" concurrency={(double)report.DurationMs / run.ElapsedMilliseconds:F1}x");
+
+    private static string Slowest(TestRunReport report, ProcessRun run)
+    {
+        if (report.Projects.Length < 2 || report.PassedTests.IsDefaultOrEmpty || run.ElapsedMilliseconds <= 0 || report.DurationMs <= 0)
+            return string.Empty;
+
+        if ((double)report.DurationMs / run.ElapsedMilliseconds >= SerialConcurrency)
+            return string.Empty;
+
+        var widest = report.PassedTests.MaxBy(test => test.DurationMs);
+
+        return string.Create(CultureInfo.InvariantCulture, $" slowestTest={widest.Name} {widest.DurationMs}ms");
+    }
+
+    private const double SerialConcurrency = 2;
 }
 
 internal sealed record ProcessRun(
@@ -947,7 +983,8 @@ internal sealed record ProcessRun(
     string StandardOutput = "",
     string StandardError = "",
     bool Drained = true,
-    bool Stopped = false);
+    bool Stopped = false,
+    string Command = "");
 
 internal readonly record struct TestRunResult(string Response, TestRunReport Report, bool Locked);
 

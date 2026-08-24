@@ -110,7 +110,6 @@ public static class Errors
             ? "pass the path to a .csproj, or call list_projects to see the solution's projects"
             : "pass a project name or a .csproj path; closest: " + string.Join(", ", known));
 
-
     public static TerseError AmbiguousProject(string project, IReadOnlyList<string> paths) => new(
         TerseErrorCode.AmbiguousProject,
         string.Create(CultureInfo.InvariantCulture, $"project name '{project}' matches {paths.Count} projects"),
@@ -163,4 +162,14 @@ public static class Errors
         TerseErrorCode.UnsupportedRunner,
         string.Create(CultureInfo.InvariantCulture, $"{tool} cannot answer under the Microsoft.Testing.Platform runner: {reason}"),
         remedy);
+
+    public static TerseError OutsideWrite(string path) => new(
+        TerseErrorCode.OutOfWorkspace,
+        string.Create(CultureInfo.InvariantCulture, $"'{path}' resolves outside every loaded workspace root"),
+        "pass force=true to write there deliberately - such a write is not compile-gated, because no project of this workspace compiles it - or pass a path inside the workspace");
+
+    public static TerseError NameTaken(string signature, string type, int line) => new(
+        TerseErrorCode.NameTaken,
+        string.Create(CultureInfo.InvariantCulture, $"'{type}' already declares '{signature}', at line {line}"),
+        "edit that member with replace_symbol or replace_symbol_body, or give the new one a parameter list no existing overload has - a duplicate name is decidable from syntax, so nothing was compiled and nothing was written");
 }

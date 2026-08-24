@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -7,20 +8,30 @@ namespace TerseSharp.Server.Tools;
 public sealed class AnalysisTools(ToolContext context)
 {
     [McpServerTool(Name = "analyze")]
-    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares is named NOT_ENABLED instead of answering a silent zero.")]
+    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares is named NOT_ENABLED instead of answering a silent zero.")]
     public Task<string> Analyze(
-        [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
-        [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
-        [Description("Alias for minSeverity.")] string? severity = null,
-        [Description("Optional comma-separated diagnostic ids to keep, e.g. CA1822,TERSE001. An id no referenced analyzer declares is reported NOT_ENABLED.")] string? ids = null,
-        [Description("Include unreferenced members and unreachable code. Default true; set false on a huge solution to skip the reference scan.")] bool includeDeadCode = true,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (200).")] int maxResults = 0,
-        [Description("Report only diagnostics that appeared since the previous analyze of the same scope, and which ones were fixed.")] bool sinceLast = false,
-        [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
-        CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, path, loaded => AnalysisService.AnalyzeAsync(
-            loaded, path, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
+            [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
+            [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
+            [Description("Alias for minSeverity.")] string? severity = null,
+            [Description("Optional comma-separated diagnostic ids to keep, e.g. CA1822,TERSE001. An id no referenced analyzer declares is reported NOT_ENABLED.")] string? ids = null,
+            [Description("Include unreferenced members and unreachable code. Default true; set false on a huge solution to skip the reference scan.")] bool includeDeadCode = true,
+            [Description("Workspace or worktree name.")] string? workspace = null,
+            [Description("Max results (200).")] int maxResults = 0,
+            [Description("Report only diagnostics that appeared since the previous analyze of the same scope, and which ones were fixed.")] bool sinceLast = false,
+            [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
+            [Description("Several files, directories or globs analyzed in one pass, at most 10. Combines with path, which is taken first; an entry carrying a comma or a brace is refused by name rather than mis-scoped.")] string?[]? paths = null,
+            CancellationToken cancellationToken = default) => context.WithWorkspaceAsync(
+            workspace,
+            path ?? First(paths),
+            loaded =>
+            {
+                var scope = Scoped(loaded, path, paths);
+
+                return scope.IsOk
+                    ? AnalysisService.AnalyzeAsync(
+                        loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken)
+                    : Task.FromResult(scope.Error!.Render());
+            },
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "format")]
@@ -111,4 +122,70 @@ public sealed class AnalysisTools(ToolContext context)
             loaded,
             new GateRequest(path, Changed: path is null && !solution, dryRun, verbose),
             cancellationToken));
+
+    private static string? First(string?[]? paths) =>
+            paths is { Length: > 0 } ? Array.Find(paths, entry => entry is { Length: > 0 }) : null;
+
+    private static Result<string?> Scoped(LoadedWorkspace loaded, string? path, string?[]? paths)
+    {
+        if (paths is not { Length: > 0 })
+            return Result.Ok(path);
+
+        if (paths.Length > MaxScopedPaths)
+        {
+            return Result.Fail<string?>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'paths' carried {paths.Length} entries, at most {MaxScopedPaths} are analyzed in one call"),
+                string.Create(CultureInfo.InvariantCulture, $"send at most {MaxScopedPaths} per call")));
+        }
+
+        var entries = new List<string>(paths.Length + 1);
+
+        if (path is { Length: > 0 })
+            entries.Add(Relative(loaded.Root, path));
+
+        foreach (var entry in paths)
+        {
+            if (Refusable(entry) is { } refusal)
+                return Result.Fail<string?>(refusal);
+
+            entries.Add(Relative(loaded.Root, entry!));
+        }
+
+        if (entries.Count is 1)
+            return Result.Ok<string?>(entries[0]);
+
+        for (var index = 0; index < entries.Count; index++)
+            entries[index] = Widened(loaded.Root, entries[index]);
+
+        return Result.Ok<string?>("{" + string.Join(',', entries) + "}");
+    }
+
+    private static TerseError? Refusable(string? entry) => entry switch
+    {
+        not { Length: > 0 } => Errors.Invalid(
+            "'paths' carries a blank entry",
+            "pass a file, a directory or a glob per entry"),
+        _ when entry.Contains(',', StringComparison.Ordinal) || entry.AsSpan().IndexOfAny('{', '}') >= 0 => Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"'paths' entry '{entry}' carries a comma or a brace, which is how several scopes are combined"),
+            "send that entry as its own call, or pass it as path="),
+        _ => null,
+    };
+
+    private static string Relative(string root, string entry) => Path.IsPathRooted(entry)
+            ? Path.GetRelativePath(root, Path.GetFullPath(entry)).Replace('\\', '/')
+            : entry;
+
+    private const int MaxScopedPaths = 10;
+
+    private static string Widened(string root, string entry)
+    {
+        if (entry.AsSpan().IndexOfAny(GlobCharacters) >= 0)
+            return entry;
+
+        var full = Path.IsPathRooted(entry) ? entry : Path.Combine(root, entry);
+
+        return Directory.Exists(full) ? entry.TrimEnd('/', '\\') + "/**/*" : entry;
+    }
+
+    private static readonly SearchValues<char> GlobCharacters = SearchValues.Create("*?{");
 }

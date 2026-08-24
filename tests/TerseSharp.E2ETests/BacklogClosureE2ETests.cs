@@ -1441,4 +1441,272 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             [TerseServerFixture.ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", Path.Combine(root, fixture + ".slnx")],
             TestContext.Current.CancellationToken);
     }
+
+    [Fact]
+    public async Task FindFiles_WithAnAbsoluteRoot_ListsThatDirectoryAndSaysItIsOutsideTheWorkspace()
+    {
+        var outside = Path.GetDirectoryName(TerseServerFixture.FixtureRoot)!;
+        var text = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "**/*.slnx",
+            ["root"] = outside,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("outside-workspace", text, StringComparison.Ordinal);
+        Assert.Contains("FixtureSolution.slnx", text, StringComparison.Ordinal);
+        Assert.Contains(outside.Replace('\\', '/'), text.Replace("\\\\", "/", StringComparison.Ordinal).Replace('\\', '/'), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithARootThatDoesNotExist_SaysSoInsteadOfAnsweringZero()
+    {
+        var text = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "*",
+            ["root"] = Path.Combine(Path.GetTempPath(), "terse-no-such-directory-4b7c"),
+        });
+
+        Assert.Contains("ERROR DocumentNotFound", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithRootAndTracked_IsRefusedRatherThanListingWithoutTheFilter()
+    {
+        var text = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "*",
+            ["root"] = Path.GetTempPath(),
+            ["tracked"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WithABatchMixingACSharpFileAndAMarkdownFile_IsAcceptedUnderTheOneForce()
+    {
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["dryRun"] = true,
+            ["files"] = new object[]
+            {
+                new Dictionary<string, object?> { ["path"] = "probe-mixed.md", ["content"] = "probe\n" },
+                new Dictionary<string, object?>
+                {
+                    ["path"] = "src/Fixture.Trading/ProbeMixed.cs",
+                    ["content"] = "namespace Fixture.Trading;\n\npublic static class ProbeMixed\n{\n    public static int Answer() => 7;\n}\n",
+                },
+            },
+        });
+
+        Assert.False(text.Contains("ERROR", StringComparison.Ordinal), "write_text answered an error, in full: " + text);
+        Assert.Contains("probe-mixed.md", text, StringComparison.Ordinal);
+        Assert.Contains("ProbeMixed.cs", text, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(TerseServerFixture.FixtureRoot, "probe-mixed.md")));
+    }
+
+    [Fact]
+    public async Task WriteText_WithForceAndAnAbsolutePathOutsideEveryRoot_WritesItAndSaysSo()
+    {
+        var probe = Path.Combine(Path.GetTempPath(), "terse-outside-probe-i310.cs");
+
+        try
+        {
+            var refused = await server.CallAsync("write_text", new()
+            {
+                ["path"] = probe,
+                ["content"] = "public static class OutsideProbe;\n",
+            });
+
+            Assert.Contains("ERROR OutOfWorkspace", refused, StringComparison.Ordinal);
+            Assert.Contains("force=true", refused, StringComparison.Ordinal);
+
+            var written = await server.CallAsync("write_text", new()
+            {
+                ["path"] = probe,
+                ["content"] = "public static class OutsideProbe;\n",
+                ["force"] = true,
+            });
+
+            Assert.DoesNotContain("ERROR", written, StringComparison.Ordinal);
+            Assert.Contains("outside-workspace", written, StringComparison.Ordinal);
+            Assert.True(File.Exists(probe));
+            Assert.Equal("public static class OutsideProbe;\n", (await File.ReadAllTextAsync(probe, TestContext.Current.CancellationToken)).Replace("\r\n", "\n", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(probe);
+        }
+    }
+
+    [Fact]
+    public async Task Analyze_WithPaths_CoversEveryNamedFileInOnePass()
+    {
+        const string First = "src/Fixture.Trading/OrderService.cs";
+        const string Second = "src/Fixture.Trading/Awkward.cs";
+
+        var one = await server.CallAsync("analyze", new() { ["path"] = First });
+        var two = await server.CallAsync("analyze", new() { ["path"] = Second });
+        var both = await server.CallAsync("analyze", new() { ["paths"] = new[] { First, Second } });
+
+        Assert.Contains("OrderService.cs", one, StringComparison.Ordinal);
+        Assert.Contains("Awkward.cs", two, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", both, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", both, StringComparison.Ordinal);
+        Assert.Contains("Awkward.cs", both, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithAPathsEntryCarryingAComma_IsRefusedRatherThanMisScoped()
+    {
+        var text = await server.CallAsync("analyze", new() { ["paths"] = new[] { "src/Fixture.Trading/OrderService.cs,src/Fixture.Trading/Awkward.cs" } });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithATrackedModification_EndsWithTheDiffSymbolsCallForIt()
+    {
+        try
+        {
+            await server.CallAsync("edit_text", new()
+            {
+                ["path"] = "notes.md",
+                ["oldText"] = "# Fixture notes",
+                ["newText"] = "# Fixture notes, momentarily changed",
+            });
+
+            var text = await server.CallAsync("changed_files", new() { ["path"] = "notes.md" });
+
+            Assert.Contains("notes.md", text, StringComparison.Ordinal);
+            Assert.Contains("next: diff_symbols path=\"notes.md\"", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = "notes.md", ["ref"] = "HEAD" });
+        }
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithStaged_AnswersTheIndexRatherThanTheWorkingTree()
+    {
+        try
+        {
+            await server.CallAsync("write_text", new() { ["path"] = "terse-staged-probe.txt", ["content"] = "probe\n" });
+            await server.CallAsync("edit_text", new()
+            {
+                ["path"] = "notes.md",
+                ["oldText"] = "# Fixture notes",
+                ["newText"] = "# Fixture notes, momentarily changed",
+            });
+
+            var working = await server.CallAsync("changed_files", []);
+            var staged = await server.CallAsync("changed_files", new() { ["staged"] = true });
+
+            Assert.Contains("notes.md", working, StringComparison.Ordinal);
+            Assert.Contains("terse-staged-probe.txt", working, StringComparison.Ordinal);
+
+            Assert.DoesNotContain("ERROR", staged, StringComparison.Ordinal);
+            Assert.DoesNotContain("notes.md", staged, StringComparison.Ordinal);
+            Assert.DoesNotContain("terse-staged-probe.txt", staged, StringComparison.Ordinal);
+            Assert.DoesNotContain("next: diff_symbols", staged, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = "terse-staged-probe.txt", ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = "notes.md", ["ref"] = "HEAD" });
+        }
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithUntrackedFalse_DropsTheFilesGitDoesNotTrack()
+    {
+        try
+        {
+            await server.CallAsync("write_text", new() { ["path"] = "terse-untracked-probe.txt", ["content"] = "probe\n" });
+
+            var all = await server.CallAsync("changed_files", []);
+            var tracked = await server.CallAsync("changed_files", new() { ["untracked"] = false });
+
+            Assert.Contains("terse-untracked-probe.txt", all, StringComparison.Ordinal);
+            Assert.DoesNotContain("terse-untracked-probe.txt", tracked, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = "terse-untracked-probe.txt", ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_OnAWholeMarkdownFile_NamesTheSectionsThatAddressItInsteadOfAnAnchor()
+    {
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "notes.md" });
+        var ranged = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["startLine"] = 1, ["endLine"] = 5 });
+
+        Assert.Contains("sections=3", whole, StringComparison.Ordinal);
+        Assert.Contains("## Open", whole, StringComparison.Ordinal);
+        Assert.DoesNotContain("sections=", ranged, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkspaceStatus_Verbose_ReportsHowMuchMemoryTheLiveServersHold()
+    {
+        var verbose = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
+        var quiet = await server.CallAsync("workspace_status", []);
+
+        Assert.Contains("live terse server(s) holding", verbose, StringComparison.Ordinal);
+        Assert.DoesNotContain("this server 0MB", verbose, StringComparison.Ordinal);
+        Assert.DoesNotContain("holding 0MB", verbose, StringComparison.Ordinal);
+        Assert.DoesNotContain("live terse server(s) holding", quiet, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WhenTheTypeAlreadyDeclaresThatSignature_IsRefusedBeforeAnythingIsCompiled()
+    {
+        var taken = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "OrderService",
+            ["declaration"] = "public int Unused() => 7;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR NameTaken", taken, StringComparison.Ordinal);
+        Assert.Contains("Unused()", taken, StringComparison.Ordinal);
+        Assert.Contains("remedy:", taken, StringComparison.Ordinal);
+        Assert.DoesNotContain("CompileRegression", taken, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithAnOverloadNoExistingMemberDeclares_StillLands()
+    {
+        var overloaded = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "OrderService",
+            ["declaration"] = "public bool Submit(Order order, decimal limit) => Submit(order);",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", overloaded, StringComparison.Ordinal);
+        Assert.Contains("dryRun", overloaded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithPathsNamingADirectory_CoversEveryFileUnderIt()
+    {
+        const string Directory = "src/Fixture.Trading";
+        const string Elsewhere = "src/Fixture.Trading/Views/OrderViewModel.cs";
+
+        var elsewhereOnly = await server.CallAsync("analyze", new() { ["path"] = Elsewhere });
+        var both = await server.CallAsync("analyze", new() { ["paths"] = new[] { Elsewhere, Directory } });
+
+        Assert.DoesNotContain("ERROR", elsewhereOnly, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.cs", elsewhereOnly, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("ERROR", both, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", both, StringComparison.Ordinal);
+    }
 }

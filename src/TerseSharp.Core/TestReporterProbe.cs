@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Text.Json;
 
@@ -44,15 +45,19 @@ public static class TestReporterProbe
 
     public static async Task<bool> UsesTestingPlatformAsync(string root, CancellationToken cancellationToken)
     {
-        for (var directory = root; directory is { Length: > 0 }; directory = Path.GetDirectoryName(directory))
-        {
-            var candidate = Path.Combine(directory, "global.json");
+        if (Nearest(root) is not { } candidate)
+            return false;
 
-            if (File.Exists(candidate))
-                return await DeclaresPlatformRunnerAsync(candidate, cancellationToken).ConfigureAwait(false);
-        }
+        var stamp = FileStamp.Of(candidate);
 
-        return false;
+        if (Runners.TryGetValue(candidate, out var cached) && cached.Stamp == stamp)
+            return cached.Platform;
+
+        var platform = await DeclaresPlatformRunnerAsync(candidate, cancellationToken).ConfigureAwait(false);
+
+        Runners[candidate] = (stamp, platform);
+
+        return platform;
     }
 
     private static async Task<bool> DeclaresPlatformRunnerAsync(string path, CancellationToken cancellationToken)
@@ -85,7 +90,7 @@ public static class TestReporterProbe
     {
         var xunit = false;
 
-        foreach (var project in Projects(root, target))
+        foreach (var project in await ProjectsAsync(root, target, cancellationToken).ConfigureAwait(false))
         {
             var text = await ReadAsync(project, cancellationToken).ConfigureAwait(false);
 
@@ -102,10 +107,16 @@ public static class TestReporterProbe
         text.Contains(package + '"', StringComparison.OrdinalIgnoreCase)
         || text.Contains(package + '\'', StringComparison.OrdinalIgnoreCase);
 
-    private static IEnumerable<string> Projects(string root, string target) =>
-        target.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-            ? [target]
-            : Directory.EnumerateFiles(root, "*.csproj", Walk).Where(Compiled).Take(MaxProjects);
+    private static async Task<IReadOnlyList<string>> ProjectsAsync(string root, string target, CancellationToken cancellationToken)
+    {
+        if (target.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+            return [target];
+
+        if (SolutionFile.IsSolutionFile(target) && File.Exists(target))
+            return Absolute(target, await SolutionFile.ProjectsAsync(target, cancellationToken).ConfigureAwait(false));
+
+        return [.. Directory.EnumerateFiles(root, "*.csproj", Walk).Where(Compiled).Take(MaxProjects)];
+    }
 
     private static bool Compiled(string path) =>
         !path.AsSpan().Contains(BinDirectory, PathBoundary.Comparison)
@@ -127,7 +138,7 @@ public static class TestReporterProbe
     {
         var found = ImmutableArray.CreateBuilder<string>();
 
-        foreach (var project in Projects(root, target))
+        foreach (var project in await ProjectsAsync(root, target, cancellationToken).ConfigureAwait(false))
         {
             if (DeclaresATestFramework(await ReadAsync(project, cancellationToken).ConfigureAwait(false)))
                 found.Add(project);
@@ -140,4 +151,30 @@ public static class TestReporterProbe
         Declares(text, TrxExtension)
         || Declares(text, MsTestSdk)
         || text.Contains(XunitPackage, StringComparison.OrdinalIgnoreCase);
+
+    private static readonly ConcurrentDictionary<string, (FileStamp Stamp, bool Platform)> Runners = new(StringComparer.FromComparison(PathBoundary.Comparison));
+
+    private static string? Nearest(string root)
+    {
+        for (var directory = root; directory is { Length: > 0 }; directory = Path.GetDirectoryName(directory))
+        {
+            var candidate = Path.Combine(directory, "global.json");
+
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static string[] Absolute(string solutionPath, IReadOnlyList<string> projects)
+    {
+        var directory = Path.GetDirectoryName(Path.GetFullPath(solutionPath)) ?? string.Empty;
+        var resolved = new string[projects.Count];
+
+        for (var index = 0; index < projects.Count; index++)
+            resolved[index] = Path.GetFullPath(Path.Combine(directory, projects[index]));
+
+        return resolved;
+    }
 }

@@ -32,16 +32,16 @@ public static class FileService
     }
 
     public static async Task<Result<string>> WriteTextAsync(
-        LoadedWorkspace workspace,
-        string path,
-        string content,
-        bool dryRun,
-        bool force,
-        bool allowErrors,
-        bool verbose,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            string path,
+            string content,
+            bool dryRun,
+            bool force,
+            bool allowErrors,
+            bool verbose,
+            CancellationToken cancellationToken)
     {
-        var resolved = PathGuard.Resolve(workspace, path);
+        var resolved = Writable(workspace, path, force);
 
         if (!resolved.IsOk)
             return Result.Fail<string>(resolved.Error!);
@@ -51,17 +51,9 @@ public static class FileService
         if (SourceFile.Reject(path, full, force) is { } refusal)
             return refusal;
 
-        var exists = File.Exists(full);
-        var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
-        var after = LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
-
-        if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false) is { } gated)
-            return gated;
-
-        if (!dryRun)
-            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
-
-        return Result.Ok(DiffResponse("write_text", path, before, after, dryRun, verbose));
+        return PathBoundary.Contains(workspace.Root, full)
+            ? await InsideAsync(workspace, path, full, content, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false)
+            : await OutsideWriteAsync(workspace, full, content, dryRun, verbose, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<Result<string>> EditTextAsync(
@@ -198,10 +190,13 @@ public static class FileService
         workspace.Indexes.Noticed(full);
     }
 
-    private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose)
+    private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose, string? outside = null)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
         var escaped = EscapedMarkup(path, after);
+
+        if (outside is { Length: > 0 })
+            response.Note("outside-workspace  " + outside);
 
         if (!dryRun && !verbose && !escaped && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
         {
@@ -300,6 +295,7 @@ public static class FileService
             response.Line(line);
 
         AppendContinuation(response, path, selection);
+        AppendSections(response, path, text, request, selection);
         AppendMemberBatch(response, path, text, selection);
 
         return response.ToString();
@@ -396,7 +392,6 @@ public static class FileService
 
     private static bool Dropped(ReadOnlySpan<char> line, ReadFormat format) =>
         !format.Verbose && !format.KeepsBlankLines && line.TrimEnd().IsEmpty;
-
 
     private static string Emit(int number, ReadOnlySpan<char> line, int budget, bool numbered) => line.Length > budget || numbered
         ? Numbered(number, line, budget)
@@ -633,7 +628,6 @@ public static class FileService
     private static string Failed(int number, TerseError error) => string.Create(
         CultureInfo.InvariantCulture,
         $"FAILED edit {number}  {error.Code}: {error.Message}\n  remedy: {error.Remedy}");
-
 
     private static EditRequest Requested(TextEdit edit, EditRequest request) => new(
         edit.OldText ?? string.Empty,
@@ -988,7 +982,6 @@ public static class FileService
         && content.Contains("&lt;", StringComparison.Ordinal)
         && !content.Contains('<', StringComparison.Ordinal);
 
-
     private static bool IsMarkup(ReadOnlySpan<char> path) =>
         Path.GetExtension(path) is var extension
         && (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase)
@@ -1244,10 +1237,121 @@ public static class FileService
             : Result.Ok((source.Value.Before, destination.Value.Before));
     }
 
-    public static async Task<Result<string>> MoveRowAsync(
+    public static Task<Result<string>> MoveRowAsync(
         LoadedWorkspace workspace,
         string path,
         string toPath,
+        EditRequest request,
+        CancellationToken cancellationToken) =>
+        MoveRowsAsync(workspace, path, toPath, [new TextRow(request.Row!, request.NewText)], request, cancellationToken);
+
+    private static Result<string> Writable(LoadedWorkspace workspace, string path, bool force)
+    {
+        if (!Path.IsPathRooted(path))
+            return PathGuard.Resolve(workspace, path);
+
+        var full = Path.GetFullPath(path);
+
+        if (PathBoundary.Contains(workspace.Root, full))
+            return Result.Ok(full);
+
+        return force ? Result.Ok(full) : Result.Fail<string>(Errors.OutsideWrite(full));
+    }
+
+    private static async Task<(string Before, string After)> AdoptedAsync(
+            LoadedWorkspace workspace,
+            string full,
+            string content,
+            CancellationToken cancellationToken)
+    {
+        var exists = File.Exists(full);
+        var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
+
+        return (before, LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding));
+    }
+
+    private static async Task<Result<string>> InsideAsync(
+            LoadedWorkspace workspace,
+            string path,
+            string full,
+            string content,
+            bool dryRun,
+            bool allowErrors,
+            bool verbose,
+            CancellationToken cancellationToken)
+    {
+        var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
+
+        if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false) is { } gated)
+            return gated;
+
+        if (!dryRun)
+            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(DiffResponse("write_text", path, before, after, dryRun, verbose));
+    }
+
+    private static async Task<Result<string>> OutsideWriteAsync(
+            LoadedWorkspace workspace,
+            string full,
+            string content,
+            bool dryRun,
+            bool verbose,
+            CancellationToken cancellationToken)
+    {
+        var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
+
+        if (!dryRun)
+            await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(DiffResponse("write_text", full, before, after, dryRun, verbose, full));
+    }
+
+    private static void AppendSections(ResponseBuilder response, string path, string text, ReadRequest request, LineSelection selection)
+    {
+        if (selection.NextLine is not 0 || !Whole(request) || !DocumentOutline.IsMarkdown(Located(path)))
+            return;
+
+        var sections = DocumentOutline.Headings(text);
+
+        if (sections.Count is 0)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"sections={sections.Count} - address one with read_text or edit_text section=\"{sections[0].Title}\" instead of an oldText anchor{Named(sections)}"));
+    }
+
+    private static bool Whole(ReadRequest request) =>
+            !request.Headings
+            && request.Section is not { Length: > 0 }
+            && request.Columns is not { Count: > 0 }
+            && request.Tail is 0
+            && request.Range.Start <= 0
+            && request.Range.End <= 0;
+
+    private static string Named(IReadOnlyList<DocumentSection> sections)
+    {
+        if (sections.Count is 1)
+            return string.Empty;
+
+        var text = new StringBuilder(": ");
+
+        for (var index = 1; index < Math.Min(sections.Count, MaxNamedSections); index++)
+            text.Append(index is 1 ? string.Empty : " | ").Append(sections[index].Title);
+
+        return sections.Count > MaxNamedSections ? text.Append(" | ...").ToString() : text.ToString();
+    }
+
+    private const int MaxNamedSections = 6;
+
+    public readonly record struct TextRow(string? Row = null, string? NewText = null);
+
+    public static async Task<Result<string>> MoveRowsAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string toPath,
+        IReadOnlyList<TextRow> rows,
         EditRequest request,
         CancellationToken cancellationToken)
     {
@@ -1256,22 +1360,48 @@ public static class FileService
         if (!pair.IsOk)
             return Result.Fail<string>(pair.Error!);
 
-        var cut = CutRow(pair.Value.Source, request.Row!);
+        var moved = Fold(pair.Value.Source, pair.Value.Destination, rows);
 
-        if (!cut.IsOk)
-            return Result.Fail<string>(cut.Error!);
-
-        var landed = LandedRow(pair.Value.Destination, request.NewText is { Length: > 0 } ? request.NewText : cut.Value.Row);
-
-        return landed.IsOk
+        return moved.IsOk
             ? await WriteTextManyAsync(
                 workspace,
-                [new FileWrite(path, cut.Value.Remainder), new FileWrite(toPath, landed.Value!)],
+                [new FileWrite(path, moved.Value.Source), new FileWrite(toPath, moved.Value.Destination)],
                 request.DryRun,
                 force: false,
                 allowErrors: false,
                 request.Verbose,
                 cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(landed.Error!);
+            : Result.Fail<string>(moved.Error!);
+    }
+
+    private static Result<(string Source, string Destination)> Fold(string source, string destination, IReadOnlyList<TextRow> rows)
+    {
+        var carried = (Source: source, Destination: destination);
+
+        foreach (var row in rows)
+        {
+            var moved = Moved(carried.Source, carried.Destination, row);
+
+            if (!moved.IsOk)
+                return moved;
+
+            carried = moved.Value;
+        }
+
+        return Result.Ok(carried);
+    }
+
+    private static Result<(string Source, string Destination)> Moved(string source, string destination, TextRow row)
+    {
+        var cut = CutRow(source, row.Row ?? string.Empty);
+
+        if (!cut.IsOk)
+            return Result.Fail<(string, string)>(cut.Error!);
+
+        var landed = LandedRow(destination, row.NewText is { Length: > 0 } ? row.NewText : cut.Value.Row);
+
+        return landed.IsOk
+            ? Result.Ok((cut.Value.Remainder, landed.Value!))
+            : Result.Fail<(string, string)>(landed.Error!);
     }
 }

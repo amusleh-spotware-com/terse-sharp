@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Collections.Immutable;
+using System.Text;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
@@ -9,7 +11,7 @@ public sealed class GitTools(ToolContext context)
     private const int MaxDiffLines = 1000;
 
     [McpServerTool(Name = "changed_files", ReadOnly = true)]
-    [Description("Replaces Bash git status and git diff --stat. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files, path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed.")]
+    [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed.")]
     public Task<string> ChangedFiles(
         [Description("Commit, branch or range to compare against, e.g. main or HEAD~3. Empty compares the working tree against HEAD.")] string? baseRef = null,
         [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
@@ -17,17 +19,17 @@ public sealed class GitTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Glob of paths to drop after path= has selected them, e.g. .research/** or **/*.md. Dropped files are not counted.")] string? exclude = null,
         [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
+        [Description("List what is STAGED - the index against HEAD, or against baseRef - instead of the working tree. Untracked files are never listed. Default false.")] bool staged = false,
+        [Description("Include files git does not track. Default true; false answers tracked changes only, which is what git status --untracked-files=no asks.")] bool untracked = true,
         CancellationToken cancellationToken = default) =>
-        FileGlob.Unsupported(exclude, "exclude") is { } rejected
-            ? Task.FromResult(rejected.Render())
-            : root is { Length: > 0 }
-                ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, cancellationToken))
-                : context.WithWorkspaceAsync(
-                    workspace,
-                    path,
-                    loaded => ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, cancellationToken),
-                    semantic: false,
-                    cancellationToken);
+        root is { Length: > 0 }
+            ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, new ChangeScope(staged, untracked), cancellationToken))
+            : context.WithWorkspaceAsync(
+                workspace,
+                path,
+                loaded => ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked), cancellationToken),
+                semantic: false,
+                cancellationToken);
 
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
     [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
@@ -86,19 +88,21 @@ public sealed class GitTools(ToolContext context)
         string? exclude,
         int maxResults,
         string? outside,
+        ChangeScope scope,
         CancellationToken cancellationToken)
     {
-        var numstat = await GitRunner.ReadAsync(root, Arguments(["diff", "--numstat"], baseRef, path), cancellationToken).ConfigureAwait(false);
+        string[] command = scope.Staged ? ["diff", "--cached"] : ["diff"];
+        var numstat = await GitRunner.ReadAsync(root, Arguments([.. command, "--numstat"], baseRef, path), cancellationToken).ConfigureAwait(false);
 
         if (!numstat.IsOk)
             return numstat.Error!.Render();
 
-        var status = await GitRunner.ReadAsync(root, Arguments(["diff", "--name-status"], baseRef, path), cancellationToken).ConfigureAwait(false);
+        var status = await GitRunner.ReadAsync(root, Arguments([.. command, "--name-status"], baseRef, path), cancellationToken).ConfigureAwait(false);
 
         if (!status.IsOk)
             return status.Error!.Render();
 
-        var untracked = baseRef is { Length: > 0 }
+        var untracked = baseRef is { Length: > 0 } || scope.Staged || !scope.Untracked
             ? Result.Ok(string.Empty)
             : await GitRunner.ReadAsync(
                 root,
@@ -106,11 +110,18 @@ public sealed class GitTools(ToolContext context)
                 cancellationToken).ConfigureAwait(false);
 
         return untracked.IsOk
-            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, maxResults, outside)
+            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, maxResults, outside, scope.Staged ? null : Steer(baseRef, path))
             : untracked.Error!.Render();
     }
 
-    private static string Render(string numstat, string nameStatus, string untracked, string? exclude, int maxResults, string? outside)
+    private static string Render(
+            string numstat,
+            string nameStatus,
+            string untracked,
+            string? exclude,
+            int maxResults,
+            string? outside,
+            string? steer)
     {
         var listed = Lines(numstat, nameStatus, untracked, Excluded(exclude));
         var response = new ResponseBuilder("changed_files", string.Empty);
@@ -123,11 +134,17 @@ public sealed class GitTools(ToolContext context)
             "files",
             "path=, exclude=, baseRef= or maxResults=");
 
+        if (listed.Tracked > 0 && listed.Files > listed.Tracked)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"tracked={listed.Tracked} untracked={listed.Files - listed.Tracked} - untracked=false or exclude= drops what path= cannot"));
+
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
 
         foreach (var line in shown)
             response.Line(line);
+
+        if (outside is not { Length: > 0 } && listed.Tracked > 0 && steer is { Length: > 0 })
+            response.Note(steer);
 
         if (outside is not { Length: > 0 } && ArgumentLine.Paths(shown.Where(row => !Folded(row))) is { } batch)
             response.Note(batch);
@@ -221,10 +238,8 @@ public sealed class GitTools(ToolContext context)
     private static FileGlob? Excluded(string? exclude) =>
         exclude is { Length: > 0 } glob ? FileGlob.Compile(glob) : null;
 
-
     private static bool Dropped(FileGlob? exclude, ReadOnlySpan<char> path) =>
         exclude is { } matcher && matcher.MatchesRelative(path);
-
 
     private static string Described(ChangedFile file, IReadOnlyDictionary<string, string> statuses) => string.Create(
         CultureInfo.InvariantCulture,
@@ -247,7 +262,7 @@ public sealed class GitTools(ToolContext context)
 
         Untracked(kept, rows);
 
-        return new Listed(rows, tracked + kept.Count);
+        return new Listed(rows, tracked + kept.Count, tracked);
     }
 
     private static Result<string> Outside(string root)
@@ -376,7 +391,7 @@ public sealed class GitTools(ToolContext context)
 
     private const int UntrackedFold = 5;
 
-    private readonly record struct Listed(List<string> Rows, int Files);
+    private readonly record struct Listed(List<string> Rows, int Files, int Tracked);
 
     private static List<string> Kept(string untracked, FileGlob? exclude)
     {
@@ -468,7 +483,6 @@ public sealed class GitTools(ToolContext context)
         "refs/tags",
     ];
 
-
     private static string Unit(bool tags, string? commit) => tags
         ? "tags"
         : commit is { Length: > 0 } ? "lines" : "commits";
@@ -534,5 +548,20 @@ public sealed class GitTools(ToolContext context)
     {
         if (value is { Length: > 0 })
             ignored.Add(name);
+    }
+
+    private readonly record struct ChangeScope(bool Staged, bool Untracked);
+
+    private static string Steer(string? baseRef, string? path)
+    {
+        var arguments = new StringBuilder("next: diff_symbols");
+
+        if (baseRef is { Length: > 0 } reference)
+            arguments.Append(" baseRef=\"").Append(reference).Append('"');
+
+        if (path is { Length: > 0 } pathspec)
+            arguments.Append(" path=\"").Append(pathspec).Append('"');
+
+        return arguments.Append(" - maps each hunk onto the declaration that contains it").ToString();
     }
 }

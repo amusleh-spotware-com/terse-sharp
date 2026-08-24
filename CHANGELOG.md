@@ -8,6 +8,142 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-08-24
+
+**Response formats changed.** A whole-file `read_text` of a markdown file now ends with a
+`sections=N - address one with read_text or edit_text section="…"` steer naming the headings it
+covered. `changed_files` gains a `tracked=N untracked=N` line when a listing carries both kinds and
+ends with the `next: diff_symbols …` call for the tracked half. `run_tests` prints `elapsedMs=` on a
+green run, and `concurrency=<summed/wall>x` when the run spanned more than one project. A failed
+`build` and a `run_tests` that produced no results now echo the resolved child command line.
+
+### Added
+
+- **`find_files root=<absolute directory>`** lists any directory instead of the workspace — an
+  analyzer cache, a temp folder, a sibling repository — tagged `outside-workspace`, with full paths on
+  its `paths=[…]` line. `search_text`, `search_regex`, `changed_files`, `diff_text` and `history`
+  already took one; `find_files` was the last listing tool that forced a shell `ls`. It is refused
+  beside `tracked=true`, which needs a repository this tool did not load. Closes **I294**.
+  `FindFiles_WithAnAbsoluteRoot_ListsThatDirectoryAndSaysItIsOutsideTheWorkspace`,
+  `FindFiles_WithARootThatDoesNotExist_SaysSoInsteadOfAnsweringZero` and
+  `FindFiles_WithRootAndTracked_IsRefusedRatherThanListingWithoutTheFilter`.
+- **Brace expansion in every glob.** `**/*.{md,yml}`, `{src,tests}/**/*.cs` and nested alternatives
+  now match the alternatives they name, in `find_files`, `search_text`/`search_regex` `glob=` and
+  `exclude=`, `changed_files exclude=` and every `path=` scope `analyze`, `format`, `cleanup` and
+  `gate` accept. The refusal that stood in for it was **78 refusals in one week — 51 % of every
+  `InvalidArgument` the surface returned** — and it is gone; an unclosed brace is a literal rather
+  than a swallowed glob. Closes **I316**.
+  `Compile_ForABraceExpansion_MatchesEveryAlternativeAndNothingElse`,
+  `Compile_ForANestedBraceExpansion_MatchesEveryLeafAlternative`,
+  `Compile_ForAnUnclosedBrace_TreatsItAsALiteralRatherThanSwallowingTheGlob`,
+  `Compile_ForABraceAlternativeCarryingASeparator_StillAnchorsOnThePath` and
+  `EveryGlobTakingTool_ExpandsABraceExpansionIntoItsAlternatives`.
+- **`analyze paths=[…]`** analyzes up to 10 files, directories or globs in one pass, so the
+  end-of-task per-file sweep is one call rather than N. An entry carrying a comma or a brace is
+  refused by name rather than mis-scoped, and a rooted entry is made workspace-relative. Closes
+  **I318**. `Analyze_WithPaths_CoversEveryNamedFileInOnePass` and
+  `Analyze_WithAPathsEntryCarryingAComma_IsRefusedRatherThanMisScoped`.
+- **`edit_text rows=[{row,newText}, …]`** moves up to 25 markdown table rows into `toPath=` as one
+  write per file. Closing a backlog cost one call per row — **8 in one release**; it now costs one.
+  A row identifier matching nothing refuses the whole batch, so a partial move cannot happen. Closes
+  **I297**. `EditText_WithRowsAndToPath_MovesEveryRowInOneCall` and
+  `EditText_WithRowsAndAnIdentifierThatMatchesNothing_MovesNothingAtAll`.
+- **`changed_files staged=true` and `untracked=false`.** The guard denied the whole
+  `git diff --cached` family — **33 denials in one week** — while no tool answered the index; it does
+  now, and `git diff --cached` is routed to it by name. `untracked=false` is
+  `git status --untracked-files=no`, which `exclude=` only approximated. Closes **I314**.
+  `ChangedFiles_WithStaged_AnswersTheIndexRatherThanTheWorkingTree`,
+  `ChangedFiles_WithUntrackedFalse_DropsTheFilesGitDoesNotTrack` and
+  `Guard_ForAStagedDiff_NamesChangedFilesStaged`.
+- **`write_text force=true` writes an absolute path outside every workspace root**, tagged
+  `outside-workspace` and never compile-gated, because no project of the workspace compiles it. A
+  seven-line scratch probe cost **3 refused calls** and ended inside the repository, because
+  `write_text` answered `OutOfWorkspace` and the guard denied every built-in on the same path — the
+  one case where the gate had no legal path at all. The read half already worked. Closes **I310**.
+  `WriteText_WithForceAndAnAbsolutePathOutsideEveryRoot_WritesItAndSaysSo`.
+- **`add_member` refuses a duplicate member from syntax, before anything is compiled.** A declaration
+  whose name and parameter list a type already has answered `CompileRegression` after a full compile
+  round trip — **3 times in one release**, each costing the whole ~4 000-character declaration. It now
+  answers `ERROR NameTaken` naming the declaration and its line; an overload whose parameter list
+  differs still lands. Closes **I295**.
+  `AddMember_WhenTheTypeAlreadyDeclaresThatSignature_IsRefusedBeforeAnythingIsCompiled` and
+  `AddMember_WithAnOverloadNoExistingMemberDeclares_StillLands`.
+- **`workspace_status verbose=true` reports memory.** `WorkingSet64` occurred once in the whole
+  source, in `Doctor`, so "how much is terse holding" had no answer that did not breach the gate —
+  measured at **8 live servers holding 5.87 GB** on one machine. The `memory` self-check now names
+  what this server holds and what every live terse server holds together, and fails above 8 GB with
+  the unload remedy. Closes **I322**.
+  `WorkspaceStatus_Verbose_ReportsHowMuchMemoryTheLiveServersHold`.
+
+### Changed
+
+- **The guard reads a compound command by segment, not by substring.** `Segments` split on `&&`,
+  `||`, `|` and `;` inside quoted arguments, so a PowerShell `-match 'msbuild|dotnet'` was read as a
+  command called `msbuild` and denied — one false deny out of a budget Claude Code caps at 3
+  consecutive. Splitting is now quote-aware, and a denial of one segment of a compound says **`NO part
+  of the command ran`**, because `git add … && git commit … && git show --stat HEAD` was denied whole
+  while the reason named only the last segment's replacement. Closes **I315** and **I327**.
+  `Guard_ForADriverNameInsideAQuotedArgument_DoesNotTreatItAsTheCommand`,
+  `Guard_ForACompoundCommandWhoseLastSegmentIsReplaced_SaysNoPartOfItRan` and
+  `Guard_ForASingleReplacedCommand_DoesNotClaimItWasPartOfACompound`.
+- **A whole markdown read ends with its section map.** `edit_text section=` was used on **1.6 % of
+  2 795 `edit_text` calls** while **391 of 751 adjacent read→edit pairs targeted a `.md` file**, at
+  ~1 608 tokens per read — and the anchors those reads existed to compose produced **29
+  `oldText matched 0 times` rejections**. A `.md` read with no `headings=`, `section=`, `columns=` or
+  line range now ends `sections=N - address one with … section="…"`, naming up to six of them. Closes
+  **I317**. `ReadText_OnAWholeMarkdownFile_NamesTheSectionsThatAddressItInsteadOfAnAnchor`.
+- **`changed_files` counts the two halves and hands over the diff call.** A listing carrying tracked
+  and untracked changes now says `tracked=N untracked=N`, so a capped listing can never read as
+  though the tracked half was all of it, and a listing with tracked changes ends with the exact
+  `next: diff_symbols …` call for them — `diff_text` answered **295 of 340 calls with a `maxLines=`
+  continuation** while `diff_symbols`, the tool the skill puts ahead of it, was called 30 times.
+  Closes **I300** and **I325**.
+  `ChangedFiles_WithATrackedModification_EndsWithTheDiffSymbolsCallForIt`.
+- **`build` and `run_tests` show the command they ran.** Diagnosing an MTP run that answered
+  `Zero tests ran / Exit code: 5` meant reading `DotnetRunner.Arguments` in source and then four
+  `Bash` probes of the test application's own `--help`, because the response said only that the child
+  refused — never with what. The resolved child command line is now echoed unconditionally on a run
+  that produced no results and on a failed build, and under `verbose=true` otherwise. Closes **I306**.
+- **A run the Microsoft.Testing.Platform runner aborted keeps its deadline steer.** terse passes
+  `--timeout` 15 s inside its own, so the runner ends the session first, `TimedOut` is false and
+  `HangSequence` is VSTest-only: the `remedy: raise timeoutSeconds` never fired on exactly the run
+  where it matters. It is now derived from evidence — the elapsed time reaching the window terse
+  itself passed — rather than from the process flag. Closes **I307**.
+- **`run_tests` reports concurrency.** `durationMs` is summed test time and `elapsedMs` is wall, so a
+  parallelism change reads as a regression: the E2E collection split raised summed time from 1 402 s
+  to 1 608 s while cutting wall from 576.7 s to 476.9 s, and answering "did that get faster" needed
+  the CI `.trx` and a hand-written scheduler analysis. A run spanning more than one project now
+  carries `concurrency=<summed/wall>x`, and the detailed report names the slowest test when it is
+  under 2x. A single-project green run is unchanged apart from `elapsedMs=`. Closes **I311**.
+- **The Microsoft.Testing.Platform probe stops re-walking the tree.** `TestReporterProbe` re-read
+  `global.json` on every `run_tests`, `list_tests` and `rerun_failed`; that answer is now memoized per
+  `global.json` and invalidated by its own last-write time, so a VSTest repository — every call in
+  this one — pays the walk once. The `.csproj` half is deliberately not cached: invalidating it needs
+  the walk it would avoid. Closes **I303** as shipped in part, with that reason recorded.
+- **`list_tests` under that runner executes only the projects its target contains.**
+  `TestReporterProbe.Projects` walked every `*.csproj` under the workspace root capped at 200, so a
+  `samples/Foo.Tests.csproj` outside the solution could be listed as though it were part of it. A
+  solution target now resolves its own project list through `SolutionFile`. Closes **I313**.
+- **A guard test that goes red because of a stray file says which file.** Five tests assert behaviour
+  "outside a .NET tree" from a sandbox under `%TEMP%`, so a `.csproj` left anywhere above it by
+  another session turned them red with no hint — roughly **40 minutes** of one run. The failure
+  message now names the marker `IsDotNetTree` actually found and where. Closes **I298**.
+- `TokenBudgetE2ETests`' advertised-payload budget is raised from 25 900 to **26 450** and
+  `MarkupProfileE2ETests`' narrowed-surface budget from 20 740 to **21 330**, for the five new
+  parameters — `find_files root`, `changed_files staged` and `untracked`, `analyze paths`,
+  `edit_text rows` — measured at ~110 tokens each after every description this release touched was
+  trimmed back. Against this repository's own break-even, a parameter that removes a measured shell
+  fallback clears it several times over. `DocsCoverageE2ETests.SkillTokenBudget` is raised from
+  22 700 to **23 450** for the eleven behaviours `SKILL.md` now teaches - a skill that does not
+  describe a shipped tool is worse than no skill, because the agent acts on the old contract.
+- **`RepeatQueryLatencyE2ETests` asserts the median of the settled calls, not every one of them.**
+  The old oracle forbade something the server documents: an idle workspace, or any workspace once the
+  heap passes 2 GB, gives its compilations back, and the next semantic call re-realizes what it needs.
+  On the four-vCPU windows runner that produced `5074, 2719, 16, 68, 4488, 16` - one re-realization in
+  the middle of six calls - and turned CI red on `1f8055a` while the caching it exists to prove was
+  working. The median still fails outright if repeats are genuinely uncached.
+
+
 ### Fixed
 
 - **The SDK terse binds to is the one `global.json` selects, not the newest one installed.**
@@ -3993,7 +4129,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.43.0
 [0.42.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.42.0
 [0.41.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.1
 [0.41.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.41.0

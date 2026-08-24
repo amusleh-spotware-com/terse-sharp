@@ -43,7 +43,7 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
         var tokens = (narrowed.Sum(tool => tool.Name.Length + (tool.Description?.Length ?? 0) + tool.JsonSchema.GetRawText().Length) + 3) / 4;
 
         Assert.True(hidden >= 30, string.Create(CultureInfo.InvariantCulture, $"only {hidden} tools were hidden"));
-        Assert.True(tokens <= 20740, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
+        Assert.True(tokens <= 21330, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
     }
 
     [Fact]
@@ -139,7 +139,6 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
         "load_workspace",
         new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx") },
         TestContext.Current.CancellationToken);
-
 
     private async Task OnlySelectionAsync() => await server.CallAsync(
         "unload_workspace",

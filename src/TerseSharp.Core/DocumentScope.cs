@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
@@ -46,7 +47,7 @@ public static class DocumentScope
     }
 
     private static bool IsGlob(string path) =>
-        path.Contains('*', StringComparison.Ordinal) || path.Contains('?', StringComparison.Ordinal);
+            path.AsSpan().IndexOfAny(GlobCharacters) >= 0;
 
     private static IEnumerable<Document> Sources(LoadedWorkspace workspace) =>
         workspace.Solution.Projects.SelectMany(project => project.Documents);
@@ -68,4 +69,6 @@ public static class DocumentScope
 
     private static IEnumerable<Document> Matching(LoadedWorkspace workspace, FileGlob glob) =>
         Editable(workspace).Where(document => Matches(workspace.Root, document, glob));
+
+    private static readonly SearchValues<char> GlobCharacters = SearchValues.Create("*?{");
 }

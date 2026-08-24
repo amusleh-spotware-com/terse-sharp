@@ -632,4 +632,113 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_WithRowsAndToPath_MovesEveryRowInOneCall()
+    {
+        const string Source = "terse-i297-open.md";
+        const string Target = "terse-i297-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding | Tool | Proposed change |\n|---|---|---|\n| **I910** first | build | do a thing |\n| **I911** second | format | do another |\n| **I912** third | clean | do a third |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding | Tool | Change | Outcome |\n|---|---|---|---|\n| **I909** older | clean | shipped | measured |\n",
+            },
+        },
+        });
+
+        try
+        {
+            var moved = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Source,
+                ["toPath"] = Target,
+                ["rows"] = new[]
+                {
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["row"] = "I910",
+                    ["newText"] = "| **I910** first | build | shipped the thing | 3 calls saved |",
+                },
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["row"] = "I912" },
+            },
+            });
+
+            Assert.DoesNotContain("ERROR", moved, StringComparison.Ordinal);
+
+            var source = await server.CallAsync("read_text", new() { ["path"] = Source, ["verbose"] = true });
+            var target = await server.CallAsync("read_text", new() { ["path"] = Target, ["verbose"] = true });
+
+            Assert.DoesNotContain("I910", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("I912", source, StringComparison.Ordinal);
+            Assert.Contains("| **I911** second | format | do another |", source, StringComparison.Ordinal);
+            Assert.Contains("| **I909** older | clean | shipped | measured |", target, StringComparison.Ordinal);
+            Assert.Contains("| **I910** first | build | shipped the thing | 3 calls saved |", target, StringComparison.Ordinal);
+            Assert.Contains("| **I912** third | clean | do a third |", target, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithRowsAndAnIdentifierThatMatchesNothing_MovesNothingAtAll()
+    {
+        const string Source = "terse-i297b-open.md";
+        const string Target = "terse-i297b-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding | Tool |\n|---|---|\n| **I920** first | build |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding | Tool |\n|---|---|\n| **I919** older | clean |\n",
+            },
+        },
+        });
+
+        try
+        {
+            var moved = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Source,
+                ["toPath"] = Target,
+                ["rows"] = new[]
+                {
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["row"] = "I920" },
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["row"] = "I999" },
+            },
+            });
+
+            Assert.Contains("ERROR", moved, StringComparison.Ordinal);
+            Assert.Contains("remedy:", moved, StringComparison.Ordinal);
+
+            var source = await server.CallAsync("read_text", new() { ["path"] = Source, ["verbose"] = true });
+
+            Assert.Contains("| **I920** first | build |", source, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+        }
+    }
 }

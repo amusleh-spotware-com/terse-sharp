@@ -79,9 +79,12 @@ public static class SymbolEditService
 
         var members = MemberDeclaration.ParseAll(declaration);
 
-        return members.IsOk
-            ? await SwapAsync(workspace, target, [Appended(type, members.Value!)], options, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(members.Error!);
+        if (!members.IsOk)
+            return Result.Fail<string>(members.Error!);
+
+        return NameTaken(type, members.Value!) is { } taken
+            ? Result.Fail<string>(taken)
+            : await SwapAsync(workspace, target, [Appended(type, members.Value!)], options, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<string>> AddEnumMembersAsync(
@@ -384,10 +387,8 @@ public static class SymbolEditService
     private static BaseNamespaceDeclarationSyntax? Namespaced(CompilationUnitSyntax unit) =>
         unit.Members.OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault();
 
-
     private static MemberDeclarationSyntax[] Spaced(IReadOnlyList<MemberDeclarationSyntax> members) =>
         [.. members.Select(member => Separated(member, true))];
-
 
     private static BaseNamespaceDeclarationSyntax Filled(
         BaseNamespaceDeclarationSyntax declared,
@@ -426,7 +427,6 @@ public static class SymbolEditService
             ? Result.Ok(new PlannedEdit(target, Rewritten(parsed.Value!, target.Node)))
             : Result.Fail<PlannedEdit>(parsed.Error!);
     }
-
 
     private static TerseError Mismatched(int symbolIds, int declarations) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"symbolIds has {symbolIds} entries and declarations has {declarations}, so they cannot be paired"),
@@ -804,6 +804,46 @@ public static class SymbolEditService
 
         return names;
     }
+
+    private static TerseError? NameTaken(TypeDeclarationSyntax type, IReadOnlyList<MemberDeclarationSyntax> added)
+    {
+        foreach (var member in added)
+        {
+            if (Signature(member) is not { } signature)
+                continue;
+
+            var existing = type.Members.FirstOrDefault(candidate => string.Equals(Signature(candidate), signature, StringComparison.Ordinal));
+
+            if (existing is not null)
+                return Errors.NameTaken(signature, type.Identifier.Text, existing.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
+        }
+
+        return null;
+    }
+
+    private static string? Signature(MemberDeclarationSyntax member) => member switch
+    {
+        MethodDeclarationSyntax method when Comparable(method.ExplicitInterfaceSpecifier, method.Modifiers) =>
+            method.Identifier.Text + Arity(method.Arity) + Parameters(method.ParameterList),
+        ConstructorDeclarationSyntax constructor => ".ctor" + Parameters(constructor.ParameterList),
+        PropertyDeclarationSyntax property when Comparable(property.ExplicitInterfaceSpecifier, property.Modifiers) => property.Identifier.Text,
+        FieldDeclarationSyntax field => Single(field.Declaration),
+        EventFieldDeclarationSyntax declared => Single(declared.Declaration),
+        BaseTypeDeclarationSyntax nested when !nested.Modifiers.Any(SyntaxKind.PartialKeyword) => nested.Identifier.Text,
+        _ => null,
+    };
+
+    private static string? Single(VariableDeclarationSyntax declaration) =>
+            declaration.Variables.Count is 1 ? declaration.Variables[0].Identifier.Text : null;
+
+    private static string Parameters(ParameterListSyntax? list) => list is null
+            ? "()"
+            : "(" + string.Join(',', list.Parameters.Select(parameter => parameter.Modifiers.ToString() + parameter.Type)) + ")";
+
+    private static bool Comparable(ExplicitInterfaceSpecifierSyntax? specifier, SyntaxTokenList modifiers) =>
+            specifier is null && !modifiers.Any(SyntaxKind.PartialKeyword);
+
+    private static string Arity(int arity) => arity is 0 ? string.Empty : string.Create(CultureInfo.InvariantCulture, $"`{arity}");
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

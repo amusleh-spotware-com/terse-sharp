@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 using TerseSharp.Server;
 
@@ -387,13 +388,21 @@ public sealed class ToolGuardTests
         {
             await File.WriteAllTextAsync(Path.Combine(directory.FullName, "index.ts"), "export {};", TestContext.Current.CancellationToken);
 
-            Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, directory.FullName).Denied);
+            var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, directory.FullName);
+
+            Assert.False(verdict.Denied, NotHermetic(directory.FullName, verdict.Reason));
         }
         finally
         {
             directory.Delete(true);
         }
     }
+
+    private static string NotHermetic(string directory, string fallback) => ToolGuard.Marker(directory) is { Length: > 0 } marker
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"this sandbox is meant to sit outside every .NET tree, and the guard found a solution marker at '{marker}' at or above '{directory}' - delete that stray file, it is not this test's")
+            : fallback;
 
     [Fact]
     public async Task Inspect_ForAGitCommandUnderADotNetProject_Denies()
@@ -427,7 +436,6 @@ public sealed class ToolGuardTests
     [InlineData("LC_ALL=C grep -r Order src/App/OrderService.cs")]
     public void Inspect_ForAReplacedCommandBehindAQuoteEnvPrefixOrSubShell_StillDenies(string command) =>
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
-
 
     [Theory]
     [InlineData("GIT_PAGER=cat git blame src/App/OrderService.cs")]
@@ -478,7 +486,6 @@ public sealed class ToolGuardTests
     [InlineData("$(git log --oneline -1)")]
     public void Inspect_ForAReplacedCommandInsideACommandSubstitution_StillDenies(string command) =>
             Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
-
 
     [Theory]
     [InlineData("$(git rev-parse --abbrev-ref HEAD)")]
@@ -537,9 +544,9 @@ public sealed class ToolGuardTests
         var relative = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git -C ../notes status" }, dotnet);
         var operand = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git status ../notes" }, dotnet);
 
-        Assert.False(directed.Denied, directed.Reason);
-        Assert.False(relative.Denied, relative.Reason);
-        Assert.False(operand.Denied, operand.Reason);
+        Assert.False(directed.Denied, NotHermetic(plain, directed.Reason));
+        Assert.False(relative.Denied, NotHermetic(plain, relative.Reason));
+        Assert.False(operand.Denied, NotHermetic(plain, operand.Reason));
     }
 
     [Fact]
@@ -764,7 +771,7 @@ public sealed class ToolGuardTests
     {
         var coverage = ToolGuard.Coverage(Path.GetTempPath());
 
-        Assert.False(coverage.Complete, coverage.Detail);
+        Assert.False(coverage.Complete, NotHermetic(Path.GetTempPath(), coverage.Detail));
         Assert.Contains("git-status=allowed", coverage.Detail, StringComparison.Ordinal);
         Assert.Contains("git-diff=allowed", coverage.Detail, StringComparison.Ordinal);
         Assert.Contains("read-cs=denied", coverage.Detail, StringComparison.Ordinal);
@@ -819,4 +826,54 @@ public sealed class ToolGuardTests
     [InlineData("git push origin v0.40.0")]
     public void Guard_ForAGitTagMutation_LeavesItAlone(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("git diff --cached --name-only")]
+    [InlineData("git diff --cached")]
+    [InlineData("git diff --staged --stat")]
+    public void Guard_ForAStagedDiff_NamesChangedFilesStaged(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("changed_files staged=true", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForAnUnstagedDiff_StillNamesDiffSymbolsRatherThanTheStagedForm()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff --stat" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("diff_symbols", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("staged=true", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("powershell -NoProfile -Command \"Get-Process | Where-Object { $_.Name -match 'msbuild|dotnet' }\"")]
+    [InlineData("echo 'dotnet build is what CI runs'")]
+    [InlineData("gh pr create --body \"ran dotnet test; all green\"")]
+    public void Guard_ForADriverNameInsideAQuotedArgument_DoesNotTreatItAsTheCommand(string command) =>
+        Assert.False(
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied,
+            command);
+
+    [Fact]
+    public void Guard_ForACompoundCommandWhoseLastSegmentIsReplaced_SaysNoPartOfItRan()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git add src && git commit -m \"x\" && git show --stat HEAD" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("git show --stat HEAD", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForASingleReplacedCommand_DoesNotClaimItWasPartOfACompound()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git status --porcelain" });
+
+        Assert.True(verdict.Denied);
+        Assert.DoesNotContain("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
 }

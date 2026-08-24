@@ -98,13 +98,16 @@ public static class ToolGuard
         if (command is null)
             return Allowed;
 
-        foreach (var segment in Segments(command))
+        var segments = Segments(command);
+        var compound = segments.Length > 1;
+
+        foreach (var segment in segments)
         {
             if (Replaced(segment, cwd) is { } subcommand)
-                return new GuardVerdict(true, BuildReason(segment, subcommand), BuildRouting(subcommand));
+                return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound), BuildRouting(subcommand));
 
             if (Covered(segment) && IsTextRead(segment))
-                return new GuardVerdict(true, Reason("Bash", segment.Trim()), BashRouting(segment.Trim()));
+                return new GuardVerdict(true, Reason("Bash", segment.Trim()) + Nothing(compound), BashRouting(segment.Trim()));
         }
 
         return Allowed;
@@ -154,8 +157,9 @@ public static class ToolGuard
         "format-style" => "use cleanup fix=style, or cleanup verify=true fix=style for --verify-no-changes - that verifies exactly what this command checks",
         "clean" => "use clean",
         "list-package" => "use package_list, with vulnerable=true or outdated=true for the resolved-graph answers",
-        "status" => "use changed_files, or changed_files root=<that directory> when it is not the loaded workspace",
+        "status" => "use changed_files, with untracked=false for --untracked-files=no, or changed_files root=<that directory> when it is not the loaded workspace",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show; for a directory that is not loaded, diff_text root=<that directory>",
+        "diff-cached" => "use changed_files staged=true, which answers the index against HEAD - or against baseRef= - as one line per file",
         "ls-files" => "use find_files tracked=true",
         "log" => "use history, which takes path=, baseRef=, contains= for the pickaxe and message= for the subject grep",
         "show" => "use history commit=<sha>, which answers the subject and one line per file with added and deleted counts",
@@ -168,8 +172,9 @@ public static class ToolGuard
     {
         "format" or "format-analyzers" or "format-style" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, names every diagnostic no fixer covers, and answers a verify in one line instead of a per-file listing.",
         "list-package" => "package_list answers the declared references from the project file with no restore at all, and vulnerable=true or outdated=true runs the same resolved-graph audit through the shared child-process runner, workspace-relative and without the CLI's table framing.",
-        "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, so the end-of-task review costs a listing instead of a diff.",
+        "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, staged= and untracked=, so the end-of-task review costs a listing instead of a diff.",
         "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths.",
+        "diff-cached" => "changed_files staged=true reads the index rather than the working tree, which is the question a pre-commit check asks, and answers one bounded line per file instead of a diff.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
         "log" or "show" => "history answers the same commits workspace-relative and bounded, with the pickaxe and the subject grep as parameters instead of flags. Only git blame and index or history mutation stay on the shell.",
         "show-file" => "read_text ref= gives a revision's text the same numbering gutter, line ranges, tail=, section= and maxChars budget as the working tree, and a whole .cs file answers its outline instead of about three times the tokens.",
@@ -177,8 +182,32 @@ public static class ToolGuard
         _ => "Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.",
     };
 
-    private static string[] Segments(string command) =>
-        command.Split(["&&", "||", "|", ";", "\n"], StringSplitOptions.RemoveEmptyEntries);
+    private static string[] Segments(string command)
+    {
+        var masked = Masked(command);
+        var segments = new List<string>();
+        var start = 0;
+        var index = 0;
+
+        while (index < masked.Length)
+        {
+            if (Operator(masked.AsSpan(index)) is var width and > 0)
+            {
+                segments.Add(command[start..index]);
+                index += width;
+                start = index;
+
+                continue;
+            }
+
+            index++;
+        }
+
+        segments.Add(command[start..]);
+        segments.RemoveAll(segment => segment.Trim().Length is 0);
+
+        return [.. segments];
+    }
 
     private static bool IsTextRead(string segment)
     {
@@ -325,7 +354,7 @@ public static class ToolGuard
         return subcommand switch
         {
             "status" when IsDotNetTree(directed) => "status",
-            "diff" when IsDotNetTree(directed) => "diff",
+            "diff" when IsDotNetTree(directed) => Cached(tokens),
             "ls-files" when IsDotNetTree(directed) && Unflagged(tokens, "ls-files") => "ls-files",
             "log" when IsDotNetTree(directed) && !Shaped(tokens) => "log",
             "show" when IsDotNetTree(directed) && !Scripted(tokens) => Showing(tokens),
@@ -412,7 +441,9 @@ public static class ToolGuard
         return null;
     }
 
-    private static bool IsDotNetTree(string? cwd)
+    private static bool IsDotNetTree(string? cwd) => Marker(cwd) is not null;
+
+    internal static string? Marker(string? cwd)
     {
         try
         {
@@ -420,35 +451,36 @@ public static class ToolGuard
         }
         catch (ArgumentException)
         {
-            return false;
+            return null;
         }
     }
 
-    private static bool Walk(string start)
+    private static string? Walk(string start)
     {
         for (var directory = new DirectoryInfo(start); directory is not null; directory = directory.Parent)
         {
-            if (Marked(directory))
-                return true;
+            if (Marked(directory) is { } marker)
+                return marker;
         }
 
-        return false;
+        return null;
     }
 
-    private static bool Marked(DirectoryInfo directory)
+    private static string? Marked(DirectoryInfo directory)
     {
         try
         {
-            return directory.Exists && SolutionMarkers.Any(marker => directory.EnumerateFiles(marker).Any());
+            return directory.Exists
+                ? SolutionMarkers.SelectMany(directory.EnumerateFiles).Select(file => file.FullName).FirstOrDefault()
+                : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            return false;
+            return null;
         }
     }
 
     private static string Bare(string token) => token.Trim(Wrappers);
-
 
     private static bool IsAssignment(string token) =>
         !token.StartsWith('-') && token.IndexOf('=', StringComparison.Ordinal) > 0;
@@ -495,7 +527,6 @@ public static class ToolGuard
         CultureInfo.InvariantCulture,
         $"{tool} {name}=\"{Trim(value)}\"");
 
-
     private static string OutlineTool(string target) => target switch
     {
         var razor when IsRazor(razor) => "razor_outline",
@@ -505,7 +536,6 @@ public static class ToolGuard
         _ => "read_text",
     };
 
-
     private static string EditTool(string target) => target switch
     {
         var razor when IsRazor(razor) => "razor_set_attribute",
@@ -514,7 +544,6 @@ public static class ToolGuard
         var code when IsCSharp(code) => "replace_symbol_body",
         _ => "edit_text",
     };
-
 
     private static string PathRouting(string tool, string target) => tool switch
     {
@@ -527,7 +556,6 @@ public static class ToolGuard
         ? Call("get_file_outline", "path", target) + ", then replace_symbol_body symbolId=<a member it lists>"
         : Call(EditTool(target), "path", target);
 
-
     private static string SearchTool(string scope) => scope switch
     {
         var razor when IsRazor(razor) => "razor_find",
@@ -535,7 +563,6 @@ public static class ToolGuard
         var markup when IsMarkup(markup) => "xaml_find",
         _ => "search_text",
     };
-
 
     private static string GrepRouting(string scope, string? pattern) =>
         Call(SearchTool(scope), "query", pattern is { Length: > 0 } text ? text : scope);
@@ -563,6 +590,7 @@ public static class ToolGuard
         "format-style" => "cleanup fix=style",
         "status" => "changed_files",
         "diff" => "diff_symbols",
+        "diff-cached" => "changed_files staged=true",
         "ls-files" => "find_files tracked=true",
         "log" => "history",
         "show" => "history",
@@ -647,7 +675,6 @@ public static class ToolGuard
             ("git-diff", Inspect("Bash", Payload("command", "git diff"), cwd).Denied),
         ];
 
-
     private static JsonObject Payload(string name, string value) => new() { [name] = value };
 
     private static string? Listing(string[] tokens) =>
@@ -655,6 +682,48 @@ public static class ToolGuard
 
     private static bool TagListing(string[] tokens) =>
         Array.Exists(tokens, token => token is "--list" or "-l") || Subcommand(tokens, Array.IndexOf(tokens, "tag") + 1) is null;
+
+    private static string Masked(string command)
+    {
+        if (command.AsSpan().IndexOfAny('"', '\'') < 0)
+            return command;
+
+        var masked = command.ToCharArray();
+        var quote = '\0';
+
+        for (var index = 0; index < masked.Length; index++)
+        {
+            var current = masked[index];
+
+            quote = Quote(quote, current);
+
+            if (quote is not '\0' && current != quote)
+                masked[index] = 'x';
+        }
+
+        return new string(masked);
+    }
+
+    private static char Quote(char quote, char current) => (quote, current) switch
+    {
+        ('\0', '"') or ('\0', '\'') => current,
+        _ when quote == current => '\0',
+        _ => quote,
+    };
+
+    private static int Operator(ReadOnlySpan<char> text) => text switch
+    {
+        ['&', '&', ..] or ['|', '|', ..] => 2,
+        ['|', ..] or [';', ..] or ['\n', ..] => 1,
+        _ => 0,
+    };
+
+    private static string Nothing(bool compound) => compound
+            ? " This segment of the compound command is what was denied, and NO part of the command ran - re-issue the segments that are allowed on their own."
+            : string.Empty;
+
+    private static string Cached(string[] tokens) =>
+            Array.Exists(tokens, token => token is "--cached" or "--staged") ? "diff-cached" : "diff";
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

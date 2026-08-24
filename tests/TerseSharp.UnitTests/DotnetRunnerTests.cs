@@ -553,10 +553,103 @@ public sealed class DotnetRunnerTests
             "this run produced no results",
             DotnetRunner.Stopped(["A.Tests"], 1, serial: false, timedOut: false));
 
-
     [Fact]
     public void Stopped_ForABatchWhereNothingTimedOut_NamesTheMissingResultsRatherThanATimeout() =>
         Assert.Equal(
             "1 of 3 project(s) produced no results; the rest of the batch still ran",
             DotnetRunner.Stopped(["B.Tests"], 3, serial: false, timedOut: false));
+
+    [Fact]
+    public void RenderBuild_ForAFailureCarryingNoErrorSeverityDiagnostic_StillEchoesTheCommand()
+    {
+        var run = new ProcessRun(1, "MSBUILD : the build host exited", 120, Command: "dotnet build TerseSharp.slnx");
+
+        var text = DotnetRunner.RenderBuild("TerseSharp.slnx", "C:/repo", run, verbose: false);
+
+        Assert.Contains("command: dotnet build TerseSharp.slnx", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderBuild_ForACleanBuild_StaysOneLineAndEchoesNoCommand()
+    {
+        var run = new ProcessRun(0, "Build succeeded.", 120, Command: "dotnet build TerseSharp.slnx");
+
+        var text = DotnetRunner.RenderBuild("TerseSharp.slnx", "C:/repo", run, verbose: false);
+
+        Assert.StartsWith("build ok", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("command:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderNoResults_WhenTheElapsedReachedTheDeadlineWindow_CarriesTheRemedyWithoutTheProcessFlag()
+    {
+        var run = new ProcessRun(3, "Aborting test run: exceeded --timeout", 585_000, Command: "dotnet test --solution x");
+
+        var text = DotnetRunner.RenderNoResults("x", run, verbose: false, root: "", deadline: TimeSpan.FromSeconds(600));
+
+        Assert.False(run.TimedOut);
+        Assert.Contains("raise timeoutSeconds", text, StringComparison.Ordinal);
+        Assert.Contains("command: dotnet test --solution x", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderNoResults_ForAFastFailure_CarriesNoDeadlineRemedy()
+    {
+        var run = new ProcessRun(1, "boom", 900, Command: "dotnet test x");
+
+        var text = DotnetRunner.RenderNoResults("x", run, verbose: false, root: "", deadline: TimeSpan.FromSeconds(600));
+
+        Assert.DoesNotContain("raise timeoutSeconds", text, StringComparison.Ordinal);
+        Assert.Contains("command: dotnet test x", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForAGreenRunSpanningTwoProjects_ReportsWallClockAndConcurrency()
+    {
+        var report = new TestRunReport(10, 0, 0, 10, 8000, [], [])
+        {
+            Projects = [new("A", 5, 0, 0, 5, 4000), new("B", 5, 0, 0, 5, 4000)],
+        };
+
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(0, string.Empty, 2000),
+            report,
+            new TestRunRequest("sln", null, false, false, 0, TimeSpan.FromSeconds(600)),
+            "C:/repo");
+
+        Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
+        Assert.Contains("elapsedMs=2000", text, StringComparison.Ordinal);
+        Assert.Contains("concurrency=4.0x", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForASingleProjectGreenRun_CarriesNeitherConcurrencyNorTheSlowestTest()
+    {
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(0, string.Empty, 3600),
+            new TestRunReport(1, 0, 0, 1, 18, [], []),
+            new TestRunRequest("proj", null, false, false, 0, TimeSpan.FromSeconds(600)),
+            "C:/repo");
+
+        Assert.DoesNotContain("concurrency=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("slowestTest=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForARunUnderTwoTimesConcurrency_NamesTheSlowestTestThatHeldIt()
+    {
+        var report = new TestRunReport(1, 1, 0, 2, 5200, [new("A.Fails", "boom", null, 10)], [new("A.Slow", 4000)])
+        {
+            Projects = [new("A", 1, 1, 0, 2, 4200), new("B", 0, 0, 0, 0, 1000)],
+        };
+
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(1, string.Empty, 4000),
+            report,
+            new TestRunRequest("sln", null, false, false, 0, TimeSpan.FromSeconds(600)),
+            "C:/repo");
+
+        Assert.Contains("concurrency=1.3x", text, StringComparison.Ordinal);
+        Assert.Contains("slowestTest=A.Slow 4000ms", text, StringComparison.Ordinal);
+    }
 }
