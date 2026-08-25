@@ -223,4 +223,23 @@ public sealed class ChangedTestSelectionE2ETests
     private static string CommandLine(string response) =>
             response.Split('\n').SingleOrDefault(line => line.StartsWith("command: ", StringComparison.Ordinal))
             ?? throw new InvalidOperationException("the response carried no command line: " + response);
+
+    [Fact]
+    public async Task Build_OnceItHasRestoredInThisSession_SkipsTheRestoreOnTheNextBuild()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var first = await CallAsync(server, "build", new() { ["verbose"] = true });
+            var second = await CallAsync(server, "build", new() { ["verbose"] = true });
+
+            Assert.DoesNotContain("--no-restore", CommandLine(first), StringComparison.Ordinal);
+            Assert.Contains("--no-restore", CommandLine(second), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }

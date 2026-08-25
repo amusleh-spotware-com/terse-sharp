@@ -8,6 +8,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-08-26
+
+### Changed
+
+- **The build that `build`, a batched `run_tests` and a Microsoft.Testing.Platform `list_tests` run
+  restores once per solution per server session, then skips the restore until something restore reads
+  actually changes.** Those calls went through `dotnet build`, which restores on every invocation; on
+  a solution whose tests are fast that dominated the call. Measured over `fixtures/SelectionSolution`,
+  five runs each, comparing a call that restores against one that does not: **2 749 ms →
+  2 050-2 198 ms**, about **550-700 ms**, against 421 ms for the tests themselves. From the second
+  build of a session onward that saving applies to every call until an input moves. A `parallel=1`
+  `run_tests` and a VSTest `list_tests` are unaffected - they never reach this build, and restore
+  through `dotnet test` as before.
+  The server records a stamp over everything restore reads: each project file, plus
+  `Directory.Packages.props`, `Directory.Build.props`, `Directory.Build.targets`,
+  `packages.lock.json`, `global.json` and `nuget.config` in **every** directory from each project up
+  to the filesystem root - the walk MSBuild itself does, so a central package file that resolves from
+  *above* the workspace root, as every fixture in this repository does, is covered. Any of those
+  changing, appearing or disappearing restores again, and a solution where some project has no
+  `obj/project.assets.json` always restores. The stamp lives in the server process, so the first
+  build after a restart restores once. As a backstop, a build that fails naming `NETSDK1004`,
+  `NETSDK1064`, `NU1100`, `NU1101`, `NU1102` or `project.assets.json` - and that was neither timed out
+  nor stopped - is retried once **with** restore, and the reported `elapsedMs` covers both attempts;
+  measured on a fixture with every `bin`/`obj` deleted, `run_tests` answered `PASSED` in 7 808 ms.
+  The stamp is read with synchronous `File.GetLastWriteTimeUtc` probes, the metadata-probe exception
+  to this repository's async rule, memoized so shared ancestor directories are walked once per call.
+  Locked by `ChangedTestSelectionE2ETests.Build_OnceItHasRestoredInThisSession_SkipsTheRestoreOnTheNextBuild`,
+  which asserts the first build carries no `--no-restore` and the second does, plus
+  `DotnetRunnerTests.RestoreIsStale_BeforeThisServerHasRestored_IsTrueEvenWithTheAssetsInPlace`,
+  `DotnetRunnerTests.RestoreIsStale_WithoutAnAssetsFile_IsTrue`,
+  `DotnetRunnerTests.RestoreInputStamp_MovesWhenAnythingRestoreReadsChanges_IncludingBetweenTheProjectAndTheRoot`,
+  `DotnetRunnerTests.FailedForMissingAssets_OnlyWhenAFailedBuildSaysThePackagesAreNotThere` and
+  `DotnetRunnerTests.BuildArguments_SkipTheImplicitRestore_UnlessTheRetryAsksForIt`.
+
 ## [0.46.0] - 2026-08-25
 
 ### Changed
@@ -4310,7 +4344,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.46.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.47.0...HEAD
+[0.47.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.47.0
 [0.46.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.46.0
 [0.45.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.45.0
 [0.44.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.44.0

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
@@ -593,17 +594,29 @@ public static partial class DotnetRunner
         return [.. kept];
     }
 
-    private static Task<ProcessRun> BuiltAsync(
+    private static async Task<ProcessRun> BuiltAsync(
         WorkspaceTarget workspace,
         string target,
         BuildScope scope,
         TimeSpan timeout,
-        CancellationToken cancellationToken) =>
-        RunAsync(
-            scope.Applied(["build", target, "-nodeReuse:false", "-v", "q", "--nologo"]),
-            workspace.Root,
-            timeout,
-            cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        var restore = RestoreIsStale(workspace);
+        var run = await RunAsync(BuildArguments(target, scope, restore), workspace.Root, timeout, cancellationToken).ConfigureAwait(false);
+
+        if (FailedForMissingAssets(run))
+        {
+            var retried = await RunAsync(BuildArguments(target, scope, restore: true), workspace.Root, timeout, cancellationToken).ConfigureAwait(false);
+
+            restore = true;
+            run = retried with { ElapsedMilliseconds = run.ElapsedMilliseconds + retried.ElapsedMilliseconds };
+        }
+
+        if (restore && run.ExitCode is 0)
+            Restored[workspace.Root] = RestoreInputStamp(workspace);
+
+        return run;
+    }
 
     private static string Slot(string resultsDirectory, int index, int invocations)
     {
@@ -1014,6 +1027,94 @@ public static partial class DotnetRunner
     "-reporter",
     "quiet",
 ];
+
+    internal static string[] BuildArguments(string target, BuildScope scope, bool restore)
+    {
+        string[] arguments = restore
+            ? ["build", target, "-nodeReuse:false", "-v", "q", "--nologo"]
+            : ["build", target, "-nodeReuse:false", "-v", "q", "--nologo", "--no-restore"];
+
+        return scope.Applied(arguments);
+    }
+
+    internal static bool FailedForMissingAssets(ProcessRun run)
+    {
+        if (run.ExitCode is 0 || run.TimedOut || run.Stopped)
+            return false;
+
+        foreach (var marker in RestoreFailures)
+        {
+            if (run.Output.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    internal static bool RestoreIsStale(WorkspaceTarget workspace) =>
+        workspace.ProjectPaths.IsDefaultOrEmpty
+        || !Restorable(workspace)
+        || !Restored.TryGetValue(workspace.Root, out var stamp)
+        || stamp != RestoreInputStamp(workspace);
+
+    internal static int RestoreInputStamp(WorkspaceTarget workspace)
+    {
+        var stamp = default(HashCode);
+        var walked = new HashSet<string>(StringComparer.FromComparison(PathBoundary.Comparison));
+
+        foreach (var project in workspace.ProjectPaths)
+        {
+            stamp.Add(File.GetLastWriteTimeUtc(project));
+
+            for (var current = Path.GetDirectoryName(project); current is { Length: > 0 }; current = Path.GetDirectoryName(current))
+            {
+                if (walked.Add(current))
+                    Stamp(ref stamp, current);
+            }
+        }
+
+        return stamp.ToHashCode();
+    }
+
+    private static readonly string[] RestoreInputs =
+    [
+        "Directory.Packages.props",
+        "Directory.Build.props",
+        "Directory.Build.targets",
+        "packages.lock.json",
+        "global.json",
+        "nuget.config",
+        "NuGet.Config",
+    ];
+
+    private static string[] RestoreFailures =>
+    [
+        "NETSDK1004",
+        "NETSDK1064",
+        "NU1100",
+        "NU1101",
+        "NU1102",
+        "project.assets.json",
+    ];
+
+    private static void Stamp(ref HashCode stamp, string directory)
+    {
+        foreach (var name in RestoreInputs)
+            stamp.Add(File.GetLastWriteTimeUtc(Path.Combine(directory, name)));
+    }
+
+    private static readonly ConcurrentDictionary<string, int> Restored = new(StringComparer.FromComparison(PathBoundary.Comparison));
+
+    private static bool Restorable(WorkspaceTarget workspace)
+    {
+        foreach (var project in workspace.ProjectPaths)
+        {
+            if (!File.Exists(Path.Combine(Path.GetDirectoryName(project) ?? workspace.Root, "obj", "project.assets.json")))
+                return false;
+        }
+
+        return true;
+    }
 }
 
 internal sealed record ProcessRun(

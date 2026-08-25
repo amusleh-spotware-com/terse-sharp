@@ -723,4 +723,110 @@ public sealed class DotnetRunnerTests
 
         Assert.Equal("test", DotnetRunner.Arguments(request, "C:/slot")[0]);
     }
+
+    [Fact]
+    public void BuildArguments_SkipTheImplicitRestore_UnlessTheRetryAsksForIt()
+    {
+        Assert.Equal(
+            ["build", "A.slnx", "-nodeReuse:false", "-v", "q", "--nologo", "--no-restore"],
+            DotnetRunner.BuildArguments("A.slnx", default, restore: false));
+
+        Assert.Equal(
+            ["build", "A.slnx", "-nodeReuse:false", "-v", "q", "--nologo"],
+            DotnetRunner.BuildArguments("A.slnx", default, restore: true));
+    }
+
+    [Fact]
+    public void FailedForMissingAssets_OnlyWhenAFailedBuildSaysThePackagesAreNotThere()
+    {
+        Assert.True(DotnetRunner.FailedForMissingAssets(new ProcessRun(1, "error NETSDK1004: Assets file not found", 10)));
+        Assert.True(DotnetRunner.FailedForMissingAssets(new ProcessRun(1, "error NETSDK1064: Package X was not found", 10)));
+        Assert.True(DotnetRunner.FailedForMissingAssets(new ProcessRun(1, "error NU1102: Unable to find package", 10)));
+        Assert.True(DotnetRunner.FailedForMissingAssets(new ProcessRun(1, "obj/project.assets.json not found", 10)));
+        Assert.False(DotnetRunner.FailedForMissingAssets(new ProcessRun(1, "error CS0103: The name 'x' does not exist", 10)));
+        Assert.False(DotnetRunner.FailedForMissingAssets(new ProcessRun(0, "error NETSDK1004: Assets file not found", 10)));
+        Assert.False(DotnetRunner.FailedForMissingAssets(new ProcessRun(1, "error NETSDK1004: Assets file not found", 10, TimedOut: true)));
+        Assert.False(DotnetRunner.FailedForMissingAssets(new ProcessRun(1, "error NETSDK1004: Assets file not found", 10, Stopped: true)));
+    }
+
+    [Fact]
+    public void RestoreIsStale_BeforeThisServerHasRestored_IsTrueEvenWithTheAssetsInPlace()
+    {
+        var root = Directory.CreateTempSubdirectory("terse-restore-").FullName;
+
+        try
+        {
+            var workspace = Restorable(root);
+
+            Assert.True(DotnetRunner.RestoreIsStale(workspace));
+            Assert.True(DotnetRunner.RestoreIsStale(workspace with { ProjectPaths = default }));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RestoreIsStale_WithoutAnAssetsFile_IsTrue()
+    {
+        var root = Directory.CreateTempSubdirectory("terse-restore-").FullName;
+
+        try
+        {
+            var workspace = Restorable(root);
+            var assets = Path.Combine(Path.GetDirectoryName(workspace.ProjectPaths[0])!, "obj", "project.assets.json");
+
+            Assert.True(File.Exists(assets));
+
+            File.Delete(assets);
+
+            Assert.True(DotnetRunner.RestoreIsStale(workspace));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RestoreInputStamp_MovesWhenAnythingRestoreReadsChanges_IncludingBetweenTheProjectAndTheRoot()
+    {
+        var root = Directory.CreateTempSubdirectory("terse-restore-").FullName;
+
+        try
+        {
+            var workspace = Restorable(root);
+            var project = workspace.ProjectPaths[0];
+            var packages = Path.Combine(root, "src", "Directory.Packages.props");
+            var unchanged = DotnetRunner.RestoreInputStamp(workspace);
+
+            Assert.Equal(unchanged, DotnetRunner.RestoreInputStamp(workspace));
+
+            File.SetLastWriteTimeUtc(project, File.GetLastWriteTimeUtc(project).AddMinutes(1));
+            var afterProject = DotnetRunner.RestoreInputStamp(workspace);
+
+            Assert.NotEqual(unchanged, afterProject);
+
+            File.WriteAllText(packages, "<Project />");
+
+            Assert.NotEqual(afterProject, DotnetRunner.RestoreInputStamp(workspace));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static WorkspaceTarget Restorable(string root)
+    {
+        var project = Path.Combine(root, "src", "Sample", "Sample.csproj");
+        var assets = Path.Combine(root, "src", "Sample", "obj", "project.assets.json");
+
+        Directory.CreateDirectory(Path.GetDirectoryName(assets)!);
+        File.WriteAllText(project, "<Project />");
+        File.WriteAllText(assets, "{}");
+
+        return new WorkspaceTarget(Path.Combine(root, "A.slnx"), root, [project]);
+    }
 }
