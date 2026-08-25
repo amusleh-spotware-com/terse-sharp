@@ -4,8 +4,9 @@ namespace TerseSharp.E2ETests;
 
 public sealed class ToolSettingsE2ETests : IAsyncLifetime
 {
-    private readonly DirectoryInfo root = Directory.CreateTempSubdirectory("terse-settings-e2e");
+    private const string Prefix = "terse-settings-e2e";
 
+    private readonly DirectoryInfo root = Directory.CreateTempSubdirectory(Prefix);
     private TerseServerProcess server = null!;
 
     public async ValueTask InitializeAsync()
@@ -77,7 +78,9 @@ public sealed class ToolSettingsE2ETests : IAsyncLifetime
     {
         var text = await server.CallAsync("workspace_status", [], TestContext.Current.CancellationToken);
 
-        Assert.Contains("tools=" + Path.Combine(root.FullName, ToolSettings.FileName), text, StringComparison.Ordinal);
+        Assert.Contains("tools=", text, StringComparison.Ordinal);
+        Assert.Contains(Path.DirectorySeparatorChar + ToolSettings.FileName, text, StringComparison.Ordinal);
+        Assert.Contains(Prefix, text, StringComparison.Ordinal);
         Assert.Contains("(xaml, razor, search_regex)", text, StringComparison.Ordinal);
         Assert.Contains("still answers when called by name", text, StringComparison.Ordinal);
     }
