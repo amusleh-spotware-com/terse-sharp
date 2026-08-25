@@ -117,6 +117,38 @@ Asserted by a token-budget suite in CI on every commit, not estimated.
 - **Never guesses.** Where it can't prove an answer it says so — a false positive costs an agent more
   than no answer.
 
+## What it costs you
+
+An MCP server's fixed cost is its tool list, attached to every request. TerseSharp is the one that
+measures its own — `workspace_status` prints `advertised=<n> tools <t> tokens`, held under a
+**26 490-token ceiling over 88 tools** by a budget test on every push — and it shrinks it three ways.
+All three are optional: the default advertises everything.
+
+- **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
+  **57 tools, ≤21 360 tokens**. Load a solution that does hold them and they come back, announced
+  with `notifications/tools/list_changed`.
+- **Per project** — a `.terse.json` checked in beside your `.sln`, found by walking up from the
+  directory the server runs in and never above the repository root:
+
+  ```json
+  {
+    "tools": {
+      "groups": { "xaml": false, "razor": false },
+      "names": { "search_regex": false }
+    }
+  }
+  ```
+
+  Twelve groups — `analysis` `build` `edit` `file` `git` `navigation` `project` `razor` `refactor`
+  `resx` `workspace` `xaml` — plus any tool name under `names`, which outranks its group. That file
+  measures **64 tools, 22 097 tokens**. An unknown key is reported rather than silently dropped, and
+  the guard follows the file: a built-in whose every replacement you disabled is allowed again. The
+  server reads it once at startup, so restart your agent after changing it.
+- **By profile.** `terse serve --tools core` (or `TERSE_TOOLS=core`) advertises the 21 tools that
+  answer most questions; `--tools all` opts out of every narrowing.
+
+A hidden tool is unadvertised, not removed — it still answers when called by name.
+
 ## Make your agent actually use it
 
 An agent that has TerseSharp installed and reaches for `Read` and `Grep` out of habit saves nothing.
@@ -140,8 +172,9 @@ swaps — on any other agent, put the same rule in `AGENTS.md` or `.cursorrules`
 A denial also returns `additionalContext` — the complete replacement call with the arguments filled
 in from the command it denied (`Call this instead: get_file_outline path="src/App/Order.cs"`) — so
 the agent is routed, not merely refused. Set `TERSE_GUARD_LOG=<path>` to append one JSON line per
-decision (tool, verdict, routing, reason, cwd, session, transcript), opt-in and best-effort; a write
-failure never changes the verdict.
+decision (tool, verdict, routing, reason, cwd, session, transcript, and `standDown` when a project's
+`.terse.json` turned a denial back into an allow), opt-in and best-effort; a write failure never
+changes the verdict.
 
 ## The tools
 

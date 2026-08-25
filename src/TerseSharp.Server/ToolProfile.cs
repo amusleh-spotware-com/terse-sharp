@@ -3,7 +3,7 @@ using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server;
 
-public readonly record struct ToolSurface(IReadOnlySet<string>? Advertised, bool MarkupDerived);
+public readonly record struct ToolSurface(IReadOnlySet<string>? Advertised, bool MarkupDerived, ToolOverrides? Overrides = null);
 
 public static class ToolProfile
 {
@@ -59,42 +59,27 @@ public static class ToolProfile
         return new(null, MarkupDerived: true);
     }
 
-    public static string? Describe(ToolSurface surface, WorkspaceMarkup markup)
-    {
-        if (surface.Advertised is { } advertised)
-        {
-            return string.Create(
-                CultureInfo.InvariantCulture,
-                $"tools={Core} - {advertised.Count} advertised; every other tool still answers when called by name");
-        }
+    public static bool Advertises(ToolSurface surface, WorkspaceMarkup served, string tool) =>
+        surface.Overrides?.Decision(tool)
+            ?? ((surface.Advertised?.Contains(tool) ?? true) && served.Serves(tool));
 
-        return surface.MarkupDerived && !markup.Complete
-            ? string.Create(
-                CultureInfo.InvariantCulture,
-                $"tools={markup.Hidden()} hidden - this workspace holds no such file; every other tool still answers when called by name")
-            : null;
-    }
+    public static string? Describe(ToolSurface surface, WorkspaceMarkup markup) =>
+            surface.Overrides is { Configured: true } overrides
+                ? Joined(Narrowed(overrides) + Ignored(overrides), Derived(surface, markup, counted: false)) + Answers
+                : Derived(surface, markup, counted: true) is { } derived ? derived + Answers : null;
 
-    public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> Filter(IReadOnlySet<string> advertised) =>
+    public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> Filter(ToolSurface surface, ToolContext context) =>
         next => async (request, cancellationToken) =>
         {
             var listed = await next(request, cancellationToken).ConfigureAwait(false);
+            var served = surface.MarkupDerived
+                ? await context.ServedAsync(cancellationToken).ConfigureAwait(false)
+                : WorkspaceMarkup.Every;
 
-            listed.Tools = [.. listed.Tools.Where(tool => advertised.Contains(tool.Name))];
+            listed.Tools = [.. listed.Tools.Where(tool => Advertises(surface, served, tool.Name))];
 
             return listed;
         };
-
-    public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> MarkupFilter(ToolContext context) =>
-    next => async (request, cancellationToken) =>
-    {
-        var listed = await next(request, cancellationToken).ConfigureAwait(false);
-        var served = await context.ServedAsync(cancellationToken).ConfigureAwait(false);
-
-        listed.Tools = [.. listed.Tools.Where(tool => served.Serves(tool.Name))];
-
-        return listed;
-    };
 
     public static WorkspaceMarkup Served(WorkspaceRegistry registry)
     {
@@ -109,5 +94,43 @@ public static class ToolProfile
             served = served.Union(workspace.Indexes.MarkupFamilies());
 
         return served;
+    }
+
+    private static string Located(ToolOverrides overrides) => overrides.Path ?? ToolSettings.FileName;
+
+    private static string Joined(string overridden, string? derived) =>
+            derived is { Length: > 0 } ? overridden + "; " + derived : overridden;
+
+    private const string Answers = "; every other tool still answers when called by name";
+
+    private static string Narrowed(ToolOverrides overrides) => overrides switch
+    {
+        { Failure: { } failure } => string.Create(
+            CultureInfo.InvariantCulture,
+            $"tools={Located(overrides)} could not be read - {failure}; it narrows nothing"),
+        { Hidden: 0 } => "tools=" + Located(overrides) + " hides nothing",
+        _ => string.Create(
+            CultureInfo.InvariantCulture,
+            $"tools={Located(overrides)} - {overrides.Hidden} hidden ({string.Join(", ", overrides.Off)})"),
+    };
+
+    private static string Ignored(ToolOverrides overrides) => overrides.Ignored.IsEmpty
+        ? string.Empty
+        : "; ignored " + string.Join(", ", overrides.Ignored);
+
+    private static string? Derived(ToolSurface surface, WorkspaceMarkup markup, bool counted)
+    {
+        if (surface.Advertised is { } advertised)
+        {
+            return counted
+                ? string.Create(CultureInfo.InvariantCulture, $"tools={Core} - {advertised.Count} advertised")
+                : "tools=" + Core;
+        }
+
+        return surface.MarkupDerived && !markup.Complete
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"tools={markup.Hidden()} hidden - this workspace holds no such file")
+            : null;
     }
 }

@@ -18,7 +18,8 @@ public static class McpHost
             CancellationToken cancellationToken)
     {
         var builder = Host.CreateApplicationBuilder();
-        var surface = ToolProfile.Resolve(tools);
+        var overrides = await ToolSettings.LoadAsync(Directory.GetCurrentDirectory(), cancellationToken).ConfigureAwait(false);
+        var surface = ToolProfile.Resolve(tools) with { Overrides = overrides };
         var context = new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch), readOnly, surface);
 
         builder.Logging.ClearProviders();
@@ -37,16 +38,16 @@ public static class McpHost
                 filters.AddListToolsFilter(AdvertisedCost.Filter());
                 filters.AddListToolsFilter(SchemaCompactor.Filter());
 
-                if (surface.Advertised is { } advertised)
-                    filters.AddListToolsFilter(ToolProfile.Filter(advertised));
-
-                if (surface.MarkupDerived)
-                    filters.AddListToolsFilter(ToolProfile.MarkupFilter(context));
+                if (surface.Advertised is not null || surface.MarkupDerived || overrides.Configured)
+                    filters.AddListToolsFilter(ToolProfile.Filter(surface, context));
             });
 
         var host = builder.Build();
 
         context.ToolsChanged = token => Announce(host.Services, token);
+
+        if (ToolSettings.Notice(overrides) is { } notice)
+            await Console.Error.WriteLineAsync(notice).ConfigureAwait(false);
 
         if (await ClientRegistrar.ProbeAsync(cancellationToken).ConfigureAwait(false) is { } assets)
             AssetBanner.Publish(assets);

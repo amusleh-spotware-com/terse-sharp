@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace TerseSharp.Server;
 
-public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null);
+public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null, string? Replaces = null);
 
 public static class ToolGuard
 {
@@ -20,7 +20,10 @@ public static class ToolGuard
         "get-childitem", "gci", "get-content", "gc", "select-string", "sls",
     ];
 
-    public static GuardVerdict Inspect(string tool, JsonObject input, string? cwd = null) => tool switch
+    public static GuardVerdict Inspect(string tool, JsonObject input, string? cwd = null, ToolOverrides? overrides = null) =>
+            Respected(Routed(tool, input, cwd), overrides);
+
+    private static GuardVerdict Routed(string tool, JsonObject input, string? cwd) => tool switch
     {
         "Read" or "Write" or "Edit" or "MultiEdit" or "NotebookEdit" => OnPath(tool, Text(input, "file_path")),
         "Glob" => OnPath(tool, Text(input, "pattern")),
@@ -28,6 +31,53 @@ public static class ToolGuard
         "Bash" => OnBash(Text(input, "command"), cwd),
         _ => Allowed,
     };
+
+    private static GuardVerdict Respected(GuardVerdict verdict, ToolOverrides? overrides) =>
+            verdict.Denied && overrides is { Configured: true } configured && !Replaceable(verdict, configured)
+                ? verdict with { Denied = false }
+                : verdict;
+
+    private static bool Replaceable(GuardVerdict verdict, ToolOverrides overrides)
+    {
+        var named = 0;
+
+        foreach (var tool in ToolGroups.Tools)
+        {
+            if (!Names(verdict, tool))
+                continue;
+
+            named++;
+
+            if (overrides.Decision(tool) is not false)
+                return true;
+        }
+
+        return named is 0;
+    }
+
+    private static bool Names(GuardVerdict verdict, string tool) =>
+            verdict.Replaces is { Length: > 0 } clause && Mentions(clause.AsSpan(), tool.AsSpan());
+
+    private static bool Mentions(ReadOnlySpan<char> clause, ReadOnlySpan<char> tool)
+    {
+        var offset = 0;
+
+        while (clause[offset..].IndexOf(tool, StringComparison.Ordinal) is var found and >= 0)
+        {
+            if (Bounded(clause, offset + found, tool.Length))
+                return true;
+
+            offset += found + tool.Length;
+        }
+
+        return false;
+    }
+
+    private static bool Bounded(ReadOnlySpan<char> clause, int start, int length) =>
+        (start is 0 || !IsWord(clause[start - 1]))
+            && (start + length == clause.Length || !IsWord(clause[start + length]));
+
+    private static bool IsWord(char character) => char.IsLetterOrDigit(character) || character is '_';
 
     public static string Render(GuardVerdict verdict)
     {
@@ -50,7 +100,7 @@ public static class ToolGuard
     public static async Task<int> RunAsync(TextReader input, TextWriter output, CancellationToken cancellationToken)
     {
         var payload = await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var verdict = Decide(payload);
+        var verdict = await DecideAsync(payload, cancellationToken).ConfigureAwait(false);
 
         await output.WriteLineAsync(Render(verdict)).ConfigureAwait(false);
         await LogAsync(payload, verdict, cancellationToken).ConfigureAwait(false);
@@ -58,16 +108,17 @@ public static class ToolGuard
         return 0;
     }
 
-    private static GuardVerdict Decide(string payload)
+    private static async Task<GuardVerdict> DecideAsync(string payload, CancellationToken cancellationToken)
     {
         try
         {
-            var root = JsonNode.Parse(payload) as JsonObject;
-            var tool = root is null ? null : Text(root, "tool_name");
+            if (JsonNode.Parse(payload) is not JsonObject root || Text(root, "tool_name") is not { } tool)
+                return Allowed;
 
-            return tool is null
-                ? Allowed
-                : Inspect(tool, root!["tool_input"] as JsonObject ?? [], Text(root, "cwd"));
+            var cwd = Text(root, "cwd");
+            var overrides = await ToolSettings.LoadAsync(cwd ?? Environment.CurrentDirectory, cancellationToken).ConfigureAwait(false);
+
+            return Inspect(tool, root["tool_input"] as JsonObject ?? [], cwd, overrides);
         }
         catch (JsonException)
         {
@@ -78,15 +129,15 @@ public static class ToolGuard
     private static readonly GuardVerdict Allowed = new(false, string.Empty);
 
     private static GuardVerdict OnPath(string tool, string? path) => path is not null && Covered(path)
-        ? new GuardVerdict(true, Reason(tool, path), PathRouting(tool, path))
-        : Allowed;
+            ? new GuardVerdict(true, Reason(tool, path), PathRouting(tool, path), Replacement(tool, path))
+            : Allowed;
 
     private static GuardVerdict OnGrep(JsonObject input)
     {
         var scope = string.Join(' ', new[] { Text(input, "glob"), Text(input, "path"), Text(input, "type") }.OfType<string>());
 
         return Covered(scope) || DotNetType(Text(input, "type"))
-            ? new GuardVerdict(true, Reason("Grep", scope.Trim()), GrepRouting(scope.Trim(), Text(input, "pattern")))
+            ? new GuardVerdict(true, Reason("Grep", scope.Trim()), GrepRouting(scope.Trim(), Text(input, "pattern")), Replacement("Grep", scope.Trim()))
             : Allowed;
     }
 
@@ -104,10 +155,10 @@ public static class ToolGuard
         foreach (var segment in segments)
         {
             if (Replaced(segment, cwd) is { } subcommand)
-                return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound), BuildRouting(subcommand));
+                return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound), BuildRouting(subcommand), BuildReplacement(subcommand));
 
             if (Covered(segment) && IsTextRead(segment))
-                return new GuardVerdict(true, Reason("Bash", segment.Trim()) + Nothing(compound), BashRouting(segment.Trim()));
+                return new GuardVerdict(true, Reason("Bash", segment.Trim()) + Nothing(compound), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()));
         }
 
         return Allowed;
@@ -608,8 +659,9 @@ public static class ToolGuard
         {
             ["tool"] = Text(root, "tool_name"),
             ["denied"] = verdict.Denied,
+            ["standDown"] = !verdict.Denied && verdict.Reason.Length is not 0,
             ["routing"] = verdict.Routing,
-            ["reason"] = verdict.Denied ? verdict.Reason : null,
+            ["reason"] = verdict.Reason is { Length: > 0 } reason ? reason : null,
             ["cwd"] = Text(root, "cwd"),
             ["session"] = Text(root, "session_id"),
             ["transcript"] = Text(root, "transcript_path"),
@@ -724,6 +776,29 @@ public static class ToolGuard
 
     private static string Cached(string[] tokens) =>
             Array.Exists(tokens, token => token is "--cached" or "--staged") ? "diff-cached" : "diff";
+
+    private static readonly string[] SearchCommands =
+            ["grep", "rg", "sed", "awk", "findstr", "wc", "select-string", "sls"];
+    private static readonly string[] ListCommands =
+            ["find", "fd", "ls", "dir", "tree", "get-childitem", "gci"];
+
+    private static string TextKind(string segment)
+    {
+        var command = Command(segment);
+        var name = Path.GetFileNameWithoutExtension(command.FirstOrDefault() ?? string.Empty);
+
+        return name switch
+        {
+            _ when Rewrites(name, command) => "Edit",
+            _ when SearchCommands.Contains(name, StringComparer.OrdinalIgnoreCase) => "Grep",
+            _ when ListCommands.Contains(name, StringComparer.OrdinalIgnoreCase) => "Glob",
+            _ => "Read",
+        };
+    }
+
+    private static bool Rewrites(string name, string[] command) =>
+        name.Equals("sed", StringComparison.OrdinalIgnoreCase)
+            && Array.Exists(command, token => token.StartsWith("-i", StringComparison.Ordinal) || token.Equals("--in-place", StringComparison.Ordinal));
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

@@ -671,6 +671,34 @@ that answers nothing, and the clip always names `next: startLine=`.
     carried 17 567 tool calls and **not one** parallel message, while 5 989 of them sat in runs of
     three or more consecutive calls of the same tool; at this server's median call latency that is
     hours of wall clock nothing depended on.
+### The advertised surface can be narrower than the whole surface
+
+`workspace_status` prints a `tools=` note when it is: the workspace holds no `.xaml`, `.razor` or
+`.resx`, the project checked in a `.terse.json`, or the server was started with `--tools core`. A
+hidden tool is **unadvertised, not removed** - it still answers when called by name, so that note is
+never a reason to fall back to `Read` or `Grep`.
+
+To narrow it deliberately, `write_text` a `.terse.json` at the repo root - it is found by walking up
+from the directory the server runs in, and never above the repository root:
+
+```json
+{
+  "tools": {
+    "groups": { "xaml": false, "razor": false },
+    "names": { "search_regex": false }
+  }
+}
+```
+
+`groups` takes `analysis`, `build`, `edit`, `file`, `git`, `navigation`, `project`, `razor`,
+`refactor`, `resx`, `workspace` or `xaml`; `names` takes a tool name and outranks its group; an
+explicit `true` outranks the markup narrowing and `--tools core`. An unknown or non-boolean key is
+named back rather than dropped, an unreadable file advertises everything, and the `PreToolUse` guard
+reads the same file, so a built-in whose every replacement the project disabled stops being denied.
+The server reads the file **once, at startup**: a `.terse.json` you write now changes the guard on the
+next call but does not change `tools/list` until the server restarts, so tell the user to restart
+rather than reporting the feature broken.
+
 
 ## Localization (`.resx` / `.resw`)
 

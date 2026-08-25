@@ -8,6 +8,59 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-08-25
+
+### Added
+
+- **A project can shrink the advertised tool surface with a `.terse.json` at its root**, found by
+  walking up from the directory the server runs in and never above the repository root. Under
+  `tools`, `groups` takes a family name and `names` takes a single tool, each mapped to `true` or
+  `false`: `{"tools":{"groups":{"xaml":false,"razor":false},"names":{"search_regex":false}}}` drops
+  24 tools and takes a `tools/list` budgeted at **26 490 tokens over 88 tools** to a measured
+  **22 097 over 64**. The twelve groups - `analysis` `build` `edit` `file` `git` `navigation`
+  `project` `razor` `refactor` `resx` `workspace` `xaml` - are discovered from the
+  `[McpServerToolType]` classes rather than a hand-maintained list, so a tool added later is grouped
+  by construction, and `ToolCensusE2ETests.EveryAdvertisedTool_BelongsToExactlyOneToolGroup` fails if
+  one ever is not. A `names` entry outranks its group, an explicit `true` outranks both the
+  markup-derived narrowing and `--tools core`, an unknown or non-boolean key is named on stderr and
+  in `workspace_status` instead of being dropped, an unreadable file advertises everything, and a
+  hidden tool still answers when called by name. The server reads the file once at startup, so a
+  change to it takes effect on the next restart - the guard, which runs as its own process, picks it
+  up on the next call. With no file the surface is exactly what it was.
+  Locked by `ToolSettingsTests`, `ToolGroupsTests` and
+  `ToolSettingsE2ETests.ToolsList_WithASettingsFile_CostsMeasurablyLessThanTheWholeSurface`.
+- **The `PreToolUse` guard follows that file.** A built-in is allowed again when **every** terse tool
+  its denial names is disabled by the project - `Read` on a `.xaml` with `xaml` and `file` both off,
+  `dotnet build` with `build` off - because denying a command whose replacement the project removed
+  leaves the agent with neither. Disabling one family alone still denies while another tool serves
+  that file, since `read_text` answers a `.xaml` whatever the `xaml_*` tools do. The replacement set
+  is carried as its own `GuardVerdict.Replaces` clause and matched on word boundaries, so `clean`
+  never matches inside `cleanup` and a directory named `build` cannot change a verdict, and the
+  `TERSE_GUARD_LOG` line gains `standDown` so a stood-down call is not recorded as one nothing
+  replaces. A shell text command is matched against the tools that replace **what it does**, not
+  against the readers: `grep`, `rg`, `awk`, `findstr` and `wc` against the search tools, `ls`, `find`,
+  `fd`, `dir` and `tree` against `find_files`, an in-place `sed -i` against the compile-gated
+  editors, and `cat`, `head`, `tail` and `type` against the readers - so hiding the four read tools
+  can no longer stand the guard down for a shell `grep`. Both directions are
+  covered by `ToolGuardTests.Inspect_WithEveryReplacementDisabledByTheProject_AllowsTheBuiltIn` and
+  `ToolGuardTests.Inspect_WithOnlyTheMarkupFamilyDisabled_StillDeniesBecauseAnotherToolStillServesIt`,
+  and the command routing by
+  `ToolGuardTests.Inspect_WithOnlyTheReadingToolsDisabled_AllowsCatAndStillDeniesGrepAndLs` and
+  `ToolGuardTests.Inspect_WithTheSearchingToolsDisabled_StillDeniesAnInPlaceSedBecauseTheEditToolsServeIt`.
+
+### Changed
+- **`workspace_status`'s `tools=` note now carries every narrowing at once and never states a count
+  it cannot prove.** A settings file used to *replace* the `--tools core` and markup notes; it now
+  appends to them, `every other tool still answers when called by name` is emitted once rather than
+  per clause, and the `tools=core` clause drops its `N advertised` figure whenever a `.terse.json`
+  is also in force - measured, that figure said 21 while `tools/list` returned 22. Locked by
+  `ToolProfileTests.Describe_ForASettingsFileBesideTheCoreProfile_DropsTheCountItCannotProveAndSaysItOnce`.
+- One token ratchet moved: `SKILL.md` 23 640 -> 24 100 (**measured 23 995**), for the working rule
+  that teaches `.terse.json`, the twelve group names, the once-at-startup read and the fact that a
+  hidden tool still answers when called by name. A skill that does not teach a capability is a
+  capability no agent uses.
+
+
 ## [0.44.0] - 2026-08-24
 
 **Response formats changed.** `get_symbol_source` on a **type** id that has one declaring reference
@@ -4212,7 +4265,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.44.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.45.0...HEAD
+[0.45.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.45.0
 [0.44.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.44.0
 [0.43.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.43.0
 [0.42.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.42.0

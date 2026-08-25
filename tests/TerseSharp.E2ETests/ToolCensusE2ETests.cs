@@ -335,12 +335,23 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
             ? [.. properties.EnumerateObject().Select(property => property.Name)]
             : [];
 
-
     private static HashSet<string> Parameters(MethodInfo method) =>
         [.. method.GetParameters()
         .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
         .Select(parameter => parameter.Name!)];
 
-
     private static string Listed(IEnumerable<string> names) => string.Join(", ", names.Order(StringComparer.Ordinal));
+
+    [Fact]
+    public async Task EveryAdvertisedTool_BelongsToExactlyOneToolGroup()
+    {
+        var advertised = await Advertised();
+        var grouped = ToolGroups.All.SelectMany(group => group.Value).ToArray();
+        var ungrouped = advertised.Where(tool => ToolGroups.Of(tool) is null).ToArray();
+
+        Assert.NotEmpty(advertised);
+        Assert.True(ungrouped.Length is 0, "no tool group holds: " + string.Join(", ", ungrouped));
+        Assert.Equal(grouped.Length, grouped.Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(advertised.Length, grouped.Length);
+    }
 }

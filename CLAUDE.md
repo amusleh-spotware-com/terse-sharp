@@ -163,6 +163,9 @@ workspace walk).
 
 `src/TerseSharp.Server` — `Program.cs` (System.CommandLine: `serve`/`install`/`uninstall`/`doctor`;
 bare args default to `serve`), `McpHost` (generic host + stdio transport + `WithToolsFromAssembly`),
+`ToolProfile` + `ToolSettings` + `ToolGroups` (what `tools/list` advertises: the `--tools`
+profile, the workspace's own markup families, and the project's checked-in `.terse.json`, whose
+group names are reflected off the `[McpServerToolType]` classes),
 `Tools/*.cs` (the `[McpServerToolType]` classes), `ClientRegistrar` + `Doctor` + `SkillAsset`
 (installs into `~/.claude.json` or `$CLAUDE_CONFIG_DIR`, Cursor, VS Code, Windsurf; `SKILL.md` is an
 embedded resource), `DotnetRunner` and `GitRunner` (the **two** deliberate shell-outs: `dotnet build`/`dotnet test` and
@@ -726,6 +729,7 @@ and being absent from it is the point:**
 | **every E2E class that spawns a build joins the collection that serializes the fixture it builds** | `E2ECollectionCensusTests` | the E2E project's own sources — every `*.cs` carrying a `[Fact]` and a `"build"`/`"run_tests"`/`"rerun_failed"`/`"list_tests"`/`"clean"` call must carry the `[Collection(...)]` its fixture implies, or sit in `Excluded`, five reasoned entries ratcheted by `MaxExclusions`, each asserted to still name a discovered file; the discovered set is asserted non-empty so it cannot go vacuous. A class that names exactly one `"<X>Solution"` no other E2E source names, and that never touches the shared fixture, belongs in `<X>SolutionCollection`; **a fixture named by more than one class keeps every builder of it in `TerseServerCollection`**, which is a second test and is why `HangReportE2ETests` stays there beside `BacklogClosureE2ETests`. Both sides are discovered, so a new fixture enrols itself. Two parallel builds *of the same fixture* are what produced this repo's 133 s build flake — and moving all of them into one collection is what turned CI red, which is why the exclusions carry their run id |
 | **every advertised schema declares exactly the parameters its tool method declares** | `ToolCensusE2ETests.EveryAdvertisedSchema_DeclaresExactlyTheParametersItsToolMethodDeclares` | `tools/list` **and** reflection over `[McpServerTool]` methods — the stdio binder validates against the schema and `terse call` against the C# parameters, so nothing but this census keeps the probe and the server refusing the same set |
 | every tool is named in `SKILL.md`, `README.md`, `NUGET_README.md` | `DocsCoverageE2ETests` | `tools/list` |
+| **every advertised tool belongs to exactly one tool group** | `ToolCensusE2ETests.EveryAdvertisedTool_BelongsToExactlyOneToolGroup` | `tools/list` **and** reflection over the `[McpServerToolType]` classes — `ToolGroups` derives the group set from the declaring class, so `.terse.json` can never name a group the server does not have, and no tool can fall outside one; the advertised set is asserted non-empty and the grouped set duplicate-free so the census cannot go vacuous |
 | every tool answers garbage, empty and missing arguments with a `remedy:` | `ToolRobustnessE2ETests` | `tools/list`, minus `ToolCensus.RobustnessExcluded` — seven entries, each carrying a written reason, ratcheted by `MaxRobustnessExclusions` |
 | every mutating tool takes `verbose` | `SchemaCensusE2ETests` | `tools/list` — every tool declaring `dryRun` must declare `verbose` |
 | every `symbolId` tool takes the `symbol` alias, and none declares `symbolId` required | `SchemaCensusE2ETests` | `tools/list` — the `properties` and `required` arrays |

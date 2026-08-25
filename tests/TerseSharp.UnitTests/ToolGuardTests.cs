@@ -876,4 +876,126 @@ public sealed class ToolGuardTests
         Assert.True(verdict.Denied);
         Assert.DoesNotContain("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Inspect_WithEveryReplacementDisabledByTheProject_AllowsTheBuiltIn()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"xaml":false,"file":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/App/Views/Shell.xaml" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithOnlyTheMarkupFamilyDisabled_StillDeniesBecauseAnotherToolStillServesIt()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"xaml":false}}}""", ToolSettings.FileName);
+
+        Assert.True(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/App/Views/Shell.xaml" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithTheBuildFamilyDisabledByTheProject_AllowsDotnetBuildAndStillDeniesGitStatus()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"build":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build" }, null, overrides).Denied);
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git status" }, Fixtures.RepositoryRoot, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithASettingsFileThatHidesNothing_DeniesExactlyAsBefore()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"names":{"impact_of":true}}}""", ToolSettings.FileName);
+
+        Assert.True(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/App/OrderService.cs" }, null, overrides).Denied);
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithTheBuildFamilyDisabledByTheProject_AllowsDotnetCleanToo()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"build":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet clean" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithTheAnalysisFamilyDisabledByTheProject_AllowsDotnetFormat()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"analysis":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet format" }, null, overrides).Denied);
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithADirectorySharingAToolName_ReachesTheSameVerdictAsAnyOtherPath()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"xaml":false,"file":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/build/Views/Shell.xaml" }, null, overrides).Denied);
+        Assert.False(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/App/Views/Shell.xaml" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithTheSearchFamilyDisabledByTheProject_AllowsAGrepScopedToCSharp()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"navigation":false,"file":false,"xaml":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Grep", new JsonObject { ["glob"] = "*.cs" }, null, overrides).Denied);
+        Assert.True(ToolGuard.Inspect("Grep", new JsonObject { ["glob"] = "*.cs" }, null, ToolSettings.Parse("""{"tools":{"groups":{"navigation":false}}}""", ToolSettings.FileName)).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithOnlyTheReadingToolsDisabled_AllowsCatAndStillDeniesGrepAndLs()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"names":{"get_file_outline":false,"get_symbol_source":false,"xaml_outline":false,"read_text":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat src/App/OrderService.cs" }, null, overrides).Denied);
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "grep -rn Submit src/App/OrderService.cs" }, null, overrides).Denied);
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "ls src/App/OrderService.cs" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithOnlyTheSearchingToolsDisabled_AllowsAShellGrepAndStillDeniesCat()
+    {
+        var overrides = ToolSettings.Parse("""{"tools":{"names":{"search_symbols":false,"find_usages":false,"find_implementations":false,"search_text":false,"xaml_find":false}}}""", ToolSettings.FileName);
+
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "grep -rn Submit src/App/OrderService.cs" }, null, overrides).Denied);
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat src/App/OrderService.cs" }, null, overrides).Denied);
+    }
+
+    [Fact]
+    public void Inspect_WithTheSearchingToolsDisabled_StillDeniesAnInPlaceSedBecauseTheEditToolsServeIt()
+    {
+        var searching = ToolSettings.Parse("""{"tools":{"groups":{"navigation":false,"file":false,"xaml":false}}}""", ToolSettings.FileName);
+        var editing = ToolSettings.Parse("""{"tools":{"groups":{"edit":false,"file":false,"refactor":false,"xaml":false}}}""", ToolSettings.FileName);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "sed -i s/a/b/ src/App/OrderService.cs" }, null, searching).Denied);
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "sed -i s/a/b/ src/App/OrderService.cs" }, null, editing).Denied);
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "awk {print} src/App/OrderService.cs" }, null, searching).Denied);
+    }
+
+    [Fact]
+    public void Entry_ForACallTheProjectStoodDown_RecordsItAsAStandDownWithItsReason()
+    {
+        const string Payload = """{"tool_name":"Bash","tool_input":{"command":"dotnet build"},"cwd":"C:/repo"}""";
+
+        var overrides = ToolSettings.Parse("""{"tools":{"groups":{"build":false}}}""", ToolSettings.FileName);
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build" }, null, overrides);
+
+        Assert.False(verdict.Denied);
+        Assert.Contains("\"standDown\":true", ToolGuard.Entry(Payload, verdict), StringComparison.Ordinal);
+        Assert.Contains("use build", ToolGuard.Entry(Payload, verdict), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Entry_ForACallNothingReplaces_RecordsNoStandDown()
+    {
+        const string Payload = """{"tool_name":"Bash","tool_input":{"command":"npm install"}}""";
+
+        var line = ToolGuard.Entry(Payload, ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "npm install" }));
+
+        Assert.Contains("\"standDown\":false", line, StringComparison.Ordinal);
+    }
 }
