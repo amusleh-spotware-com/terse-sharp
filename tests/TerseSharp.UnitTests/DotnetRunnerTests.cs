@@ -689,6 +689,7 @@ public sealed class DotnetRunnerTests
         Assert.False(DotnetRunner.Expandable(solution with { Target = "one.csproj" }, two));
         Assert.False(DotnetRunner.Expandable(solution with { Scope = new BuildScope("Release", null, default) }, two));
         Assert.False(DotnetRunner.Expandable(solution with { Reporter = TestReporter.TestingPlatformTrx }, two));
+        Assert.False(DotnetRunner.Expandable(solution with { RunSettings = ["xUnit.MaxParallelThreads=1"] }, two));
     }
 
     [Fact]

@@ -990,6 +990,7 @@ public static partial class DotnetRunner
         && request.Targets.IsDefaultOrEmpty
         && request.Parallel is not 1
         && request.Filter is not { Length: > 0 }
+        && request.RunSettings.IsDefaultOrEmpty
         && request.Scope.IsDefault
         && request.Reporter is TestReporter.VsTestLogger
         && SolutionFile.IsSolutionFile(request.Target);

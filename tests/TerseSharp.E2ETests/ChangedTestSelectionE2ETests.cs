@@ -16,6 +16,13 @@ public sealed class ChangedTestSelectionE2ETests
 
         try
         {
+            await CallAsync(server, "build", []);
+            await CallAsync(server, "load_workspace", new()
+            {
+                ["path"] = Path.Combine(SelectionRoot, "SelectionSolution.slnx"),
+                ["reload"] = true,
+            });
+
             var edit = await CallAsync(server, "replace_symbol_body", new()
             {
                 ["symbolId"] = "M:Selection.Core.Adder.Add(System.Int32,System.Int32)",
@@ -188,17 +195,22 @@ public sealed class ChangedTestSelectionE2ETests
 
         try
         {
-            await CallAsync(server, "build", []);
-
-            var expanded = await CallAsync(server, "run_tests", new() { ["verbose"] = true, ["timeoutSeconds"] = 600 });
             var single = await CallAsync(server, "run_tests", new() { ["verbose"] = true, ["parallel"] = 1, ["timeoutSeconds"] = 600 });
 
+            await CallAsync(server, "load_workspace", new()
+            {
+                ["path"] = Path.Combine(SelectionRoot, "SelectionSolution.slnx"),
+                ["reload"] = true,
+            });
+
+            var expanded = await CallAsync(server, "run_tests", new() { ["verbose"] = true, ["timeoutSeconds"] = 600 });
+
+            Assert.Contains("dotnet test", CommandLine(single), StringComparison.Ordinal);
+            Assert.Contains("SelectionSolution.slnx", CommandLine(single), StringComparison.Ordinal);
             Assert.Contains("Selection.Core.Tests.dll", CommandLine(expanded), StringComparison.Ordinal);
             Assert.Contains("Selection.Other.Tests.dll", CommandLine(expanded), StringComparison.Ordinal);
             Assert.DoesNotContain("dotnet test", CommandLine(expanded), StringComparison.Ordinal);
             Assert.DoesNotContain("SelectionSolution.slnx", CommandLine(expanded), StringComparison.Ordinal);
-            Assert.Contains("dotnet test", CommandLine(single), StringComparison.Ordinal);
-            Assert.Contains("SelectionSolution.slnx", CommandLine(single), StringComparison.Ordinal);
             Assert.Contains("total=2", expanded, StringComparison.Ordinal);
             Assert.Equal(Verdict(single), Verdict(expanded));
         }
@@ -209,5 +221,6 @@ public sealed class ChangedTestSelectionE2ETests
     }
 
     private static string CommandLine(string response) =>
-        response.Split('\n').Single(line => line.StartsWith("command: ", StringComparison.Ordinal));
+            response.Split('\n').SingleOrDefault(line => line.StartsWith("command: ", StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("the response carried no command line: " + response);
 }

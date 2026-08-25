@@ -107,12 +107,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         : null;
 
     public async Task<string> WithTargetAsync(
-            string? workspace,
-            string? pathHint,
-            Func<WorkspaceTarget, Task<string>> action,
-            bool changed = false,
-            bool tests = false,
-            CancellationToken cancellationToken = default)
+        string? workspace,
+        string? pathHint,
+        Func<WorkspaceTarget, Task<string>> action,
+        bool changed = false,
+        bool tests = false,
+        CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
 
@@ -125,11 +125,11 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     }
 
     private async Task<Result<WorkspaceTarget>> TargetAsync(
-            string? workspace,
-            string? pathHint,
-            bool changed,
-            bool tests,
-            CancellationToken cancellationToken)
+        string? workspace,
+        string? pathHint,
+        bool changed,
+        bool tests,
+        CancellationToken cancellationToken)
     {
         if (!changed)
             return Target(workspace, pathHint, changed: false, tests);
@@ -162,11 +162,11 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     }
 
     private static WorkspaceTarget Described(LoadedWorkspace loaded, bool changed, bool tests = false) => new(
-            loaded.SolutionPath,
-            loaded.Root,
-            ProjectPaths(loaded),
-            changed ? ChangedTestSelection.Select(loaded) : default,
-            tests ? TestProjectsOf(loaded) : default);
+        loaded.SolutionPath,
+        loaded.Root,
+        ProjectPaths(loaded),
+        changed ? ChangedTestSelection.Select(loaded) : default,
+        tests ? TestProjectsOf(loaded) : default);
 
     public void Dispose() => Registry.Dispose();
 
@@ -355,8 +355,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     }
 
     private static ImmutableArray<string> TestProjectsOf(LoadedWorkspace loaded) => loaded.Load.Failures.Count is 0
-            ? TestScope.TestProjectsOf(loaded.Solution, loaded.Load.TargetFramework is null or { Length: 0 })
-            : default;
+        ? TestScope.TestProjectsOf(loaded.Solution, loaded.Load.TargetFramework is null or { Length: 0 })
+        : default;
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

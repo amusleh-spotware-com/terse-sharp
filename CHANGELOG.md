@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-08-25
+
 ### Changed
 
 - **`run_tests` over a solution now executes tests the way an IDE does: the solution is built once,
@@ -25,21 +27,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   Direct execution is used only where it can be proven correct: the project must reference the
   xunit.v3 in-process runner and its built assembly must exist on disk. Anything else keeps
   `dotnet test`, and the expansion itself is refused — leaving exactly today's single solution-wide
-  invocation — for `parallel=1`, for a filtered run (`test=`/`filter=`), for `changed=true` when it
-  selected its own projects, for a solution with fewer than two test projects, when any project of
-  the solution failed to load (a classification drawn from an incomplete solution could silently run
-  fewer tests than `dotnet test` would), and whenever `configuration`, `targetFramework` or
-  `properties` is passed, because an assembly path read from the loaded workspace would then point at
-  the wrong build. Test projects are classified by `TestScope`, the same metadata-reference
+  invocation — for `parallel=1`, for a filtered run (`test=`/`filter=`), for `runSettings=`, for
+  `changed=true` when it selected its own projects, for a solution with fewer than two test projects,
+  for a runner that is not VSTest-reported, when any project of the solution failed to load (a
+  classification drawn from an incomplete solution could silently run fewer tests than `dotnet test`
+  would), and whenever `configuration`, `targetFramework` or `properties` is passed, because an
+  assembly path read from the loaded workspace would then point at the wrong build. A multi-targeted
+  test project, and a workspace loaded with `targetFramework=`, both fall back to `dotnet test` for
+  that project, so a single framework's assembly is never run where every framework was asked for. Test projects are classified by `TestScope`, the same metadata-reference
   classifier `changed=true` already selects with.
   **Response format changed:** `timeoutSeconds` is now the budget for **each** test project of a
   solution run rather than for the whole run, and a `verbose=true` run reports every command it
-  invoked, joined by ` && `, where a merged batch previously reported none at all.
+  invoked, joined by ` && `, where a merged batch previously reported none at all. The directly
+  executed path carries no `--blame-hang` data collector, so a run stopped there cannot name the test
+  that was still running; the tool and parameter descriptions now say so, and the `dotnet test` path
+  is unchanged.
   Locked by `ChangedTestSelectionE2ETests.RunTests_OverASolution_RunsEachTestProjectAsItsOwnInvocationInsteadOfOneSolutionWideRun`,
   which asserts both directions against the two-test-project `SelectionSolution` fixture, plus
   `DotnetRunnerTests.Expandable_OnAPlainSolutionRun_IsTrueSoItsTestProjectsRunAsSeparateConcurrentInvocations`,
   `DotnetRunnerTests.Builds_WhenASolutionWasExpanded_IsThatOneSolutionRatherThanEveryProjectItExpandedTo`,
-  `DotnetRunnerTests.Merge_KeepsBothCommands_SoAConcurrentBatchStillReportsEveryInvocationItRan` and
+  `DotnetRunnerTests.Merge_KeepsBothCommands_SoAConcurrentBatchStillReportsEveryInvocationItRan`,
+  `DotnetRunnerTests.Arguments_ForADirectExpansion_RunTheBuiltTestAssemblyItselfWithATrxUnderTheSlot`,
+  `DotnetRunnerTests.Arguments_WhenTheRunIsNotADirectExpansion_StaysOnDotnetTestEvenForAnAssemblyPath`,
+  `TestScopeTests.TestProjectsOf_WhenOneProjectFileIsLoadedOncePerTargetFramework_FallsBackToTheProjectRatherThanOneFrameworksAssembly`,
+  `TestScopeTests.TestProjectsOf_WithoutDirectExecution_NamesTheProjectFileEvenWhenTheAssemblyIsRunnable` and
   `ChangedTestBoundTests.CrowdedNote_NamesHowManyProjectsWereReachedAndTheBoundItPassed`.
 
 ## [0.45.0] - 2026-08-25
@@ -4299,7 +4310,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.45.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.46.0...HEAD
+[0.46.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.46.0
 [0.45.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.45.0
 [0.44.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.44.0
 [0.43.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.43.0

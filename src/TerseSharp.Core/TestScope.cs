@@ -22,7 +22,7 @@ public static class TestScope
     public static ImmutableArray<string> TestProjectsOf(Solution solution, bool allowDirect)
     {
         var found = ImmutableArray.CreateBuilder<string>();
-        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var seen = new Dictionary<string, int>(StringComparer.FromComparison(PathBoundary.Comparison));
 
         foreach (var project in solution.Projects)
         {
