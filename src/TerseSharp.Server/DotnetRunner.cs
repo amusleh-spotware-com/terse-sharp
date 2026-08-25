@@ -57,15 +57,16 @@ public static partial class DotnetRunner
         if (Refused(reported) is { } refusal)
             return new TestRunResult(refusal.Render(), TestRunReport.Empty, false);
 
+        var expanded = Expanded(workspace, reported);
         var results = Directory.CreateTempSubdirectory("terse-tests-");
 
         try
         {
-            var prepared = await PreparedAsync(workspace, reported, cancellationToken).ConfigureAwait(false);
+            var prepared = await PreparedAsync(workspace, expanded, cancellationToken).ConfigureAwait(false);
 
             return prepared.Failure is { } failed
                 ? new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked)
-                : await RanAsync(workspace, reported, results, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
+                : await RanAsync(workspace, expanded, results, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -109,7 +110,8 @@ public static partial class DotnetRunner
         first.StandardOutput + "\n" + next.StandardOutput,
         first.StandardError + "\n" + next.StandardError,
         first.Drained && next.Drained,
-        first.Stopped || next.Stopped);
+        first.Stopped || next.Stopped,
+        Joined(first.Command, next.Command));
 
     private static void Discard(DirectoryInfo results)
     {
@@ -128,10 +130,12 @@ public static partial class DotnetRunner
     private static TestRunReport Report(DirectoryInfo results, string workspaceRoot) =>
             TestResultParser.Parse(Directory.EnumerateFiles(results.FullName, "*.trx", RecursiveAndTolerant), workspaceRoot);
 
-    private static string[] Arguments(TestRunRequest request, string resultsDirectory) =>
-        request.Reporter is TestReporter.VsTestLogger
-            ? VsTestArguments(request, resultsDirectory)
-            : TestPlatformArguments.Of(request, resultsDirectory);
+    internal static string[] Arguments(TestRunRequest request, string resultsDirectory) => request.Target switch
+    {
+        var target when request.Direct && IsAssembly(target) => AssemblyArguments(request, resultsDirectory),
+        _ when request.Reporter is TestReporter.VsTestLogger => VsTestArguments(request, resultsDirectory),
+        _ => TestPlatformArguments.Of(request, resultsDirectory),
+    };
 
     private static string[] VsTestArguments(TestRunRequest request, string resultsDirectory)
     {
@@ -720,7 +724,7 @@ public static partial class DotnetRunner
 
         var elapsed = 0L;
 
-        foreach (var target in request.Invocations)
+        foreach (var target in request.Builds)
         {
             var run = await BuiltAsync(workspace, target, request.Scope, request.Timeout, cancellationToken).ConfigureAwait(false);
 
@@ -973,6 +977,42 @@ public static partial class DotnetRunner
     }
 
     private const double SerialConcurrency = 2;
+    private const int MinimumExpandedProjects = 2;
+
+    private static TestRunRequest Expanded(WorkspaceTarget workspace, TestRunRequest request) =>
+        Expandable(request, workspace.TestProjects)
+            ? request with { Targets = workspace.TestProjects, BuildTarget = request.Target, Direct = true }
+            : request;
+
+    internal static bool Expandable(TestRunRequest request, ImmutableArray<string> testProjects) =>
+        !testProjects.IsDefaultOrEmpty
+        && testProjects.Length >= MinimumExpandedProjects
+        && request.Targets.IsDefaultOrEmpty
+        && request.Parallel is not 1
+        && request.Filter is not { Length: > 0 }
+        && request.Scope.IsDefault
+        && request.Reporter is TestReporter.VsTestLogger
+        && SolutionFile.IsSolutionFile(request.Target);
+
+    private static string Joined(string first, string next) => (first.Length, next.Length) switch
+    {
+        (0, _) => next,
+        (_, 0) => first,
+        _ => first + " && " + next,
+    };
+
+    internal static bool IsAssembly(string target) => target.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+
+
+    private static string[] AssemblyArguments(TestRunRequest request, string resultsDirectory) =>
+    [
+        request.Target,
+    "-trx",
+    Path.Combine(resultsDirectory, "results.trx"),
+    "-noLogo",
+    "-reporter",
+    "quiet",
+];
 }
 
 internal sealed record ProcessRun(

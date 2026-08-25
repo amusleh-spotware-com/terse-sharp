@@ -117,7 +117,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Build and test** | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
 | **Build and test** | `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
-| **Build and test** | `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line, and a run that spanned several projects appends `Name:total/durationMs` per project so "which tier is slow" costs no second run; a failure carries its message, expected/actual and one source frame |
+| **Build and test** | `Bash: dotnet test` / `vstest` | `run_tests` | a green run is one line, and a run that spanned several projects appends `Name:total/durationMs` per project so "which tier is slow" costs no second run; a failure carries its message, expected/actual and one source frame. A solution is built once, then each test assembly runs directly where its runner allows, skipping the MSBuild and VSTest host `dotnet test` pays per project |
 | **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` | at most 10, run **concurrently**; the timeout applies to **each** project, and one that timed out is named instead of the merged run being reported as passed. Naming the same project twice is refused - two invocations of one assembly race each other and fail tests that pass alone |
 | **Build and test** | bounding parallelism **inside** one test assembly | `run_tests(runSettings: ["xUnit.MaxParallelThreads=1"])` | VSTest RunSettings overrides, passed through as one trailing `-- Name=Value` block - the layer `parallel` deliberately does not touch. `xUnit.StopOnFail`, `MSTest.Parallelize.Workers` and `NUnit.NumberOfTestWorkers` live here too; an entry that is not `Name=Value` is refused before anything runs |
 | **Build and test** | re-running what broke | `rerun_failed` | replays the previous failures only |
@@ -822,7 +822,7 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 
 | Goal | Call |
 |---|---|
-| whole solution | `run_tests` |
+| whole solution | `run_tests` — built **once**, then each test assembly run directly where its runner allows, **concurrently**, one process each; `timeoutSeconds` bounds **each**, `parallel: 1` restores the single `dotnet test` |
 | one project | `run_tests(project)` — a project **name** or a path to the `.csproj` |
 | one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
 | a raw VSTest expression | `run_tests(filter)` |

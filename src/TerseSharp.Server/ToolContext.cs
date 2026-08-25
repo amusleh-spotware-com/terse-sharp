@@ -107,30 +107,32 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         : null;
 
     public async Task<string> WithTargetAsync(
-        string? workspace,
-        string? pathHint,
-        Func<WorkspaceTarget, Task<string>> action,
-        bool changed = false,
-        CancellationToken cancellationToken = default)
+            string? workspace,
+            string? pathHint,
+            Func<WorkspaceTarget, Task<string>> action,
+            bool changed = false,
+            bool tests = false,
+            CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
 
         return await ToolBoundary.RunAsync(async () =>
         {
-            var target = await TargetAsync(workspace, pathHint, changed, cancellationToken).ConfigureAwait(false);
+            var target = await TargetAsync(workspace, pathHint, changed, tests, cancellationToken).ConfigureAwait(false);
 
             return target.IsOk ? await action(target.Value!).ConfigureAwait(false) : target.Error!.Render();
         }).ConfigureAwait(false);
     }
 
     private async Task<Result<WorkspaceTarget>> TargetAsync(
-        string? workspace,
-        string? pathHint,
-        bool changed,
-        CancellationToken cancellationToken)
+            string? workspace,
+            string? pathHint,
+            bool changed,
+            bool tests,
+            CancellationToken cancellationToken)
     {
         if (!changed)
-            return Target(workspace, pathHint, changed: false);
+            return Target(workspace, pathHint, changed: false, tests);
 
         var resolved = Registry.Resolve(workspace, pathHint);
 
@@ -144,10 +146,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
         using var lease = synced.Value!;
 
-        return Result.Ok(Described(lease.Workspace, changed: true));
+        return Result.Ok(Described(lease.Workspace, changed: true, tests));
     }
 
-    private Result<WorkspaceTarget> Target(string? workspace, string? pathHint, bool changed)
+    private Result<WorkspaceTarget> Target(string? workspace, string? pathHint, bool changed, bool tests = false)
     {
         var resolved = Registry.Resolve(workspace, pathHint);
 
@@ -156,14 +158,15 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
         using var lease = resolved.Value!;
 
-        return Result.Ok(Described(lease.Workspace, changed));
+        return Result.Ok(Described(lease.Workspace, changed, tests));
     }
 
-    private static WorkspaceTarget Described(LoadedWorkspace loaded, bool changed) => new(
-        loaded.SolutionPath,
-        loaded.Root,
-        ProjectPaths(loaded),
-        changed ? ChangedTestSelection.Select(loaded) : default);
+    private static WorkspaceTarget Described(LoadedWorkspace loaded, bool changed, bool tests = false) => new(
+            loaded.SolutionPath,
+            loaded.Root,
+            ProjectPaths(loaded),
+            changed ? ChangedTestSelection.Select(loaded) : default,
+            tests ? TestProjectsOf(loaded) : default);
 
     public void Dispose() => Registry.Dispose();
 
@@ -350,6 +353,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             Console.Error.WriteLine("terse: tools/list_changed could not be sent: " + exception.Message);
         }
     }
+
+    private static ImmutableArray<string> TestProjectsOf(LoadedWorkspace loaded) => loaded.Load.Failures.Count is 0
+            ? TestScope.TestProjectsOf(loaded.Solution, loaded.Load.TargetFramework is null or { Length: 0 })
+            : default;
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

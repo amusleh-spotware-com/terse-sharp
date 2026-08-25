@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using TerseSharp.Core;
 using TerseSharp.Server;
 
@@ -651,5 +652,74 @@ public sealed class DotnetRunnerTests
 
         Assert.Contains("concurrency=1.3x", text, StringComparison.Ordinal);
         Assert.Contains("slowestTest=A.Slow 4000ms", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Merge_KeepsBothCommands_SoAConcurrentBatchStillReportsEveryInvocationItRan()
+    {
+        var first = new ProcessRun(0, "a", 10, Command: "dotnet test one.csproj");
+        var next = new ProcessRun(0, "b", 20, Command: "dotnet test two.csproj");
+
+        Assert.Equal("dotnet test one.csproj && dotnet test two.csproj", DotnetRunner.Merge(first, next).Command);
+    }
+
+    [Fact]
+    public void Merge_WhenOneRunCarriesNoCommand_KeepsTheOtherWithoutADanglingSeparator()
+    {
+        var known = new ProcessRun(0, "a", 10, Command: "dotnet test one.csproj");
+        var blank = new ProcessRun(0, "b", 20);
+
+        Assert.Equal("dotnet test one.csproj", DotnetRunner.Merge(known, blank).Command);
+        Assert.Equal("dotnet test one.csproj", DotnetRunner.Merge(blank, known).Command);
+        Assert.Equal(string.Empty, DotnetRunner.Merge(blank, blank).Command);
+    }
+
+    [Fact]
+    public void Expandable_OnAPlainSolutionRun_IsTrueSoItsTestProjectsRunAsSeparateConcurrentInvocations()
+    {
+        var solution = new TestRunRequest("A.slnx", null, false, false, 0, TimeSpan.FromSeconds(600));
+        ImmutableArray<string> two = ["one.csproj", "two.csproj"];
+
+        Assert.True(DotnetRunner.Expandable(solution, two));
+        Assert.False(DotnetRunner.Expandable(solution, ["only.csproj"]));
+        Assert.False(DotnetRunner.Expandable(solution, default));
+        Assert.False(DotnetRunner.Expandable(solution with { Parallel = 1 }, two));
+        Assert.False(DotnetRunner.Expandable(solution with { Filter = "FullyQualifiedName~Adder" }, two));
+        Assert.False(DotnetRunner.Expandable(solution with { Targets = two }, two));
+        Assert.False(DotnetRunner.Expandable(solution with { Target = "one.csproj" }, two));
+        Assert.False(DotnetRunner.Expandable(solution with { Scope = new BuildScope("Release", null, default) }, two));
+        Assert.False(DotnetRunner.Expandable(solution with { Reporter = TestReporter.TestingPlatformTrx }, two));
+    }
+
+    [Fact]
+    public void Builds_WhenASolutionWasExpanded_IsThatOneSolutionRatherThanEveryProjectItExpandedTo()
+    {
+        var request = new TestRunRequest("A.slnx", null, false, false, 0, TimeSpan.FromSeconds(600))
+        {
+            Targets = ["one.csproj", "two.csproj"],
+            BuildTarget = "A.slnx",
+        };
+
+        Assert.Equal(["A.slnx"], request.Builds);
+        Assert.Equal(["one.csproj", "two.csproj"], request.Invocations);
+        Assert.Equal(["one.csproj", "two.csproj"], (request with { BuildTarget = null }).Builds);
+    }
+
+    [Fact]
+    public void Arguments_ForADirectExpansion_RunTheBuiltTestAssemblyItselfWithATrxUnderTheSlot()
+    {
+        var request = new TestRunRequest("C:/repo/bin/Unit.Tests.dll", null, true, false, 0, TimeSpan.FromSeconds(600), Direct: true);
+
+        Assert.Equal(
+            ["C:/repo/bin/Unit.Tests.dll", "-trx", Path.Combine("C:/slot", "results.trx"), "-noLogo", "-reporter", "quiet"],
+            DotnetRunner.Arguments(request, "C:/slot"));
+    }
+
+    [Fact]
+    public void Arguments_WhenTheRunIsNotADirectExpansion_StaysOnDotnetTestEvenForAnAssemblyPath()
+    {
+        var request = new TestRunRequest("C:/repo/bin/Unit.Tests.dll", null, true, false, 0, TimeSpan.FromSeconds(600));
+
+        Assert.Equal("test", DotnetRunner.Arguments(request, "C:/slot")[0]);
     }
 }

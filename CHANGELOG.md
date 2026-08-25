@@ -8,6 +8,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **`run_tests` over a solution now executes tests the way an IDE does: the solution is built once,
+  then each test assembly is run directly, one process per project, concurrently.** Until now a bare
+  `run_tests` handed the whole solution to a single `dotnet test`, which re-enters MSBuild and hosts
+  VSTest. Rider does neither: it builds once and launches one runner **per assembly**, N at a time.
+  That is now the shape here — the solution is built once, and each test project is invoked as
+  `dotnet <assembly>.dll -trx <slot>/results.trx -noLogo -reporter quiet`, with no MSBuild
+  evaluation and no VSTest host per project. Measured over five alternating pairs on
+  `fixtures/SelectionSolution` (two test projects), every pair favouring the new path:
+  **5 333 ms → 3 283 ms, 38 % faster**. The saving is per test project and lands on runner overhead,
+  so a solution whose wall clock is dominated by one long suite sees it only at the margin: this
+  repository's own 2 241 tests measured 484 s against a 455-598 s range for the old path, because its
+  E2E project spends 1 438 s of child-process work inside a 480 s wall whatever runs it.
+  Direct execution is used only where it can be proven correct: the project must reference the
+  xunit.v3 in-process runner and its built assembly must exist on disk. Anything else keeps
+  `dotnet test`, and the expansion itself is refused — leaving exactly today's single solution-wide
+  invocation — for `parallel=1`, for a filtered run (`test=`/`filter=`), for `changed=true` when it
+  selected its own projects, for a solution with fewer than two test projects, when any project of
+  the solution failed to load (a classification drawn from an incomplete solution could silently run
+  fewer tests than `dotnet test` would), and whenever `configuration`, `targetFramework` or
+  `properties` is passed, because an assembly path read from the loaded workspace would then point at
+  the wrong build. Test projects are classified by `TestScope`, the same metadata-reference
+  classifier `changed=true` already selects with.
+  **Response format changed:** `timeoutSeconds` is now the budget for **each** test project of a
+  solution run rather than for the whole run, and a `verbose=true` run reports every command it
+  invoked, joined by ` && `, where a merged batch previously reported none at all.
+  Locked by `ChangedTestSelectionE2ETests.RunTests_OverASolution_RunsEachTestProjectAsItsOwnInvocationInsteadOfOneSolutionWideRun`,
+  which asserts both directions against the two-test-project `SelectionSolution` fixture, plus
+  `DotnetRunnerTests.Expandable_OnAPlainSolutionRun_IsTrueSoItsTestProjectsRunAsSeparateConcurrentInvocations`,
+  `DotnetRunnerTests.Builds_WhenASolutionWasExpanded_IsThatOneSolutionRatherThanEveryProjectItExpandedTo`,
+  `DotnetRunnerTests.Merge_KeepsBothCommands_SoAConcurrentBatchStillReportsEveryInvocationItRan` and
+  `ChangedTestBoundTests.CrowdedNote_NamesHowManyProjectsWereReachedAndTheBoundItPassed`.
+
 ## [0.45.0] - 2026-08-25
 
 ### Added

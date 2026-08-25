@@ -232,7 +232,10 @@ success that costs nothing — every mutating tool answers in one line per chang
 `get_symbol_source symbolIds=`, `replace_symbol symbolIds=`, `search_text`/`search_regex queries=`,
 `run_tests projects=`, `write_text files=` and `edit_text edits=` each answer in one call what used to
 cost one call per item — `run_tests projects=` also runs them **concurrently**, one process per core
-by default, each project built before the fan-out (`parallel=1` restores the serial run) — and
+by default, each project built before the fan-out (`parallel=1` restores the serial run), and a bare
+`run_tests` over a solution now does that by itself, the way an IDE does: the solution is built
+**once**, then each test assembly is run directly where its runner allows — no MSBuild evaluation and
+no VSTest host per project — measured **38 % faster** over five alternating pairs on a two-test-project solution — and
 `write_text files=` puts every `.cs` file it writes through **one**
 compile gate, so a type and the consumer it breaks land together. From the **second** consecutive call
 of the same tool the response gains **one** extra line — `2 read_text calls in a row - pass paths=[...]

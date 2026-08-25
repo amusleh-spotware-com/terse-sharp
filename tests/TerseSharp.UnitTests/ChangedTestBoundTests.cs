@@ -25,7 +25,8 @@ public sealed class ChangedTestBoundTests
 
         Assert.Contains("reaches 13 test projects", note, StringComparison.Ordinal);
         Assert.Contains("more than the 10", note, StringComparison.Ordinal);
-        Assert.Contains("whole solution was run once instead", note, StringComparison.Ordinal);
+        Assert.Contains("every test project of the solution was run instead", note, StringComparison.Ordinal);
+        Assert.Contains("the timeout applies per project", note, StringComparison.Ordinal);
     }
 
     private static TestSelection Selecting(int projects) => new(

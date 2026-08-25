@@ -57,12 +57,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values, and one source frame, and a build that failed under the run returns error-severity diagnostics only. A stopped run names the test that was still running. Pass projects to run several test projects in ONE call, CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each project built up front then run with --no-build, and a project that times out is named without stopping the rest; a duplicate is refused. parallel bounds how many run at once and defaults to one per core; parallel=1 is serial and stops at the first timeout. runSettings passes VSTest RunSettings overrides, which bound parallelism INSIDE one assembly. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. verbose=true gives the full report on a green run and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run as they scope build.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values, and one source frame, and a build that failed under the run returns error-severity diagnostics only. A stopped run names the test still running, on the dotnet test path. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each built up front then run with --no-build, and a project that times out is named without stopping the rest; a duplicate is refused. parallel bounds how many run at once and defaults to one per core; parallel=1 is serial, stops at the first timeout, and keeps a solution as ONE invocation. runSettings passes VSTest RunSettings overrides, which bound parallelism INSIDE one assembly. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. verbose=true gives the full report on a green run and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run as they scope build.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test. Microsoft.Testing.Platform takes FullyQualifiedName only; anything else is refused naming test=.")] string? filter = null,
         [Description("Project path; empty runs every test project.")] string? project = null,
-        [Description("Several test projects run in one call, at most 10, each a project name or a path to its .csproj. They run concurrently, governed by parallel. A duplicate is refused. Cannot be combined with project=.")] string?[]? projects = null,
+        [Description("Several test projects in one call, at most 10, each a name or a path to its .csproj, run concurrently under parallel. Not with project=.")] string?[]? projects = null,
         [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
         [Description("How many projects of a batch run at once. A value outside 0-10 is refused whatever the run; 0 is one per core bounded by the batch, 1 is serial and stops at the first timeout.")] int parallel = 0,
         [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] - parallelism inside one assembly, which parallel does not touch. VSTest only; refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
@@ -73,7 +73,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         [Description("List passing tests too.")] bool includePassed = false,
         [Description("List the N slowest tests.")] int slowest = 0,
         [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
-        [Description("Timeout seconds, 1-3600 (600). With projects=, it is the budget for each project rather than for the batch, and it also bounds each project's build. Above 30s it is ALSO a per-test ceiling 15s below it: a test still running then is stopped and named.")] int timeoutSeconds = 600,
+        [Description("Timeout seconds, 1-3600 (600). With projects= or a solution, it is the budget for each project rather than for the batch, and it also bounds each project's build. Above 30s it is ALSO a per-test ceiling 15s below it on the dotnet test path.")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) => context.WithTargetAsync(
         workspace,
@@ -118,7 +118,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                 changed,
                 cancellationToken);
         },
-        changed && string.IsNullOrWhiteSpace(project) && projects is not { Length: > 0 },
+        changed && WholeSolution(project, projects),
+        WholeSolution(project, projects),
         cancellationToken);
 
     [McpServerTool(Name = "rerun_failed")]
@@ -397,8 +398,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     internal static bool Crowded(TestSelection tests) => !tests.IsFullRun && tests.Run.Length > MaxBatchedProjects;
 
     internal static string CrowdedNote(TestSelection tests) => string.Create(
-    CultureInfo.InvariantCulture,
-    $"NOTE the change reaches {tests.Run.Length} test projects, more than the {MaxBatchedProjects} a selective run bounds, so the whole solution was run once instead - the timeout applies per invocation");
+        CultureInfo.InvariantCulture,
+        $"NOTE the change reaches {tests.Run.Length} test projects, more than the {MaxBatchedProjects} a selective run bounds, so every test project of the solution was run instead - the timeout applies per project");
 
     private static async Task<string> Noted(Task<string> run, string note)
     {
@@ -496,7 +497,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             : Task.FromResult(resolved.Error!.Render());
     }
 
-    private const int MaxParallel = MaxBatchedProjects;
+    private const int MaxParallel = TestRunRequest.MaxParallel;
 
     private static Result<int> Parallelism(int parallel) => parallel is < 0 or > MaxParallel
     ? Result.Fail<int>(Errors.Invalid(
@@ -536,4 +537,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 
         return Result.Ok(runSettings is null ? ImmutableArray<string>.Empty : [.. runSettings]);
     }
+
+    private static bool WholeSolution(string? project, string?[]? projects) =>
+        string.IsNullOrWhiteSpace(project) && projects is not { Length: > 0 };
 }
