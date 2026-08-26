@@ -19,14 +19,13 @@ public static class AdvertisedCost
         };
 
     public static string? Describe(bool verbose = false) => Volatile.Read(ref last) is { } reading
-        ? string.Create(CultureInfo.InvariantCulture, $"advertised={reading.Tools} tools {reading.Tokens} tokens")
-            + (verbose ? "\n" + Breakdown(reading) : string.Empty)
-        : null;
+            ? string.Create(CultureInfo.InvariantCulture, $"advertised={reading.Tools} tools {reading.Tokens} tokens")
+                + (verbose ? OfWhole(reading) + "\n" + Breakdown(reading) : string.Empty)
+            : null;
 
     private static string Breakdown(Reading reading) => string.Create(
         CultureInfo.InvariantCulture,
         $"  toolDescriptions={Tokens(reading.Descriptions)} parameterDescriptions={Tokens(reading.Parameters)} schemaFrame={Tokens(reading.Frame)} names={Tokens(reading.Names)}");
-
 
     private static int Tokens(int characters) => (characters + 3) / 4;
 
@@ -81,4 +80,20 @@ public static class AdvertisedCost
     }
 
     private sealed record Reading(int Tools, int Tokens, int Names, int Descriptions, int Parameters, int Frame);
+
+    private static Reading? unnarrowed;
+
+    public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> Unnarrowed() =>
+            next => async (request, cancellationToken) =>
+            {
+                var listed = await next(request, cancellationToken).ConfigureAwait(false);
+
+                Volatile.Write(ref unnarrowed, Measure(listed.Tools));
+
+                return listed;
+            };
+
+    private static string OfWhole(Reading reading) => Volatile.Read(ref unnarrowed) is { } full && full.Tools > reading.Tools
+            ? string.Create(CultureInfo.InvariantCulture, $" of {full.Tools} tools {full.Tokens}")
+            : string.Empty;
 }

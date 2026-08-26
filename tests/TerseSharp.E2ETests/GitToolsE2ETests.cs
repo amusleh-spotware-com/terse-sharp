@@ -146,7 +146,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         }
     }
     private static string[] Records(string listing) =>
-        [.. listing.Split('\n').Skip(1).Where(line => line.Length > 0)];
+        [.. listing.Split('\n').Skip(1).Where(line => line.Length > 0 && !line.StartsWith("paths=", StringComparison.Ordinal) && !line.StartsWith("next:", StringComparison.Ordinal))];
 
     [Fact]
     public async Task ChangedFiles_WithExclude_DropsThePathsAPathspecCannotLeaveOut()

@@ -364,13 +364,14 @@ public static class Doctor
     }
 
     public static async Task<string[]> SelfChecksAsync(LoadedWorkspace workspace, CancellationToken cancellationToken) =>
-        [
-            Guarded("roslyn", RoslynLine),
-            await GuardedAsync("assets", () => AssetsLineAsync(cancellationToken)).ConfigureAwait(false),
-            Guarded("guard coverage", () => GuardCoverageLine(workspace.SolutionPath)),
-            Guarded("memory", MemoryLine),
-            await GuardedAsync("phases", async () => PhaseLine(await PhaseProbe.MeasureAsync(workspace, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false),
-        ];
+            [
+                Guarded("roslyn", RoslynLine),
+                await GuardedAsync("assets", () => AssetsLineAsync(cancellationToken)).ConfigureAwait(false),
+                Guarded("guard coverage", () => GuardCoverageLine(workspace.SolutionPath)),
+                Guarded("memory", MemoryLine),
+                Guarded("shadow", ShadowLine),
+                await GuardedAsync("phases", async () => PhaseLine(await PhaseProbe.MeasureAsync(workspace, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false),
+            ];
 
     private static string Guarded(string name, Func<string> check)
     {
@@ -441,4 +442,12 @@ public static class Doctor
     }
 
     private const long MemoryCeilingBytes = 8L * 1024 * 1024 * 1024;
+
+    private static string ShadowLine() => ShadowCopyAnalyzerLoader.InPlaceDirectories is { Length: > 0 } directories
+            ? Check(
+                "shadow",
+                string.Create(CultureInfo.InvariantCulture, $"{directories.Length} analyzer directory(ies) loaded IN PLACE, not from the shadow cache: {string.Join(", ", directories.Take(3))}"),
+                false,
+                "an in-place map inside a project's own output is what makes an external dotnet build fail MSB3027 - delete that entry under the terse-analyzers cache, or restart the server after rebuilding that analyzer")
+            : Check("shadow", "every analyzer assembly was loaded from the shadow cache", true, string.Empty);
 }

@@ -354,11 +354,11 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task SearchText_WithMatchesOnlyAndUnique_CollapsesTheDistinctMatchedValues()
+    public async Task SearchRegex_WithMatchesOnlyAndUnique_CollapsesTheDistinctMatchedValues()
     {
-        var text = await server.CallAsync("search_text", new()
+        var text = await server.CallAsync("search_regex", new()
         {
-            ["query"] = "public",
+            ["query"] = @"namespace Fixture\.Trading;",
             ["glob"] = "src/**/*.cs",
             ["matchesOnly"] = true,
             ["unique"] = true,
@@ -367,7 +367,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         var records = text.Split('\n').Where(Record).ToArray();
 
         Assert.Single(records);
-        Assert.Equal("public", Payload(records[0]).Split("  x")[0]);
+        Assert.Equal("namespace Fixture.Trading;", Payload(records[0]).Split("  x")[0]);
     }
 
     [Fact]
@@ -881,5 +881,164 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
+    }
+
+    [Fact]
+    public async Task SearchText_WithMatchesOnly_RefusesAndNamesSearchRegex()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "OrderService",
+            ["glob"] = "**/*.cs",
+            ["matchesOnly"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("search_regex", text, StringComparison.Ordinal);
+        Assert.Contains("countOnly=true", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithCountOnly_AnswersOneLinePerFileAndNoMatchedText()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "TwinAlpha",
+            ["glob"] = "**/Twin*.cs",
+            ["countOnly"] = true,
+        });
+
+        Assert.Contains("TwinAlpha.cs  1", text, StringComparison.Ordinal);
+        Assert.Contains("1 matching lines", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("public sealed class", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("TwinBravo.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithCountOnlyAndSeveralQueries_TagsEachCount()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "TwinAlpha", "Count" },
+            ["glob"] = "**/TwinAlpha.cs",
+            ["countOnly"] = true,
+        });
+
+        Assert.Contains("TwinAlpha.cs", text, StringComparison.Ordinal);
+        Assert.Contains("q1=1", text, StringComparison.Ordinal);
+        Assert.Contains("q2=1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithCountOnlyBesideUnique_RefusesRatherThanDroppingIt()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "TwinAlpha",
+            ["countOnly"] = true,
+            ["unique"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("countOnly", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithHeadingsAndMaxLines_TruncatesTheHeadingMapAndSaysSo()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "headings.md",
+            ["headings"] = true,
+            ["maxLines"] = 2,
+        });
+
+        Assert.Contains("2/6 sections truncated", text, StringComparison.Ordinal);
+        Assert.Contains("maxLines= or maxLevel=", text, StringComparison.Ordinal);
+        Assert.Contains("# Heading map", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Bravo", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithHeadingsAndMaxLevel_DropsTheDeeperHeadingsAndKeepsGitHubAnchors()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "headings.md",
+            ["headings"] = true,
+            ["maxLevel"] = 2,
+        });
+
+        Assert.Contains("4 sections", text, StringComparison.Ordinal);
+        Assert.Contains("## Alpha  #alpha", text, StringComparison.Ordinal);
+        Assert.Contains("## Bravo  #bravo", text, StringComparison.Ordinal);
+        Assert.Contains("## Detail  #detail-2", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("### Detail", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithMaxLevelAndNoHeadings_RefusesRatherThanDroppingIt()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["maxLevel"] = 2 });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("headings=true", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithAMalformedEditsEntry_NamesTheEntryThatFailedToBind()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "notes.md",
+            ["edits"] = new object?[]
+            {
+                new Dictionary<string, object?> { ["oldText"] = "a", ["newText"] = "b" },
+                new Dictionary<string, object?> { ["oldText"] = "c", ["newText"] = 7 },
+            },
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("edits[1]", text, StringComparison.Ordinal);
+        Assert.Contains("falls near:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithAPartlyRefusedBatch_LeadsWithWhatLandedAndRefusesUnderneath()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["dryRun"] = true,
+            ["edits"] = new object?[]
+            {
+                new Dictionary<string, object?> { ["path"] = "notes.md", ["oldText"] = "# Fixture notes", ["newText"] = "# Fixture notes edited" },
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Order.cs", ["oldText"] = "namespace Fixture.Trading;", ["newText"] = "namespace Fixture.Trading;" },
+            },
+        });
+
+        var refused = text.IndexOf("REFUSED", StringComparison.Ordinal);
+
+        Assert.True(refused > 0, text);
+        Assert.False(text.StartsWith("ERROR", StringComparison.Ordinal), text);
+        Assert.True(text.IndexOf("notes.md", StringComparison.Ordinal) < refused, text);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithAGlobArgument_NamesThePathsParameterAndAWorkedGlob()
+    {
+        var text = await server.CallAsync("analyze", new() { ["glob"] = "src/**/*.cs" });
+
+        Assert.Contains("unrecognized glob", text, StringComparison.Ordinal);
+        Assert.Contains("paths=[\"src/**/*.cs\"]", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_RejectingAnArgument_CarriesAWorkedCopyPasteCall()
+    {
+        var text = await server.CallAsync("search_text", new() { ["globs"] = "src/**/*.cs" });
+
+        Assert.Contains("example: search_text query=", text, StringComparison.Ordinal);
+        Assert.Contains("glob=\"src/**/*.cs\"", text, StringComparison.Ordinal);
     }
 }

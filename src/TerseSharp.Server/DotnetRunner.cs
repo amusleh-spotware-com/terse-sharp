@@ -817,7 +817,9 @@ public static partial class DotnetRunner
         if (run.Drained)
             return;
 
-        response.Note("WARNING the process exited but its output stream stayed open, so what was captured is incomplete");
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"WARNING the process exited but its output stream stayed open, so what was captured is incomplete - captured={run.Output.Length} chars"));
     }
 
     private static bool Answered(ProcessRun run) => run.ExitCode is 0 && run.Drained;
@@ -873,12 +875,12 @@ public static partial class DotnetRunner
     }
 
     private static async Task<BuildRun> ListedFromModulesAsync(
-        WorkspaceTarget workspace,
-        string target,
-        string? contains,
-        BuildScope scope,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
+            WorkspaceTarget workspace,
+            string target,
+            string? contains,
+            BuildScope scope,
+            TimeSpan timeout,
+            CancellationToken cancellationToken)
     {
         var build = await BuiltAsync(workspace, target, scope, timeout, cancellationToken).ConfigureAwait(false);
 
@@ -889,7 +891,7 @@ public static partial class DotnetRunner
         var modules = await ModulesAsync(workspace, projects, scope, timeout, cancellationToken).ConfigureAwait(false);
 
         return modules.Length is 0
-            ? new BuildRun(NoTestModule(target).Render(), Locked(build))
+            ? new BuildRun(NoTestModule(target, projects).Render(), Locked(build))
             : await ListedFromAsync(workspace, target, contains, modules, timeout, cancellationToken).ConfigureAwait(false);
     }
 
@@ -918,9 +920,11 @@ public static partial class DotnetRunner
     private static Task<ProcessRun> ListedAsync(WorkspaceTarget workspace, string module, TimeSpan timeout, CancellationToken cancellationToken) =>
         RunAsync([module, "--list-tests"], workspace.Root, timeout, cancellationToken);
 
-    private static TerseError NoTestModule(string target) => Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"the build of {Path.GetFileName(target)} wrote no test module under the workspace root, so there is nothing to list"),
-        "pass project= naming a test project; a multi-targeted test project needs targetFramework= too, because its TargetPath does not resolve without one");
+    private static TerseError NoTestModule(string target, ImmutableArray<string> scanned) => Errors.Invalid(
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"the build of {Path.GetFileName(target)} wrote no test module under the workspace root, so there is nothing to list; list_tests selects test projects by scanning each .csproj for a test framework, and that scan matched {scanned.Length} project(s){Scanned(scanned)}"),
+        "pass project= naming a test project; a multi-targeted test project needs targetFramework= too, because its TargetPath does not resolve without one. run_tests selects by metadata reference instead, so the two can disagree on a solution whose test framework arrives through Directory.Build.props");
 
     private static async Task<string[]> ModulesAsync(
         WorkspaceTarget workspace,
@@ -1016,7 +1020,6 @@ public static partial class DotnetRunner
     };
 
     internal static bool IsAssembly(string target) => target.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
-
 
     private static string[] AssemblyArguments(TestRunRequest request, string resultsDirectory) =>
     [
@@ -1115,6 +1118,10 @@ public static partial class DotnetRunner
 
         return true;
     }
+
+    private static string Scanned(ImmutableArray<string> scanned) => scanned.Length is 0
+        ? string.Empty
+        : ": " + string.Join(", ", scanned.Take(5).Select(project => Path.GetFileName(project.AsSpan()).ToString()));
 }
 
 internal sealed record ProcessRun(

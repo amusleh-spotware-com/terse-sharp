@@ -120,12 +120,14 @@ Asserted by a token-budget suite in CI on every commit, not estimated.
 ## What it costs you
 
 An MCP server's fixed cost is its tool list, attached to every request. TerseSharp is the one that
-measures its own — `workspace_status` prints `advertised=<n> tools <t> tokens`, held under a
-**26 490-token ceiling over 88 tools** by a budget test on every push — and it shrinks it three ways.
+measures its own — `workspace_status` prints `advertised=<n> tools <t> tokens`, and under `verbose=true`
+the whole surface beside it (`advertised=57 tools 21780 tokens of 88 tools 26851`), so what a narrowing saves
+is read off the running server rather than out of a test constant. The total is held under a
+**26 900-token ceiling over 88 tools** by a budget test on every push — and it shrinks it three ways.
 All three are optional: the default advertises everything.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤21 360 tokens**. Load a solution that does hold them and they come back, announced
+  **57 tools, ≤21 780 tokens**. Load a solution that does hold them and they come back, announced
   with `notifications/tools/list_changed`.
 - **Per project** — a `.terse.json` checked in beside your `.sln`, found by walking up from the
   directory the server runs in and never above the repository root:

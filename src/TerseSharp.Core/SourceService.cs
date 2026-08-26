@@ -132,9 +132,9 @@ public static class SourceService
         var outline = await OutlineService.TypeAsync(workspace, symbol, true, "short", cancellationToken).ConfigureAwait(false);
 
         return outline.IsOk
-            ? outline.Value! + string.Create(
+            ? outline.Value!.TrimEnd('\n') + string.Create(
                 CultureInfo.InvariantCulture,
-                $"steer: get_symbol_source symbolId={symbol.Name}.Member for one member's source, verbose=true for the whole type")
+                $"\nsteer: get_symbol_source symbolId={symbol.Name}.Member for one member's source, verbose=true for the whole type")
             : null;
     }
 

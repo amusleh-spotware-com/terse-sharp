@@ -240,7 +240,7 @@ public static class FileService
         return request.Range with { Start = Math.Max(1, total - request.Tail + 1), End = 0 };
     }
 
-    private static Result<string> Outline(string path, string label, string text, bool verbose)
+    private static Result<string> Outline(string path, string label, string text, ReadRequest request)
     {
         if (!DocumentOutline.IsMarkdown(path))
         {
@@ -249,18 +249,14 @@ public static class FileService
                 "drop headings=true, or use get_file_outline for a .cs file"));
         }
 
-        var sections = DocumentOutline.Headings(text);
-        var response = new ResponseBuilder("read_text", label + " headings").Verbose(verbose);
-        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var rows = HeadingRows(DocumentOutline.Headings(text), request.MaxLevel);
+        var shown = Math.Min(rows.Count, request.Range.MaxLines);
+        var response = new ResponseBuilder("read_text", label + " headings").Verbose(request.Verbose);
 
-        response.Summary(sections.Count, sections.Count, "sections");
+        response.Summary(shown, rows.Count, "sections", "maxLines= or maxLevel=");
 
-        foreach (var section in sections)
-        {
-            response.Line(string.Create(
-                CultureInfo.InvariantCulture,
-                $"{section.StartLine}-{section.EndLine}  {section.Heading}  #{Unique(seen, MarkdownAnchor.Of(section.Heading))}"));
-        }
+        for (var index = 0; index < shown; index++)
+            response.Line(rows[index]);
 
         return Result.Ok(response.ToString());
     }
@@ -403,7 +399,7 @@ public static class FileService
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0);
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null);
 
@@ -721,16 +717,20 @@ public static class FileService
         EditRequest request,
         CancellationToken cancellationToken)
     {
-        var rendered = new List<string>(groups.Count);
+        var applied = new List<string>(groups.Count);
+        var refused = new List<string>();
+        var failures = new List<string>();
 
         foreach (var group in groups)
         {
             var answer = await EditTextBatchAsync(workspace, group.Path, group.Edits, request, cancellationToken).ConfigureAwait(false);
 
-            rendered.Add(answer.IsOk ? answer.Value! : answer.Error!.Render());
+            Sort(answer, group.Path, applied, refused, failures);
         }
 
-        return Result.Ok(string.Join('\n', rendered));
+        return Result.Ok(applied.Count is 0
+            ? string.Join('\n', failures)
+            : string.Join('\n', applied.Concat(refused)));
     }
 
     public readonly record struct FileWrite(string Path, string Content);
@@ -851,7 +851,7 @@ public static class FileService
             return Columned(path, label, text, request, columns);
 
         if (request.Headings)
-            return Outline(path, label, text, request.Verbose);
+            return Outline(path, label, text, request);
 
         return request.Section is { Length: > 0 } heading
             ? Slice(label, text, heading, request)
@@ -1403,5 +1403,40 @@ public static class FileService
         return landed.IsOk
             ? Result.Ok((cut.Value.Remainder, landed.Value!))
             : Result.Fail<(string, string)>(landed.Error!);
+    }
+
+    private static List<string> HeadingRows(IReadOnlyList<DocumentSection> sections, int maxLevel)
+    {
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var rows = new List<string>(sections.Count);
+
+        foreach (var section in sections)
+        {
+            var anchor = Unique(seen, MarkdownAnchor.Of(section.Heading));
+
+            if (maxLevel is 0 || section.Level <= maxLevel)
+            {
+                rows.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{section.StartLine}-{section.EndLine}  {section.Heading}  #{anchor}"));
+            }
+        }
+
+        return rows;
+    }
+
+    private static void Sort(Result<string> answer, string path, List<string> applied, List<string> refused, List<string> failures)
+    {
+        if (answer.IsOk)
+        {
+            applied.Add(answer.Value!);
+
+            return;
+        }
+
+        var error = answer.Error!;
+
+        failures.Add(error.Render());
+        refused.Add(string.Create(CultureInfo.InvariantCulture, $"REFUSED {path}: {error.Code} - {error.Message}; remedy: {error.Remedy}"));
     }
 }

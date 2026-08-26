@@ -90,11 +90,24 @@ public sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
     private Assembly Load(string original)
     {
         if (Path.GetDirectoryName(original) is not { Length: > 0 } directory)
+        {
+            InPlace.TryAdd(original, 0);
+
             return Map(original);
+        }
 
         var copy = Path.Combine(Shadow(directory), Path.GetFileName(original));
 
-        return Map(File.Exists(copy) ? copy : original);
+        if (!File.Exists(copy))
+        {
+            InPlace.TryAdd(directory, 0);
+
+            return Map(original);
+        }
+
+        InPlace.TryRemove(directory, out _);
+
+        return Map(copy);
     }
 
     private string Shadow(string directory)
@@ -244,4 +257,8 @@ public sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
             return false;
         }
     }
+
+    private static readonly ConcurrentDictionary<string, byte> InPlace = new(StringComparer.OrdinalIgnoreCase);
+
+    public static string[] InPlaceDirectories => [.. InPlace.Keys];
 }

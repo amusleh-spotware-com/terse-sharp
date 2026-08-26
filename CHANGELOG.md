@@ -8,6 +8,120 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-08-26
+
+> **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> Three shapes an agent could have parsed moved. `search_text matchesOnly=true` is **refused** where it used
+> to answer - an argument combination removed, and the reason is in the Changed section below.
+> `edit_text edits=[...]` no longer interleaves refusals with applied files: a partly refused batch leads with
+> what changed and lists `REFUSED <path>: <code> - <message>; remedy: …` underneath, so only a batch where
+> NOTHING landed still opens with `ERROR`. `read_text headings=true` now honours `maxLines=`, so its summary
+> can read `N/T sections truncated - narrow with maxLines= or maxLevel=` where it always read `N sections`,
+> and a heading map longer than the `maxLines` default is now clipped rather than returned whole.
+
+### Added
+
+- `search_text` and `search_regex` take `countOnly=true`, which answers ONE line per file - the path and its
+  match count, plus `q1=N` per query when `queries=` is passed - and no matched text at all, bounded by the
+  same `maxResults` - locked by `SearchText_WithCountOnly_AnswersOneLinePerFileAndNoMatchedText` and
+  `SearchText_WithCountOnlyAndSeveralQueries_TagsEachCount`. A presence check across a large tree now costs a
+  count listing instead of the matching lines: the measured case answered "0 in README.md, 0 in NUGET_README.md, 2 in SKILL.md" for ~2 500 tokens of
+  changelog prose. Refused beside `matchesOnly=`, `unique=` and `context=`, which have nothing to act on
+  (`I340`).
+- `read_text headings=true` takes `maxLevel=`, which lists the headings down to that level only - `maxLevel=2`
+  answers a long changelog's `##` sections without their `###` children - and keeps the anchor GitHub assigns
+  over the whole document, so a listed heading's `#slug` is still the real one. Refused without
+  `headings=true` rather than silently ignored, which `ReadText_WithMaxLevelAndNoHeadings_RefusesRatherThanDroppingIt`
+  and `ReadText_WithHeadingsAndMaxLevel_DropsTheDeeperHeadingsAndKeepsGitHubAnchors` lock (`I334`).
+- `workspace_status verbose=true` reports the WHOLE advertised surface beside the narrowed one -
+  `advertised=20 tools 6000 tokens of 88 tools 25857` - so the number that justifies a `--tools` profile, a
+  markup narrowing or a `.terse.json` is derived from the running server instead of read out of a test
+  constant (`I342`).
+
+### Fixed
+
+- `read_text headings=true` silently ignored `maxLines=`: `FileService.Outline` never read it, so a
+  `maxLines: 30` on a 179-section changelog answered all 179. The heading map is now bounded and reports
+  `N/T sections truncated - narrow with maxLines= or maxLevel=`, asserted by
+  `ReadText_WithHeadingsAndMaxLines_TruncatesTheHeadingMapAndSaysSo` (`I334`).
+- `get_symbol_source` on a type id ran the steer straight onto the last outline line, so the answer read
+  `SymbolEditService.AddRoute  struct private  :835-835steer: get_symbol_source symbolId=...`. The steer is
+  now on its own line, like every other steer in the surface (`I337`).
+- `replace_symbol add=` compared `TextSpan`s **across documents** when checking whether the edit replaces the
+  very type `add=` appends to, so a coincidental cross-file span match refused a valid multi-file batch. The
+  document id is now compared alongside the span, and `fixtures/FixtureSolution` gained the `TwinAlpha`/
+  `TwinBravo` pair - two files of identical layout whose declarations really do share a span - so the case can
+  fail; `ReplaceSymbol_AddingToATypeWhoseSpanTwinIsReplacedInAnotherFile_IsNotRefused` is the regression test
+  (`I338`).
+- a malformed `edit_text edits=[...]` entry answered `JsonException ... BytePositionInLine: 2796` and the
+  accepted parameter list, but never said WHICH entry was malformed, so a ~2 800-character batch had to be
+  re-sent to find it. The quote now names the entry - `edits[1] is the entry that failed to bind (json path
+  $[1].newText); byte 2796 of the 2812 characters of edits falls near: ...` - the same treatment
+  `declarations[1]:` already gave `replace_symbol` (`I336`).
+- a mixed-outcome `edit_text edits=[...]` batch opened with `ERROR` even when most entries landed, which reads
+  as a failed call and invites a needless re-send of the whole payload. A partial batch now leads with the
+  files that changed and renders each refusal underneath as
+  `REFUSED <path>: <code> - <message>; remedy: <remedy>`; a batch where nothing landed keeps the bare `ERROR`
+  first line (`I341`).
+- an unrecognized `glob=` - the single largest error class in the measured week at 101 refusals - was answered
+  only with the accepted-parameter list. The remedy now names the parameter that takes a glob on that tool and
+  carries a copy-paste value: `this tool takes the glob in paths=, e.g. paths=["src/**/*.cs"]`. `find_files`,
+  `search_text` and `search_regex` also gained `ToolExamples` entries, so any rejected call on them ends with
+  a complete worked call (`I366`).
+- `ShadowCopyAnalyzerLoader` fell back to mapping an analyzer assembly IN PLACE whenever the shadow copy was
+  absent, and said nothing - the same silent shape as the `MSB3027` defect the shadow cache exists to prevent.
+  The fallback is now recorded and `workspace_status verbose=true` carries a `shadow` self-check:
+  `every analyzer assembly was loaded from the shadow cache`, or
+  `N analyzer directory(ies) loaded IN PLACE, not from the shadow cache: <first three>` with the remedy
+  (`I333`).
+- `diff_text`'s description claimed `maxLines= caps it at 400 by default` while `MaxDiffLines` is **1000**.
+  A tool description stating the wrong default is the confidently-wrong answer this repo refuses (`I365`).
+- `ChildProcess` could answer with an EMPTY capture while reporting `Drained=false` - "the capture is
+  incomplete" over nothing at all - when a detached grandchild inherited the pipe and a reader continuation
+  had not been scheduled inside the drain grace. On the grace timeout the streams are now settled first:
+  `QuietAsync` samples the captured length every 25 ms and returns as soon as it stops growing, bounded by the
+  SAME `DrainGrace`, so nothing waits longer than before. The drain warning also names what was captured
+  (`captured=N chars`), so an empty partial snapshot can never read as a quiet command. The settle has its
+  OWN 250 ms budget, not a second `DrainGrace`, so the worst case on that already-failed path moves 2 s to
+  2.25 s and the constant itself was not raised. Locked by
+  `RunAsync_WhenADetachedGrandchildKeepsThePipeOpen_StillCapturesWhatTheChildAlreadyWroteWithoutASecondFullGrace`,
+  which asserts the content AND a wall-clock ceiling (`I343`).
+- `build`, `run_tests`, `rerun_failed`, `list_tests` and `clean` are refused UP FRONT when the loaded solution
+  builds the assembly the server is running from - the `terse call` probe this repository's own hard gate
+  names as evidence (b), which used to burn 42 s retrying `MSB3026` ten times and answer
+  `this run produced no results`. The match is on a project's exact `OutputFilePath`, so an installed terse
+  serving this solution and a fixture server serving `fixtures/FixtureSolution` are both unaffected. The
+  refusal is **scoped to calls that really write that output**: `package_list` is not on this path at all, and
+  `noBuild=true`, `dryRun=true`, a `project=` and a `configuration=` each scope the call away from it and are
+  never refused - `OutputFilePath` is the loaded configuration's, so a `configuration=Release` build cannot be
+  the one that overwrites a Debug-hosted server. The mirror case is stated rather than claimed: a probe run
+  from `bin/Release` against a Debug-evaluated workspace is NOT detected. Covered by
+  `Builds_WhenAProjectOutputIsTheRunningAssembly_SaysSoThroughASeparatorDifference` and
+  `Refusal_WhenTheSolutionBuildsTheRunningAssembly_NamesMsb3026AndTheCopyToMake` (`I344`).
+
+
+
+
+### Changed
+
+- `search_text matchesOnly=true` is refused. A literal query's matched span is the query itself, so every
+  record read back the text the caller passed: one measured 88-record enumeration carried ~1 100 tokens of
+  zero information. `matchesOnly=` stays on `search_regex`, where the matched span varies, and
+  `countOnly=true` answers the presence question it was being used for (`I339`).
+- the token ceilings moved, deliberately and with their reason, for the two new parameters (`countOnly` on
+  both search tools, `maxLevel` on `read_text`) and the SKILL rows that teach them: the advertised payload
+  budget 26 490 -> 26 900 (measured 26 851 over 88 tools), the markup-narrowed budget 21 360 -> 21 780, the
+  `.terse.json`-narrowed budget 22 200 -> 22 420 and the shipped-skill budget 24 100 -> 24 400 (measured
+  24 365). The budgets exist to stop SILENT growth, not to forbid a measured one.
+- `fixtures/FixtureSolution` gained `TwinAlpha.cs`, `TwinBravo.cs` and `headings.md`, so the fixture `.cs`
+  count under `src/` moved 23 -> 25 and `BacklogClosureE2ETests.FindFiles_WithDepth_...` was updated with it.
+- `list_tests` under Microsoft.Testing.Platform now names its classifier when it finds no test module: how
+  many projects the `.csproj` text scan matched and the first five of them, plus the fact that `run_tests`
+  selects by metadata reference instead, so the two can disagree on a solution whose test framework arrives
+  through `Directory.Build.props` (`I346`, partial - the classifiers are not yet unified).
+
+
+
 ## [0.47.0] - 2026-08-26
 
 ### Changed
@@ -4344,7 +4458,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.47.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.48.0...HEAD
+[0.48.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.48.0
 [0.47.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.47.0
 [0.46.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.46.0
 [0.45.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.45.0

@@ -426,7 +426,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         });
 
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("declarations is an array parameter", text, StringComparison.Ordinal);
+        Assert.Contains("declarations is the array parameter that failed to bind", text, StringComparison.Ordinal);
         Assert.Contains("falls near:", text, StringComparison.Ordinal);
     }
 

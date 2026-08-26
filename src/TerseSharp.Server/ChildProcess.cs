@@ -114,6 +114,15 @@ internal static class ChildProcess
         private readonly StringBuilder text = new();
         private readonly Lock gate = new();
 
+        public int Length
+        {
+            get
+            {
+                lock (gate)
+                    return text.Length;
+            }
+        }
+
         public void Append(char[] buffer, int count)
         {
             lock (gate)
@@ -186,6 +195,8 @@ internal static class ChildProcess
         }
         catch (Exception failure) when (failure is TimeoutException or IOException or ObjectDisposedException or OperationCanceledException)
         {
+            await QuietAsync(streams).ConfigureAwait(false);
+
             Release(process);
             Observe(streams.Output);
             Observe(streams.Error);
@@ -253,4 +264,26 @@ internal static class ChildProcess
 
     internal static string Rendered(string fileName, IReadOnlyList<string> arguments) =>
             arguments.Count is 0 ? fileName : fileName + " " + string.Join(' ', arguments);
+
+    private static readonly TimeSpan QuietStep = TimeSpan.FromMilliseconds(25);
+
+    private static async Task QuietAsync(ProcessStreams streams)
+    {
+        var previous = -1;
+        var settling = Stopwatch.StartNew();
+
+        while (settling.Elapsed < SettleGrace)
+        {
+            var captured = streams.OutputText.Length + streams.ErrorText.Length;
+
+            if (captured == previous)
+                return;
+
+            previous = captured;
+
+            await Task.Delay(QuietStep).ConfigureAwait(false);
+        }
+    }
+
+    private static readonly TimeSpan SettleGrace = TimeSpan.FromMilliseconds(250);
 }

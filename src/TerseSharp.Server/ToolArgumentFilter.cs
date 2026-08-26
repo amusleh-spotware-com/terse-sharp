@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Text;
+using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -156,35 +157,39 @@ internal static class ToolArgumentFilter
     }
 
     private static string Attributed(
-        JsonException json,
-        IDictionary<string, JsonElement> supplied,
-        List<string> candidates,
-        long offset)
+            JsonException json,
+            IDictionary<string, JsonElement> supplied,
+            List<string> candidates,
+            long offset)
     {
         var named = candidates.Find(candidate => json.Path is { Length: > 0 } path && path.Contains(candidate, StringComparison.Ordinal));
 
         if (named is not null)
-            return "\n" + Quoted(named, supplied[named], offset);
+            return "\n" + Quoted(named, supplied[named], offset, json.Path);
 
         return candidates switch
         {
             [] => string.Empty,
-            [var only] => "\n" + Quoted(only, supplied[only], offset),
+            [var only] => "\n" + Quoted(only, supplied[only], offset, json.Path),
             _ => string.Create(
                 CultureInfo.InvariantCulture,
                 $"\nthe value that failed is one of the array parameters {string.Join(", ", candidates)}, at byte {offset} of its own JSON; the exception does not say which"),
         };
     }
 
-    private static string Quoted(string name, JsonElement value, long offset)
+    private static string Quoted(string name, JsonElement value, long offset, string? path)
     {
         var raw = value.GetRawText();
         var from = (int)Math.Max(0, offset - Window);
         var to = (int)Math.Min(raw.Length, offset + Window);
+        var entry = Entry(raw, offset);
+        var at = entry < 0
+            ? string.Create(CultureInfo.InvariantCulture, $"{name} is the array parameter that failed to bind")
+            : string.Create(CultureInfo.InvariantCulture, $"{name}[{entry}] is the entry that failed to bind");
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"{name} is an array parameter, and byte {offset} of its {raw.Length} characters falls near: {raw.AsSpan(from, to - from)}");
+            $"{at}{Pathed(path)}; byte {offset} of the {raw.Length} characters of {name} falls near: {raw.AsSpan(from, to - from)}");
     }
 
     private const int Window = 40;
@@ -211,7 +216,7 @@ internal static class ToolArgumentFilter
             ? null
             : Errors.Invalid(
                 tool + " rejected the call: unrecognized " + string.Join(", ", unknown),
-                Remedy(required(), accepted) + PluralHint(unknown, arrays) + ToolExamples.Suffix(tool));
+                Remedy(required(), accepted) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + ToolExamples.Suffix(tool));
     }
 
     private static readonly System.Collections.Frozen.FrozenSet<string> KnownPlurals =
@@ -221,4 +226,42 @@ internal static class ToolArgumentFilter
         arrays is { Length: > 0 } declared && Array.Exists(unknown, KnownPlurals.Contains)
             ? "; this tool's list parameter is " + string.Join(", ", declared)
             : string.Empty;
+
+    private static int Entry(string raw, long offset)
+    {
+        var index = -1;
+
+        try
+        {
+            var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(raw));
+
+            while (reader.Read() && reader.TokenStartIndex < offset)
+            {
+                if (reader.CurrentDepth is 1 && reader.TokenType is JsonTokenType.StartObject)
+                    index++;
+            }
+        }
+        catch (JsonException)
+        {
+            return index;
+        }
+
+        return index;
+    }
+
+    private static string Pathed(string? path) =>
+            path is { Length: > 0 } json ? " (json path " + json + ")" : string.Empty;
+
+    private static string GlobHint(string[] unknown, string[] accepted)
+    {
+        if (!unknown.Contains("glob", StringComparer.Ordinal))
+            return string.Empty;
+
+        if (accepted.Contains("paths", StringComparer.Ordinal))
+            return "; this tool takes the glob in paths=, e.g. paths=[\"src/**/*.cs\"]";
+
+        return accepted.Contains("path", StringComparer.Ordinal)
+            ? "; this tool takes the glob in path=, e.g. path=\"src/**/*.cs\""
+            : string.Empty;
+    }
 }

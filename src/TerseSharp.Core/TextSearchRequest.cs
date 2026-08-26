@@ -11,7 +11,8 @@ public readonly record struct TextSearchRequest(
     bool Unique = false,
     string? Root = null,
     string? Exclude = null,
-    bool MatchesOnly = false)
+    bool MatchesOnly = false,
+    bool CountOnly = false)
 {
     public const int MaxContext = 5;
 

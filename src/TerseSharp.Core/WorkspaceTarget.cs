@@ -8,7 +8,8 @@ public readonly record struct WorkspaceTarget(
     string Root,
     ImmutableArray<string> ProjectPaths = default,
     TestSelection Tests = default,
-    ImmutableArray<string> TestProjects = default)
+    ImmutableArray<string> TestProjects = default,
+    string? RunningAssembly = null)
 {
     private const int MaxSuggestions = 8;
 

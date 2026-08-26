@@ -893,13 +893,15 @@ public static class SymbolEditService
         if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
             return Result.Fail<AppendedMembers>(AddNotShared(types, route.Container));
 
-        if (planned.Any(edit => edit.Target.Node.Span == container.Span))
+        var document = planned[chosen].Target.Document.Id;
+
+        if (planned.Any(edit => edit.Target.Document.Id == document && edit.Target.Node.Span == container.Span))
             return Result.Fail<AppendedMembers>(AddReplacesItsOwnType());
 
         var members = MemberDeclaration.ParseAll(string.Join("\n\n", route.Members));
 
         return members.IsOk
-            ? Result.Ok(new AppendedMembers(planned[chosen].Target.Document.Id, container, members.Value!))
+            ? Result.Ok(new AppendedMembers(document, container, members.Value!))
             : Result.Fail<AppendedMembers>(members.Error!);
     }
 

@@ -36,10 +36,12 @@ public static class McpHost
                 filters.AddCallToolFilter(ToolArgumentFilter.Structured);
                 filters.AddCallToolFilter(RepeatSteer.Filter());
                 filters.AddListToolsFilter(AdvertisedCost.Filter());
-                filters.AddListToolsFilter(SchemaCompactor.Filter());
 
                 if (surface.Advertised is not null || surface.MarkupDerived || overrides.Configured)
                     filters.AddListToolsFilter(ToolProfile.Filter(surface, context));
+
+                filters.AddListToolsFilter(AdvertisedCost.Unnarrowed());
+                filters.AddListToolsFilter(SchemaCompactor.Filter());
             });
 
         var host = builder.Build();

@@ -548,7 +548,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         return int.Parse(tokens[(tokens.LastIndexOf(' ') + 1)..], CultureInfo.InvariantCulture);
     }
 
-    private const int AdvertisedPayloadBudget = 26490;
+    private const int AdvertisedPayloadBudget = 26900;
 
     [Fact]
     public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()
@@ -579,5 +579,20 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.Contains("steer: get_symbol_source", wide, StringComparison.Ordinal);
         Assert.True(Tokens(widest) < Tokens(wide), Report("get_symbol_source", widest, wide));
         Assert.True(Tokens(documented) < Tokens(inlined), Report("get_symbol_source", documented, inlined));
+    }
+
+    [Fact]
+    public async Task SearchTextWithCountOnly_CostsAFractionOfTheMatchingLinesOverTheWidestQuery()
+    {
+        var lines = await server.CallAsync("search_text", new() { ["query"] = "Order", ["glob"] = "**/*.cs" });
+        var counts = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Order",
+            ["glob"] = "**/*.cs",
+            ["countOnly"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", counts, StringComparison.Ordinal);
+        Assert.True(Tokens(counts) * 3 < Tokens(lines), Report("search_text countOnly", counts, lines));
     }
 }

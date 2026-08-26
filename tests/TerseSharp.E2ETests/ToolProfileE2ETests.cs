@@ -53,4 +53,22 @@ public sealed class ToolProfileE2ETests : IAsyncLifetime
 
     private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task WorkspaceStatusVerbose_ReportsTheWholeSurfaceBesideTheNarrowedOne()
+    {
+        await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        var text = await CallAsync("workspace_status", new() { ["verbose"] = true });
+        var line = Array.Find(text.Split('\n'), entry => entry.StartsWith("advertised=", StringComparison.Ordinal));
+
+        Assert.NotNull(line);
+
+        var parts = line.Split(' ');
+
+        Assert.Equal("of", parts[4]);
+        Assert.Equal(ToolProfile.CoreTools.Count, int.Parse(parts[0]["advertised=".Length..], CultureInfo.InvariantCulture));
+        Assert.True(int.Parse(parts[5], CultureInfo.InvariantCulture) > ToolProfile.CoreTools.Count, line);
+        Assert.True(int.Parse(parts[7], CultureInfo.InvariantCulture) > int.Parse(parts[2], CultureInfo.InvariantCulture), line);
+    }
 }

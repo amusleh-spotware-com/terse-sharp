@@ -22,6 +22,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
         {
+            if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
+                return Task.FromResult(refused);
+
             var scope = Scoped(configuration, targetFramework, properties);
 
             return scope.IsOk
@@ -52,7 +55,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             : context.WithTargetAsync(
                 workspace,
                 project,
-                target => CleanWithRecoveryAsync(target, project, includeIntermediate, dryRun, verbose, cancellationToken),
+                target => SelfBuilt(target, !dryRun && project is not { Length: > 0 }) is { } refused
+                    ? Task.FromResult(refused)
+                    : CleanWithRecoveryAsync(target, project, includeIntermediate, dryRun, verbose, cancellationToken),
                 cancellationToken: cancellationToken);
     }
 
@@ -80,6 +85,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         project,
         target =>
         {
+            if (SelfBuilt(target, !noBuild && projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
+                return Task.FromResult(refused);
+
             var selection = Selection(test, filter);
 
             if (!selection.IsOk)
@@ -135,6 +143,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, null, target =>
         {
+            if (SelfBuilt(target, !noBuild && configuration is not { Length: > 0 }) is { } refused)
+                return Task.FromResult(refused);
+
             var memory = lastRun.Memory;
 
             if (!memory.Covers(target.Root))
@@ -176,6 +187,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, target =>
         {
+            if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
+                return Task.FromResult(refused);
+
             var scope = Scoped(configuration, targetFramework, properties);
 
             return scope.IsOk
@@ -540,4 +554,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 
     private static bool WholeSolution(string? project, string?[]? projects) =>
         string.IsNullOrWhiteSpace(project) && projects is not { Length: > 0 };
+
+    private static string? SelfBuilt(WorkspaceTarget target, bool writes) => SelfBuild.Refusal(target, writes)?.Render();
+
+    private static bool Whole(string? project, string? configuration) =>
+        project is not { Length: > 0 } && configuration is not { Length: > 0 };
 }

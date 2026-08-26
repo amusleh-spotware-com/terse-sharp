@@ -162,11 +162,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     }
 
     private static WorkspaceTarget Described(LoadedWorkspace loaded, bool changed, bool tests = false) => new(
-        loaded.SolutionPath,
-        loaded.Root,
-        ProjectPaths(loaded),
-        changed ? ChangedTestSelection.Select(loaded) : default,
-        tests ? TestProjectsOf(loaded) : default);
+            loaded.SolutionPath,
+            loaded.Root,
+            ProjectPaths(loaded),
+            changed ? ChangedTestSelection.Select(loaded) : default,
+            tests ? TestProjectsOf(loaded) : default,
+            SelfBuild.RunningAssemblyOf(loaded));
 
     public void Dispose() => Registry.Dispose();
 

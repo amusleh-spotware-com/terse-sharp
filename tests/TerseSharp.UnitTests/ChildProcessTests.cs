@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Globalization;
 using TerseSharp.Core;
 using TerseSharp.Server;
 
@@ -135,4 +136,25 @@ public sealed class ChildProcessTests
     }
 
     private static readonly string[] MutatedByOtherTests = ["TERSE_HOME", "CLAUDE_CONFIG_DIR"];
+
+    [Fact]
+    public async Task RunAsync_WhenADetachedGrandchildKeepsThePipeOpen_StillCapturesWhatTheChildAlreadyWroteWithoutASecondFullGrace()
+    {
+        var deadline = TimeSpan.FromSeconds(45);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var run = await ChildProcess.RunAsync(
+            BlockingShell,
+            DetachedHolder,
+            AppContext.BaseDirectory,
+            deadline,
+            TestContext.Current.CancellationToken);
+
+        clock.Stop();
+
+        Assert.False(run.Drained);
+        Assert.NotEqual(0, run.Output.Length);
+        Assert.Contains(ChildMarker, run.StandardOutput, StringComparison.Ordinal);
+        Assert.True(clock.ElapsedMilliseconds < 10_000, string.Create(CultureInfo.InvariantCulture, $"the settle added {clock.ElapsedMilliseconds} ms on top of the 2 s drain grace"));
+    }
 }

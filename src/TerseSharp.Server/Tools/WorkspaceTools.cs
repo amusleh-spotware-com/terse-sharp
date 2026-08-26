@@ -118,7 +118,7 @@ CancellationToken cancellationToken = default) =>
     [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out.")]
     public Task<string> WorkspaceStatus(
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("List the MSBuild warnings the load reported, and the roslyn, assets, guard coverage, memory and phases self-checks. Default false.")] bool verbose = false,
+        [Description("List the MSBuild warnings the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(
             workspace,

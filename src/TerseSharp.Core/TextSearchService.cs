@@ -118,6 +118,7 @@ public static class TextSearchService
         var span = text.AsSpan();
         var hits = new List<string>();
         var tracker = new LineTracker();
+        var counts = request.CountOnly ? new int[request.Patterns.Length] : [];
         var total = 0;
         var index = 0;
 
@@ -125,13 +126,15 @@ public static class TextSearchService
         {
             total++;
 
-            if (hits.Count < request.MaxResults)
+            if (request.CountOnly)
+                TallyLine(span, match, matcher, counts);
+            else if (hits.Count < request.MaxResults)
                 hits.Add(Format(relativePath, span, match, ref tracker, request, matcher));
 
             index = EndOfLine(span, Resumed(match, request)) + 1;
         }
 
-        return new FileHits(hits, total, 0);
+        return new FileHits(Rows(relativePath, hits, total, counts, request), total, 0);
     }
 
     private static int Content(ReadOnlySpan<char> text, TextMatch match)
@@ -225,6 +228,9 @@ public static class TextSearchService
 
     private static string Render(TextSearchRequest request, FileHits[] perFile)
     {
+        if (request.CountOnly)
+            return Counts(request, perFile);
+
         var response = new ResponseBuilder(request.Tool, Argument(request));
         var total = 0;
         var skipped = 0;
@@ -827,5 +833,88 @@ public static class TextSearchService
         return candidates.IsOk
             ? Result.Ok(Rendered(candidates.Value!, glob, maxResults, stamps, name, depth, Path.GetFullPath(root)))
             : Result.Fail<string>(candidates.Error!);
+    }
+
+    private static void TallyLine(ReadOnlySpan<char> text, TextMatch match, TextMatcher matcher, int[] counts)
+    {
+        var start = text[..match.At].LastIndexOf('\n') + 1;
+        var line = text[start..EndOfLine(text, match.At)];
+        var tagged = false;
+
+        for (var query = 0; query < counts.Length; query++)
+        {
+            if (!matcher.MatchesLine(line, query))
+                continue;
+
+            counts[query]++;
+            tagged = true;
+        }
+
+        if (!tagged)
+            counts[match.Query]++;
+    }
+
+    private static List<string> Rows(string relativePath, List<string> hits, int total, int[] counts, TextSearchRequest request)
+    {
+        if (!request.CountOnly)
+            return hits;
+
+        return total is 0 ? [] : [Tally(relativePath, total, counts, request)];
+    }
+
+    private static string Tally(string relativePath, int total, int[] counts, TextSearchRequest request) => request.SeveralPatterns
+            ? string.Create(CultureInfo.InvariantCulture, $"{relativePath}{RecordSeparator}{total}{RecordSeparator}{Tags(counts)}")
+            : string.Create(CultureInfo.InvariantCulture, $"{relativePath}{RecordSeparator}{total}");
+
+    private static string Tags(int[] counts)
+    {
+        var parts = new List<string>(counts.Length);
+
+        for (var query = 0; query < counts.Length; query++)
+        {
+            if (counts[query] > 0)
+                parts.Add(string.Create(CultureInfo.InvariantCulture, $"{Tag(query)}={counts[query]}"));
+        }
+
+        return string.Join(' ', parts);
+    }
+
+    private static (List<string> Rows, int Matched, int Lines, int Skipped) Tallied(FileHits[] perFile, int maxResults)
+    {
+        var rows = new List<string>();
+        var matched = 0;
+        var lines = 0;
+        var skipped = 0;
+
+        foreach (var file in perFile)
+        {
+            lines += file.Total;
+            skipped += file.Skipped;
+
+            if (file.Hits.Count is 0)
+                continue;
+
+            matched++;
+
+            if (rows.Count < maxResults)
+                rows.Add(file.Hits[0]);
+        }
+
+        return (rows, matched, lines, skipped);
+    }
+
+    private static string Counts(TextSearchRequest request, FileHits[] perFile)
+    {
+        var response = new ResponseBuilder(request.Tool, Argument(request));
+        var tallied = Tallied(perFile, request.MaxResults);
+
+        response.Summary(tallied.Rows.Count, tallied.Matched, "files", "glob= or maxResults=");
+        Annotate(response, tallied.Rows.Count, request, new SearchTally(tallied.Rows.Count, tallied.Matched, tallied.Skipped));
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"{tallied.Lines} matching lines"));
+
+        foreach (var row in tallied.Rows)
+            response.Line(row);
+
+        return response.ToString();
     }
 }

@@ -179,4 +179,59 @@ public sealed class SteersAndRemediesE2ETests(TerseServerFixture server)
         Assert.Contains("steer: get_symbol_source symbolId=Wide.Member", wide, StringComparison.Ordinal);
         Assert.DoesNotContain("DeliberatelyLongPropertyNameThree.Length", wide, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbolSource_OnATypeId_PutsTheSteerOnItsOwnLine()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderRouter" });
+        var steer = Array.Find(text.Split('\n'), line => line.StartsWith("steer: get_symbol_source", StringComparison.Ordinal));
+
+        Assert.NotNull(steer);
+        Assert.EndsWith("verbose=true for the whole type", steer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_AddingToATypeWhoseSpanTwinIsReplacedInAnotherFile_IsNotRefused()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "TwinAlpha.Count", "TwinBravo" },
+            ["declarations"] = new[]
+            {
+                "public int Count() => 1;",
+                "public sealed class TwinBravo\n{\n    public int Count() => 1;\n}",
+            },
+            ["add"] = new[] { "private int Doubled() => Count() * 2;" },
+            ["addTo"] = "TwinAlpha",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("this call replaces that type itself", text, StringComparison.Ordinal);
+        Assert.Contains("Doubled", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkspaceStatusVerbose_SaysWhetherEveryAnalyzerCameFromTheShadowCache()
+    {
+        var text = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
+
+        Assert.True(
+            text.Contains("every analyzer assembly was loaded from the shadow cache", StringComparison.Ordinal)
+            || text.Contains("loaded IN PLACE, not from the shadow cache", StringComparison.Ordinal),
+            text);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_AddingToTheVeryTypeItReplaces_IsStillRefused()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "TwinBravo",
+            ["declaration"] = "public sealed class TwinBravo\n{\n    public int Count() => 1;\n}",
+            ["add"] = new[] { "private int Doubled() => Count() * 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("this call replaces that type itself", text, StringComparison.Ordinal);
+    }
 }

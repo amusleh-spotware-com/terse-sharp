@@ -27,8 +27,8 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 
 | Job | Instead of | Use | Why |
 |---|---|---|---|
-| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs - `verbose=true` splits that total into `toolDescriptions`, `parameterDescriptions`, `schemaFrame` and `names`; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do |
-| **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` | the five self-check lines an agent acts on, in-server and without the ~40 s shell-out: `roslyn` (the SDK's Roslyn against the one terse carries — the check that explains a dead Razor generator), `assets`, `guard coverage`, `memory` - what this server and every live terse server hold, which is the number no other call can answer - and `phases` measured on the loaded workspace |
+| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs - `verbose=true` splits that total into `toolDescriptions`, `parameterDescriptions`, `schemaFrame` and `names`; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do. `verbose=true` adds the whole surface beside the narrowed one, `advertised=20 tools 6000 tokens of 88 tools 25857` |
+| **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` | the six self-check lines an agent acts on, in-server and without the ~40 s shell-out: `roslyn` (the SDK's Roslyn against the one terse carries — the check that explains a dead Razor generator), `assets`, `guard coverage`, `memory` (what every live terse server holds), `shadow` (whether an analyzer was mapped IN PLACE rather than from the shadow cache) and `phases` |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` | lists every solution and project under a directory without loading one; auto-discovery only walks *up* from the working directory |
 | **Workspace** | — | `load_workspace` | one call per solution; `targetFramework:` picks the framework every semantic tool answers from, `reload: true` forces a re-read you should almost never need |
 | **Workspace** | — | `list_workspaces` | every loaded solution with its git branch and worktree, and the absolute path `unload_workspace` takes |
@@ -66,7 +66,8 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `grep -n -e A -e B -e C` / one search per literal | `search_text(queries: ["I175", "I176", "I177"])` | up to 10 literals in **one** pass over the same file set; every record carries `q1`..`qN` for the position of its literal in `queries=`, which a regex alternation cannot tell you. A line matching several is **one** record tagged `q1,q3` in query order, so a tag absent from a record means that literal is absent from that line. No legend is echoed back — you passed the array |
 | **Files** | a search that keeps hitting a folder you do not want | `search_text(query, exclude: ".research/**")` | dropped after `glob=` has selected, so one call answers what two used to |
 | **Files** | `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
-| **Files** | `grep -o` | `search_text(query, matchesOnly: true)` | prints the matched span instead of the whole line; compose with `unique: true` to answer "which distinct values of this shape exist" |
+| **Files** | `grep -o` | `search_regex(query, matchesOnly: true)` | prints the matched span instead of the whole line; compose with `unique: true` for "which distinct values of this shape exist". **`search_text` refuses it** — a literal's matched span is the literal you passed |
+| **Files** | `grep -c` / "is X in these files at all?" | `search_text(query, countOnly: true)` | ONE line per file — path and match count, plus `q1=N` per `queries=` entry — and no matched text. Refused beside `matchesOnly=`, `unique=`, `context=` |
 | **Files** | `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
 | **Files** | `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` | identical matching lines collapse to the first record plus `x<count>` |
 | **Files** | `Bash: git show <ref>:<path>` | `read_text(path, ref: "main")` · `get_file_outline(path, ref: "main")` | the file as it was at that ref, with the same gutter, line ranges, `tail=`, `section=` and `maxChars` as the working tree, and a whole `.cs` answering its outline; one path, and a ref that does not exist is refused rather than answered from the working tree |
@@ -75,7 +76,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
 | **Files** | `wc -c file` for a size you want *while* reading | `read_text(path, bytes: true)` | ends the answer with `bytes=N`, on every shape it returns and once per `paths=` entry |
 | **Files** | a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from, and says `line N was cut mid-way` when the budget ran out **inside** a line — raise `maxChars` for that line, because a line range cannot resume at a character offset |
-| **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section |
+| **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section. `maxLines=` bounds the map and `maxLevel: 2` drops every `###`, so a 179-section changelog answers its shape in a dozen lines; anchors stay the ones GitHub assigns over the whole document, and `maxLevel=` without `headings=true` is refused |
 | **Files** | reading a whole `.md` whose content is one long table | `read_text(path, columns: "Finding,Tool")` | one line per table row, those columns only - what `headings=true` cannot give a file with nothing to narrow by. `section=` scopes it to that section's tables and is named in a refusal, `maxLines=` bounds the rows; a column no table under the read declares is refused naming the real ones even when the others matched, and `headings=`/`startLine=`/`endLine=`/`tail=` beside it are refused rather than silently winning |
 | **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` | restores the file from that ref through the same compile gate as any write - the way back for a `.csproj` or `.md` that `undo_last_change` cannot cover. A write of markup carrying `&lt;` and no raw `<` warns and names this call, because HTML-escaped markup is not markup |
 | **Files** | a scratch `.cs` probe outside every workspace root | `write_text(path, content, force: true)` | an absolute path under no loaded root is written with `force=true`, tagged `outside-workspace` and never compile-gated, because no project of this workspace compiles it - the read half already worked |
@@ -85,7 +86,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", occurrence: 1, place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line. A heading that repeats needs `occurrence=`: the refusal names `occurrence=1..N` and each candidate's start line, so the index is picked with no re-read. `read_text` takes it too, and refuses it without a `section=`. Only with `section=`; supply your own blank lines |
 | **Edit text** | one `edit_text row=` call per row when closing a whole backlog | `edit_text(path, rows: [{row, newText}, ...], toPath: "IMPROVEMENTS-ARCHIVE.md")` | up to 25 rows cut and landed in order as ONE write per file; a row identifier matching nothing refuses the batch, so a partial move cannot happen |
 | **Edit text** | closing a backlog row: cutting one table row out of one markdown file and appending it to another | `edit_text(path, row: "I286", toPath: "IMPROVEMENTS-ARCHIVE.md", newText: "\| … \|")` | the row is matched by its **first cell**, so its old text never crosses the wire; `newText=` is what lands in the target - omit it to move the row verbatim. An identifier matching no row, or more than one, is refused saying which, and `row=` without `toPath=` is refused rather than dropped |
-| **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch |
+| **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch. A **partly** refused batch leads with what changed and lists each refusal as `REFUSED <path>: <code> - <message>; remedy: …`, so only a leading `ERROR` means re-send; a malformed entry is named — `edits[1] is the entry that failed to bind` |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` | an entry may name its own `path`, and the top-level `path` may then be omitted entirely; entries are grouped by file, applied as one write each, and answered one line per changed file. A path-less entry with no top-level `path` is refused by index. At most 10 per file and 25 in total |
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` | up to 10 in one call, and every `.cs` document among them shares **one** compile gate — so a type and the consumer it breaks land together instead of the first write being rolled back alone |
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; a multi-match refusal lists the candidate lines with their numbers, so `occurrence=` is picked from the refusal and needs no re-read, and an out-of-range value names the range it could have picked |
@@ -875,17 +876,21 @@ root, so a test project outside the solution still runs. An unknown name answers
 naming the closest projects and a name two projects share answers `ERROR AmbiguousProject` listing
 both; neither is ever handed to MSBuild as a path.
 
-When a locked output file blocks the build that `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` runs,
-the response says so (`WARNING a locked output file blocked the operation`) and, with a single
-workspace loaded, the server unloads it, retries and reloads, then reports which of the three happened
-in a `NOTE`. You do not need to `unload_workspace` by hand first. When the note says the output is
-**still** locked it also lists every process the build named, one
-`holder pid=… <name> startedUtc=… exe=…` line each - the executable workspace-relative when it lives under the root, which tells a test host
-running out of *this* tree's `bin/` from another session's - classified as this terse server, an MSBuild or BuildHost — including one an *earlier*
-terse load spawned out of this tree's own `bin/` — a live `testhost` you should wait for rather than
-stop, a bare `dotnet` host, or a pid that is already gone. The only holder the note rules out is the
-analyzer and source-generator set, which is mapped from a shadow copy and never from a project's own
-output; read the `holder` lines before stopping anything.
+When a locked output file blocks the build that `build`, `run_tests`, `rerun_failed`, `list_tests` or
+`clean` runs, the response says so (`WARNING a locked output file blocked the operation`) and, with one
+workspace loaded, the server unloads it, retries and reloads, reporting which happened in a `NOTE` — so
+no `unload_workspace` by hand. When the output is **still** locked it lists every process the build
+named, one
+`holder pid=… <name> startedUtc=… exe=…` line each — the executable workspace-relative when it lives
+under the root, which tells a test host running out of *this* tree's `bin/` from another session's —
+classified as this terse server, an MSBuild or BuildHost (including one an earlier terse load spawned
+out of this tree's `bin/`), a live `testhost` to wait for rather than stop, a bare `dotnet` host, or a
+pid already gone. The one holder it rules out is the analyzer set, mapped from a shadow copy and never
+from a project's own output; read the `holder` lines before stopping anything.
+
+**One lock is refused before it happens**: when the loaded solution builds the assembly this server
+runs from — a `terse call` probe out of a repo's own `bin/` — the build and test tools refuse up front
+naming `MSB3026`. Run the probe from a copy outside the solution.
 
 ## When a tool refuses
 
@@ -911,8 +916,10 @@ Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one ou
 exists to prevent.
 
 **Need a call of a tool that actually works?** For the tools whose valid arguments are not derivable
-from the schema — the ten `razor_*` tools and `package_add`/`package_remove` — the `remedy:` of a
-rejected call ends with `example: <a complete, working call>`. Calling one of them with no arguments
+from the schema — the ten `razor_*` tools, `package_add`/`package_remove` and the three glob-taking
+search and file tools — the `remedy:` of a
+rejected call ends with `example: <a complete, working call>` — `find_files`, `search_text` and
+`search_regex` carry one too. Calling one of them with no arguments
 on purpose is a one-call way to get that shape; do not go read a test file for it.
 
 **A claim about tool *behaviour* is proven against a freshly built binary, never against this
