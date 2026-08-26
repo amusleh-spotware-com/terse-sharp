@@ -1,3 +1,5 @@
+using TerseSharp.Core;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -1040,5 +1042,69 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("example: search_text query=", text, StringComparison.Ordinal);
         Assert.Contains("glob=\"src/**/*.cs\"", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public async Task EditText_WithAnOldTextThatBeginsWithANewline_LeavesEveryOtherLineEndingUntouched(string ending)
+    {
+        var relative = "line-ending-probe" + (ending.Length is 1 ? "-lf" : "-crlf") + ".md";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, relative);
+        var before = string.Join(ending, ["# Title", string.Empty, "## Alpha", "alpha body", string.Empty, "## Bravo", "bravo body", string.Empty]);
+
+        await File.WriteAllTextAsync(path, before, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = relative,
+                ["oldText"] = "\n## Bravo",
+                ["newText"] = "\n## Charlie",
+            });
+
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Equal(before.Replace("## Bravo", "## Charlie", StringComparison.Ordinal), after);
+            Assert.Equal(ending, LineEndings.Uniform(after));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public async Task EditText_WithAnOldTextThatEndsWithANewline_LeavesEveryOtherLineEndingUntouched(string ending)
+    {
+        var relative = "line-ending-tail-probe" + (ending.Length is 1 ? "-lf" : "-crlf") + ".md";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, relative);
+        var before = string.Join(ending, ["# Title", string.Empty, "## Alpha", "alpha body", string.Empty, "## Bravo", "bravo body", string.Empty]);
+
+        await File.WriteAllTextAsync(path, before, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = relative,
+                ["oldText"] = "## Bravo\n",
+                ["newText"] = "## Charlie\n",
+            });
+
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Equal(before.Replace("## Bravo", "## Charlie", StringComparison.Ordinal), after);
+            Assert.Equal(ending, LineEndings.Uniform(after));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 }

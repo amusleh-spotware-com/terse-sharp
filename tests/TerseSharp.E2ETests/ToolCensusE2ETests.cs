@@ -79,7 +79,7 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
                 probe.Tool + " opened its response with its own name\n" + text);
             Assert.True(
                 ToolCensus.Tokens(text) <= ToolCensus.Budget(probe.Tool),
-                string.Create(CultureInfo.InvariantCulture, $"{probe.Tool}={ToolCensus.Tokens(text)}/{ToolCensus.Budget(probe.Tool)}\n{text}"));
+                string.Create(CultureInfo.InvariantCulture, $"{probe.Tool}={ToolCensus.Tokens(text)}/{ToolCensus.Budget(probe.Tool)}\n{ToolCensus.BudgetProbe}\n{text}"));
         }
     }
 
@@ -112,7 +112,7 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
         }
 
         Assert.True(probed >= 40, $"only {probed} read tools were budgeted");
-        Assert.True(over.Count is 0, "over budget: " + string.Join(", ", over));
+        Assert.True(over.Count is 0, "over budget: " + string.Join(", ", over) + "\n" + ToolCensus.BudgetProbe);
     }
 
     private static bool Reads((string Tool, Dictionary<string, object?> Arguments, string Expect) probe) =>
@@ -353,5 +353,21 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
         Assert.True(ungrouped.Length is 0, "no tool group holds: " + string.Join(", ", ungrouped));
         Assert.Equal(grouped.Length, grouped.Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(advertised.Length, grouped.Length);
+    }
+
+    [Fact]
+    public async Task TheBudgetProbeSteer_NamesAnAdvertisedToolAndAnAnswerThatReallyCarriesTheNumber()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains("call <tool>", ToolCensus.BudgetProbe, StringComparison.Ordinal);
+        Assert.Contains("--workspace", ToolCensus.BudgetProbe, StringComparison.Ordinal);
+        Assert.Contains("workspace_status prints it", ToolCensus.BudgetProbe, StringComparison.Ordinal);
+        Assert.Contains(tools, tool => string.Equals(tool.Name, "workspace_status", StringComparison.Ordinal));
+
+        var status = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
+
+        Assert.Contains("advertised=", status, StringComparison.Ordinal);
+        Assert.Contains("toolDescriptions", status, StringComparison.Ordinal);
     }
 }

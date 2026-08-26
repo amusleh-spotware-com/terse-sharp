@@ -462,4 +462,21 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("ERROR", text, StringComparison.Ordinal);
         Assert.DoesNotContain("retryWith=", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ABatchWhoseDeclarationNameDoesNotMatchItsPairedSymbol_IsRefusedFromSyntax()
+    {
+        var refused = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Alpha.Duplicate.Value", "M:Fixture.Broken.Beta.Duplicate.Value" },
+            ["declarations"] = new[] { "public int Value() => 1;", "public int PerEntryOnly() => 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.Contains("declarations[1]", refused, StringComparison.Ordinal);
+        Assert.Contains("'PerEntryOnly'", refused, StringComparison.Ordinal);
+        Assert.Contains("'Value'", refused, StringComparison.Ordinal);
+        Assert.DoesNotContain("CompileRegression", refused, StringComparison.Ordinal);
+    }
 }

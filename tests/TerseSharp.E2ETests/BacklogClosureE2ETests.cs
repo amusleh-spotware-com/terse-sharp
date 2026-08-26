@@ -1221,8 +1221,8 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         Assert.StartsWith(counted, rolled, StringComparison.Ordinal);
         Assert.StartsWith(counted, top, StringComparison.Ordinal);
-        Assert.Contains("src/Fixture.Trading/**  x25 files", rolled, StringComparison.Ordinal);
-        Assert.Contains("src/**  x25 files", top, StringComparison.Ordinal);
+        Assert.Contains("src/Fixture.Trading/**  x26 files", rolled, StringComparison.Ordinal);
+        Assert.Contains("src/**  x26 files", top, StringComparison.Ordinal);
         Assert.Contains("DeliberateOutcomesTests.cs", rolled, StringComparison.Ordinal);
         Assert.DoesNotContain("OrderService.cs", rolled, StringComparison.Ordinal);
         Assert.True(rolled.Length * 4 < flat.Length, rolled);

@@ -278,12 +278,13 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         .Split('\n')
         .Count(line => line.Length > 0 && char.IsAsciiDigit(line[0]) && line.Contains(": ", StringComparison.Ordinal));
 
-    private static string Report(string tool, string response) =>
-        string.Create(CultureInfo.InvariantCulture, $"{tool}: {Tokens(response)} tokens\n{response}");
+    private static string Report(string tool, string response) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{tool}: {Tokens(response)} tokens\n{ToolCensus.BudgetProbe}\n{response}");
 
     private static string Report(string tool, string response, string baseline) => string.Create(
         CultureInfo.InvariantCulture,
-        $"{tool}: {Tokens(response)} tokens vs {Tokens(baseline)} for the raw file");
+        $"{tool}: {Tokens(response)} tokens vs {Tokens(baseline)} for the raw file\n{ToolCensus.BudgetProbe}");
 
     [Fact]
     public async Task WorkspaceStatus_KeepsItsTelemetryBehindVerbose()

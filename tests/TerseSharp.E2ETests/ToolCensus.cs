@@ -282,6 +282,14 @@ internal static class ToolCensus
 
         return (double)shared / (first.Count + second.Count - shared);
     }
+
+    public const string BudgetProbe =
+        "measure the next iteration in ~3 s instead of a ~90 s build+test cycle: "
+        + "dotnet src/TerseSharp.Server/bin/<Configuration>/net10.0/terse.dll call <tool> "
+        + "--workspace <solution> --json '{...}' answers from the freshly built binary. "
+        + "The advertised tools/list cost is a session number: workspace_status prints it as "
+        + "advertised=<n> tools <t> tokens - split by verbose=true into toolDescriptions, "
+        + "parameterDescriptions, schemaFrame and names - inside an MCP session, not from that one-shot probe";
 }
 
 internal sealed record ToolPair(string First, string Second, string Reason);

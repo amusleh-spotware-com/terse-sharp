@@ -105,9 +105,10 @@ public static class FileService
             return Result.Fail<string>(NoMatch(before, oldText, match, occurrence));
 
         var ending = LineEndings.Dominant(before);
+        var start = SplitCarriageReturn(before, match.Start) ? match.Start - 1 : match.Start;
 
         return Result.Ok(string.Concat(
-            before.AsSpan(0, match.Start),
+            before.AsSpan(0, start),
             LineEndings.Adopt(newText, ending),
             before.AsSpan(match.Start + match.Length)));
     }
@@ -1439,4 +1440,7 @@ public static class FileService
         failures.Add(error.Render());
         refused.Add(string.Create(CultureInfo.InvariantCulture, $"REFUSED {path}: {error.Code} - {error.Message}; remedy: {error.Remedy}"));
     }
+
+    private static bool SplitCarriageReturn(ReadOnlySpan<char> before, int start) =>
+        start > 0 && before[start] is '\n' && before[start - 1] is '\r';
 }

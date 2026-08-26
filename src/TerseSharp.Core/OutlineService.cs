@@ -7,19 +7,20 @@ namespace TerseSharp.Core;
 public static class OutlineService
 {
     public static async Task<Result<string>> FileAsync(
-LoadedWorkspace workspace,
-string path,
-bool signatures,
-string ids,
-bool usings,
-CancellationToken cancellationToken,
-bool parameterNames = true,
-string? contains = null)
+        LoadedWorkspace workspace,
+        string path,
+        bool signatures,
+        string ids,
+        bool usings,
+        CancellationToken cancellationToken,
+        bool parameterNames = true,
+        string? contains = null,
+        bool all = false)
     {
         var document = DocumentLookup.Find(workspace, path);
 
         if (document is null)
-            return await FromDiskAsync(workspace, path, signatures, ids, usings, parameterNames, contains, cancellationToken).ConfigureAwait(false);
+            return await FromDiskAsync(workspace, path, signatures, ids, usings, parameterNames, contains, all, cancellationToken).ConfigureAwait(false);
 
         if (Rejected(ids) is { } refusal)
             return refusal;
@@ -31,7 +32,7 @@ string? contains = null)
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
         var declarations = Declarations(root);
-        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains);
+        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, All: all);
 
         return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
             ? note
@@ -45,7 +46,8 @@ string? contains = null)
         string ids,
         CancellationToken cancellationToken,
         bool parameterNames = true,
-        string? contains = null)
+        string? contains = null,
+        bool all = false)
     {
         if (Rejected(ids) is { } refusal)
             return refusal;
@@ -67,7 +69,7 @@ string? contains = null)
 
         return model is null || node is not MemberDeclarationSyntax declaration || !IsTypeDeclaration(declaration)
             ? Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []))
-            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, new OutlineFormat(signatures, ids, null, parameterNames, contains)));
+            : Result.Ok(Render("get_type_outline", symbol.Name, [declaration], model, new OutlineFormat(signatures, ids, null, parameterNames, contains, All: all)));
     }
 
     private static Result<string>? Rejected(string ids) =>
@@ -84,11 +86,11 @@ string? contains = null)
         member is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax;
 
     private static string Render(
-            string tool,
-            string argument,
-            MemberDeclarationSyntax[] declarations,
-            SemanticModel model,
-            OutlineFormat format)
+        string tool,
+        string argument,
+        MemberDeclarationSyntax[] declarations,
+        SemanticModel model,
+        OutlineFormat format)
     {
         var response = new ResponseBuilder(tool, argument);
 
@@ -99,11 +101,17 @@ string? contains = null)
 
         var references = new List<string>();
         var members = 0;
+        var omitted = 0;
 
         foreach (var declaration in declarations)
-            members += AppendType(response, declaration, model, format, references);
+        {
+            var tally = AppendType(response, declaration, model, format, references);
 
-        if (format.Contains is not { Length: > 0 } && members >= WideOutline)
+            members += tally.Total;
+            omitted += tally.Omitted;
+        }
+
+        if (omitted is 0 && format.Contains is not { Length: > 0 } && members >= WideOutline)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"{members} members - narrow with contains="));
         else if (format.Batchable && ArgumentLine.Ids(references) is { } batch)
             response.Note(batch);
@@ -113,29 +121,40 @@ string? contains = null)
 
     private const int WideOutline = 25;
 
-    private static int AppendType(
-            ResponseBuilder response,
-            MemberDeclarationSyntax declaration,
-            SemanticModel model,
-            OutlineFormat format,
-            List<string> references)
+    private static MemberTally AppendType(
+        ResponseBuilder response,
+        MemberDeclarationSyntax declaration,
+        SemanticModel model,
+        OutlineFormat format,
+        List<string> references)
     {
         var symbol = model.GetDeclaredSymbol(declaration);
 
         if (symbol is null)
-            return 0;
+            return default;
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
             $"{Reference(symbol, format.Ids, Never)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
 
         var overloaded = Overloaded(declaration, model);
+        var filtered = format.Contains is { Length: > 0 };
+        var capped = !filtered && !format.All;
         var total = 0;
         var shown = 0;
+        var omitted = 0;
 
         foreach (var member in Members(declaration))
         {
-            total += IsTypeDeclaration(member) ? 0 : 1;
+            var counts = !IsTypeDeclaration(member);
+
+            total += counts ? 1 : 0;
+
+            if (capped && shown >= MaxListedMembers)
+            {
+                omitted += counts ? 1 : 0;
+                continue;
+            }
 
             if (AppendMember(response, member, model, format, overloaded) is { } reference)
             {
@@ -144,10 +163,12 @@ string? contains = null)
             }
         }
 
-        if (format.Contains is { Length: > 0 } && shown < total)
+        if (filtered && shown < total)
             response.Line(string.Create(CultureInfo.InvariantCulture, $"  {shown} of {total} members"));
+        else if (omitted > 0)
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"  {total - omitted} of {total} members - contains= or all=true"));
 
-        return total;
+        return new MemberTally(total, omitted);
     }
 
     private static readonly IReadOnlySet<string> Never = new HashSet<string>(StringComparer.Ordinal);
@@ -251,7 +272,7 @@ string? contains = null)
             directive.Alias is { } alias ? alias.Name.Identifier.ValueText + " = " : string.Empty,
             directive.NamespaceOrType?.ToString() ?? string.Empty);
 
-    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true, string? Contains = null, bool Batchable = true);
+    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true, string? Contains = null, bool Batchable = true, bool All = false);
 
     private const string TextSteer =
         "NOTE this is the outline, not the file text - a whole-file .cs read costs about three times as much and is almost never the question."
@@ -283,13 +304,14 @@ string? contains = null)
                 : SteeredAsync(workspace, path, request.Bytes ? FileService.ByteLength(document.FilePath) : null, cancellationToken);
 
     public static Result<string> FromText(
-            string path,
-            string text,
-            bool signatures,
-            string ids,
-            bool usings,
-            bool parameterNames = true,
-            string? contains = null)
+        string path,
+        string text,
+        bool signatures,
+        string ids,
+        bool usings,
+        bool parameterNames = true,
+        string? contains = null,
+        bool all = false)
     {
         if (Rejected(ids) is { } refusal)
             return refusal;
@@ -298,7 +320,7 @@ string? contains = null)
         var root = tree.GetRoot();
         var model = CSharpCompilation.Create("terse-ref", [tree]).GetSemanticModel(tree);
         var declarations = Declarations(root);
-        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, Batchable: false);
+        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, Batchable: false, All: all);
 
         return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
             ? note
@@ -315,6 +337,7 @@ string? contains = null)
         bool usings,
         bool parameterNames,
         string? contains,
+        bool all,
         CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace.Root, path);
@@ -326,7 +349,7 @@ string? contains = null)
             return Result.Fail<string>(await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false));
 
         var text = await File.ReadAllTextAsync(resolved.Value!, cancellationToken).ConfigureAwait(false);
-        var outline = FromText(path, text, signatures, ids, usings, parameterNames, contains);
+        var outline = FromText(path, text, signatures, ids, usings, parameterNames, contains, all);
 
         return outline.IsOk ? Result.Ok(outline.Value! + "\n" + ParsedFromText) : outline;
     }
@@ -393,4 +416,8 @@ string? contains = null)
 
     private static bool Listable(ISymbol member) =>
         !member.IsImplicitlyDeclared && member is not IMethodSymbol { AssociatedSymbol: not null };
+
+    private const int MaxListedMembers = 40;
+
+    private readonly record struct MemberTally(int Total, int Omitted);
 }

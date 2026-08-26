@@ -147,6 +147,7 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
 
         Assert.Contains("CS0169", text, StringComparison.Ordinal);
         Assert.DoesNotContain("run_tests PASSED", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("build=ok", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -8,6 +8,56 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-08-26
+
+### Changed
+
+- `replace_symbol` now refuses a `symbolIds=`/`declarations=` batch whose declaration name does not
+  match the symbol its position pairs it with, from syntax, before anything is compiled - the way
+  `add_member` already answers `NameTaken`. A mis-paired batch used to be decided only by the
+  compiler, costing a `CompileRegression` rollback plus the whole re-sent payload; it now answers
+  `ERROR InvalidArgument` naming the entry index and both names
+  (`declarations[1]: declares 'PerEntryOnly', but the paired symbolId addresses 'Value'`). Covered by
+  `ABatchWhoseDeclarationNameDoesNotMatchItsPairedSymbol_IsRefusedFromSyntax`.
+- `get_file_outline` and `get_type_outline` now list at most **40 members per type** when neither
+  `contains=` nor the new `all=true` is passed, and count the rest as
+  `40 of 104 members - contains= or all=true`. A 100-member type used to return its whole member list
+  and only then print the `narrow with contains=` steer - the steer arrived after the payload was
+  paid. `all=true` restores the full list; the omission is always counted, so it is never silent. This is a
+  **response-format change**: an unfiltered outline of a wide type now returns less than before, and a
+  capped outline no longer also prints the `N members - narrow with contains=` steer, which would
+  otherwise state a total the payload does not show.
+  Covered by `GetFileOutline_OnAWideType_CapsTheMemberListAndCountsTheRest` against the new
+  `WideSurface` fixture type.
+- Every token-budget assertion - `TokenBudgetE2ETests`, the SKILL.md budget in `DocsCoverageE2ETests`,
+  and both budget censuses in `ToolCensusE2ETests` - now prints the `terse call workspace_status`
+  probe command in its failure message, so a blown budget names the ~3 s way to measure the next
+  iteration instead of the ~90 s `build` + `run_tests` cycle. Covered by
+  `TheBudgetProbeSteer_NamesAnAdvertisedToolAndAnAnswerThatReallyCarriesTheNumber`.
+- `run_tests` and `rerun_failed` now carry the verdict of the build they ran, on the **same line** as
+  the test verdict - `run_tests PASSED  passed=1 ... build=ok errors=0 warnings=0`. The
+  definition-of-done requires reading the build result before the test result, which used to force a
+  separate `build` call purely to see a verdict the test run had already produced. A run with
+  `noBuild=true`, a run that produced no test results, and a run whose build failed carry nothing -
+  the verdict is emitted only on positive proof that the build succeeded, never on the absence of a
+  diagnostic. The build verdict is a
+  suffix rather than the leading line the backlog row proposed, because a leading line would break the
+  one-line success contract every other build/test tool holds to. Covered by
+  `RunTests_WhenItBuilt_CarriesTheBuildVerdictOnTheSameLineAsTheTestVerdict`.
+
+### Fixed
+
+- `edit_text` with an `oldText` that **begins with a newline**, on a CRLF file, inserted a stray
+  carriage return and shifted the replacement by one character: the bare `\n` matched the LF half of
+  a CRLF pair, and the replacement - which adopts the file's own dominant ending - then re-added the
+  `\r`. A leading-newline match is now extended back over the `\r` it split, so the span is a whole
+  line ending and the file's other line endings are byte-identical afterwards. Covered in both
+  directions by
+  `EditText_WithAnOldTextThatBeginsWithANewline_LeavesEveryOtherLineEndingUntouched`, which runs over
+  an LF file and a CRLF one.
+
+
+
 ## [0.49.0] - 2026-08-26
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
@@ -4550,7 +4600,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.49.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.50.0...HEAD
+[0.50.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.50.0
 [0.49.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.49.0
 [0.48.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.48.0
 [0.47.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.47.0

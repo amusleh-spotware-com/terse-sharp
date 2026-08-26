@@ -528,9 +528,14 @@ public static class SymbolEditService
         if (!symbol.IsOk)
             return Result.Fail<PlannedEdit>(symbol.Error!);
         var found = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
-        return found is null
-            ? Result.Fail<PlannedEdit>(Errors.SymbolNotFound(symbolId, []))
-            : Plan(found, declaration);
+        if (found is null)
+            return Result.Fail<PlannedEdit>(Errors.SymbolNotFound(symbolId, []));
+
+        var planned = Plan(found, declaration);
+
+        return planned.IsOk && Misnamed(symbol.Value!, planned.Value.Nodes) is { } refusal
+            ? Result.Fail<PlannedEdit>(refusal)
+            : planned;
     }
 
     private static async Task<Result<string>> BatchedAsync(
@@ -969,6 +974,35 @@ public static class SymbolEditService
 
     private static Diagnostic[] BodyDiagnostics(SyntaxNode parsed) =>
         [.. parsed.GetDiagnostics().Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error)];
+
+    private static string? DeclaredName(SyntaxNode node) => node switch
+    {
+        MethodDeclarationSyntax method => method.Identifier.Text,
+        PropertyDeclarationSyntax property => property.Identifier.Text,
+        EventDeclarationSyntax declared => declared.Identifier.Text,
+        BaseTypeDeclarationSyntax type => type.Identifier.Text,
+        EnumMemberDeclarationSyntax member => member.Identifier.Text,
+        BaseFieldDeclarationSyntax field => Single(field.Declaration),
+        _ => null,
+    };
+
+    private static TerseError? Misnamed(ISymbol symbol, IReadOnlyList<SyntaxNode> nodes)
+    {
+        string? declared = null;
+
+        foreach (var node in nodes)
+        {
+            if (DeclaredName(node) is not { } name)
+                return null;
+
+            if (string.Equals(name, symbol.Name, StringComparison.Ordinal))
+                return null;
+
+            declared ??= name;
+        }
+
+        return declared is null ? null : Errors.Misnamed(declared, symbol.Name);
+    }
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

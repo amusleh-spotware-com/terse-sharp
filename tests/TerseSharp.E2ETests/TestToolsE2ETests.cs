@@ -361,4 +361,28 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("runSettings entry MaxParallelThreads is not Name=Value", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task RunTests_WhenItBuilt_CarriesTheBuildVerdictOnTheSameLineAsTheTestVerdict()
+    {
+        var built = await server.CallAsync("run_tests", new()
+        {
+            ["project"] = TestProject,
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+        });
+
+        var skipped = await server.CallAsync("run_tests", new()
+        {
+            ["project"] = TestProject,
+            ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+            ["noBuild"] = true,
+        });
+
+        Assert.StartsWith("run_tests PASSED", built, StringComparison.Ordinal);
+        Assert.Contains("build=ok errors=0 warnings=", built, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", built, StringComparison.Ordinal);
+
+        Assert.StartsWith("run_tests PASSED", skipped, StringComparison.Ordinal);
+        Assert.DoesNotContain("build=ok", skipped, StringComparison.Ordinal);
+    }
 }

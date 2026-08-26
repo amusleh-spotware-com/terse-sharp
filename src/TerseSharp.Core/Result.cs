@@ -177,4 +177,9 @@ public static class Errors
         TerseErrorCode.InvalidArgument,
         string.Create(CultureInfo.InvariantCulture, $"replace_symbol_body cannot address '{symbolId}': it is a {kind}, and this tool edits a method, constructor, accessor or local function"),
         "use replace_symbol to replace the whole declaration, or edit_text force=true to change a field or property initializer");
+
+    public static TerseError Misnamed(string declared, string addressed) => new(
+        TerseErrorCode.InvalidArgument,
+        string.Create(CultureInfo.InvariantCulture, $"declares '{declared}', but the paired symbolId addresses '{addressed}'"),
+        "symbolIds and declarations are paired positionally - reorder the declarations to match, or send them one per call; the mismatch is decidable from syntax, so nothing was compiled and nothing was written");
 }

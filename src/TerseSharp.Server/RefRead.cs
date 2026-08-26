@@ -26,11 +26,11 @@ internal static class RefRead
     }
 
     public static async Task<string> OutlineAsync(
-            LoadedWorkspace workspace,
-            string path,
-            string reference,
-            OutlineOptions options,
-            CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        string path,
+        string reference,
+        OutlineOptions options,
+        CancellationToken cancellationToken)
     {
         var relative = Relative(workspace, path);
         var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
@@ -45,7 +45,8 @@ internal static class RefRead
             options.Ids,
             options.Usings,
             options.ParameterNames,
-            options.Contains));
+            options.Contains,
+            options.All));
 
         return outline + "\n" + Historical(reference);
     }
@@ -63,4 +64,4 @@ internal static class RefRead
         Path.IsPathRooted(path) ? path : Path.Combine(workspace.Root, path));
 }
 
-internal readonly record struct OutlineOptions(bool Signatures, string Ids, bool Usings, bool ParameterNames, string? Contains);
+internal readonly record struct OutlineOptions(bool Signatures, string Ids, bool Usings, bool ParameterNames, string? Contains, bool All = false);

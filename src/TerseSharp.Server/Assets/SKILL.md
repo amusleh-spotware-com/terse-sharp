@@ -39,7 +39,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
 | **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` | a path inside the workspace root that belongs to no project — a fixture tree kept outside the solution — is **parsed from its own text**, not refused, and the answer ends `HEURISTIC parsed from the file's own text`. Outside the root it is still refused |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` | up to 10 in one response, each under its own path line; an unresolved path is reported inline as `NOT_FOUND`, never a failed call |
-| **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too, and an unfiltered outline of 25+ members ends with `104 members - narrow with contains=`, because an outline never truncates and so never earned the truncation steer |
+| **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too. An **unfiltered** outline lists at most **40 members per type** and counts the rest as `40 of 104 members - contains= or all=true`, so a wide type costs a steer instead of a payload; `all: true` lists every one, and the omission is always counted, never silent |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id | answers `get_type_outline`'s member list plus a steer to one member, not the whole file's text; `verbose: true` opts back into the source. A type with ONE declaring reference whose **rendered source** - the declaration *plus* its doc comment, which is what the response carries - is at most 4 lines and 200 characters answers that source instead, because withholding something shorter than the steer saves nothing |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
@@ -462,7 +462,10 @@ rejected edit, an `edit_text force=true` on the file header and a `retryWith`.
 `declarations` — one declaration per symbol, paired positionally, at most 20, and more than one entry
 per file is allowed. That is how a signature change lands **together with the callers it breaks**:
 sent one at a time it is rolled back as a `CompileRegression`, and callee-first ordering does not help
-because the callee is what is changing. Unpaired arrays are refused naming both counts, and two edits
+because the callee is what is changing. Unpaired arrays are refused naming both counts, a declaration
+whose own name does not match the symbol its position pairs it with is refused from syntax before
+anything is compiled (`declarations[3]: declares 'PerEntryOnly', but the paired symbolId addresses
+'Threshold'`), and two edits
 where one declaration **contains** the other are refused whichever order you send them in, rather than
 silently dropping the inner one.
 
@@ -856,7 +859,9 @@ change is nearly free. A run that spanned **more than one project** appends `con
 per project to that same line - and a run that already prints its counters in full adds the slowest
 test when concurrency is under 2x
 (`… durationMs=122371  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms`). A
-single-project run is unchanged, and `build` behaves the same way
+single-project run is unchanged. A run that **built** also carries that build's own verdict on the
+same line - `build=ok errors=0 warnings=0` - so reading the build result before the test
+result costs no second call; `noBuild=true` carries nothing. `build` behaves the same way
 (`build ok  errors=0 warnings=0  elapsedMs=4235`), warnings included: a build that succeeds is one
 line however many warnings it produced, and a build that fails lists errors only. `warnings=` counts
 what that build emitted, so a build that recompiled nothing reports `0`.

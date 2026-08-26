@@ -67,7 +67,7 @@ public static partial class DotnetRunner
 
             return prepared.Failure is { } failed
                 ? new TestRunResult(failed.Response, Report(results, workspace.Root), failed.Locked)
-                : await RanAsync(workspace, expanded, results, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
+                : await RanAsync(workspace, expanded, results, prepared, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -736,18 +736,21 @@ public static partial class DotnetRunner
             return new PreparedBuild(0, null);
 
         var elapsed = 0L;
+        var warnings = 0;
 
         foreach (var target in request.Builds)
         {
             var run = await BuiltAsync(workspace, target, request.Scope, request.Timeout, cancellationToken).ConfigureAwait(false);
+            var diagnostics = Diagnostics(run.Output);
 
             elapsed += run.ElapsedMilliseconds;
+            warnings += diagnostics.Warnings.Length;
 
-            if (run.ExitCode is not 0 || Diagnostics(run.Output).Errors.Length is not 0)
+            if (run.ExitCode is not 0 || diagnostics.Errors.Length is not 0)
                 return new PreparedBuild(elapsed, BatchBuildFailure(workspace, request, target, run));
         }
 
-        return new PreparedBuild(elapsed, null);
+        return new PreparedBuild(elapsed, null, BuildVerdict(warnings));
     }
 
     private static string Outcome(ProcessRun run) => run.TimedOut ? "timed out" : "failed";
@@ -766,10 +769,10 @@ public static partial class DotnetRunner
         WorkspaceTarget workspace,
         TestRunRequest request,
         DirectoryInfo results,
-        long preparedMilliseconds,
+        PreparedBuild prepared,
         CancellationToken cancellationToken)
     {
-        var (run, missing) = await InvokeAsync(workspace, request, results.FullName, preparedMilliseconds, cancellationToken).ConfigureAwait(false);
+        var (run, missing) = await InvokeAsync(workspace, request, results.FullName, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
         var report = Report(results, workspace.Root);
         var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
         var hung = await HangSequence.ActiveAsync(results, cancellationToken).ConfigureAwait(false);
@@ -777,7 +780,7 @@ public static partial class DotnetRunner
         var stopped = run.TimedOut || hung.Length is not 0;
 
         return new TestRunResult(
-            Hung(Interrupted(response, missing, request.Invocations.Length, request.IsSerial, stopped), hung),
+            Verdicted(prepared.Verdict ?? Built(request, run, report), Hung(Interrupted(response, missing, request.Invocations.Length, request.IsSerial, stopped), hung)),
             report,
             Locked(run));
     }
@@ -1122,6 +1125,30 @@ public static partial class DotnetRunner
     private static string Scanned(ImmutableArray<string> scanned) => scanned.Length is 0
         ? string.Empty
         : ": " + string.Join(", ", scanned.Take(5).Select(project => Path.GetFileName(project.AsSpan()).ToString()));
+
+    private static string BuildVerdict(int warnings) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"  build=ok errors=0 warnings={warnings}");
+
+    private static string Verdicted(string? verdict, string response)
+    {
+        if (verdict is null)
+            return response;
+
+        var end = response.IndexOf('\n', StringComparison.Ordinal);
+
+        return end < 0 ? response + verdict : response[..end] + verdict + response[end..];
+    }
+
+    private static string? Built(TestRunRequest request, ProcessRun run, TestRunReport report)
+    {
+        if (request.NoBuild || report.Total is 0)
+            return null;
+
+        var diagnostics = Diagnostics(run.Output);
+
+        return diagnostics.Errors.Length is 0 ? BuildVerdict(diagnostics.Warnings.Length) : null;
+    }
 }
 
 internal sealed record ProcessRun(
@@ -1143,4 +1170,4 @@ internal readonly record struct BuildDiagnostics(string[] Errors, string[] Warni
 
 internal readonly record struct DotnetInstallation(string Selected, string[] Sdks, string[] Runtimes);
 
-internal readonly record struct PreparedBuild(long ElapsedMilliseconds, BuildRun? Failure);
+internal readonly record struct PreparedBuild(long ElapsedMilliseconds, BuildRun? Failure, string? Verdict = null);

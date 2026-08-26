@@ -664,4 +664,30 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("from referenced assemblies", text, StringComparison.Ordinal);
         Assert.Contains("JsonSerializer", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetFileOutline_OnAWideType_CapsTheMemberListAndCountsTheRest()
+    {
+        var capped = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs" });
+        var whole = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["all"] = true });
+
+        Assert.Contains("WideSurface.Slot40", capped, StringComparison.Ordinal);
+        Assert.DoesNotContain("WideSurface.Slot41", capped, StringComparison.Ordinal);
+        Assert.Contains("40 of 45 members - contains= or all=true", capped, StringComparison.Ordinal);
+
+        Assert.Contains("WideSurface.Slot45", whole, StringComparison.Ordinal);
+        Assert.DoesNotContain("of 45 members", whole, StringComparison.Ordinal);
+        Assert.True(whole.Length > capped.Length);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_OnACappedType_DoesNotAlsoPrintTheWideOutlineSteer()
+    {
+        var capped = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs" });
+        var whole = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["all"] = true });
+
+        Assert.Contains("40 of 45 members - contains= or all=true", capped, StringComparison.Ordinal);
+        Assert.DoesNotContain("45 members - narrow with contains=", capped, StringComparison.Ordinal);
+        Assert.Contains("45 members - narrow with contains=", whole, StringComparison.Ordinal);
+    }
 }
