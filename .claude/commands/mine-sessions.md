@@ -1,5 +1,5 @@
 ---
-description: Mine every Claude Code session across all projects for token, character, latency, memory and productivity waste down to the individual character, mine the call sequences for composite and batch tools that fuse a measured round trip into one call, mine the code the agent emitted for legacy syntax and slow constructs, mine the user's own turns for every intervention and trap that cost an extra prompt, deep-research the state of the art in agent accuracy, log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
+description: Mine every Claude Code session across all projects for the two things that decide a task's cost - how many tool calls it took and how many wall-clock minutes the user waited - and for token, character, latency, memory and productivity waste down to the individual character; mine the call sequences for composites, batches and unspent parallelism that delete a measured round trip; mine the code the agent emitted for legacy syntax and slow constructs; mine the user's own turns for every intervention and trap that cost an extra prompt; deep-research the state of the art in agent accuracy and speed; log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
 argument-hint: "[weeks to scan, default 1]"
 ---
 
@@ -17,14 +17,29 @@ why that goal came back clean. They are not ranked by taste — they are ranked 
 | `[accuracy]` | **the agent stops falling into traps that force the user to intervene** | an extra user prompt, a rejected edit, a retry with different arguments, a confident wrong answer acted on — measured in M5C |
 | `[modern]` | **the agent emits modern .NET — latest C# syntax, current APIs** | a legacy construct in text the agent *wrote*, counted per 1000 emitted lines and confirmed against the workspace — measured in M5B |
 | `[perf]` | **the agent emits code that is not slow** | sync-over-async, sync file I/O, an allocation on a per-file/per-line/per-symbol path in emitted text — measured in M5B |
-| `[speed]` | **the agent finishes sooner** | latency, wall time, a blind wait, a serial sequence with no dependency — measured in M4 |
+| `[speed]` | **the agent finishes the task sooner, in fewer calls** | wall time per task, tool calls per task, a serial round trip that had no dependency, a blind wait, a re-run of work whose inputs never moved — measured in M4 |
 | `[cost]` | **the agent pays fewer tokens for the same answer** | payload, framing, round trips, batches — measured in M2, M3 and M6 |
 
-`[accuracy]` outranks the rest, and it is not close: an intervention costs a whole turn at M2's turn
-`p50`, plus the tokens of the re-issued work, plus the context already spent on the wrong path. A
-payload row of equal token size is worth less than an intervention row. Rank accordingly in M9.
+**`[accuracy]` and `[speed]` are co-primary, and both outrank `[cost]`.** An intervention costs a whole
+turn at M2's turn `p50`, plus the tokens of the re-issued work, plus the context already spent on the
+wrong path — so a payload row of equal token size is worth less than an intervention row. And a
+round trip costs the corpus **model gap** (`tool_result` → next `tool_use`, measured **p50 6 097 ms**
+on 35 967 gaps in the 1-week window of 2026-08-26) **plus** the tool's own `p50` — so a row that
+deletes one call per task is worth more than a row that shortens one response, because the wall clock
+the user waits through is dominated by *how many times the loop turns*, not by how wide each answer
+is. Rank accordingly in M9.
 
-**Seven gates that outrank everything else in this command:**
+**The three `[speed]` metrics, and they are the run's headline numbers.** Every run reports all three
+in M11 against the previous run, and a run that reports none of them has not measured `[speed]` and
+says so as a degraded run:
+
+| Metric | Where it comes from | Baseline, 1 week to 2026-08-26 |
+|---|---|---|
+| **tool calls per task cycle** | M4's cycle table — user turn to the next user turn | mean **25.6**, p90 **84** |
+| **wall time per task cycle** | the same table | p50 **1.3 min**, p90 **51.9 min**, mean **44.8 min** |
+| **round-trip latency** | model gap p50 + the called tool's p50 | **6 097 ms** of model gap, before the tool runs at all |
+
+**Eight gates that outrank everything else in this command:**
 
 1. **A finding without a number is not a finding.** "Reads feel wasteful" is banned. "36 `Read` calls
    in one session, 214 KB of tool results, ~53 500 tokens, against 10 `search_text` calls" is a
@@ -79,6 +94,20 @@ payload row of equal token size is worth less than an intervention row. Rank acc
    And a class this repository **deliberately** leaves off — an `.editorconfig` severity, the app-wide
    conventions clause in `CLAUDE.md` — is not a finding; check before logging, because proposing that
    the codebase fight its own configuration is the same defect as a number nobody encoded.
+8. **A call deleted beats a response shortened, and the run must say which it did.** The prime
+   directive is "save tokens, **increase speed**" — conjunction, not disjunction — and the corpus says
+   the second half is where the hours are: in the 1-week window of 2026-08-26, **228.2 h** of turn wall
+   time carried **156.1 h** of tool time and **102.9 h** of model gap, against a tool-result payload of
+   a few tens of millions of tokens. A format trim that saves 2 000 tokens and changes no call count
+   saves **zero seconds**. So every `[speed]` row states its saving in **hours or milliseconds per
+   window**, and states which of the four levers it pulls: **(a) delete the call** (fuse, batch,
+   cache, or answer it in the first response), **(b) parallelise the call** (the agent issues it in the
+   same assistant message as an independent sibling), **(c) shorten the call** (the tool itself gets
+   faster), **(d) never make the call** (a rule or a guard stops a run that could not have changed its
+   answer). (a), (b) and (d) are worth a multiple of (c), because each also deletes a **6 097 ms**
+   model gap that no server change can touch — and the corpus measured **99.997%** of tool-bearing
+   assistant messages issuing exactly **one** tool call (36 070 of 36 071), so lever (b) is almost
+   entirely unspent.
 
 **Also banned:** `AskUserQuestion`, `ExitPlanMode`, editing any file other than `IMPROVEMENTS.md` and
 `IMPROVEMENTS-ARCHIVE.md`, `git add -A`, a `Co-Authored-By:` trailer, and writing any script anywhere
@@ -740,28 +769,344 @@ tokens:
 So the ranking for this phase: **de-frame → relativise paths → collapse multi-space runs → minify →
 only then consider changing the shape of the data.**
 
-## M4 — The performance and memory pass
+## M4 — The speed pass: wall clock, call count, and the round trips that cost both
 
-Tokens are half the prime directive; the other half is speed, and a server that answers cheaply but
-slowly loses the session anyway.
+Tokens are half the prime directive; **speed is the other half, and it is the half the user actually
+waits through.** A server that answers cheaply but turns the loop 26 times to finish one task has lost
+the session. This phase is not an appendix to M2 — it is the phase that measures goal `[speed]`, it
+has its **own deterministic script**, and a run that skipped it is degraded in M11.
 
-**Latency, from M2's `p50`/`p90`/`p99`/`tot` columns.** The corpus-wide baseline, measured over
-73 186 paired calls on 2026-08-08, is **p50 367 ms · p90 12 437 ms · p99 182 810 ms**, 190.6 h of tool
-wall time against 348.0 h of turn wall time — so tools are roughly **55% of everything the agent
-waits for**. Judge every tool against that distribution, not against a feeling. For every
-`mcp__terse-sharp__*` tool in the top 25:
+### M4.1 — Run the third script
+
+Same rules as M2: temp directory, never inside the repository, `ast.parse` before running, hand
+`python` the **Windows** path. It reads the same corpus and answers a different question — *where did
+the wall clock go, and how many turns of the loop did it take*.
+
+```python
+import collections, datetime, json, os, re, sys
+
+WEEKS = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
+CUTOFF = datetime.datetime.now().timestamp() - WEEKS * 7 * 86400
+MUTATE = {'replace_symbol', 'replace_symbol_body', 'add_member', 'delete_symbol', 'edit_text',
+          'write_text', 'rename_symbol', 'move_type_to_file', 'change_signature', 'Edit', 'Write'}
+VERIFY = {'run_tests', 'rerun_failed', 'build', 'analyze', 'cleanup', 'format', 'get_diagnostics',
+          'gate', 'list_tests', 'clean'}
+NARROW = ('project', 'filter', 'projects', 'test', 'path')
+SLEEP = re.compile(r'\bsleep\s+(\d+)')
+WAITLOOP = re.compile(r'\b(while|until|for)\b')
+TEXTCMD = re.compile(r'\b(grep|rg|cat|head|tail|sed|awk|ls|find)\b')
+TARGET_KEYS = ('path', 'file', 'filePath', 'symbolId', 'symbol', 'query', 'pattern', 'name', 'command')
+
+
+def short(t):
+    return t.split('__')[-1] if t.startswith('mcp__') else t
+
+
+def target(a):
+    for k in TARGET_KEYS:
+        v = a.get(k)
+        if isinstance(v, str) and v:
+            return v[:200]
+    return ''
+
+
+def stamp(r):
+    raw = r.get('timestamp')
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(raw.replace('Z', '+00:00')).timestamp()
+    except ValueError:
+        return None
+
+
+def q(v, f):
+    if not v:
+        return 0.0
+    o = sorted(v)
+    return o[min(len(o) - 1, int(len(o) * f))]
+
+
+roots, seen = [], set()
+for c in (os.path.expanduser('~/.claude/projects'),
+          os.path.join(os.environ.get('CLAUDE_CONFIG_DIR', ''), 'projects')):
+    if c and os.path.isdir(c):
+        rp = os.path.realpath(c).lower()
+        if rp not in seen:
+            seen.add(rp)
+            roots.append(c)
+
+
+def walk():
+    files = set()
+    for root in roots:
+        for folder, _, names in os.walk(root):
+            if os.path.basename(folder) == 'tool-results':
+                continue
+            for name in names:
+                if not name.endswith('.jsonl'):
+                    continue
+                p = os.path.join(folder, name)
+                k = os.path.realpath(p).lower()
+                if k in files:
+                    continue
+                try:
+                    if os.path.getmtime(p) >= CUTOFF:
+                        files.add(k)
+                        yield p
+                except OSError:
+                    pass
+
+
+calls = collections.Counter(); errors = collections.Counter(); dur = collections.defaultdict(list)
+dupes = collections.Counter(); gaps = []; turns = []; parallel = collections.Counter()
+chains = collections.Counter(); same_target = collections.Counter(); runs = collections.Counter()
+cycles_s = []; cycles_c = []; tail_s = []; tail_c = []; body_s = []; body_c = []
+verify_ms = collections.Counter(); verify_n = collections.Counter(); scoped = collections.Counter()
+repeat_gap = []; agent_ms = []; bash_kind_ms = collections.Counter(); bash_kind_n = collections.Counter()
+sleep_declared = sleep_bare = sleep_bare_s = 0; sleep_ms = 0.0
+serial_ms = 0.0; sessions = set(); cycles = 0
+
+for path in walk():
+    sessions.add(path)
+    pending, order, seen_calls, events, marks = {}, [], collections.Counter(), [], []
+    last_result_at = None
+    for line in open(path, encoding='utf-8', errors='replace'):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        at = stamp(rec)
+        if rec.get('type') == 'system' and rec.get('subtype') == 'turn_duration':
+            if isinstance(rec.get('durationMs'), (int, float)):
+                turns.append(rec['durationMs'])
+        msg = rec.get('message')
+        if not isinstance(msg, dict):
+            continue
+        blocks = msg.get('content')
+        if rec.get('type') == 'user' and at:
+            istr = isinstance(blocks, list) and any(
+                isinstance(b, dict) and b.get('type') == 'tool_result' for b in blocks)
+            txt = isinstance(blocks, str) or (isinstance(blocks, list) and any(
+                isinstance(b, dict) and b.get('type') == 'text' for b in blocks))
+            if txt and not istr:
+                marks.append(at)
+                last_result_at = at
+        if not isinstance(blocks, list):
+            continue
+        fan = sum(1 for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use')
+        if fan:
+            parallel[min(fan, 8)] += 1
+        for b in blocks:
+            if not isinstance(b, dict):
+                continue
+            if b.get('type') == 'tool_use':
+                tool = short(b.get('name') or 'none')
+                a = b.get('input') or {}
+                calls[tool] += 1
+                pending[b.get('id')] = (tool, at, fan, a)
+                enc = json.dumps(a, sort_keys=True)
+                seen_calls[(tool, enc[:4000])] += 1
+                order.append((tool, target(a)))
+                if last_result_at and at and at >= last_result_at:
+                    gaps.append((at - last_result_at) * 1000)
+            elif b.get('type') == 'tool_result':
+                tool, started, fan_of, a = pending.pop(b.get('tool_use_id'), (None, None, 1, {}))
+                if at:
+                    last_result_at = at
+                if not tool or not started or not at or at < started:
+                    continue
+                ms = (at - started) * 1000
+                dur[tool].append(ms)
+                events.append((started, tool, tool in MUTATE, ms))
+                if fan_of == 1:
+                    serial_ms += ms
+                content = b.get('content')
+                text = content if isinstance(content, str) else json.dumps(content or '')
+                if b.get('is_error') or text.lstrip().startswith('ERROR '):
+                    errors[tool] += 1
+                if tool in VERIFY:
+                    verify_ms[tool] += ms
+                    verify_n[tool] += 1
+                    scoped[(tool, 'scoped' if any(a.get(k) for k in NARROW) else 'whole')] += 1
+                if tool == 'Agent':
+                    agent_ms.append(ms)
+                if tool == 'Bash':
+                    cmd = a.get('command', '') or ''
+                    s = SLEEP.findall(cmd)
+                    if s:
+                        total = sum(int(v) for v in s)
+                        sleep_declared += total
+                        sleep_ms += ms
+                        if not WAITLOOP.search(cmd):
+                            sleep_bare += 1
+                            sleep_bare_s += total
+                        bash_kind_n['sleep/wait'] += 1; bash_kind_ms['sleep/wait'] += ms
+                    elif TEXTCMD.search(cmd):
+                        bash_kind_n['shell text tool'] += 1; bash_kind_ms['shell text tool'] += ms
+                    else:
+                        bash_kind_n['other'] += 1; bash_kind_ms['other'] += ms
+    for (tool, _), c in seen_calls.items():
+        if c > 1:
+            dupes[tool] += c - 1
+    for i in range(len(order) - 1):
+        p = (order[i][0], order[i + 1][0])
+        if p[0] != p[1]:
+            chains[p] += 1
+            if order[i][1] and order[i][1] == order[i + 1][1]:
+                same_target[p] += 1
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and order[j + 1][0] == order[i][0]:
+            j += 1
+        if j - i + 1 >= 3:
+            runs[order[i][0]] += j - i + 1
+        i = j + 1
+    events.sort()
+    last = {}
+    for t, tool, _, _ in events:
+        if tool in VERIFY:
+            if tool in last:
+                repeat_gap.append(t - last[tool])
+            last[tool] = t
+    for i, start in enumerate(marks):
+        end = marks[i + 1] if i + 1 < len(marks) else (events[-1][0] if events else start)
+        span = [e for e in events if start <= e[0] <= end]
+        if len(span) < 4:
+            continue
+        cycles += 1
+        cycles_s.append((span[-1][0] + span[-1][3] / 1000) - span[0][0])
+        cycles_c.append(len(span))
+        cut = None
+        for k in range(len(span) - 1, -1, -1):
+            if span[k][2]:
+                cut = k
+                break
+        if cut is None:
+            continue
+        tail, body = span[cut + 1:], span[:cut + 1]
+        if tail:
+            tail_s.append((tail[-1][0] + tail[-1][3] / 1000) - tail[0][0]); tail_c.append(len(tail))
+        if body:
+            body_s.append((body[-1][0] + body[-1][3] / 1000) - body[0][0]); body_c.append(len(body))
+
+total_calls = sum(calls.values()); tool_ms = sum(sum(v) for v in dur.values())
+turn_ms = sum(turns); gap_ms = sum(gaps); gp50 = q(gaps, .5)
+msgs = sum(parallel.values())
+
+
+def show(k, v):
+    print(f'{k:<34}{v}')
+
+
+print(f'== SPEED  window={WEEKS}w  transcripts={len(sessions)}  calls={total_calls:,}  cycles={cycles}')
+show('turn wall time', f'{turn_ms/3.6e6:.1f} h over {len(turns):,} turns  p50={q(turns,.5)/1000:.0f}s')
+show('tool wall time', f'{tool_ms/3.6e6:.1f} h  serial={serial_ms*100/max(tool_ms,1):.0f}%')
+show('model gap (result->next call)', f'{gap_ms/3.6e6:.1f} h  p50={gp50:.0f}ms p90={q(gaps,.9):.0f}ms  n={len(gaps):,}')
+show('ROUND-TRIP COST', f'{gp50:.0f}ms of model gap before any tool runs')
+show('fan-out: exactly ONE call', f'{parallel.get(1,0):,} of {msgs:,} = {parallel.get(1,0)*100/max(msgs,1):.3f}%')
+show('TASK CYCLE wall', f'p50={q(cycles_s,.5)/60:.1f} min  p90={q(cycles_s,.9)/60:.1f} min  mean={sum(cycles_s)/max(len(cycles_s),1)/60:.1f} min')
+show('TASK CYCLE calls', f'p50={q(cycles_c,.5):.0f}  p90={q(cycles_c,.9):.0f}  mean={sum(cycles_c)/max(len(cycles_c),1):.1f}')
+show('  body (to last edit)', f'{sum(body_s)/3600:.1f} h  calls mean={sum(body_c)/max(len(body_c),1):.1f}')
+show('  TAIL (after last edit)', f'{sum(tail_s)/3600:.1f} h = {sum(tail_s)*100/max(sum(tail_s)+sum(body_s),1):.0f}%  '
+                                 f'calls mean={sum(tail_c)/max(len(tail_c),1):.1f}  p90={q(tail_s,.9)/60:.1f} min')
+
+print('\n== tools ranked by TOTAL WALL TIME (the speed lever, not the token lever)')
+for tool, v in sorted(dur.items(), key=lambda kv: -sum(kv[1]))[:25]:
+    n = max(calls[tool], 1)
+    print(f'  {tool:<34}{calls[tool]:>6}x  tot={sum(v)/3.6e6:>6.2f}h  {sum(v)*100/max(tool_ms,1):>5.1f}%  '
+          f'p50={q(v,.5):>7.0f}  p90={q(v,.9):>8.0f}  p99={q(v,.99):>9.0f}  '
+          f'err={errors[tool]*100/n:>4.1f}%  dup={dupes[tool]}')
+
+print('\n== verification: the gate tax')
+tot = sum(verify_ms.values())
+for tool, ms in verify_ms.most_common():
+    print(f'  {tool:<18}{verify_n[tool]:>6}x  {ms/3.6e6:>6.2f}h  {ms*100/max(tot,1):>5.1f}%  '
+          f'mean={ms/max(verify_n[tool],1)/1000:>7.1f}s')
+print(f'  TOTAL {sum(verify_n.values())}x {tot/3.6e6:.2f}h = {tot*100/max(tool_ms,1):.0f}% of tool time, '
+      f'{sum(verify_n.values())/max(cycles,1):.1f} verification calls per task cycle')
+print(f'  scoped vs whole: {dict(sorted(scoped.items()))}')
+print(f'  identical verification re-run in one session: n={len(repeat_gap):,}  '
+      f'median gap={q(repeat_gap,.5)/60:.1f} min  under 5 min apart={sum(1 for g in repeat_gap if g<300):,}')
+
+print('\n== duplicate calls (identical args, one session) = pure wasted round trips')
+dt = sum(dupes.values()); dms = sum(dupes[t]*q(dur[t],.5) for t in dupes)
+print(f'  {dt:,} calls  {dms/3.6e6:.2f}h of tool time + {dt*gp50/3.6e6:.2f}h of model gap')
+for tool, c in dupes.most_common(10):
+    print(f'  {tool:<34}{c:>6} dup  p50={q(dur[tool],.5):>7.0f}ms  ~{c*(q(dur[tool],.5)+gp50)/3.6e6:>5.2f}h')
+
+print('\n== blind waits')
+print(f'  sleep-bearing Bash calls declared {sleep_declared:,}s = {sleep_declared/3600:.1f}h, '
+      f'actual wall {sleep_ms/3.6e6:.1f}h')
+print(f'  BARE sleeps (no while/until/for guard): {sleep_bare} calls, {sleep_bare_s:,}s = {sleep_bare_s/3600:.1f}h')
+for k, n in bash_kind_n.most_common():
+    print(f'  Bash {k:<20}{n:>6}x  {bash_kind_ms[k]/3.6e6:>6.2f}h')
+if agent_ms:
+    print(f'  Agent (subagent): {len(agent_ms)}x  {sum(agent_ms)/3.6e6:.2f}h  '
+          f'p90={q(agent_ms,.9)/1000:.0f}s p99={q(agent_ms,.99)/1000:.0f}s max={max(agent_ms)/1000:.0f}s')
+
+print('\n== chains: each fused pair deletes ONE round trip = one model gap + one tool call')
+for (a, b), c in chains.most_common(24):
+    if c < 8:
+        break
+    print(f'  {c:>6}x  {a} -> {b}  same-target={same_target[(a,b)]*100//max(c,1)}%  '
+          f'~{c*(gp50+q(dur[a],.5))/3.6e6:>5.2f}h if fused')
+
+print('\n== same-tool runs >=3 consecutive (batch or parallelise: each deletes a model gap)')
+for tool, c in runs.most_common(12):
+    print(f'  {tool:<34}{c:>6} calls in runs  ~{c*gp50/3.6e6:>5.2f}h of model gap')
+
+print(f'\n== SPEEDLINE calls={total_calls} cycles={cycles} callspercycle={sum(cycles_c)/max(len(cycles_c),1):.1f} '
+      f'cyclemin={sum(cycles_s)/max(len(cycles_s),1)/60:.1f} turnh={turn_ms/3.6e6:.1f} toolh={tool_ms/3.6e6:.1f} '
+      f'gaph={gap_ms/3.6e6:.1f} gapp50={gp50:.0f} onecallpct={parallel.get(1,0)*100/max(msgs,1):.3f} '
+      f'verifyh={tot/3.6e6:.1f} duph={(dms+dt*gp50)/3.6e6:.1f} baresleeps={sleep_bare}')
+```
+
+### M4.2 — The four levers, and what the corpus said the first time this ran
+
+Read the output against gate 8's lever list. The 1-week baseline of **2026-08-26** — 305 transcripts,
+36 075 calls, 663 task cycles — is what the next run compares to, and it is what every threshold below
+is calibrated on:
+
+| Measured | Figure | Lever |
+|---|---|---|
+| **fan-out** | **36 070 of 36 071** tool-bearing assistant messages issued exactly **one** tool call; exactly one message issued two | **(b)** — the harness's parallel `tool_use` capability is **99.997% unspent**, and it is free. This is the largest single `[speed]` finding the corpus can produce, and no server change can produce it |
+| **model gap** | **102.9 h**, p50 **6 097 ms**, p90 21 648 ms, over 35 967 gaps | the floor under every round trip. It is why **(a)/(b)/(d) beat (c)** |
+| **verification** | **64.5 h** over **4 856** calls = **41% of all tool wall time**, **7.3 verification calls per task cycle** | **(d)** — `run_tests` alone is **58.0 h**, 2 454 calls, mean **85 s**, p99 **965 s** |
+| **duplicates** | **3 008** identical calls in-session = **15.7 h**; `run_tests` **1 183** of 2 454 (48%), `build` **787** of 1 053 (75%) | **(a)** — 1 154 identical verification calls re-issued **under 5 minutes** apart |
+| **shell text tools** | 2 369 `Bash` calls = **18.1 h** = 51.5% of all `Bash` wall time | **(d)** — the fallback class the guard exists to delete |
+| **bare `sleep`** | **156** calls, **25 307 s = 7.0 h**, largest single **580 s** | **(d)** — the gate is written and was breached 156 times in one week |
+| **subagent** | 184 `Agent` calls, **6.4 h**, p99 **2 303 s**, max **6 589 s** (110 min for one) | **(c)/(d)** — scope the delegation or do not delegate |
+| **the tail** | after the last edit: **15%** of post-first-edit wall, mean 6.8 calls, p90 **11.1 min** | the end-of-task gate is real but is **not** where the hours are — the interleaved `edit → run_tests → edit` loop is |
+
+Judge every `mcp__terse-sharp__*` tool against that distribution, not against a feeling:
 
 - a `p90` above the corpus `p90` on a *read* tool is a defect: a read is supposed to be the cheap end.
 - a `p99` more than 5× its `p50` is a **cold path** — first call after a load, an eviction, an
   analyzer assembly load, a lazily built compilation. Name the trigger.
 - a `tot` in the tens of minutes on a read tool is a **budget** problem regardless of `p50`.
 - compare against the built-in it replaces where the corpus has both. **A terse tool slower than the
-  `Grep` it replaces is a product defect even when it returns fewer tokens** — the prime directive is
-  "save tokens, increase speed", conjunction not disjunction.
-- `run_tests` / `build`: total wall time and how much of the session it blocked. A long serial wait
-  with no per-project breakdown is already `I125`; strengthen it rather than duplicating.
+  `Grep` it replaces is a product defect even when it returns fewer tokens.**
+- **a tool whose `dup` count is a double-digit share of its calls is a caching row, and on a
+  `VERIFY` tool it is the single most valuable row this phase can produce** — the answer could not
+  have changed, and the server is the only thing that can prove it.
 
-**Memory.** The server is a long-lived stdio process holding MSBuild workspaces:
+### M4.3 — The three questions this phase must answer in writing
+
+1. **How many calls did one task take, and which of them were not needed?** Duplicates, error retries,
+   verification re-runs, and the second half of every same-target chain are all "not needed" — sum
+   them and state the share of `calls per task cycle` they represent.
+2. **Where did the wall clock go?** Tool time, model gap, and the unaccounted remainder, each as a
+   share of turn wall time. A phase that reports tool time only has hidden the larger half.
+3. **What would have made the agent finish sooner without changing a single tool?** Parallel `tool_use`
+   blocks, a batch parameter it already has, a verification it did not have to re-run, a `sleep` it
+   did not have to serve. These are `SKILL.md` / `CLAUDE.md` / guard rows, they cost no surface, and
+   the corpus says they are the biggest ones available.
+
+### M4.4 — Memory
+
+The server is a long-lived stdio process holding MSBuild workspaces:
 
 1. `doctor` — it prints every live `terse`/`testhost` pid with resident megabytes (shipped as `I100`).
    Record RSS now, after a `load_workspace`, and after an `unload_workspace`.
@@ -777,11 +1122,9 @@ waits for**. Judge every tool against that distribution, not against a feeling. 
    `CA1865` and friends are real per-call costs at solution scale. Do **not** fix anything here — this
    command edits one markdown file. Log it.
 
-Anything measured in this phase is a row with a **millisecond or megabyte** figure in its
-`Expected saving` cell, not a token figure. Mixing the two units in one cell is how a saving stops
-being comparable across runs.
-
----
+Anything measured in this phase is a row with an **hour, millisecond or megabyte** figure in its
+`Expected saving` cell, plus the lever letter from gate 8 — never a token figure. Mixing the two units
+in one cell is how a saving stops being comparable across runs.
 
 ## M5 — Read the evidence behind the top offenders
 
@@ -1242,10 +1585,15 @@ Both come straight from M5A's per-session table, both are single numbers, and bo
 as a **trend** — record them in M11 so the next run can compare:
 
 - **interventions per session** — the direct measure of goal `[accuracy]`;
-- **edits per user turn** — the direct measure of goal `[speed]` at the workflow level: how much work
-  the agent completed per prompt it was given. A run where this falls while edit volume stays flat is a
-  run where the agent needed more steering for the same output, and that is a finding even when no
-  single tool looks bad.
+- **edits per user turn** — how much work the agent completed per prompt it was given. A run where this
+  falls while edit volume stays flat is a run where the agent needed more steering for the same
+  output, and that is a finding even when no single tool looks bad.
+
+Goal `[speed]` has its own two, from M4, and they are the ones M11 leads with because they are what
+the user experiences: **tool calls per task cycle** (baseline mean **25.6**, p90 **84**) and **wall
+minutes per task cycle** (baseline p50 **1.3**, p90 **51.9**, mean **44.8**). A run where calls per
+cycle rises is a run that got slower however good each individual response looked — that is the whole
+point of measuring the loop rather than the response.
 
 ---
 
@@ -1487,8 +1835,11 @@ per-task narrative, no third heading, and adding one fails `BacklogShapeTests`. 
      `.claude/commands/…`) when the lever is discoverability or workflow rather than capability.
      There is no separate workflow table; the `Tool` cell carries that distinction.
    - **Proposed change** — one concrete change. "Make it better" is not a proposal.
-   - **Expected saving** — derived from the measurement, in calls and tokens, or in milliseconds and
-     megabytes for an M4 row. Never both units in one cell.
+   - **Expected saving** — derived from the measurement, in calls and tokens, or in hours,
+     milliseconds and megabytes for an M4 row. Never both units in one cell. **A `[speed]` row also
+     carries its gate-8 lever letter** — `(a)` delete the call, `(b)` parallelise it, `(c)` shorten
+     it, `(d)` never make it — because a row that does not say which lever it pulls cannot be ranked
+     against one that does, and `(c)` rows are systematically worth less than the other three.
    - **Rejected** — every approach this run already refuted for that row, so it is never re-attempted;
      `—` when there is none. A constraint that blocks the obvious fix belongs here (for example: the
      `Replaces Bash …` prefix cannot be shortened without un-enrolling the guard census).
@@ -1499,8 +1850,10 @@ per-task narrative, no third heading, and adding one fails `BacklogShapeTests`. 
    measured cost first — **except that an `[accuracy]` row outranks a `[cost]` row of equal measured
    size**, because an intervention costs a turn at M2's turn `p50` plus the re-paid input from M5A's
    `wasted-in` column plus the context already spent, and only the first of those three is in the
-   number. Order within the file: `[accuracy]`, then `[perf]` and `[modern]` where a gate already
-   exists to carry them, then `[speed]`, then `[cost]`.
+   number. Order within the file: `[accuracy]` and `[speed]` — which are co-primary, tie broken by
+   measured hours — then `[perf]` and `[modern]` where a gate already exists to carry them, then
+   `[cost]`. Within `[speed]`, a lever `(a)`, `(b)` or `(d)` row outranks a `(c)` row of equal size,
+   because it also deletes a model gap no server change can touch.
 4. **No cap, and no silent drop — the floor and the aggregation rule are the discipline.**
    - A candidate clears the floor on its own if it is worth **≥200 tokens per session**, **≥1 call per
      session**, **≥500 ms per call**, or a named accuracy gain.
@@ -1544,6 +1897,7 @@ per-task narrative, no third heading, and adding one fails `BacklogShapeTests`. 
 |---|---|
 | Corpus | window in weeks, transcripts scanned, records read **and the share carrying no `message`**, projects covered (slugs only), total tool calls, built-in vs MCP share, tool-result tokens, tool-input chars, attachment tokens, spilled/sidecar bytes, thinking tokens, tool wall time against turn wall time, seconds slept |
 | Token ledger | per `message.model`: input, cache read, 1h and 5m writes, output, and the base-input-equivalent total. Never a dollar figure the corpus cannot prove |
+| **Speed headline** | **the three `[speed]` metrics first, before anything else in the report** — tool calls per task cycle, wall minutes per task cycle, and round-trip latency (model gap p50 + tool p50) — each against the previous run and against the 2026-08-26 baseline of 25.6 calls / 44.8 min / 6 097 ms. Then the four levers with the hours each is worth this window: calls deleted, calls parallelised, calls shortened, calls never made. A report that opens with tokens has buried the half the user waits through |
 | Top waste | the eight cost centres from M2–M4, each with its number |
 | Sequence | the top call chains with their same-target share, the same-tool runs with their longest run, the fan-out histogram, and the re-fetch pairs — the raw input to M6 |
 | Composites & batches | every candidate from M6 with the mechanism it took (format / parameter / list / new tool), the floor it cleared, and the break-even arithmetic for every one that was rejected |
@@ -1551,7 +1905,7 @@ per-task narrative, no third heading, and adding one fails `BacklogShapeTests`. 
 | Friction | error **rate** per tool for tools with ≥50 calls, error-code histogram, API-error statuses, permission denials by kind, interruptions, queue enqueue/remove ratio, `max_tokens` truncations, compaction pre→post |
 | Trim ledger | the full M2 ledger in tokens per class and share of output — **and the placebo section stated as zero**, so the next run does not re-propose it |
 | Surface cost | total `[Description]` bytes and `SKILL.md` bytes, and what they cost per request |
-| Latency & memory | slowest tools by `p95` and by total minutes, RSS per workspace and per document, any cold-path trigger named |
+| Latency & memory | slowest tools by `p95` and by **total hours**, the verification tax (calls and hours per task cycle, scoped vs whole-solution split, identical re-runs under 5 minutes apart), the duplicate-call ledger in hours, the fan-out histogram as a share, bare-`sleep` count and seconds, subagent p99 and max, RSS per workspace and per document, any cold-path trigger named |
 | Research | the methods M7 found worth adopting, each with **the instrument that verified it** (corpus / tokenizer / primary source) and the refutation attempt it survived; the ones dropped as already-true or not actionable here; and an explicit `UNVERIFIED` list of every claim that survived no instrument |
 | Emitted code | legacy-syntax and slow-construct rates per 1000 emitted lines, the top classes with their session counts, which instrument (d) call confirmed each, and the classes dropped as already-caught, out-of-scope for the allocation gate, or deliberately-off in `.editorconfig` |
 | Interventions | interventions per session and as a share of prompts, the cue histogram, the tool immediately before each, and the shape each top entry was classified into (silent no-op / unprovable answer / wrong default / missing remedy / gate breach) |
