@@ -822,6 +822,11 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
 
 ## Definition of done
 
+- [ ] The verification ladder was climbed, never started at the top: `analyze` on the touched file
+      (mean 7.0 s) after every edit, a scoped `build` (13.0 s) when the edit crosses a signature or a
+      consumer, the affected project's tests once the slice compiles, and the whole-solution
+      `run_tests` (mean 85 s, p99 16 min) **once**, at the end. 48% of `run_tests` calls and 75% of
+      `build` calls in a measured week were byte-identical repeats of a call already answered.
 - [ ] `build` clean — **read before** any test result; `run_tests` green over the whole solution.
 - [ ] `analyze` down to `info` on every touched file → `format` / `cleanup` → re-`analyze`;
       `get_diagnostics` for the solution-wide sweep.

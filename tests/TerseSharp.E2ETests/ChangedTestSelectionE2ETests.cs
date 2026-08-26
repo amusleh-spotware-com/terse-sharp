@@ -242,4 +242,25 @@ public sealed class ChangedTestSelectionE2ETests
             await server.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task ListProjects_WithProperties_AnswersEachProjectsOwnEvaluatedValue()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var text = await CallAsync(server, "list_projects", new() { ["properties"] = "IsPackable,TargetFramework" });
+
+            Assert.Contains("3 projects", text, StringComparison.Ordinal);
+            Assert.Contains("Selection.Core  C#", text, StringComparison.Ordinal);
+            Assert.Contains("IsPackable=true", text, StringComparison.Ordinal);
+            Assert.Contains("IsPackable=false", text, StringComparison.Ordinal);
+            Assert.Contains("TargetFramework=net10.0", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }

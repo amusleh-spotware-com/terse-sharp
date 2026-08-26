@@ -25,7 +25,7 @@ public static class SymbolEditService
         var replacement = ParseBody(target.Node, body);
 
         return replacement is null
-            ? Result.Fail<string>(Errors.Invalid("the body did not parse", "pass a block starting with '{' or an expression body"))
+            ? Result.Fail<string>(BodyRefusal(target.Node, symbol, body))
             : await SwapAsync(workspace, target, [replacement], options, cancellationToken).ConfigureAwait(false);
     }
 
@@ -939,6 +939,36 @@ public static class SymbolEditService
     private static TerseError BlankContainer(string addTo) => Errors.Invalid(
             "addTo=" + addTo + " names no containing type - every comma-separated entry was blank",
             "name one containing type per add= entry, or drop addTo= to append to the container the targets share");
+
+    private static TerseError BodyRefusal(SyntaxNode node, ISymbol symbol, string body)
+    {
+        if (!HasReplaceableBody(node))
+            return Errors.NoBody(SymbolId.From(symbol).Value, node.Kind().ToString());
+
+        var (text, errors) = BodyErrors(body);
+
+        return errors.Length is 0
+            ? Errors.Invalid("the body did not parse", "pass a block starting with '{' or an expression body")
+            : MemberDeclaration.MalformedBody(errors, text);
+    }
+
+    private static bool HasReplaceableBody(SyntaxNode node) =>
+        node is MethodDeclarationSyntax or ConstructorDeclarationSyntax or AccessorDeclarationSyntax or LocalFunctionStatementSyntax;
+
+    private static (string Text, Diagnostic[] Errors) BodyErrors(string body)
+    {
+        var trimmed = body.Trim();
+
+        if (trimmed.StartsWith("=>", StringComparison.Ordinal))
+            return (trimmed, BodyDiagnostics(SyntaxFactory.ParseExpression(trimmed[2..])));
+
+        var text = trimmed.StartsWith('{') ? trimmed : "{" + body + "}";
+
+        return (text, BodyDiagnostics(SyntaxFactory.ParseStatement(text)));
+    }
+
+    private static Diagnostic[] BodyDiagnostics(SyntaxNode parsed) =>
+        [.. parsed.GetDiagnostics().Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error)];
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

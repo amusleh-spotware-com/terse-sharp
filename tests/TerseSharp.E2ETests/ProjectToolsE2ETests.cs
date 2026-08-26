@@ -270,4 +270,30 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR Internal", audited, StringComparison.Ordinal);
         Assert.DoesNotContain("references", audited, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ListProjects_WithProperties_PrintsTheEvaluatedValueBesideEachProject()
+    {
+        var text = await server.CallAsync("list_projects", new()
+        {
+            ["properties"] = "TargetFramework,IsPackable,NoSuchPropertyAnywhere",
+        });
+
+        Assert.Contains("TargetFramework=net10.0", text, StringComparison.Ordinal);
+        Assert.Contains("IsPackable=true", text, StringComparison.Ordinal);
+        Assert.Contains("NoSuchPropertyAnywhere=(unset)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ListProjects_WithBothPathAndProperties_RefusesInsteadOfAnsweringOneOfThem()
+    {
+        var text = await server.CallAsync("list_projects", new()
+        {
+            ["path"] = Project,
+            ["properties"] = "TargetFramework",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("properties=", text, StringComparison.Ordinal);
+    }
 }

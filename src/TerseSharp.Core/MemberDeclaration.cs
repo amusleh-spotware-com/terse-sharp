@@ -82,7 +82,6 @@ public static class MemberDeclaration
     private static Diagnostic[] Fatal(EnumDeclarationSyntax parsed) =>
         [.. parsed.GetDiagnostics().Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error)];
 
-
     private static TerseError NotEnumMembers() => Errors.Invalid(
         "the declaration did not parse as enum members",
         "pass one or more enum member names, e.g. 'Internal' or 'Internal = 3, Retry'");
@@ -161,4 +160,10 @@ public static class MemberDeclaration
     private static string Flattened(string excerpt) => excerpt
         .Replace("\r", string.Empty, StringComparison.Ordinal)
         .Replace("\n", "\\n", StringComparison.Ordinal);
+
+    public static TerseError MalformedBody(Diagnostic[] errors, string body) => Errors.Invalid(
+        "the body did not parse: "
+            + string.Join("; ", errors.Take(3).Select(diagnostic => diagnostic.GetMessage(CultureInfo.InvariantCulture)))
+            + Where(body, errors[0].Location.SourceSpan.Start),
+        "the offset above is where the parser stopped - on a truncated body that is the unbalanced brace; pass a block starting with '{', an expression body as '=> expr', or bare statements");
 }

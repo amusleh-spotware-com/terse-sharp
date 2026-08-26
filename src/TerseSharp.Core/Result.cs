@@ -172,4 +172,9 @@ public static class Errors
         TerseErrorCode.NameTaken,
         string.Create(CultureInfo.InvariantCulture, $"'{type}' already declares '{signature}', at line {line}"),
         "edit that member with replace_symbol or replace_symbol_body, or give the new one a parameter list no existing overload has - a duplicate name is decidable from syntax, so nothing was compiled and nothing was written");
+
+    public static TerseError NoBody(string symbolId, string kind) => new(
+        TerseErrorCode.InvalidArgument,
+        string.Create(CultureInfo.InvariantCulture, $"replace_symbol_body cannot address '{symbolId}': it is a {kind}, and this tool edits a method, constructor, accessor or local function"),
+        "use replace_symbol to replace the whole declaration, or edit_text force=true to change a field or property initializer");
 }

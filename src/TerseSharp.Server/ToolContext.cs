@@ -41,7 +41,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         string? path = null,
         Func<LoadedWorkspace, string?>? guard = null,
         bool typesOnly = false,
-        bool referenced = false)
+        bool referenced = false,
+        Func<LoadedWorkspace, TerseError, string>? unresolved = null)
     {
         if (symbolId is not { Length: > 0 } requested)
             return Errors.Blank("symbolId", "symbol").Render();
@@ -64,9 +65,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             {
                 var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, path, cancellationToken, typesOnly, referenced).ConfigureAwait(false);
 
-                return symbol.IsOk
-                    ? await action(lease.Workspace, symbol.Value!).ConfigureAwait(false)
-                    : symbol.Error!.Render();
+                if (symbol.IsOk)
+                    return await action(lease.Workspace, symbol.Value!).ConfigureAwait(false);
+
+                return unresolved is null ? symbol.Error!.Render() : unresolved(lease.Workspace, symbol.Error!);
             }).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }

@@ -8,7 +8,7 @@ public sealed class EditTools(ToolContext context)
     private const string VerboseHelp = "Return the full diff instead of the one-line summary. Default false.";
 
     [McpServerTool(Name = "replace_symbol_body")]
-    [Description("Replace a method, constructor or accessor body, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. No line numbers and no surrounding context needed. Replaces one call per missing import. Rolled back if it introduces a compile error, and the rejection then names a retryWith token that holds the body, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a method, constructor or accessor body, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. No line numbers and no surrounding context needed. Replaces one call per missing import. Rolled back if it introduces a compile error, and the rejection then names a retryWith token that holds the body, so the retry costs a token instead of the whole payload. An unresolved symbolId holds the body the same way. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbolBody(
         [Description("Symbol id of the member.")] string? symbolId = null,
         [Description("New body: statements with or without the surrounding braces, or an expression body as '=> expr'. On a member that is already expression-bodied, a bare expression is accepted and stays expression-bodied.")] string body = "",
@@ -29,7 +29,7 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "replace_symbol_body"));
 
-        var target = held is null ? symbolId ?? symbol : Slot(held.Targets, 0);
+        var target = symbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
         var text = held is null ? body : First(held.Payloads, body);
         var imports = Kept(usings, held?.Usings);
 
@@ -41,7 +41,7 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload, as is a batch refused for ONE unresolvable id. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
             [Description("Symbol id of the member.")] string? symbolId = null,
             [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
@@ -52,7 +52,7 @@ public sealed class EditTools(ToolContext context)
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for symbolId.")] string? symbol = null,
-            [Description("Symbol ids of the members to replace together, paired positionally with declarations. Replaces one call per member. Several entries per file are allowed; two entries where one declaration contains the other are refused.")] string[]? symbolIds = null,
+            [Description("Symbol ids of the members to replace together, paired positionally with declarations. Replaces one call per member. Several entries per file are allowed; two entries where one declaration contains the other are refused. Beside retryWith= it corrects the held ids.")] string[]? symbolIds = null,
             [Description("One complete declaration per entry of symbolIds, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
             [Description(UsingsHelp)] string[]? usings = null,
             [Description(RetryHelp)] string? retryWith = null,
@@ -75,12 +75,12 @@ public sealed class EditTools(ToolContext context)
         var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container);
 
         if (held is { Targets.Count: > 1 })
-            return Batched(workspace, [.. held.Targets], [.. held.Payloads], options, cancellationToken, held.Root, helpers, container, imports);
+            return Batched(workspace, Corrected(symbolIds, held.Targets), [.. held.Payloads], options, cancellationToken, held.Root, helpers, container, imports);
 
         if (held is null && (symbolIds, declarations) is not (null, null))
             return Batched(workspace, symbolIds ?? [], declarations ?? [], options, cancellationToken, null, helpers, container, imports);
 
-        var target = held is null ? symbolId ?? symbol : Slot(held.Targets, 0);
+        var target = symbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
         var text = held is null ? declaration : First(held.Payloads, declaration);
 
         return Supplied(workspace, target, text, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
@@ -90,7 +90,7 @@ public sealed class EditTools(ToolContext context)
             held?.Root);
     }
     [McpServerTool(Name = "add_member")]
-    [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. Replaces one call per missing import. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. Replaces one call per missing import. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload; an unresolved typeSymbolId is held the same way. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> AddMember(
         [Description("Symbol id of the containing type, or of an enum when adding enum members. Cannot be combined with path.")] string? typeSymbolId = null,
         [Description("One complete member declaration, or several in sequence; they are added together as one edit. With an enum container, one or more enum member names.")] string declaration = "",
@@ -112,8 +112,8 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "add_member"));
 
-        var container = held is null ? typeSymbolId ?? symbol : Slot(held.Targets, 0);
-        var file = held is null ? path : Slot(held.Targets, 1);
+        var container = typeSymbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
+        var file = path ?? (held is null ? null : Slot(held.Targets, 1));
         var text = held is null ? declaration : First(held.Payloads, declaration);
         var imports = Kept(usings, held?.Usings);
 
@@ -193,13 +193,13 @@ public sealed class EditTools(ToolContext context)
         new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add], addTo);
 
     private Task<string> Guarded(
-    string? workspace,
-    string? symbolId,
-    Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
-    CancellationToken cancellationToken,
-    Carry carry = default,
-    string? heldRoot = null,
-    bool typesOnly = false)
+        string? workspace,
+        string? symbolId,
+        Func<LoadedWorkspace, Microsoft.CodeAnalysis.ISymbol, Task<Result<string>>> action,
+        CancellationToken cancellationToken,
+        Carry carry = default,
+        string? heldRoot = null,
+        bool typesOnly = false)
     {
         var rejection = context.RejectWrite();
 
@@ -211,7 +211,8 @@ public sealed class EditTools(ToolContext context)
                 async (loaded, resolved) => Carried(await action(loaded, resolved).ConfigureAwait(false), carry, loaded.Root),
                 cancellationToken,
                 guard: loaded => Elsewhere(heldRoot, loaded.Root),
-                typesOnly: typesOnly);
+                typesOnly: typesOnly,
+                unresolved: (loaded, error) => Rejected(error, carry, loaded.Root));
     }
 
     private Task<string> Supplied(
@@ -251,7 +252,7 @@ public sealed class EditTools(ToolContext context)
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous CompileRegression, e.g. r3. The rejected declaration is held by the server together with its add= and usings=, so a retry names the token instead of re-sending any of them; pass either again to override what is held, combine it with allowErrors=true, or send the missing callee first and then retry. The token is bound to the workspace the edit was rejected in and to the tool that issued it: a replay that resolves to another workspace is refused instead of landing there, and a replay by the wrong edit tool is refused naming the tool that can apply it.";
+    private const string RetryHelp = "Token from a previous CompileRegression or resolution failure, e.g. r3. The rejected declaration is held with its add= and usings=, so a retry names the token instead of re-sending any of them; pass either again to override what is held, combine it with allowErrors=true, or send the missing callee first and then retry. A symbolId or symbolIds you pass OUTRANKS the held one, which is how a mis-typed id is corrected. The token is bound to the workspace the edit was rejected in and to the tool that issued it: a replay that resolves to another workspace is refused instead of landing there, and a replay by the wrong edit tool is refused naming the tool that can apply it.";
 
     private readonly record struct Carry(
         string? Tool,
@@ -261,19 +262,8 @@ public sealed class EditTools(ToolContext context)
         string? AddTo = null,
         string[]? Usings = null);
 
-    private static string Carried(Result<string> result, Carry carry, string root)
-    {
-        if (result.IsOk)
-            return result.Value!;
-
-        var error = result.Error!;
-
-        return carry.Tool is { Length: > 0 } tool && error.Code is TerseErrorCode.CompileRegression
-            ? error.Render() + "\nretryWith=" + RejectedEdits.Remember(
-                root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings)
-                + "  the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them"
-            : error.Render();
-    }
+    private static string Carried(Result<string> result, Carry carry, string root) =>
+        result.IsOk ? result.Value! : Rejected(result.Error!, carry, root);
 
     private static string? Elsewhere(string? held, string root) => held is { Length: > 0 } origin && !PathBoundary.SameFile(origin, root)
         ? Errors.Invalid(
@@ -340,4 +330,27 @@ public sealed class EditTools(ToolContext context)
     private static string[]? Kept(string[]? supplied, IReadOnlyList<string>? held) => supplied is not null
         ? (supplied.Length is 0 ? null : supplied)
         : held is { Count: > 0 } ? [.. held] : null;
+
+    private static string Rejected(TerseError error, Carry carry, string root) =>
+        carry.Tool is { Length: > 0 } tool && Holdable(error.Code) && Worth(carry)
+            ? error.Render() + "\nretryWith=" + RejectedEdits.Remember(
+                root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings)
+                + Note(error.Code, carry)
+            : error.Render();
+
+    private static bool Holdable(TerseErrorCode code) =>
+        code is TerseErrorCode.CompileRegression or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol;
+
+    private static string Note(TerseErrorCode code, Carry carry) => code switch
+    {
+        TerseErrorCode.CompileRegression => "  the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them",
+        _ when carry.Targets is { Length: > 1 } => "  the declarations are held, so the retry is the token plus a corrected symbolIds= - one entry per held declaration, and nothing else",
+        _ => "  the declaration is held, so the retry is the token plus a corrected symbolId= and nothing else",
+    };
+
+    private static string[] Corrected(string[]? supplied, IReadOnlyList<string> held) =>
+        supplied is { Length: > 0 } ? supplied : [.. held];
+
+    private static bool Worth(Carry carry) =>
+        carry.Payloads is { } payloads && Array.Exists(payloads, text => text is { Length: > 0 });
 }

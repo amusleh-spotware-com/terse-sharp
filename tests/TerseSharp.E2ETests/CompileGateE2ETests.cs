@@ -431,4 +431,35 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("ERROR InvalidArgument", blank, StringComparison.Ordinal);
         Assert.Contains("names no containing type", blank, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ABatchRejectedForAnUnresolvableId_HoldsItsDeclarationsBehindARetryToken()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "Calculator.NoMemberSpelledLikeThis" },
+            ["declarations"] = new[] { "public int Healthy() => 1;", "public int PreExistingError() => 2;" },
+        });
+
+        var retried = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "M:Fixture.Broken.Calculator.PreExistingError" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR SymbolNotFound", rejected, StringComparison.Ordinal);
+        Assert.Contains("retryWith=", rejected, StringComparison.Ordinal);
+        Assert.Contains("public int PreExistingError() => 2;", retried, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", retried, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AResolutionFailureCarryingNoPayload_MintsNoRetryToken()
+    {
+        var text = await CallAsync("replace_symbol_body", new() { ["symbolId"] = "Calculator.NoMemberSpelledLikeThis" });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("retryWith=", text, StringComparison.Ordinal);
+    }
 }

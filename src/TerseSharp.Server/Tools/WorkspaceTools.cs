@@ -127,12 +127,22 @@ CancellationToken cancellationToken = default) =>
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]
-    [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. path=<file> answers the opposite question - which project compiles that file, and whether an edit to it would be compile-gated. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
+    [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. properties=\"IsTestProject,TargetFramework\" adds each project's EVALUATED value to its line, so 'which projects set X' is ONE call, a Directory.Build.props value is answered rather than missed, and an undefined one reads (unset). path=<file> answers the opposite question - which project compiles that file, and whether an edit to it would be compile-gated; the two are refused together. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
     public Task<string> ListProjects(
     [Description("Workspace or worktree name.")] string? workspace = null,
     [Description("Keep only projects whose name contains this text.")] string? filter = null,
-    [Description("A file to answer about instead of listing: names the project that compiles it, or says no project does.")] string? path = null) =>
-    context.WithWorkspace(workspace, path, loaded => path is { Length: > 0 } file ? RenderOwner(loaded, file) : RenderProjects(loaded, filter));
+    [Description("A file to answer about instead of listing: names the project that compiles it, or says no project does.")] string? path = null,
+    [Description("Comma-separated MSBuild property names, e.g. IsTestProject,TargetFramework. Each line gains name=value from the evaluated set, (unset) where none is defined. Refused beside path=.")] string? properties = null,
+    CancellationToken cancellationToken = default) =>
+    (path, properties) is ({ Length: > 0 }, { Length: > 0 })
+        ? Task.FromResult(Errors.Invalid(
+            "path= names the one project that compiles a file, and properties= answers about every project - they are different questions",
+            "call list_projects path=<file> on its own, then list_projects properties=<names> for the evaluated values").Render())
+        : context.WithWorkspaceAsync(
+            workspace,
+            path,
+            loaded => Listed(loaded, filter, path, Requested(properties), cancellationToken),
+            cancellationToken: cancellationToken);
 
     private static string? Discover() =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
@@ -323,20 +333,21 @@ CancellationToken cancellationToken = default) =>
         _ => "degraded(" + (sync.StateDetail ?? "unknown") + ")",
     };
 
-    private static string RenderProjects(LoadedWorkspace workspace, string? filter)
+    private static string RenderProjects(LoadedWorkspace workspace, string? filter, string[] names, CancellationToken cancellationToken)
     {
         var projects = workspace.Solution.Projects
             .Where(project => Matches(project.Name, filter))
             .OrderBy(project => project.Name, StringComparer.Ordinal)
             .ToArray();
         var response = new ResponseBuilder("list_projects", workspace.SolutionPath);
+
         response.Summary(projects.Length, projects.Length, "projects", "filter=");
 
         foreach (var project in projects)
         {
             response.Line(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{project.Name}  {project.Language}  documents={project.Documents.Count()}  {PositionFormat.Relative(workspace.Root, project.FilePath)}"));
+                $"{project.Name}  {project.Language}  documents={project.Documents.Count()}  {PositionFormat.Relative(workspace.Root, project.FilePath)}{Evaluated(project.FilePath, names, cancellationToken)}"));
         }
 
         return response.ToString();
@@ -456,4 +467,29 @@ CancellationToken cancellationToken = default) =>
     private static string Owner(LoadedWorkspace workspace, Microsoft.CodeAnalysis.Project project, string verdict) => string.Create(
         CultureInfo.InvariantCulture,
         $"{project.Name}  {PositionFormat.Relative(workspace.Root, project.FilePath)}  {verdict}");
+
+    private static string[] Requested(string? properties) => properties is not { Length: > 0 } names
+        ? []
+        : [.. names.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+    private static Task<string> Listed(LoadedWorkspace loaded, string? filter, string? path, string[] names, CancellationToken cancellationToken) =>
+        path is { Length: > 0 } file
+            ? Task.FromResult(RenderOwner(loaded, file))
+            : names.Length is 0
+                ? Task.FromResult(RenderProjects(loaded, filter, names, cancellationToken))
+                : Task.Run(() => RenderProjects(loaded, filter, names, cancellationToken), cancellationToken);
+
+    private static string Evaluated(string? projectPath, string[] names, CancellationToken cancellationToken)
+    {
+        if (names.Length is 0 || projectPath is not { Length: > 0 } file)
+            return string.Empty;
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return ProjectEvaluation.Values(file, names) is { } values
+            ? "  " + string.Join("  ", names.Select((name, index) => name + "=" + Shown(values[index])))
+            : "  UNEVALUATED - MSBuild could not evaluate this project; restore or build it once";
+    }
+
+    private static string Shown(string value) => value is { Length: > 0 } ? value : "(unset)";
 }

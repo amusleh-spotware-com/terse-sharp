@@ -149,19 +149,9 @@ public static class ToolGuard
         if (command is null)
             return Allowed;
 
-        var segments = Segments(command);
-        var compound = segments.Length > 1;
+        var replaced = Compound(command, cwd);
 
-        foreach (var segment in segments)
-        {
-            if (Replaced(segment, cwd) is { } subcommand)
-                return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound), BuildRouting(subcommand), BuildReplacement(subcommand));
-
-            if (Covered(segment) && IsTextRead(segment))
-                return new GuardVerdict(true, Reason("Bash", segment.Trim()) + Nothing(compound), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()));
-        }
-
-        return Allowed;
+        return replaced.Denied || !Sleeping(command) ? replaced : Napping();
     }
 
     private static string? Replaced(string segment, string? cwd)
@@ -646,7 +636,7 @@ public static class ToolGuard
         "log" => "history",
         "show" => "history",
         "show-file" => "read_text",
-        "tag" => "history",
+        "tag" => "history tags=true",
         _ => "run_tests",
     };
 
@@ -771,7 +761,7 @@ public static class ToolGuard
     };
 
     private static string Nothing(bool compound) => compound
-            ? " This segment of the compound command is what was denied, and NO part of the command ran - re-issue the segments that are allowed on their own."
+            ? " This is a compound command and NO part of the command ran - 'Call this instead' names the tool call for every denied segment, and the allowed remainder when it can be re-issued on its own."
             : string.Empty;
 
     private static string Cached(string[] tokens) =>
@@ -799,6 +789,78 @@ public static class ToolGuard
     private static bool Rewrites(string name, string[] command) =>
         name.Equals("sed", StringComparison.OrdinalIgnoreCase)
             && Array.Exists(command, token => token.StartsWith("-i", StringComparison.Ordinal) || token.Equals("--in-place", StringComparison.Ordinal));
+
+    private static GuardVerdict Denial(string segment, string? cwd, bool compound)
+    {
+        if (Replaced(segment, cwd) is { } subcommand)
+            return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound), BuildRouting(subcommand), BuildReplacement(subcommand));
+
+        return Covered(segment) && IsTextRead(segment)
+            ? new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()))
+            : Allowed;
+    }
+
+    private static string Reissue(List<string> calls, List<string> allowed, bool anded)
+    {
+        var made = string.Join("  then  ", calls);
+
+        return allowed.Count is 0 || !anded
+            ? made
+            : made + "  then re-issue the allowed remainder in Bash: " + string.Join(" && ", allowed);
+    }
+
+    private static readonly string[] SleepCommands = ["sleep", "start-sleep"];
+    private static readonly string[] LoopKeywords = ["while", "until", "for", "foreach"];
+
+    private static bool IsSleep(string token) =>
+        SleepCommands.Contains(Path.GetFileNameWithoutExtension(Bare(token)), StringComparer.OrdinalIgnoreCase);
+
+    private static bool Sleeping(string command)
+    {
+        var masked = Masked(command);
+
+        return !Array.Exists(Tokens(masked), token => LoopKeywords.Contains(Bare(token), StringComparer.OrdinalIgnoreCase))
+            && Array.Exists(Segments(masked), IsSleepCall);
+    }
+
+    private static GuardVerdict Napping() => new(true, SleepReason);
+
+    private const string SleepReason = "TerseSharp guard: a bare 'sleep' is not how you wait - across one measured week it declared 25 307 seconds and cost 7.0 h of real wall clock in 156 calls, largest single 580 s. Background work notifies you: Bash(run_in_background: true) and Agent(run_in_background: true) both re-invoke you when they finish, and TaskList/TaskGet/TaskOutput answer status in one call. If you need the result to continue and have nothing else to do, END THE TURN - stopping is free, sleeping is billed. The only sleep this guard allows is the sub-second pause inside a loop that also detects the process dying: while :; do kill -0 \"$PID\" || break; sleep 1; done";
+    private const string Priced = " Measured over one week, the shell text tools cost 2 369 Bash calls and 18.1 h - 51.5% of all Bash wall time - at a 13.2% error rate; the terse-sharp answer is one call.";
+
+    private static GuardVerdict Compound(string command, string? cwd)
+    {
+        var segments = Segments(command);
+        var compound = segments.Length > 1;
+        var allowed = new List<string>(segments.Length);
+        var calls = new List<string>();
+        GuardVerdict? refused = null;
+
+        foreach (var segment in segments)
+        {
+            var verdict = Denial(segment, cwd, compound);
+
+            if (!verdict.Denied)
+            {
+                allowed.Add(segment.Trim());
+
+                continue;
+            }
+
+            refused ??= verdict;
+
+            if (verdict.Routing is { Length: > 0 } routing && !calls.Contains(routing, StringComparer.Ordinal))
+                calls.Add(routing);
+        }
+
+        return refused is null ? Allowed : refused with { Routing = Reissue(calls, allowed, OnlyAnded(command)) };
+    }
+
+    private static bool IsSleepCall(string segment) =>
+        IsSleep(Command(segment).FirstOrDefault() ?? string.Empty);
+
+    private static bool OnlyAnded(string command) =>
+        Masked(command).Replace("&&", "  ", StringComparison.Ordinal).AsSpan().IndexOfAny("&|;\n") < 0;
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

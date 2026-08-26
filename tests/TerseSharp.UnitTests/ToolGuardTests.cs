@@ -998,4 +998,81 @@ public sealed class ToolGuardTests
 
         Assert.Contains("\"standDown\":false", line, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Routing_ForACompoundCommandWithOneDeniedSegment_NamesTheAllowedRemainderToReIssue()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git fetch origin && git tag --list && gh auth status" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("history tags=true", verdict.Routing!, StringComparison.Ordinal);
+        Assert.Contains("git fetch origin && gh auth status", verdict.Routing!, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("sleep 90")]
+    [InlineData("sleep 300 && echo done")]
+    public void Bash_WithABareSleep_IsDeniedBecauseWaitingIsNotWork(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("END THE TURN", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("while :; do [ -f out.txt ] && break; kill -0 $PID || break; sleep 1; done")]
+    [InlineData("until curl -sf http://localhost:5000/health; do sleep 5; done")]
+    public void Bash_WithASleepInsideALoop_IsAllowedBecauseThatIsTheGuardedShape(string command) => Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void Reason_ForABashTextRead_PricesTheShellTextClassItReplaces()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat src/App/OrderService.cs" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("18.1 h", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git commit -m \"deny a bare sleep in the guard\"")]
+    [InlineData("gh release create v1.0.0 --notes \"sleep 90 is now denied\"")]
+    public void Bash_MentioningSleepOnlyInsideQuotes_IsAllowed(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("docker run -d alpine sleep 3600")]
+    [InlineData("kubectl run tmp --image=busybox -- sleep infinity")]
+    [InlineData("python sleep.py")]
+    [InlineData("ssh host sleep 1")]
+    [InlineData("timeout 30 sleep 5")]
+    public void Bash_WithSleepAsAFileOrAnArgument_IsAllowedBecauseOnlyTheCommandWordCounts(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void Bash_NamingSleepInAnArgumentOfAReplacedCommand_KeepsTheReplacementRouting()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "dotnet test --filter Sleep" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("run_tests", verdict.Routing);
+    }
+
+    [Fact]
+    public void Routing_ForACompoundCommandThatIsNotAllAnded_DoesNotOfferTheRemainderAsAStandaloneCommand()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "cat src/App/OrderService.cs | wc -l" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.DoesNotContain("re-issue the allowed remainder", verdict.Routing!, StringComparison.Ordinal);
+    }
 }

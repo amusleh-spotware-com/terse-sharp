@@ -177,7 +177,9 @@ Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outl
 A denial is not only a prohibition. It returns `additionalContext` — the **complete replacement call,
 arguments filled in from the command it just denied** — which Claude Code places beside the tool
 result: `Call this instead: get_file_outline path="src/App/OrderService.cs"`. A positive routing
-instruction at the moment the agent is about to fall back beats a negation. `terse install --skill`
+instruction at the moment the agent is about to fall back beats a negation. When only ONE segment of a
+compound command is denied, nothing of the command runs and that same line names both halves of the
+re-issue — the tool call for the denied segment, then the allowed remainder to run in `Bash`. `terse install --skill`
 ships the skill that teaches the swaps; on any other agent, a short rule in `CLAUDE.md` / `AGENTS.md` /
 `.cursorrules` does the same job.
 
@@ -186,7 +188,9 @@ ships the skill that teaches the swaps; on any other agent, a short rule in `CLA
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them; `dotnet build`/`test`/`format`/`clean`,
-`dotnet watch build`/`test`, `msbuild`, `dotnet list package`; and the working-tree half of git —
+`dotnet watch build`/`test`, `msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose
+command word is `sleep`, outside a `while`/`until`/`for` loop — because waiting is not work and nothing
+replaces it; and the working-tree half of git —
 `git status` and `git diff` in every flag and `-C` form, answered by `changed_files` and
 `diff_symbols`, with `git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files`
 to `find_files tracked=true`, and a `git tag` **listing** to `history tags=true`.

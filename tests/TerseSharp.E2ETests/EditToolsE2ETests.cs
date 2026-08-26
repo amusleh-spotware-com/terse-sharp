@@ -735,4 +735,32 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Assert.Contains("WARNING attributes dropped: System.Diagnostics.Conditional", text, StringComparison.Ordinal);
         Assert.DoesNotContain("System.Obsolete,", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_OnAMemberWithNoBody_RefusesByKindInsteadOfBlamingTheBody()
+    {
+        var text = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "Fixture.Trading.OrderService.PendingCount",
+            ["body"] = "{ return 1; }",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("PropertyDeclaration", text, StringComparison.Ordinal);
+        Assert.Contains("replace_symbol", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("did not parse", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_WithAnUnbalancedBrace_NamesTheOffsetTheParserStoppedAt()
+    {
+        var text = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = UnusedMethod,
+            ["body"] = "{ if (true) { return 1; } return 2;",
+        });
+
+        Assert.Contains("the body did not parse", text, StringComparison.Ordinal);
+        Assert.Contains("at offset", text, StringComparison.Ordinal);
+    }
 }

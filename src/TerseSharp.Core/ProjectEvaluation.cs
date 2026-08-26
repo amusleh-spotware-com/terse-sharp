@@ -72,4 +72,29 @@ public static class ProjectEvaluation
         property.Xml?.ContainingProject?.FullPath is { Length: > 0 } file
         && PathBoundary.Contains(root, file)
         && (name is not { Length: > 0 } || property.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    public static string[]? Values(string projectPath, string[] names)
+    {
+        try
+        {
+            lock (ProjectGlobs.EvaluationGate)
+            {
+                using var collection = new ProjectCollection();
+                var project = collection.LoadProject(projectPath);
+
+                try
+                {
+                    return [.. names.Select(project.GetPropertyValue)];
+                }
+                finally
+                {
+                    collection.UnloadProject(project);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is InvalidProjectFileException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 }

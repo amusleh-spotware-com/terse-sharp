@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 87 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 88 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
 ---
 
 # TerseSharp
@@ -34,6 +34,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Workspace** | — | `list_workspaces` | every loaded solution with its git branch and worktree, and the absolute path `unload_workspace` takes |
 | **Workspace** | — | `unload_workspace(path)` | releases the MSBuild file locks; addressed by the solution **path**, not a worktree name (`workspace=` is an alias for `path=`) |
 | **Workspace** | — | `list_projects(filter)` | name, language, document count; the name it prints is exactly what `build`, `run_tests`, `list_tests` and `clean` accept as `project=` |
+| **Workspace** | one `project_properties` call per project for "which projects set X" | `list_projects(properties: "IsTestProject,TargetFramework")` | each line gains `name=value` from MSBuild's **evaluated** set, so a `Directory.Build.props` value is answered rather than missed, and an undefined one reads `(unset)`; refused beside `path=` |
 | **Workspace** | reading a `.csproj` to learn whether an edit is gated | `list_projects(path: "src/Foo.cs")` | which project compiles that file, from the evaluated `EnableDefaultItems` the edit path reads; no project compiling it is exactly when a write is *not* gated |
 | **Navigate** | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
 | **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` | a path inside the workspace root that belongs to no project — a fixture tree kept outside the solution — is **parsed from its own text**, not refused, and the answer ends `HEURISTIC parsed from the file's own text`. Outside the root it is still refused |
@@ -165,6 +166,13 @@ diagnostics, builds, tests or the working tree.
 **So a `Read`, `Grep`, `Glob`, `Edit`, `Write` or code-touching `Bash` call on one of those is
 forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it in the table above.
 
+**And issue independent calls in ONE message.** Several `tool_use` blocks in one message run
+concurrently; one call per message pays a **6 097 ms (p50)** model gap before its tool even starts, and
+**36 070 of 36 071** tool-bearing messages in a measured week issued exactly ONE call. Before every
+message carrying a call: *is there another call I already need whose arguments do not depend on this
+one's result?* If yes, send them together — but never guess an argument to make a call parallel. Inside
+one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
+
 **The shell does not launder it.** `grep`, `rg`, `find`, `fd`, `cat`, `head`, `tail`, `sed`, `awk`,
 `ls`, `dir`, `tree`, `wc`, `nl`, `findstr`,
 `type`, `dotnet build`, `dotnet test`, `dotnet watch build`, `dotnet watch test`, `dotnet msbuild` and
@@ -188,6 +196,18 @@ check exactly the rule sets the two CI commands check, so there is never a reaso
 them. `dotnet list package` is covered too and routes to `package_list`, whose `vulnerable=true` and
 `outdated=true` answer from the same restored graph. `dotnet restore`, `pack`, `publish`, `run` and
 `tool` are **not** covered: no TerseSharp tool replaces them, so shelling out is the right call.
+
+**A bare `sleep` is denied too, and nothing replaces it.** A segment whose COMMAND WORD is `sleep`,
+outside a `while`/`until`/`for` loop, is refused: 156 such calls burned **7.0 h** of wall clock in one
+measured week. `docker run … sleep 3600` and `python sleep.py` are untouched. Background work
+re-invokes you when it finishes, and when you need its result and have nothing else to do, **end the
+turn** — stopping is free, sleeping is billed. The one allowed shape is the pause inside a loop that
+also detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; done`.
+
+**A denial of ONE segment of a compound command hands back the whole re-issue.** No part of it ran, and
+`Call this instead:` names the tool call for each denied segment **and** the allowed remainder to run in
+`Bash`. The shell-text denial is priced too: that class cost **18.1 h — 51.5% of all `Bash` wall time**
+in one measured week, at a 13.2% error rate.
 
 **The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff`,
 `git diff <ref>` and the whole `git diff --cached` family are served by `changed_files`
@@ -339,6 +359,22 @@ carrying only warnings answers with the bounded
 host says why. That tail is appended whenever no **error** was found, in either mode, so
 `verbose=true` is always a superset: it adds the warnings, it never replaces the failure reason. A
 `list_tests` that succeeded is untouched, whether or not it matched a name.
+
+**The verification ladder — climb it, never start at the top.** `run_tests` is **37% of all tool wall
+time**, and **48% of its calls were byte-identical repeats inside one session** (`build`: 75%). Per
+edit, climb only as high as the edit reaches:
+
+| Rung | Call | Measured mean | When |
+|---|---|---|---|
+| 1 | `analyze` on the touched file, down to `info` | **7.0 s** | after EVERY edit |
+| 2 | `build` scoped to the project | **13.0 s** | when the edit crosses a signature or a consumer |
+| 3 | `run_tests` scoped to the affected project | **85 s** | once the slice compiles |
+| 4 | `run_tests` over the whole solution | 85 s+, p99 **16 min** | ONCE, at the end of the task |
+| — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
+
+A tier is never dropped; only how often it is re-run. Banned: a full-suite run between two edits of one
+slice · re-issuing `build`/`run_tests` with identical arguments when nothing was written in between · a
+run to "confirm" one that already passed · reading a test result before the build result.
 
 **Analyse — at the end of a task, call `gate` and stop there.** It runs `analyze` at `info`,
 `format`, `cleanup fix=all` and `analyze` again, in the order this project mandates, over the files
@@ -672,6 +708,14 @@ that answers nothing, and the clip always names `next: startLine=`.
     carried 17 567 tool calls and **not one** parallel message, while 5 989 of them sat in runs of
     three or more consecutive calls of the same tool; at this server's median call latency that is
     hours of wall clock nothing depended on.
+15. **A subagent does not inherit this skill — the brief carries it, or the delegate greps.** A spawn
+    aimed at this workspace carries, inline: the mandate and ban list above, the workspace name, **the
+    `changed_files` output and the `diff_symbols` ids as its scope**, and a call ceiling. A delegate
+    that must re-derive the diff walks the whole tree — measured p99 **2 303 s**, max **6 589 s**, 110
+    minutes inside one call. One review round, then the fixes, then a re-review of the fixes only. And
+    spawn only when the work does not fit one context or genuinely runs beside yours; otherwise inline
+    is cheaper, because a spawn pays a full context prime plus its own serial round trips.
+
 ### The advertised surface can be narrower than the whole surface
 
 `workspace_status` prints a `tools=` note when it is: the workspace holds no `.xaml`, `.razor` or

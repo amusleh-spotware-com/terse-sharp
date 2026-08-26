@@ -8,6 +8,98 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-08-26
+
+> **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> Three refusals an agent could have parsed moved. `replace_symbol`, `replace_symbol_body` and
+> `add_member` now end a `SymbolNotFound` or `AmbiguousSymbol` rejection that CARRIES A PAYLOAD with a
+> `retryWith=` token line, where they used to end at the `remedy:`. `replace_symbol_body` on a target it
+> cannot address no longer answers `the body did not parse` - it answers `replace_symbol_body cannot
+> address 'X': it is a <kind>, and this tool edits a method, constructor, accessor or local function` -
+> and a body that genuinely did not parse now carries the parser's message plus `at offset N of M`. And
+> an explicitly passed `symbolId`/`symbolIds` now OUTRANKS the one a `retryWith` token holds, where it
+> used to be ignored.
+
+### Added
+
+- **A rejection whose symbol id did not resolve now hands back a `retryWith` token**, the way a
+  `CompileRegression` already did. `replace_symbol`, `replace_symbol_body` and `add_member` hold the
+  rejected declarations behind the token on `SymbolNotFound` and `AmbiguousSymbol` too, and an
+  explicitly passed `symbolId`/`symbolIds` now OUTRANKS the held one - so a batch refused for one
+  mis-typed id is retried as the token plus the corrected ids instead of the whole payload again.
+  Measured on the two rejections that produced the row: ~2 400 and ~1 500 characters of declarations
+  no longer re-sent. A rejection carrying no payload mints nothing, so the eight-slot store is not
+  churned by empty-argument probes. Locked by
+  `ABatchRejectedForAnUnresolvableId_HoldsItsDeclarationsBehindARetryToken` and
+  `AResolutionFailureCarryingNoPayload_MintsNoRetryToken`. (`I372`)
+- `list_projects` takes `properties="IsTestProject,TargetFramework"`, printing each project's EVALUATED
+  MSBuild value beside its name - so "which projects set X" is ONE call instead of one
+  `project_properties` call per project, and a value that comes from `Directory.Build.props` is answered
+  rather than missed. A property the project does not define reads `(unset)`, a project MSBuild cannot
+  evaluate reads `UNEVALUATED`, and `properties=` beside `path=` is refused naming both. Locked by
+  `ListProjects_WithProperties_PrintsTheEvaluatedValueBesideEachProject`,
+  `ListProjects_WithProperties_AnswersEachProjectsOwnEvaluatedValue` (three projects, two different
+  `IsPackable` values) and `ListProjects_WithBothPathAndProperties_RefusesInsteadOfAnsweringOneOfThem`.
+  On this solution that is 1 call instead of 4; on a 148-project tree, 1 instead of 148. (`I375`)
+- **The guard denies a bare `sleep`** - one not inside a `while`/`until`/`for` loop - naming the two
+  alternatives that already exist: background work re-invokes you when it finishes, and ending the turn
+  is free. Measured over one week: 156 bare sleeps declared 25 307 s and burned **7.0 h** of real wall
+  clock, largest single 580 s. Only a segment whose COMMAND WORD is `sleep` or `Start-Sleep` counts, and
+  the scan runs over the quote-masked command - so `docker run -d alpine sleep 3600`, `python sleep.py`,
+  `timeout 30 sleep 5` and `git commit -m "...sleep..."` are untouched, and a command another row
+  replaces keeps its own routing rather than losing it to this one. Locked by
+  `Bash_WithABareSleep_IsDeniedBecauseWaitingIsNotWork`,
+  `Bash_WithASleepInsideALoop_IsAllowedBecauseThatIsTheGuardedShape`,
+  `Bash_MentioningSleepOnlyInsideQuotes_IsAllowed`,
+  `Bash_WithSleepAsAFileOrAnArgument_IsAllowedBecauseOnlyTheCommandWordCounts` and
+  `Bash_NamingSleepInAnArgumentOfAReplacedCommand_KeepsTheReplacementRouting`. (`I379`)
+- **`SKILL.md`'s hard gate states the parallel-call rule as a first-class instruction**: independent
+  calls go in ONE message, because several `tool_use` blocks in one message run concurrently and a
+  serial call pays a p50 **6 097 ms** model gap before its tool even starts. Measured: 36 070 of 36 071
+  tool-bearing assistant messages in one week issued exactly ONE call - the capability is 99.997%
+  unspent. A cross-tool `RepeatSteer` nudge was implemented beside it and **reverted in the same run**:
+  its landing site is chosen by call order, so it appended framing to three unrelated responses that
+  other tests measure exactly. (`I376`)
+
+### Changed
+
+- **`replace_symbol_body` says WHICH of its two failures happened.** A target that has no body - a
+  field, a property, a type - is refused by KIND (`'X' is a PropertyDeclaration, which has no body to
+  replace`) naming `replace_symbol` and `edit_text force=true`; a body that genuinely did not parse now
+  carries the parser's own message and `at offset N of M: ...`, which on a truncated body is the
+  unbalanced brace. Both used to answer the same line, and the first read as a contradiction of what had
+  just been sent. Locked by `ReplaceSymbolBody_OnAMemberWithNoBody_RefusesByKindInsteadOfBlamingTheBody`
+  and `ReplaceSymbolBody_WithAnUnbalancedBrace_NamesTheOffsetTheParserStoppedAt`. (`I374`)
+- **A guard denial of ONE segment of a compound command hands back the whole re-issue.** `Call this
+  instead:` now names the tool call for every denied segment AND the allowed remainder to re-issue in
+  `Bash`, instead of leaving the caller to split the command - which cost a full turn every time. A
+  `git tag` listing also routes to `history tags=true` rather than to a bare `history`, which answers
+  commits, not tags. The remainder is offered only when every operator in the command is `&&`: a
+  pipeline's downstream stage is not a standalone command, and `||`'s branch is conditional. Locked by
+  `Routing_ForACompoundCommandWithOneDeniedSegment_NamesTheAllowedRemainderToReIssue` and
+  `Routing_ForACompoundCommandThatIsNotAllAnded_DoesNotOfferTheRemainderAsAStandaloneCommand`.
+  (`I373`)
+- **The shell-text denial is priced.** Its reason now carries what that class costs - 2 369 `Bash`
+  calls and 18.1 h, 51.5% of all `Bash` wall time, at a 13.2% error rate - so the substitution is a cost
+  decision rather than only a prohibition; and `SKILL.md` now requires every subagent spawn to carry the
+  `changed_files` scope and a stated call ceiling, against a measured subagent p99 of 2 303 s and a max
+  of 6 589 s. Locked by `Reason_ForABashTextRead_PricesTheShellTextClassItReplaces`. (`I380`)
+- **`SKILL.md` and `CLAUDE.md` carry the verification ladder with its measured cost per rung** -
+  `analyze` 7.0 s after every edit, a scoped `build` 13.0 s when the edit crosses a signature or a
+  consumer, the affected project's tests once the slice compiles, and the whole-solution suite ONCE at
+  the end (mean 85 s, p99 16 min). 48% of `run_tests` calls and 75% of `build` calls in one measured
+  week were byte-identical repeats. (`I378`)
+- **Four token budgets were raised deliberately, and this is the record of why.** `SKILL.md` 24 400 ->
+  25 500, `tools/list` 26 900 -> 27 150, the markup-narrowed surface 21 780 -> 22 050 and the
+  settings-narrowed surface 22 420 -> 22 700. The skill gained the parallel-call rule, the verification
+  ladder, the `sleep` and compound-denial paragraphs and the subagent brief (`I376`, `I378`, `I379`,
+  `I380`); the advertised payload gained the `list_projects properties=` and `retryWith` description
+  text (`I372`, `I375`). Both were trimmed first - the descriptions twice - and the residual is the
+  price of teaching four measured levers. The ceilings still ratchet: they are asserted, not advisory.
+
+
+
+
 ## [0.48.0] - 2026-08-26
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
@@ -4458,7 +4550,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.48.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.49.0...HEAD
+[0.49.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.49.0
 [0.48.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.48.0
 [0.47.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.47.0
 [0.46.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.46.0

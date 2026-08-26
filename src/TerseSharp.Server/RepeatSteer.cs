@@ -64,12 +64,13 @@ public static class RepeatSteer
             return null;
         }
 
-        var count = Counted(tool);
+        return Repeated(tool, Counted(tool), batched);
+    }
 
-        return !batched && count >= Threshold && Plural.TryGetValue(tool, out var plural)
+    private static string? Repeated(string tool, int count, bool batched) =>
+        !batched && count >= Threshold && Plural.TryGetValue(tool, out var plural)
             ? string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - pass {plural}=[...] with the next {Math.Min(count, MaxBatch)}+ in ONE call")
             : null;
-    }
 
     private const int MaxBatch = 10;
 
