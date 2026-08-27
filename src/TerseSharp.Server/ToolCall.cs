@@ -31,11 +31,11 @@ internal static class ToolCall
         exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
 
     private static async Task<int> CalledAsync(
-        string tool,
-        string? workspace,
-        string? json,
-        TextWriter output,
-        CancellationToken cancellationToken)
+            string tool,
+            string? workspace,
+            string? json,
+            TextWriter output,
+            CancellationToken cancellationToken)
     {
         var methods = Methods();
 
@@ -48,9 +48,16 @@ internal static class ToolCall
             return 1;
         }
 
+        var overrides = await ToolSettings.LoadAsync(Directory.GetCurrentDirectory(), cancellationToken).ConfigureAwait(false);
         var services = new ServiceCollection();
-        services.AddSingleton(_ => new ToolContext(new WorkspaceRegistry(1, watch: false), readOnly: false));
+
+        services.AddSingleton(_ => new ToolContext(
+            new WorkspaceRegistry(1, watch: false),
+            readOnly: false,
+            ToolProfile.Resolve(null) with { Overrides = overrides }));
+
         services.AddSingleton<LastTestRun>();
+        services.AddMcpServer().WithToolsFromAssembly();
 
         await using var provider = services.BuildServiceProvider();
         var context = provider.GetRequiredService<ToolContext>();
@@ -75,6 +82,8 @@ internal static class ToolCall
 
             return 1;
         }
+
+        await AdvertiseAsync(provider, context, cancellationToken).ConfigureAwait(false);
 
         var instance = ActivatorUtilities.CreateInstance(provider, method.DeclaringType!);
 
@@ -196,5 +205,20 @@ internal static class ToolCall
             arguments.Select(argument => argument.Key),
             () => [.. declared.Where(parameter => !parameter.HasDefaultValue).Select(parameter => parameter.Name!)],
             [.. declared.Select(parameter => parameter.Name!)]);
+    }
+
+    private static async Task AdvertiseAsync(IServiceProvider provider, ToolContext context, CancellationToken cancellationToken)
+    {
+        var whole = provider.GetServices<McpServerTool>().Select(registered => registered.ProtocolTool).ToArray();
+
+        if (whole.Length is 0)
+            return;
+
+        foreach (var advertised in whole)
+            advertised.InputSchema = SchemaCompactor.Compact(advertised.InputSchema);
+
+        var served = await context.ServedAsync(cancellationToken).ConfigureAwait(false);
+
+        AdvertisedCost.Observe([.. whole.Where(advertised => ToolProfile.Advertises(context.Surface, served, advertised.Name))], whole);
     }
 }

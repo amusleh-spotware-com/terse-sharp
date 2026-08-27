@@ -109,6 +109,7 @@ background task; `TERSE_UPDATE=0` turns it off.
 | Why is the build red? | **~8,000 tok** of MSBuild spew | `build` → **~600 tok** | **13×** |
 | What did I just change? | `git diff` → the whole patch | `diff_symbols` → the changed **declarations** | **10×** |
 | Which rows does this checked-in table hold? | `Read` the whole `.md`, then grep it | `read_text columns="Finding,Tool"` | **~10×** |
+| What does this budgeted doc cost in tokens? | a build plus the E2E suite → **~10 min** | `read_text tokens=true` → **~3 s** | **200×** |
 | Does this `{Binding}` bind? | **no static answer exists in WPF** | `xaml_bindings validate=true` | ∞ |
 
 Asserted by a token-budget suite on every push, not estimated.

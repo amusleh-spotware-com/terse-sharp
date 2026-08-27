@@ -8,22 +8,23 @@ namespace TerseSharp.Server.Tools;
 public sealed class NavigationTools(ToolContext context)
 {
     [McpServerTool(Name = "search_symbols", ReadOnly = true)]
-    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. Use instead of Grep for anything that is a type or member.")]
+    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none. Use instead of Grep for anything that is a type or member.")]
     public Task<string> SearchSymbols(
-        [Description("Name or CamelHump pattern.")] string query,
-        [Description("Optional kind filter: class, interface, method, property, field, enum.")] string? kind = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (50).")] int maxResults = 0,
-        [Description("Keep only one half of the solution: src for the production projects, test for the ones that reference a test framework. Empty searches both.")] string? scope = null,
-        CancellationToken cancellationToken = default)
+            [Description("Name or CamelHump pattern.")] string query,
+            [Description("Optional kind filter: class, interface, method, property, field, enum.")] string? kind = null,
+            [Description("Workspace or worktree name.")] string? workspace = null,
+            [Description("Max results (50).")] int maxResults = 0,
+            [Description("Keep only one half of the solution: src for the production projects, test for the ones that reference a test framework. Empty searches both.")] string? scope = null,
+            [Description("File the declarations are expected in. Its matches are answered first and the solution is searched only when it declares none; a path naming no document answers DocumentNotFound.")] string? path = null,
+            CancellationToken cancellationToken = default)
     {
         var half = scope?.ToLowerInvariant();
 
         return half is null or "" or "src" or "test"
             ? context.WithWorkspaceAsync(
                 workspace,
-                null,
-                loaded => SearchAsync(loaded, query, kind, half, Cap(maxResults, 50), cancellationToken),
+                path,
+                loaded => SearchAsync(loaded, query, kind, half, Cap(maxResults, 50), path, cancellationToken),
                 cancellationToken: cancellationToken)
             : Task.FromResult(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"scope='{scope}' is not a known half of the solution"),
@@ -210,29 +211,40 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
             cancellationToken: cancellationToken);
 
     private static async Task<string> SearchAsync(
-        LoadedWorkspace workspace,
-        string query,
-        string? kind,
-        string? scope,
-        int maxResults,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            string query,
+            string? kind,
+            string? scope,
+            int maxResults,
+            string? path,
+            CancellationToken cancellationToken)
     {
-        var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken, foldTests: true).ConfigureAwait(false);
-        var components = await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
+        var scoped = ScopedFile(workspace, path);
+
+        if (!scoped.IsOk)
+            return scoped.Error!.Render();
+
+        var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken, foldTests: true, inFile: scoped.Value).ConfigureAwait(false);
+
+        var components = found.Scoped
+            ? []
+            : await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
+
         var declared = scope is "test" ? 0 : components.Count;
+        var unscoped = scoped.Value is { Length: > 0 } && !found.Scoped;
 
         if (declared + found.Total is 0)
-        {
-            return Declined(query, kind, scope)
-                ?? await ReferencedAsync(workspace, query, maxResults, cancellationToken).ConfigureAwait(false);
-        }
+            return await NoneAsync(workspace, query, kind, scope, maxResults, unscoped, cancellationToken).ConfigureAwait(false);
 
         var budget = ResultCap.Shown(declared + found.Total, maxResults);
         var shownComponents = Math.Min(declared, budget);
         var shownSymbols = Math.Min(found.Ranked.Count, budget - shownComponents);
         var response = new ResponseBuilder("search_symbols", query);
 
-        response.Summary(shownComponents + shownSymbols, declared + found.Total, "symbols", "kind=, scope= or maxResults=");
+        response.Summary(shownComponents + shownSymbols, declared + found.Total, "symbols", "kind=, scope=, path= or maxResults=");
+
+        if (unscoped)
+            response.Note(FellBack);
 
         if (!found.TotalIsExact)
             response.Note("WARNING total counts duplicate declarations across projects; narrow query= for an exact count");
@@ -373,4 +385,29 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         null or "" or "class" or "interface" or "enum" or "struct" or "record" or "delegate" => true,
         _ => false,
     };
+
+    private static Result<string?> ScopedFile(LoadedWorkspace workspace, string? path) => path is { Length: > 0 }
+            ? DocumentLookup.Find(workspace, path) is { } document
+                ? Result.Ok<string?>(document.FilePath)
+                : Result.Fail<string?>(Errors.DocumentNotFound(path))
+            : Result.Ok<string?>(null);
+
+    private const string FellBack = "NOTE path= declared no match - the whole solution was searched";
+
+    private static async Task<string> NoneAsync(
+            LoadedWorkspace workspace,
+            string query,
+            string? kind,
+            string? scope,
+            int maxResults,
+            bool unscoped,
+            CancellationToken cancellationToken)
+    {
+        if (Declined(query, kind, scope) is { } refusal)
+            return refusal;
+
+        var referenced = await ReferencedAsync(workspace, query, maxResults, cancellationToken).ConfigureAwait(false);
+
+        return unscoped ? referenced + "\n" + FellBack : referenced;
+    }
 }

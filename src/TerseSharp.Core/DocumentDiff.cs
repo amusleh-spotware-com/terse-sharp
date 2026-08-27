@@ -36,4 +36,4 @@ public sealed record DocumentDiff(string Path, string Text, int ChangedLines)
     }
 }
 
-public sealed record EditOptions(string Tool, bool DryRun, bool AllowErrors, bool Verbose = false, System.Collections.Immutable.ImmutableArray<string> Usings = default, System.Collections.Immutable.ImmutableArray<string> Add = default, string? AddTo = null);
+public sealed record EditOptions(string Tool, bool DryRun, bool AllowErrors, bool Verbose = false, System.Collections.Immutable.ImmutableArray<string> Usings = default, System.Collections.Immutable.ImmutableArray<string> Add = default, string? AddTo = null, bool Rename = false, bool AllowPolicy = false);

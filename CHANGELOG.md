@@ -8,6 +8,77 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-08-27
+
+### Added
+
+- **`read_text tokens=true`** ends the answer with `tokens=N` for the **whole** file, whatever range
+  was read - the same `(characters + 3) / 4` count the shipped-doc and tool budgets assert. It rides
+  on every shape `read_text` returns, once per `paths=` entry, and on the outline a whole `.cs` read
+  answers instead of its text, so a budgeted document is measured in one call rather than by a build
+  plus a ten-minute E2E cycle. It rides on the `ref=` shape too, where the historical text it just
+  returned is what is counted, and the `.cs` outline counts the file on disk so the two stamps of one
+  answer never come from different sources. Covered by
+  `BacklogClosureE2ETests.ReadText_WithTokens_AnswersTheWholeFilesBudgetCountWhateverRangeWasRead`
+  and `BacklogClosureE2ETests.ReadText_WithTokensOnACsFile_StampsTheOutlineItAnswersInstead`.
+  Closes `I391`.
+- **`search_symbols path=`** answers the matches that document declares first and searches the whole
+  solution only when it declares none - the `path=` that `get_symbol`, `get_symbol_source` and
+  `get_type_outline` already take. A path naming no document of the workspace answers
+  `ERROR DocumentNotFound` rather than being ignored, and the truncation steer now names `path=`
+  beside `kind=`, `scope=` and `maxResults=`. A fallback is never silent: the answer carries
+  `NOTE path= declared no match - the whole solution was searched`, so a file-scoped answer and a
+  solution-wide one are told apart. While the scoping holds, the Razor component declarations that
+  `search_symbols` merges in are dropped rather than answered beside a one-file result. Covered by
+  `BacklogClosureE2ETests.SearchSymbols_WithPath_AnswersOnlyTheDeclarationsThatFileHolds`,
+  `BacklogClosureE2ETests.SearchSymbols_WithAPathThatDeclaresNoMatch_FallsBackToTheWholeSolution`
+  and `BacklogClosureE2ETests.SearchSymbols_WithAPathNamingNoDocument_AnswersDocumentNotFound`.
+  Closes `I387`.
+- **`replace_symbol rename=true`** accepts a declaration whose NAME differs from the symbol id it is
+  paired with, applying it as written instead of refusing the batch, so a member is renamed and
+  rewritten in ONE compile-gated edit. It is opt-in because a silent rename would let a mis-paired
+  batch land, which is what the `I381` pairing check exists to stop; references are not rewritten, so
+  the gate rolls the edit back when a caller breaks, and `rename_symbol` is what makes them follow.
+  The refusal's remedy now names both routes, and every rename a batch applied is reported on the
+  short success line as `NOTE renamed: Add -> Append` - the flag is batch-wide, so a transposed pair
+  the pairing check would otherwise have caught stays visible without `verbose=true`. Covered by
+  `BacklogClosureE2ETests.ReplaceSymbol_WithRename_AppliesADeclarationWhoseNameDiffersFromItsSymbolId`.
+  Closes `I390`.
+- **`terse call` builds the advertised surface the way the stdio `tools/list` filter does**, so
+  `workspace_status` answers `advertised=<n> tools <t> tokens` - and, with `verbose=true`, its
+  `toolDescriptions`/`parameterDescriptions`/`schemaFrame`/`names` split - from the one-shot probe as
+  well as from an MCP session. A tool-description edit is measurable in about three seconds instead
+  of a ninety-second `build` plus `run_tests` cycle. `AdvertisedCost.Observe` is the shared entry
+  point both paths record through. Covered by
+  `InstallCommandE2ETests.Call_WorkspaceStatus_AnswersWhatTheAdvertisedSurfaceCostsWithoutAnMcpSession`.
+  Closes `I388`.
+
+### Fixed
+
+- **A `NOT_RESOLVED` entry of a `get_symbol_source symbolIds=` batch now carries the nearest-name
+  list that the singular path's `SymbolNotFound` remedy already computed and the batch dropped**, so
+  a near-miss id costs one call instead of three. The generic `use search_symbols to find the id`
+  remedy is still withheld, so an entry with no near miss adds nothing, and the `symbol '<id>' `
+  prefix the batch line already carried in its own `NOT_RESOLVED <id>` header is dropped, so the
+  entry is cheaper than it was before the nearest names arrived. Covered by
+  `BacklogClosureE2ETests.GetSymbolSource_WhenABatchedIdNearlyMatches_NamesTheNearestIdsTheSingularPathWouldHave`
+  and
+  `BacklogClosureE2ETests.GetSymbolSource_WhenABatchedIdHasNoNearestName_KeepsTheGenericRemedyOutOfTheAnswer`.
+  Closes `I386`.
+- `DocsCoverageE2ETests.SkillTokenBudget` is raised from 25 500 to 25 800 tokens, for the three
+  `SKILL.md` rows documenting `search_symbols path=`, `read_text tokens=true` and
+  `replace_symbol rename=true`. Measured with the tool this release adds: `SKILL.md` costs 25 762
+  tokens.
+- The advertised-surface ceilings are raised for the same three parameter descriptions:
+  `TokenBudgetE2ETests.AdvertisedPayloadBudget` from 27 150 to 27 450, the `MarkupProfileE2ETests`
+  narrowed ceiling from 22 050 to 22 350 and the `ToolSettingsE2ETests` one from 22 700 to 22 980.
+  Measured through the one-shot probe this release adds: `tools/list` costs 27 403 tokens over 88
+  tools, against 27 141 before. The three descriptions were cut by 170 tokens after the first
+  measurement rather than the ceiling being raised to fit them. `SkillTokenBudget` then went to
+  25 850 for the two `SKILL.md` clauses naming the new `NOTE path= declared no match` and
+  `NOTE renamed:` lines, which an agent has to be taught or it will not read them.
+
+
 ### Changed
 
 - **The `PreToolUse` guard no longer denies a whole batch because one command in it is replaced.**
@@ -4642,7 +4713,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.50.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.51.0...HEAD
+[0.51.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.51.0
 [0.50.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.50.0
 [0.49.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.49.0
 [0.48.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.48.0

@@ -226,9 +226,7 @@ public static class FileService
     {
         var answer = Rendered(path, label, text, request);
 
-        return request.Bytes && answer.IsOk
-            ? Result.Ok(answer.Value! + "\n" + Sized(request.Length))
-            : answer;
+        return answer.IsOk ? Result.Ok(answer.Value! + Stamps(request)) : answer;
     }
 
     private static LineRange Tailed(string text, ReadRequest request)
@@ -400,7 +398,7 @@ public static class FileService
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0);
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null);
 
@@ -502,7 +500,7 @@ public static class FileService
 
         var text = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
 
-        return Present(full, label, text, request.Bytes ? request with { Length = file.Length } : request);
+        return Present(full, label, text, request with { Length = file.Length, Characters = text.Length });
     }
 
     private const string OutsideSuffix = "  " + OutsideMarker;
@@ -1443,4 +1441,45 @@ public static class FileService
 
     private static bool SplitCarriageReturn(ReadOnlySpan<char> before, int start) =>
         start > 0 && before[start] is '\n' && before[start - 1] is '\r';
+
+    public static string Stamps(ReadRequest request) => (request.Bytes ? "\n" + Sized(request.Length) : string.Empty)
+            + (request.Tokens ? "\n" + Counted(request.Characters) : string.Empty);
+
+    public static string Counted(int characters) => string.Create(CultureInfo.InvariantCulture, $"tokens={(characters + 3) / 4}");
+
+    public static async Task<int?> CharacterLengthAsync(string? full, CancellationToken cancellationToken)
+    {
+        if (full is not { Length: > 0 } || !File.Exists(full))
+            return null;
+
+        await using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, CountBufferChars, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var reader = new StreamReader(stream);
+
+        return await CountedAsync(reader, cancellationToken).ConfigureAwait(false);
+    }
+
+    private const int CountBufferChars = 8192;
+
+    private static async Task<int> CountedAsync(StreamReader reader, CancellationToken cancellationToken)
+    {
+        var buffer = ArrayPool<char>.Shared.Rent(CountBufferChars);
+
+        try
+        {
+            var characters = 0;
+            var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+
+            while (read > 0)
+            {
+                characters += read;
+                read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+            }
+
+            return characters;
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(buffer);
+        }
+    }
 }

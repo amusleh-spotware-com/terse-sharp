@@ -437,17 +437,20 @@ public static class SymbolEditService
         "split the batch, or edit the remaining members in a second call");
 
     public static async Task<Result<string>> ReplaceDeclarationsAsync(
-    LoadedWorkspace workspace,
-    IReadOnlyList<string> symbolIds,
-    IReadOnlyList<string> declarations,
-    EditOptions options,
-    CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            IReadOnlyList<string> symbolIds,
+            IReadOnlyList<string> declarations,
+            EditOptions options,
+            CancellationToken cancellationToken)
     {
         if (symbolIds.Count != declarations.Count)
             return Result.Fail<string>(Mismatched(symbolIds.Count, declarations.Count));
+
         if (symbolIds.Count is 0 or > MaxBatchedEdits)
             return Result.Fail<string>(TooMany(symbolIds.Count));
-        var planned = await PlannedAsync(workspace, symbolIds, declarations, cancellationToken).ConfigureAwait(false);
+
+        var planned = await PlannedAsync(workspace, symbolIds, declarations, options.Rename, cancellationToken).ConfigureAwait(false);
+
         return planned.IsOk
             ? await BatchedAsync(workspace, planned.Value!, options, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(planned.Error!);
@@ -498,16 +501,17 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<PlannedEdit[]>> PlannedAsync(
-        LoadedWorkspace workspace,
-        IReadOnlyList<string> symbolIds,
-        IReadOnlyList<string> declarations,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            IReadOnlyList<string> symbolIds,
+            IReadOnlyList<string> declarations,
+            bool rename,
+            CancellationToken cancellationToken)
     {
         var planned = new PlannedEdit[symbolIds.Count];
 
         for (var index = 0; index < planned.Length; index++)
         {
-            var one = await OneAsync(workspace, symbolIds[index], declarations[index], cancellationToken).ConfigureAwait(false);
+            var one = await OneAsync(workspace, symbolIds[index], declarations[index], rename, cancellationToken).ConfigureAwait(false);
 
             if (!one.IsOk)
                 return Result.Fail<PlannedEdit[]>(Attributed(one.Error!, index));
@@ -519,21 +523,25 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<PlannedEdit>> OneAsync(
-        LoadedWorkspace workspace,
-        string symbolId,
-        string declaration,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            string symbolId,
+            string declaration,
+            bool rename,
+            CancellationToken cancellationToken)
     {
         var symbol = await SymbolLookup.ResolveAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+
         if (!symbol.IsOk)
             return Result.Fail<PlannedEdit>(symbol.Error!);
+
         var found = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
+
         if (found is null)
             return Result.Fail<PlannedEdit>(Errors.SymbolNotFound(symbolId, []));
 
         var planned = Plan(found, declaration);
 
-        return planned.IsOk && Misnamed(symbol.Value!, planned.Value.Nodes) is { } refusal
+        return !rename && planned.IsOk && Misnamed(symbol.Value!, planned.Value.Nodes) is { } refusal
             ? Result.Fail<PlannedEdit>(refusal)
             : planned;
     }
@@ -555,11 +563,11 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> SwappedManyAsync(
-                LoadedWorkspace workspace,
-                IReadOnlyList<PlannedEdit> planned,
-                EditOptions options,
-                IReadOnlyList<AppendedMembers> appended,
-                CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            IReadOnlyList<PlannedEdit> planned,
+            EditOptions options,
+            IReadOnlyList<AppendedMembers> appended,
+            CancellationToken cancellationToken)
     {
         var solution = workspace.Solution;
         var changed = new List<DocumentId>(planned.Count);
@@ -581,7 +589,7 @@ public static class SymbolEditService
 
         var applied = await EditGate.ApplyAsync(workspace, solution, changed, options, cancellationToken).ConfigureAwait(false);
 
-        return Warned(applied, Dropped(planned));
+        return Warned(applied, Dropped(planned) + Renamed(planned));
     }
 
     private static Task<Result<Solution>> GroupedAsync(
@@ -1002,6 +1010,27 @@ public static class SymbolEditService
         }
 
         return declared is null ? null : Errors.Misnamed(declared, symbol.Name);
+    }
+
+    private static string Renamed(IReadOnlyList<PlannedEdit> planned)
+    {
+        var moved = new List<string>(2);
+
+        foreach (var edit in planned)
+        {
+            if (Moved(edit) is { } rename && !moved.Contains(rename, StringComparer.Ordinal))
+                moved.Add(rename);
+        }
+
+        return moved.Count is 0 ? string.Empty : "\nNOTE renamed: " + string.Join(", ", moved);
+    }
+
+    private static string? Moved(PlannedEdit edit)
+    {
+        if (edit.Nodes.Count is not 1 || DeclaredName(edit.Target.Node) is not { } before || DeclaredName(edit.Nodes[0]) is not { } after)
+            return null;
+
+        return string.Equals(before, after, StringComparison.Ordinal) ? null : before + " -> " + after;
     }
 }
 

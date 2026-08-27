@@ -318,4 +318,23 @@ public sealed class InstallCommandE2ETests : IDisposable
             await server.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task Call_WorkspaceStatus_AnswersWhatTheAdvertisedSurfaceCostsWithoutAnMcpSession()
+    {
+        var solution = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+        var quiet = await RunAsync("call", "workspace_status", "--workspace", solution);
+        var verbose = await RunAsync("call", "workspace_status", "--workspace", solution, "--json", "{\"verbose\": true}");
+        var reading = Advertised(quiet);
+
+        Assert.Equal(ToolCoverageE2ETests.ExercisedCount, int.Parse(reading.Split(' ')[0], CultureInfo.InvariantCulture));
+        Assert.EndsWith(" tokens", reading, StringComparison.Ordinal);
+        Assert.Contains("toolDescriptions=", verbose, StringComparison.Ordinal);
+        Assert.Contains("parameterDescriptions=", verbose, StringComparison.Ordinal);
+    }
+
+    private static string Advertised(string output) => output
+        .Split('\n')
+        .Select(line => line.TrimEnd('\r'))
+        .Single(line => line.StartsWith("advertised=", StringComparison.Ordinal))["advertised=".Length..];
 }

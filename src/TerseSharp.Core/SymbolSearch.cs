@@ -3,18 +3,19 @@ using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace TerseSharp.Core;
 
-public readonly record struct SymbolMatches(IReadOnlyList<ISymbol> Ranked, int Total, bool TotalIsExact, int Withheld);
+public readonly record struct SymbolMatches(IReadOnlyList<ISymbol> Ranked, int Total, bool TotalIsExact, int Withheld, bool Scoped = false);
 
 public static class SymbolSearch
 {
     public static async Task<SymbolMatches> FindAsync(
-    LoadedWorkspace workspace,
-    string query,
-    string? kind,
-    string? scope,
-    int maxResults,
-    CancellationToken cancellationToken,
-    bool foldTests = false)
+            LoadedWorkspace workspace,
+            string query,
+            string? kind,
+            string? scope,
+            int maxResults,
+            CancellationToken cancellationToken,
+            bool foldTests = false,
+            string? inFile = null)
     {
         var ceiling = Math.Max(Math.Min(maxResults, 1024) * 8, 256);
         var projects = Scoped(workspace, scope);
@@ -32,11 +33,13 @@ public static class SymbolSearch
                 var test = TestScope.Of(projects[index]) is "test";
 
                 perProject[index] = [.. matches
-                .Where(candidate => KindMatches(candidate, kind))
-                .Select(candidate => new Identified(candidate, SymbolId.From(candidate).Value, test))];
+                        .Where(candidate => KindMatches(candidate, kind))
+                        .Select(candidate => new Identified(candidate, SymbolId.From(candidate).Value, test))];
             }).ConfigureAwait(false);
 
-        return Summarize(perProject, ceiling, maxResults, foldTests && scope is not { Length: > 0 });
+        var narrowed = InFile(perProject, inFile);
+
+        return Summarize(narrowed.Matches, ceiling, maxResults, foldTests && scope is not { Length: > 0 }) with { Scoped = narrowed.Scoped };
     }
 
     private static Project[] Scoped(LoadedWorkspace workspace, string? scope) => scope is { Length: > 0 } wanted
@@ -82,4 +85,45 @@ public static class SymbolSearch
         || symbol.Kind.ToString().Equals(kind, StringComparison.OrdinalIgnoreCase);
 
     private readonly record struct Identified(ISymbol Symbol, string Id, bool IsTest);
+
+    private static (Identified[][] Matches, bool Scoped) InFile(Identified[][] perProject, string? inFile)
+    {
+        if (inFile is not { Length: > 0 })
+            return (perProject, false);
+
+        var narrowed = new Identified[perProject.Length][];
+        var declared = false;
+
+        for (var index = 0; index < perProject.Length; index++)
+        {
+            narrowed[index] = Declared(perProject[index], inFile);
+            declared |= narrowed[index].Length > 0;
+        }
+
+        return declared ? (narrowed, true) : (perProject, false);
+    }
+
+    private static bool DeclaredIn(ISymbol symbol, string path)
+    {
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            if (string.Equals(reference.SyntaxTree.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static Identified[] Declared(Identified[] candidates, string path)
+    {
+        var kept = new List<Identified>(candidates.Length);
+
+        foreach (var candidate in candidates)
+        {
+            if (DeclaredIn(candidate.Symbol, path))
+                kept.Add(candidate);
+        }
+
+        return [.. kept];
+    }
 }

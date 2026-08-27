@@ -83,18 +83,18 @@ public static class SourceService
     }
 
     private static async Task AppendResolvedAsync(
-    LoadedWorkspace workspace,
-    ResponseBuilder response,
-    string symbolId,
-    SourceFormat format,
-    string? path,
-    CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            ResponseBuilder response,
+            string symbolId,
+            SourceFormat format,
+            string? path,
+            CancellationToken cancellationToken)
     {
         var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
 
         if (!resolved.IsOk)
         {
-            response.Note("NOT_RESOLVED " + symbolId + "  " + resolved.Error!.Message);
+            response.Note("NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, resolved.Error!));
             return;
         }
 
@@ -200,4 +200,28 @@ public static class SourceService
     }
 
     private const int MaxInlinedTypeChars = 200;
+
+    private static string Unresolved(string symbolId, TerseError error)
+    {
+        var message = Trimmed(error.Message, symbolId);
+
+        return string.Equals(error.Remedy, Errors.SearchForTheId, StringComparison.Ordinal)
+            ? message
+            : message + "  " + error.Remedy;
+    }
+
+    private static string Trimmed(string message, string symbolId)
+    {
+        const string Opening = "symbol '";
+
+        var text = message.AsSpan();
+        var length = Opening.Length + symbolId.Length + 2;
+
+        return text.Length > length
+            && text.StartsWith(Opening, StringComparison.Ordinal)
+            && text.Slice(Opening.Length, symbolId.Length).SequenceEqual(symbolId)
+            && text[Opening.Length + symbolId.Length] is '\''
+                ? message[length..]
+                : message;
+    }
 }

@@ -52,8 +52,10 @@ public sealed class TemporaryWorkspace : IDisposable
 
     public async Task MaterialiseAsync(CancellationToken cancellationToken)
     {
+        materialised.Clear();
+
         foreach (var document in Workspace.Solution.Projects.SelectMany(project => project.Documents))
-            await document.GetTextAsync(cancellationToken);
+            materialised.Add(await document.GetTextAsync(cancellationToken));
     }
 
     public void Dispose()
@@ -62,4 +64,6 @@ public sealed class TemporaryWorkspace : IDisposable
         registry.Dispose();
         files.Dispose();
     }
+
+    private readonly List<Microsoft.CodeAnalysis.Text.SourceText> materialised = [];
 }

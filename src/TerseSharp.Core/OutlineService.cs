@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -282,6 +283,7 @@ public static class OutlineService
             LoadedWorkspace workspace,
             string path,
             long? bytes,
+            int? characters,
             CancellationToken cancellationToken)
     {
         var outline = await FileAsync(workspace, path, signatures: true, "short", usings: false, cancellationToken).ConfigureAwait(false);
@@ -289,19 +291,32 @@ public static class OutlineService
         if (!outline.IsOk)
             return outline;
 
-        return Result.Ok(bytes is { } length
-            ? outline.Value! + "\n" + TextSteer + "\n" + FileService.Sized(length)
-            : outline.Value! + "\n" + TextSteer);
+        return Result.Ok(outline.Value! + "\n" + TextSteer
+            + (bytes is { } length ? "\n" + FileService.Sized(length) : string.Empty)
+            + (characters is { } count ? "\n" + FileService.Counted(count) : string.Empty));
     }
 
-    public static Task<Result<string>> OrTextAsync(
+    public static async Task<Result<string>> OrTextAsync(
             LoadedWorkspace workspace,
             string path,
             FileService.ReadRequest request,
-            CancellationToken cancellationToken) =>
-            DocumentLookup.Find(workspace, path) is not { } document
-                ? FileService.ReadTextAsync(workspace, path, request, cancellationToken)
-                : SteeredAsync(workspace, path, request.Bytes ? FileService.ByteLength(document.FilePath) : null, cancellationToken);
+            CancellationToken cancellationToken)
+    {
+        if (DocumentLookup.Find(workspace, path) is not { } document)
+            return await FileService.ReadTextAsync(workspace, path, request, cancellationToken).ConfigureAwait(false);
+
+        var characters = request.Tokens
+            ? await FileService.CharacterLengthAsync(document.FilePath, cancellationToken).ConfigureAwait(false)
+                ?? (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).Length
+            : (int?)null;
+
+        return await SteeredAsync(
+            workspace,
+            path,
+            request.Bytes ? FileService.ByteLength(document.FilePath) : null,
+            characters,
+            cancellationToken).ConfigureAwait(false);
+    }
 
     public static Result<string> FromText(
         string path,

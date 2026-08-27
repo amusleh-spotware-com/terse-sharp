@@ -19,10 +19,13 @@ internal static class RefRead
             return shown.Error!.Render();
 
         var label = relative + "@" + reference;
+        var text = shown.Value!;
 
-        return whole && SourceFile.IsCSharp(relative)
-            ? NavigationTools.Unwrap(OutlineService.FromText(label, shown.Value!, signatures: true, "short", usings: false)) + "\n" + Historical(reference)
-            : NavigationTools.Unwrap(FileService.Rendered(relative, label, shown.Value!, request));
+        var answer = whole && SourceFile.IsCSharp(relative)
+            ? Historic(OutlineService.FromText(label, text, signatures: true, "short", usings: false), reference)
+            : FileService.Rendered(relative, label, text, request);
+
+        return NavigationTools.Unwrap(Stamped(answer, request, text.Length));
     }
 
     public static async Task<string> OutlineAsync(
@@ -62,6 +65,14 @@ internal static class RefRead
     private static string Relative(LoadedWorkspace workspace, string path) => PositionFormat.Relative(
         workspace.Root,
         Path.IsPathRooted(path) ? path : Path.Combine(workspace.Root, path));
+
+    private static Result<string> Historic(Result<string> outline, string reference) =>
+            outline.IsOk ? Result.Ok(outline.Value! + "\n" + Historical(reference)) : outline;
+
+    private static Result<string> Stamped(Result<string> answer, FileService.ReadRequest request, int characters) =>
+            answer.IsOk && request.Tokens
+                ? Result.Ok(answer.Value! + FileService.Stamps(request with { Bytes = false, Characters = characters }))
+                : answer;
 }
 
 internal readonly record struct OutlineOptions(bool Signatures, string Ids, bool Usings, bool ParameterNames, string? Contains, bool All = false);

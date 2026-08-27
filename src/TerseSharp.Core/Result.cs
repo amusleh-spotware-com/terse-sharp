@@ -30,13 +30,13 @@ public static class Errors
         "pass workspace=<solution file name, worktree name or full path>; loaded: " + string.Join(" | ", loaded));
 
     public static TerseError SymbolNotFound(string symbolId, IReadOnlyList<string> nearest) => new(
-        TerseErrorCode.SymbolNotFound,
-        string.Create(CultureInfo.InvariantCulture, $"symbol '{symbolId}' did not resolve"),
-        nearest.Count is 0
-            ? "use search_symbols to find the id"
-            : string.Create(
-                CultureInfo.InvariantCulture,
-                $"nearest (showing {Math.Min(nearest.Count, MaxListedCandidates)} of {nearest.Count}): {string.Join(", ", nearest.Take(MaxListedCandidates))}"));
+            TerseErrorCode.SymbolNotFound,
+            string.Create(CultureInfo.InvariantCulture, $"symbol '{symbolId}' did not resolve"),
+            nearest.Count is 0
+                ? SearchForTheId
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"nearest (showing {Math.Min(nearest.Count, MaxListedCandidates)} of {nearest.Count}): {string.Join(", ", nearest.Take(MaxListedCandidates))}"));
 
     public static TerseError AmbiguousSymbol(string symbolId, IReadOnlyList<string> candidates) => new(
         TerseErrorCode.AmbiguousSymbol,
@@ -179,7 +179,22 @@ public static class Errors
         "use replace_symbol to replace the whole declaration, or edit_text force=true to change a field or property initializer");
 
     public static TerseError Misnamed(string declared, string addressed) => new(
-        TerseErrorCode.InvalidArgument,
-        string.Create(CultureInfo.InvariantCulture, $"declares '{declared}', but the paired symbolId addresses '{addressed}'"),
-        "symbolIds and declarations are paired positionally - reorder the declarations to match, or send them one per call; the mismatch is decidable from syntax, so nothing was compiled and nothing was written");
+            TerseErrorCode.InvalidArgument,
+            string.Create(CultureInfo.InvariantCulture, $"declares '{declared}', but the paired symbolId addresses '{addressed}'"),
+            "symbolIds and declarations are paired positionally - reorder the declarations to match, or send them one per call; pass rename=true to apply the differently-named declaration as written, or rename_symbol to rewrite the name and its references first; the mismatch is decidable from syntax, so nothing was compiled and nothing was written");
+
+    public const string SearchForTheId = "use search_symbols to find the id";
+
+    public static TerseError PolicyViolation(PolicyVerdict verdict) => new(
+            TerseErrorCode.PolicyViolation,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"the edit introduced {verdict.Rejected.Length} policy violation(s) and was rolled back:\n{Violations(verdict)}"),
+            verdict.Refused
+                ? "fix the code above - this project's .terse.json sets policy.allowOverride=false, so allowPolicy=true is refused here"
+                : "fix the code above, or pass allowPolicy=true to apply it anyway; the response then names every rule it bypassed");
+
+
+    private static string Violations(PolicyVerdict verdict) =>
+        string.Join("\n", verdict.Rejected.Select(finding => finding.Explain()));
 }

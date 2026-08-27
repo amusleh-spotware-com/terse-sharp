@@ -1709,4 +1709,186 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", both, StringComparison.Ordinal);
         Assert.Contains("OrderService.cs", both, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbolSource_WhenABatchedIdNearlyMatches_NamesTheNearestIdsTheSingularPathWouldHave()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "OrderBook.Ad", "OrderBook.Add" },
+        });
+
+        var line = Array.Find(
+            text.Split('\n'),
+            candidate => candidate.StartsWith("NOT_RESOLVED OrderBook.Ad ", StringComparison.Ordinal));
+
+        Assert.NotNull(line);
+        Assert.Contains("nearest (showing", line, StringComparison.Ordinal);
+        Assert.Contains("OrderBook.Add(Order)", line, StringComparison.Ordinal);
+        Assert.Contains("public void Add(Order order)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WhenABatchedIdHasNoNearestName_KeepsTheGenericRemedyOutOfTheAnswer()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "OrderBook.Add", "Fixture.Trading.NoSuchMember" },
+        });
+
+        var line = Array.Find(
+            text.Split('\n'),
+            candidate => candidate.StartsWith("NOT_RESOLVED Fixture.Trading.NoSuchMember", StringComparison.Ordinal));
+
+        Assert.Equal(
+            "NOT_RESOLVED Fixture.Trading.NoSuchMember  did not resolve",
+            line?.TrimEnd('\r'));
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithPath_AnswersOnlyTheDeclarationsThatFileHolds()
+    {
+        var everywhere = await server.CallAsync("search_symbols", new() { ["query"] = "Add" });
+        var inFile = await server.CallAsync("search_symbols", new()
+        {
+            ["query"] = "Add",
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+        });
+
+        Assert.Contains("ServiceBag.AddScoped", everywhere, StringComparison.Ordinal);
+        Assert.StartsWith("1 symbols", inFile, StringComparison.Ordinal);
+        Assert.Contains("M:Fixture.Trading.OrderBook.Add(Fixture.Trading.Order)", inFile, StringComparison.Ordinal);
+        Assert.DoesNotContain("ServiceBag.AddScoped", inFile, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOTE path=", inFile, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithAPathThatDeclaresNoMatch_FallsBackToTheWholeSolution()
+    {
+        var text = await server.CallAsync("search_symbols", new()
+        {
+            ["query"] = "Add",
+            ["path"] = "src/Fixture.Trading/OrderSide.cs",
+        });
+
+        Assert.Contains("M:Fixture.Trading.OrderBook.Add(Fixture.Trading.Order)", text, StringComparison.Ordinal);
+        Assert.Contains("ServiceBag.AddScoped", text, StringComparison.Ordinal);
+        Assert.Contains("NOTE path= declared no match - the whole solution was searched", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithAPathNamingNoDocument_AnswersDocumentNotFound()
+    {
+        var text = await server.CallAsync("search_symbols", new()
+        {
+            ["query"] = "Add",
+            ["path"] = "src/Fixture.Trading/NoSuchFile.cs",
+        });
+
+        Assert.Contains("ERROR DocumentNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("src/Fixture.Trading/NoSuchFile.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithRename_AppliesADeclarationWhoseNameDiffersFromItsSymbolId()
+    {
+        const string Renamed = "public void Append(Order order)\n{\n    if (!bySymbol.TryGetValue(order.Symbol, out var orders))\n    {\n        orders = [];\n        bySymbol[order.Symbol] = orders;\n    }\n\n    orders.Add(order);\n}";
+
+        var refused = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderBook.Add" },
+            ["declarations"] = new[] { Renamed },
+            ["dryRun"] = true,
+        });
+
+        var applied = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderBook.Add" },
+            ["declarations"] = new[] { Renamed },
+            ["rename"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.Contains("pass rename=true", refused, StringComparison.Ordinal);
+        Assert.Contains("rename_symbol", refused, StringComparison.Ordinal);
+        Assert.Contains("dryRun", applied, StringComparison.Ordinal);
+        Assert.Contains("-    public void Add(Order order)", applied, StringComparison.Ordinal);
+        Assert.Contains("+    public void Append(Order order)", applied, StringComparison.Ordinal);
+        Assert.Contains("NOTE renamed: Add -> Append", applied, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithTokens_AnswersTheWholeFilesBudgetCountWhateverRangeWasRead()
+    {
+        var characters = (await File.ReadAllTextAsync(
+            Path.Combine(TerseServerFixture.FixtureRoot, "appsettings.json"),
+            TestContext.Current.CancellationToken)).Length;
+
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["tokens"] = true });
+        var ranged = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["tokens"] = true,
+            ["startLine"] = 1,
+            ["endLine"] = 1,
+        });
+
+        var plain = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json" });
+        var stamp = string.Create(CultureInfo.InvariantCulture, $"tokens={(characters + 3) / 4}");
+
+        Assert.Equal(stamp, TokenStamp(whole));
+        Assert.Equal(stamp, TokenStamp(ranged));
+        Assert.DoesNotContain("tokens=", plain, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithTokensOnACsFile_StampsTheOutlineItAnswersInstead()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["tokens"] = true,
+        });
+
+        var characters = (await File.ReadAllTextAsync(
+            Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderBook.cs"),
+            TestContext.Current.CancellationToken)).Length;
+
+        Assert.Contains("OrderBook.Add", text, StringComparison.Ordinal);
+        Assert.Equal(string.Create(CultureInfo.InvariantCulture, $"tokens={(characters + 3) / 4}"), TokenStamp(text));
+    }
+
+    private static string TokenStamp(string text) => text
+        .Split('\n')
+        .Select(line => line.TrimEnd('\r'))
+        .Single(line => line.StartsWith("tokens=", StringComparison.Ordinal));
+
+    [Fact]
+    public async Task ReadText_WithTokensAtARef_StampsTheHistoricalTextItReturned()
+    {
+        var ranged = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["ref"] = "HEAD",
+            ["tokens"] = true,
+        });
+
+        var outlined = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["ref"] = "HEAD",
+            ["tokens"] = true,
+        });
+
+        Assert.Contains("MaxVolume", ranged, StringComparison.Ordinal);
+        Assert.StartsWith("tokens=", TokenStamp(ranged), StringComparison.Ordinal);
+        Assert.NotEqual("tokens=0", TokenStamp(ranged));
+        var counted = int.Parse(TokenStamp(outlined)["tokens=".Length..], CultureInfo.InvariantCulture);
+
+        Assert.Contains("OrderBook.Add", outlined, StringComparison.Ordinal);
+        Assert.NotEqual("tokens=0", TokenStamp(outlined));
+        Assert.True(counted * 4 > outlined.Length, string.Create(CultureInfo.InvariantCulture, $"tokens={counted} counts the outline, not the file it outlines\n{outlined}"));
+    }
 }
