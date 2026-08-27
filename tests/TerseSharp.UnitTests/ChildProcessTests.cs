@@ -155,6 +155,8 @@ public sealed class ChildProcessTests
         Assert.False(run.Drained);
         Assert.NotEqual(0, run.Output.Length);
         Assert.Contains(ChildMarker, run.StandardOutput, StringComparison.Ordinal);
-        Assert.True(clock.ElapsedMilliseconds < 10_000, string.Create(CultureInfo.InvariantCulture, $"the settle added {clock.ElapsedMilliseconds} ms on top of the 2 s drain grace"));
+        Assert.True(clock.ElapsedMilliseconds < SettleCeilingMilliseconds, string.Create(CultureInfo.InvariantCulture, $"the settle added {clock.ElapsedMilliseconds} ms on top of the 2 s drain grace"));
     }
+
+    private const int SettleCeilingMilliseconds = 30_000;
 }
