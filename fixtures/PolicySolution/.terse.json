@@ -1,0 +1,11 @@
+{
+  "policy": {
+    "action": "reject",
+    "allowOverride": true,
+    "cognitiveThreshold": 10,
+    "rules": {
+      "cognitiveComplexity": 150,
+      "methodStatements": { "limit": 10, "action": "warn" }
+    }
+  }
+}

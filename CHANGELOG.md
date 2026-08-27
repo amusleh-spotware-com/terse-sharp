@@ -8,6 +8,53 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **Code policy — reject an edit that violates the project's standards, with the reason and the fix.**
+  Opt in with a `policy` section in `.terse.json`; with no section, nothing changes. Twelve rules,
+  `TERSE100`-`TERSE111`: cognitive complexity, method statements, methods per type, constructor
+  dependencies, parameter count, method-name length, meaningless type suffixes, naming per
+  declaration kind, `async void`, condition operands, chained references and nesting depth.
+  Every default is taken from the JetBrains ReSharper/Rider inspection model rather than invented:
+  the limits mirror `MaximumMethodStatements`, `MaximumMethodsInClass`,
+  `MaximumConstructorDependencies`, `MinimumMeaningfulMethodNameLength` and
+  `MeaninglessClassNameSuffixes`, and each rule's default action is derived from the matching
+  inspection severity - `ERROR`/`WARNING` reject, `SUGGESTION`/`HINT` warn.
+- **Cognitive complexity is expressed as a percentage of a threshold, exactly as the JetBrains
+  CognitiveComplexity plugin reports it.** `cognitiveThreshold` defaults to `10` and the rule's
+  limit defaults to `150` percent - the plugin's own *Refactor me?* band - so a member scoring
+  above `15` is rejected. `CognitiveComplexity.Of` implements the plugin's counting rules, pinned
+  by unit tests: `if`/loops/`switch` statement/`catch` cost `1 + nesting` and nest, `else` and the
+  `if` of an `else if` cost a flat `1` and do not nest, `goto`, `break`, recursion and each run of
+  `&&` or `||` cost a flat `1`, lambdas nest without cost, and `try`, `continue`, `?:`, `??`,
+  `switch` expressions and pattern combinators are free.
+- **`allowPolicy=true` on `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`
+  and `rename_symbol`** applies an edit the policy would reject. It is never silent: the response
+  carries `WARNING policy overridden` naming every rule bypassed, and a project that sets
+  `policy.allowOverride=false` refuses the override and says so in the `remedy:`. A rejection is
+  held like a `CompileRegression`, so the corrected retry costs a `retryWith` token rather than the
+  whole declaration.
+
+### Changed
+
+- **Only violations the edit *introduces* block it.** The policy gate tallies findings before and
+  after exactly as the compile gate tallies errors, so a pre-existing violation in a file never
+  blocks a later clean edit to it, and `format`, `cleanup` and `doctor` are exempt because they
+  rewrite mechanically rather than author code. A finding is keyed by rule, path and declaration and
+  **not** by its measured value, so an edit that *improves* an already-violating member - complexity
+  25 down to 20, still over the ceiling - is not reported as introducing it. The trade is deliberate:
+  worsening an already-violating member is also not caught, which is the right way round, because
+  falsely refusing a genuine improvement is the costlier error.
+- **A `.terse.json` the policy parser could not use is reported on the edit itself.** Malformed JSON,
+  an unknown rule key, a naming pattern that is not a valid regex and an unrecognised `action` each
+  come back as a `WARNING` line naming what was ignored, instead of the rule silently disappearing.
+- `chainedReferences` (`TERSE110`) ships **off by default**: without a semantic model a namespace
+  qualification such as `Microsoft.CodeAnalysis.CSharp.SyntaxKind.X` is indistinguishable from a
+  Law-of-Demeter violation, so enabling it by default would refuse correct code. Turn it on per
+  project when the tree's conventions make it meaningful.
+- `ERROR PolicyViolation` is a new `TerseErrorCode`. `EditOptions` gained `AllowPolicy`, and a
+  response carrying a policy warning is never condensed to the one-line success form.
+
 ## [0.51.0] - 2026-08-27
 
 ### Added

@@ -48,7 +48,7 @@ public sealed class AnalysisTools(ToolContext context)
             loaded,
             new FixScope(path, changed),
             new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
-            new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose),
+            new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
             cancellationToken));
 
     [McpServerTool(Name = "cleanup")]
@@ -72,7 +72,7 @@ public sealed class AnalysisTools(ToolContext context)
                 loaded,
                 new FixScope(path, changed),
                 new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
-                new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose),
+                new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
                 cancellationToken))
             : Task.FromResult(mode.Error!.Render());
     }

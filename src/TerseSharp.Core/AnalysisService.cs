@@ -62,12 +62,12 @@ public static class AnalysisService
     }
 
     private static async Task<Result<Collected>> CollectedAsync(
-        LoadedWorkspace workspace,
-        string? path,
-        bool includeDeadCode,
-        bool changed,
-        IReadOnlyList<string> ids,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            string? path,
+            bool includeDeadCode,
+            bool changed,
+            IReadOnlyList<string> ids,
+            CancellationToken cancellationToken)
     {
         var unscoped = path is null && !changed;
         var documents = unscoped ? [] : DocumentScope.Select(workspace, path, changed);
@@ -89,7 +89,9 @@ public static class AnalysisService
             ? await DeadCodeService.FindAsync(workspace, targets, scope, cancellationToken).ConfigureAwait(false)
             : [];
 
-        return Result.Ok(new Collected(found, analyzed, extra, ProjectDiagnostics.Unsupported(targets, ids, found), scope));
+        var policy = await PolicyAsync(workspace, targets, documents, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(new Collected(found, analyzed, [.. extra, .. policy], ProjectDiagnostics.Unsupported(targets, ids, found), scope));
     }
 
     private readonly record struct Collected(
@@ -245,6 +247,23 @@ public static class AnalysisService
 
     private static string[] Occurrences(DiagnosticFold.Finding[] findings, IReadOnlyList<string> extra) =>
         DiagnosticFold.PerOccurrence(findings.Select(finding => finding.Key).Concat(extra));
+
+    private static async Task<IReadOnlyList<string>> PolicyAsync(
+            LoadedWorkspace workspace,
+            Project[] targets,
+            DocumentId[] documents,
+            CancellationToken cancellationToken)
+    {
+        var options = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
+
+        if (!options.Active)
+            return [];
+
+        var scanned = documents.Length is 0 ? [.. targets.SelectMany(project => project.DocumentIds)] : documents;
+        var found = await PolicyGate.ScanAsync(workspace, scanned, cancellationToken).ConfigureAwait(false);
+
+        return [.. found.Select(finding => finding.Diagnostic())];
+    }
 }
 
 public static class DiagnosticFormat

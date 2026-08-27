@@ -12,6 +12,7 @@ public enum TerseErrorCode
     AmbiguousProject,
     EditConflict,
     CompileRegression,
+    PolicyViolation,
     OutOfWorkspace,
     ReadOnly,
     InvalidArgument,

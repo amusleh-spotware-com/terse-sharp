@@ -21,21 +21,23 @@ public static class EditGate
             ? null
             : await AnalyseAsync(workspace.Solution, adopted, changed, workspace.Root, cancellationToken).ConfigureAwait(false);
 
-        if (options.DryRun)
-            return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root));
+        var policy = await PolicyGate.EvaluateAsync(workspace, adopted, changed, options.AllowPolicy, cancellationToken).ConfigureAwait(false);
 
-        if (report is { NewErrors.Length: > 0 })
-            return Result.Fail<string>(Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers));
+        if (options.DryRun)
+            return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root, policy));
+
+        if (Blocked(report, policy) is { } failure)
+            return Result.Fail<string>(failure);
 
         return await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false)
-            ? Result.Ok(Render(options, diff, "applied", report, workspace.Root))
+            ? Result.Ok(Render(options, diff, "applied", report, workspace.Root, policy))
             : Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
     }
 
-    private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root)
+    private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root, PolicyVerdict policy)
     {
         var response = new ResponseBuilder(options.Tool, state).Verbose(options.Verbose);
-        var condensed = Condensed(options, diffs, report);
+        var condensed = Condensed(options, diffs, report, policy);
 
         if (!condensed)
             response.Summary(diffs.Length, diffs.Length, "files changed");
@@ -48,6 +50,8 @@ public static class EditGate
 
         if (report is not null)
             Announce(response, report, options.Verbose || options.DryRun);
+
+        Policy(response, policy, options.DryRun);
 
         if (!options.DryRun && report is { NewErrors.Length: 0 } && GateCoverage.Once() is { } coverage)
             response.Note(coverage);
@@ -291,12 +295,13 @@ public static class EditGate
         return response.ToString();
     }
 
-    private static bool Condensed(EditOptions options, DocumentDiff[] diffs, GateReport? report) =>
-        !options.Verbose
-        && !options.DryRun
-        && diffs.Length is not 0
-        && report is not { NewErrors.Length: > 0 }
-        && report is not { Unresolved.Length: > 0 };
+    private static bool Condensed(EditOptions options, DocumentDiff[] diffs, GateReport? report, PolicyVerdict policy) =>
+            !options.Verbose
+            && !options.DryRun
+            && diffs.Length is not 0
+            && policy.Quiet
+            && report is not { NewErrors.Length: > 0 }
+            && report is not { Unresolved.Length: > 0 };
 
     private static async Task<string?> EndingAsync(
         LoadedWorkspace workspace,
@@ -454,7 +459,6 @@ public static class EditGate
         || key.StartsWith("CS1503 ", StringComparison.Ordinal)
         || key.StartsWith("CS1729 ", StringComparison.Ordinal);
 
-
     private static Document? Located(Solution after, string root, string error) =>
         PathOf(error) is { Length: > 0 } relative
         && after.GetDocumentIdsWithFilePath(Path.Combine(root, relative)) is [var id, ..]
@@ -546,5 +550,31 @@ public static class EditGate
         }
 
         return true;
+    }
+
+    private static TerseError? Blocked(GateReport? report, PolicyVerdict policy) => report switch
+    {
+        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers),
+        _ => policy.Blocks ? Errors.PolicyViolation(policy) : null,
+    };
+
+    private static void Policy(ResponseBuilder response, PolicyVerdict policy, bool dryRun)
+    {
+        if (policy.Notice is { } notice)
+            response.Line("WARNING " + notice);
+
+        foreach (var finding in policy.Warned)
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"WARNING policy  {finding.Render()}"));
+
+        if (policy.Bypassed)
+        {
+            foreach (var finding in policy.Rejected)
+                response.Line(string.Create(CultureInfo.InvariantCulture, $"WARNING policy overridden  {finding.Render()}"));
+        }
+        else if (dryRun && policy.Blocks)
+        {
+            foreach (var finding in policy.Rejected)
+                response.Line(string.Create(CultureInfo.InvariantCulture, $"WARNING would be rolled back by policy  {finding.Explain()}"));
+        }
     }
 }

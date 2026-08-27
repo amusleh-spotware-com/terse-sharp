@@ -748,9 +748,44 @@ from the directory the server runs in, and never above the repository root:
 explicit `true` outranks the markup narrowing and `--tools core`. An unknown or non-boolean key is
 named back rather than dropped, an unreadable file advertises everything, and the `PreToolUse` guard
 reads the same file, so a built-in whose every replacement the project disabled stops being denied.
-The server reads the file **once, at startup**: a `.terse.json` you write now changes the guard on the
-next call but does not change `tools/list` until the server restarts, so tell the user to restart
-rather than reporting the feature broken.
+## Code policy - when an edit is refused for style, not for compiling
+
+A project can make this server **reject an edit that violates its standards**, through a `policy`
+section in the same `.terse.json`. It is **off unless that section exists**. When on, an edit answers
+`ERROR PolicyViolation` naming each rule, the declaration, measured against allowed, and a `fix:` line.
+
+**Only what the edit INTRODUCES counts** - a violation already in the file does not block you, so never
+"fix" unrelated members to get an edit through. A finding is keyed by rule, path and declaration, not
+by its measured value, so neither improving nor worsening an already-violating member registers.
+
+Twelve rules, `TERSE100`-`TERSE111`: cognitive complexity, method statements, methods per type,
+constructor dependencies, parameter count, method-name length, meaningless type suffixes, naming per
+declaration kind, `async void`, condition operands, chained references (off by default), nesting depth.
+Each is `reject`, `warn` or `off`; a `warn` rule lets the edit land and answers `WARNING policy  ...`.
+Cognitive complexity is a **percentage of a threshold** - default `150`% of `10`, so a score above 15
+fails: `cognitive complexity 21 (210% of threshold 10) exceeds 150% (15)`.
+
+**`allowPolicy=true` is the escape hatch and is never silent.** `replace_symbol_body`,
+`replace_symbol`, `add_member`, `delete_symbol` and `rename_symbol` take it; the edit lands and the
+response carries `WARNING policy overridden` naming every rule bypassed. A project setting
+`"allowOverride": false` refuses it. A rejection also names a `retryWith` token holding your
+declaration, so the corrected retry costs a token, not the payload.
+
+```json
+{
+  "policy": {
+    "action": "reject",
+    "cognitiveThreshold": 10,
+    "rules": { "cognitiveComplexity": 150, "methodStatements": { "limit": 10, "action": "warn" } },
+    "naming": { "interface": "^I[A-Z][A-Za-z0-9]*$" }
+  }
+}
+```
+
+A top-level `"action"` sets every rule at once - the one switch between declining an edit and warning.
+An unknown rule key, a bad regex or an unrecognised action is **named back on the next edit** as a
+`WARNING`, never silently dropped. The policy half of the file is re-read whenever it changes; the
+`tools` half below is read once at startup.
 
 
 ## Localization (`.resx` / `.resw`)

@@ -184,4 +184,16 @@ public static class Errors
             "symbolIds and declarations are paired positionally - reorder the declarations to match, or send them one per call; pass rename=true to apply the differently-named declaration as written, or rename_symbol to rewrite the name and its references first; the mismatch is decidable from syntax, so nothing was compiled and nothing was written");
 
     public const string SearchForTheId = "use search_symbols to find the id";
+
+    public static TerseError PolicyViolation(PolicyVerdict verdict) => new(
+            TerseErrorCode.PolicyViolation,
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"the edit introduced {verdict.Rejected.Length} policy violation(s) and was rolled back:\n{Violations(verdict)}"),
+            verdict.Refused
+                ? "fix the code above - this project's .terse.json sets policy.allowOverride=false, so allowPolicy=true is refused here"
+                : "fix the code above, or pass allowPolicy=true to apply it anyway; the response then names every rule it bypassed");
+
+    private static string Violations(PolicyVerdict verdict) =>
+        string.Join("\n", verdict.Rejected.Select(finding => finding.Explain()));
 }

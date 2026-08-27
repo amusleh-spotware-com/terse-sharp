@@ -14,6 +14,7 @@ public sealed class EditTools(ToolContext context)
             [Description("New body: statements with or without the surrounding braces, or an expression body as '=> expr'. On a member that is already expression-bodied, a bare expression is accepted and stays expression-bodied.")] string body = "",
             [Description("Diff only, write nothing.")] bool dryRun = false,
             [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+            [Description(PolicyHelp)] bool allowPolicy = false,
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for symbolId.")] string? symbol = null,
@@ -34,7 +35,7 @@ public sealed class EditTools(ToolContext context)
         var imports = Kept(usings, held?.Usings);
 
         return Supplied(workspace, target, text, "body", (loaded, resolved) => SymbolEditService.ReplaceBodyAsync(
-            loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, imports), cancellationToken),
+            loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken),
             cancellationToken,
             new Carry("replace_symbol_body", [target ?? string.Empty], [text], Usings: imports),
             held?.Root);
@@ -49,6 +50,7 @@ public sealed class EditTools(ToolContext context)
                     [Description("Name of the containing type that add= lands in, e.g. ToolBoundary or T:TerseSharp.Server.ToolBoundary. Only needed when the targets do not all share one containing type; it must name one of their containers, so a member can never land in a type none of the targets lives in. Comma-separated routes each add= entry to its own container, in the same order; one name takes them all, and any other count is refused naming both.")] string? addTo = null,
                     [Description("Diff only, write nothing.")] bool dryRun = false,
                     [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+                    [Description(PolicyHelp)] bool allowPolicy = false,
                     [Description(VerboseHelp)] bool verbose = false,
                     [Description("Workspace or worktree name.")] string? workspace = null,
                     [Description("Alias for symbolId.")] string? symbol = null,
@@ -73,7 +75,7 @@ public sealed class EditTools(ToolContext context)
         var imports = Kept(usings, held?.Usings);
         var helpers = Kept(add, held?.Add);
         var container = addTo ?? held?.AddTo;
-        var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename);
+        var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename, allowPolicy);
 
         if (held is { Targets.Count: > 1 })
             return Batched(workspace, Corrected(symbolIds, held.Targets), [.. held.Payloads], options, cancellationToken, held.Root, helpers, container, imports);
@@ -98,6 +100,7 @@ public sealed class EditTools(ToolContext context)
             [Description("Path of a .cs file to append namespace-level type declarations to, instead of a type symbol id.")] string? path = null,
             [Description("Diff only, write nothing.")] bool dryRun = false,
             [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+            [Description(PolicyHelp)] bool allowPolicy = false,
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for typeSymbolId.")] string? symbol = null,
@@ -118,7 +121,7 @@ public sealed class EditTools(ToolContext context)
         var text = held is null ? declaration : First(held.Payloads, declaration);
         var imports = Kept(usings, held?.Usings);
 
-        return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose, imports), cancellationToken, held?.Root, imports);
+        return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken, held?.Root, imports);
     }
 
     private Task<string> Added(
@@ -170,12 +173,13 @@ public sealed class EditTools(ToolContext context)
             [Description("Symbol id to delete.")] string? symbolId = null,
             [Description("Delete even when references exist. Default false.")] bool force = false,
             [Description("Diff only, write nothing.")] bool dryRun = false,
+            [Description(PolicyHelp)] bool allowPolicy = false,
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for symbolId.")] string? symbol = null,
             CancellationToken cancellationToken = default) =>
             Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => SymbolEditService.DeleteAsync(
-                loaded, resolved, force, Options("delete_symbol", dryRun, allowErrors: false, verbose), cancellationToken), cancellationToken);
+                loaded, resolved, force, Options("delete_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "rename_symbol")]
     [Description("Rename a symbol across the whole solution, including interface implementations, overrides and XML doc crefs. Use instead of a find-and-replace sweep. A successful rename answers in one line per changed file - plus every XAML or Razor site it could NOT rewrite; pass verbose=true for the diff.")]
@@ -183,15 +187,16 @@ public sealed class EditTools(ToolContext context)
             [Description("Symbol id to rename.")] string? symbolId = null,
             [Description("New identifier.")] string newName = "",
             [Description("Diff only, write nothing.")] bool dryRun = false,
+            [Description(PolicyHelp)] bool allowPolicy = false,
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for symbolId.")] string? symbol = null,
             CancellationToken cancellationToken = default) =>
             Supplied(workspace, symbolId ?? symbol, newName, "newName", (loaded, resolved) => RenameService.RenameAsync(
-                loaded, resolved, newName, Options("rename_symbol", dryRun, allowErrors: false, verbose), cancellationToken), cancellationToken);
+                loaded, resolved, newName, Options("rename_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
-    private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null, string? addTo = null, bool rename = false) =>
-            new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add], addTo, rename);
+    private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null, string? addTo = null, bool rename = false, bool allowPolicy = false) =>
+            new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add], addTo, rename, allowPolicy);
 
     private Task<string> Guarded(
         string? workspace,
@@ -340,7 +345,7 @@ public sealed class EditTools(ToolContext context)
             : error.Render();
 
     private static bool Holdable(TerseErrorCode code) =>
-            code is TerseErrorCode.CompileRegression or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol;
+            code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol;
 
     private static string Note(TerseErrorCode code, Carry carry) => code switch
     {
@@ -354,5 +359,7 @@ public sealed class EditTools(ToolContext context)
 
     private static bool Worth(Carry carry) =>
         carry.Payloads is { } payloads && Array.Exists(payloads, text => text is { Length: > 0 });
+
+    private const string PolicyHelp = "Apply an edit the project's .terse.json code policy would reject; the response then names every rule it bypassed. Default false.";
 
 }

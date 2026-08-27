@@ -16,7 +16,7 @@ internal static class PhaseProbe
             workspace,
             workspace.Solution,
             [document.Id],
-            new EditOptions("doctor", DryRun: true, AllowErrors: false),
+            new EditOptions("doctor", DryRun: true, AllowErrors: false, AllowPolicy: true),
             cancellationToken)).ConfigureAwait(false);
         var diff = await TimedAsync(() => GitRunner.ReadAsync(workspace.Root, ["diff", "--stat"], cancellationToken)).ConfigureAwait(false);
 

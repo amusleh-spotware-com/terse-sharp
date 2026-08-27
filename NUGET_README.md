@@ -195,11 +195,42 @@ list: a build dispatched beside an edit is a race, not a saving.
 Microsoft.Testing.Platform when `global.json` selects it, as xunit.v3, MSTest and NUnit projects use.
 
 **The advertised surface shrinks three ways**, all optional. A solution holding no `.xaml`, `.razor` or
-`.resx` never sees those 31 tools — **57 tools, ≤21,780 tokens** instead of 88 and ≤26,900. A
+`.resx` never sees those 31 tools — **57 tools, ≤22,650 tokens** instead of 88 and ≤27,800. A
 `.terse.json` beside your `.sln` disables groups (`analysis` `build` `edit` `file` `git` `navigation`
 `project` `razor` `refactor` `resx` `workspace` `xaml`) or individual `names`. And
 `terse serve --tools core` advertises the 21 tools that answer most questions. A hidden tool is
 unadvertised, not removed — it still answers when called by name.
+
+## Make it refuse code that breaks your standards
+
+An agent writes code that compiles and still isn't code you'd merge. A `policy` section in the same
+`.terse.json` makes TerseSharp **reject the edit and say why** — off unless you add it.
+
+```json
+{
+  "policy": {
+    "action": "reject",
+    "cognitiveThreshold": 10,
+    "rules": { "cognitiveComplexity": 150, "methodStatements": { "limit": 10, "action": "warn" } },
+    "naming": { "interface": "^I[A-Z][A-Za-z0-9]*$" }
+  }
+}
+```
+
+Twelve rules, `TERSE100`–`TERSE111`: cognitive complexity, method statements, methods per type,
+constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
+declaration kind, `async void`, condition operands, chained references, nesting depth. **Every default
+is ReSharper's** — the limits mirror `MaximumMethodStatements`, `MaximumMethodsInClass`,
+`MaximumConstructorDependencies`, `MinimumMeaningfulMethodNameLength` and
+`MeaninglessClassNameSuffixes` — and cognitive complexity is a **percentage of a threshold**, exactly
+as the JetBrains CognitiveComplexity plugin reports it: default `150%` of `10`, its own *Refactor me?*
+band.
+
+A rejection names the rule, the declaration, the measured value against the allowed one, and a `fix:`
+line. **Only what the edit introduces counts**, so a legacy file never blocks a clean edit to it. A
+rule can `reject`, `warn` or be `off`; `allowPolicy=true` forces an edit through and the response names
+every rule it bypassed; `"allowOverride": false` takes that away. `analyze` reports the same findings
+across code you already have.
 
 ## Markup and localization the compiler can't check
 

@@ -259,11 +259,11 @@ runs the test module itself.
 An MCP server's fixed cost is its tool list, attached to every request — and past a certain size that
 measurably costs tool-selection accuracy. `workspace_status` prints `advertised=<n> tools <t> tokens`,
 and under `verbose=true` the whole surface beside it, so what a narrowing saves is read off the running
-server. A **26,900-token ceiling over 88 tools** is asserted on every push, and it shrinks three ways —
+server. A **27,800-token ceiling over 88 tools** is asserted on every push, and it shrinks three ways —
 all optional; the default advertises everything.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤21,780 tokens**. Load one that does and they come back, announced with
+  **57 tools, ≤22,650 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
 - **Per project** — a `.terse.json` beside your `.sln`, found by walking up from the server's directory
   and never above the repository root:
@@ -279,7 +279,7 @@ all optional; the default advertises everything.
 
   Twelve groups — `analysis` `build` `edit` `file` `git` `navigation` `project` `razor` `refactor`
   `resx` `workspace` `xaml` — plus any tool name under `names`, which outranks its group. That file
-  measures **64 tools, 22,097 tokens**. An unknown key is reported rather than silently dropped, and the
+  measures **64 tools, ≤23,280 tokens**. An unknown key is reported rather than silently dropped, and the
   guard follows the file: a built-in whose every replacement you disabled is allowed again. Read once at
   startup, so restart your agent after changing it.
 - **By profile.** `terse serve --tools core` (or `TERSE_TOOLS=core`) advertises the 21 tools that answer
@@ -287,6 +287,44 @@ all optional; the default advertises everything.
 
 A hidden tool is unadvertised, not removed — it still answers when called by name.
 </details>
+
+## 🚦 Make it refuse code that breaks your standards
+
+An agent writes code that compiles and still isn't code you'd merge: a 40-branch method, an
+`OrderManager`, an `async void`. The same `.terse.json` can make TerseSharp **reject the edit and say
+why** — off unless you add a `policy` section, so nothing changes until you ask for it.
+
+```json
+{
+  "policy": {
+    "action": "reject",
+    "cognitiveThreshold": 10,
+    "rules": { "cognitiveComplexity": 150, "methodStatements": { "limit": 10, "action": "warn" } },
+    "naming": { "interface": "^I[A-Z][A-Za-z0-9]*$" }
+  }
+}
+```
+
+```
+ERROR PolicyViolation: the edit introduced 1 policy violation(s) and was rolled back:
+TERSE100  src/Trading/OrderService.cs:41  OrderService.Reconcile  cognitive complexity 21 (210% of threshold 10) exceeds 150% (15)
+  fix: split the member - each extracted part must be a real concept with a domain name, not DoThingPart1
+remedy: fix the code above, or pass allowPolicy=true to apply it anyway; the response then names every rule it bypassed
+```
+
+Twelve rules, `TERSE100`–`TERSE111` — cognitive complexity, method statements, methods per type,
+constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
+declaration kind, `async void`, condition operands, chained references, nesting depth. **Every default
+is ReSharper's**, not invented: the limits mirror `MaximumMethodStatements`, `MaximumMethodsInClass`,
+`MaximumConstructorDependencies`, `MinimumMeaningfulMethodNameLength` and
+`MeaninglessClassNameSuffixes`, and cognitive complexity is a **percentage of a threshold** exactly as
+the JetBrains CognitiveComplexity plugin reports it — default `150%` of `10`, its own *Refactor me?*
+band.
+
+**Only what the edit introduces counts**, so a legacy file never blocks a clean edit to it. A rule can
+`reject`, `warn` or be `off`; `allowPolicy=true` forces an edit through and the response names every
+rule it bypassed; `"allowOverride": false` takes that away. `analyze` reports the same findings across
+code you already have.
 
 ## 🎨 Markup and localization the compiler can't check
 
