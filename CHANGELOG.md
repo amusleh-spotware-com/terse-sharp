@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`BacklogShapeTests` now census-gates backlog id uniqueness.** The rule that ids are "allocated in
+  sequence across both files" had no test, and two parallel sessions independently allocated `I399`
+  and `I400` on the same day without anything catching it. The new gate reads both files and fails on
+  any id allocated twice, minus `CollidedBeforeThisGate` - ten ids that collided before the gate
+  existed (`I28`, `I38`, `I70`, `I74`, `I81`, `I81/I82`, `I93`, `I216`, `I217`, `I314`) and which the
+  append-only archive rule forbids renumbering. A second test asserts that set only ever shrinks, so a
+  new duplicate is a build failure rather than a historical row.
+
 
 ## [0.51.0] - 2026-08-27
 

@@ -83,4 +83,56 @@ public sealed class BacklogShapeTests
 
         return cells.Count('|') - cells.Count("\\|") + 1;
     }
+
+    [Fact]
+    public void TheBacklogAndTheArchive_AllocateEveryIdExactlyOnceAcrossBothFiles()
+    {
+        var ids = DataRowsOf(Backlog).Concat(DataRowsOf(Archive)).Select(IdOf).OfType<string>().ToArray();
+
+        var duplicated = DuplicatedIds()
+            .Where(id => !CollidedBeforeThisGate.Contains(id))
+            .ToArray();
+
+        Assert.NotEmpty(ids);
+        Assert.True(duplicated.Length is 0, "ids allocated more than once: " + string.Join(", ", duplicated));
+    }
+
+    private static string? IdOf(string row)
+    {
+        var start = row.IndexOf("**I", StringComparison.Ordinal);
+
+        if (start < 0)
+            return null;
+
+        var end = row.IndexOf("**", start + 3, StringComparison.Ordinal);
+
+        return end < 0 ? null : row[(start + 2)..end];
+    }
+
+    [Fact]
+    public void TheHistoricalIdCollisions_OnlyEverShrink()
+    {
+        var duplicated = DuplicatedIds();
+
+        Assert.All(duplicated, id => Assert.Contains(id, CollidedBeforeThisGate));
+        Assert.True(
+            duplicated.Length <= CollidedBeforeThisGate.Count,
+            "the historical collision set grew; a new duplicate id is a defect, not a historical row");
+    }
+
+    private static string[] DuplicatedIds() =>
+        [
+            .. DataRowsOf(Backlog)
+            .Concat(DataRowsOf(Archive))
+            .Select(IdOf)
+            .OfType<string>()
+            .GroupBy(id => id, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key),
+    ];
+
+    private static readonly HashSet<string> CollidedBeforeThisGate = new(StringComparer.Ordinal)
+    {
+        "I28", "I38", "I70", "I74", "I81", "I81/I82", "I93", "I216", "I217", "I314",
+    };
 }
