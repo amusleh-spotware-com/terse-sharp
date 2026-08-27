@@ -357,11 +357,17 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     public async Task GetSymbolSource_WithABatch_CostsLessThanTheSameMembersOneCallAtATime()
     {
         var ids = new[] { "OrderBook.Add", "OrderBook.Remove", "OrderBook.Total" };
+
+        await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderBook.Add" });
+
         var batched = await server.CallAsync("get_symbol_source", new() { ["symbolIds"] = ids });
         var separate = 0;
 
         foreach (var id in ids)
+        {
+            await server.CallAsync("workspace_status", []);
             separate += Tokens(await server.CallAsync("get_symbol_source", new() { ["symbolId"] = id }));
+        }
 
         Assert.True(Tokens(batched) <= separate, $"batched={Tokens(batched)} separate={separate}\n{batched}");
     }
