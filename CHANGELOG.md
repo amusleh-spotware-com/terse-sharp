@@ -8,6 +8,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+
+## [0.51.0] - 2026-08-27
+
 ### Added
 
 - **Code policy — reject an edit that violates the project's standards, with the reason and the fix.**
@@ -35,29 +38,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   held like a `CompileRegression`, so the corrected retry costs a `retryWith` token rather than the
   whole declaration.
 
-### Changed
-
-- **Only violations the edit *introduces* block it.** The policy gate tallies findings before and
-  after exactly as the compile gate tallies errors, so a pre-existing violation in a file never
-  blocks a later clean edit to it, and `format`, `cleanup` and `doctor` are exempt because they
-  rewrite mechanically rather than author code. A finding is keyed by rule, path and declaration and
-  **not** by its measured value, so an edit that *improves* an already-violating member - complexity
-  25 down to 20, still over the ceiling - is not reported as introducing it. The trade is deliberate:
-  worsening an already-violating member is also not caught, which is the right way round, because
-  falsely refusing a genuine improvement is the costlier error.
-- **A `.terse.json` the policy parser could not use is reported on the edit itself.** Malformed JSON,
-  an unknown rule key, a naming pattern that is not a valid regex and an unrecognised `action` each
-  come back as a `WARNING` line naming what was ignored, instead of the rule silently disappearing.
-- `chainedReferences` (`TERSE110`) ships **off by default**: without a semantic model a namespace
-  qualification such as `Microsoft.CodeAnalysis.CSharp.SyntaxKind.X` is indistinguishable from a
-  Law-of-Demeter violation, so enabling it by default would refuse correct code. Turn it on per
-  project when the tree's conventions make it meaningful.
-- `ERROR PolicyViolation` is a new `TerseErrorCode`. `EditOptions` gained `AllowPolicy`, and a
-  response carrying a policy warning is never condensed to the one-line success form.
-
-## [0.51.0] - 2026-08-27
-
-### Added
 
 - **`read_text tokens=true`** ends the answer with `tokens=N` for the **whole** file, whatever range
   was read - the same `(characters + 3) / 4` count the shipped-doc and tool budgets assert. It rides
@@ -127,6 +107,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 
 ### Changed
+
+- **Only violations the edit *introduces* block it.** The policy gate tallies findings before and
+  after exactly as the compile gate tallies errors, so a pre-existing violation in a file never
+  blocks a later clean edit to it, and `format`, `cleanup` and `doctor` are exempt because they
+  rewrite mechanically rather than author code. A finding is keyed by rule, path and declaration and
+  **not** by its measured value, so an edit that *improves* an already-violating member - complexity
+  25 down to 20, still over the ceiling - is not reported as introducing it. The trade is deliberate:
+  worsening an already-violating member is also not caught, which is the right way round, because
+  falsely refusing a genuine improvement is the costlier error.
+- **A `.terse.json` the policy parser could not use is reported on the edit itself.** Malformed JSON,
+  an unknown rule key, a naming pattern that is not a valid regex and an unrecognised `action` each
+  come back as a `WARNING` line naming what was ignored, instead of the rule silently disappearing.
+- `chainedReferences` (`TERSE110`) ships **off by default**: without a semantic model a namespace
+  qualification such as `Microsoft.CodeAnalysis.CSharp.SyntaxKind.X` is indistinguishable from a
+  Law-of-Demeter violation, so enabling it by default would refuse correct code. Turn it on per
+  project when the tree's conventions make it meaningful.
+- `ERROR PolicyViolation` is a new `TerseErrorCode`. `EditOptions` gained `AllowPolicy`, and a
+  response carrying a policy warning is never condensed to the one-line success form.
+
 
 - **The `PreToolUse` guard no longer denies a whole batch because one command in it is replaced.**
   A compound `Bash` command that mixes commands the server answers (`git log`, `git status`,
