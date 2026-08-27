@@ -8,6 +8,48 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **The `PreToolUse` guard no longer denies a whole batch because one command in it is replaced.**
+  A compound `Bash` command that mixes commands the server answers (`git log`, `git status`,
+  `dotnet build`, `cat Foo.cs`) with commands it does not (`git commit`, `echo`, `gh auth status`)
+  is now **rewritten instead of refused**: the hook returns `hookSpecificOutput.updatedInput` with
+  the replaced pipelines stripped out and **no `permissionDecision` at all**, so the remainder runs
+  through the caller's normal permission evaluation, and `additionalContext` names what was stripped
+  and the terse call that answers it. `git branch -a | head -40 && echo mid && git log --oneline -3
+  && git remote -v` now runs as `git branch -a | head -40 && echo mid && git remote -v` instead of
+  costing the whole turn. `GuardVerdict` gains a `Rewrite` member carrying the rewritten command;
+  `Denied` stays `true` for a stripped batch, so a project's `.terse.json` stand-down still turns the
+  whole thing back into a plain allow. The `TERSE_GUARD_LOG` line gains a `rewrite` field carrying
+  the rewritten command, and its `denied` is now `false` for a stripped batch, so a rewrite can no
+  longer be counted as a refusal by anything reading that log.
+- **The rewrite is fenced to the shapes where it is provably sound**, and every other shape is
+  denied whole exactly as before. A pipeline holding a replaced stage is dropped whole, so
+  `git branch -a && git status --short | head -20` becomes `git branch -a` rather than leaving a
+  dangling `head`, and a batch in which every command is replaced is still a plain denial. The
+  fence refuses a rewrite when the command carries `||`, a background `&`, a subshell, a redirect,
+  a command substitution, a `#` comment (which would otherwise **promote** commented-out text into
+  an executed command), a shell keyword (`for`, `while`, `if`, `do`, `done`, …), any backslash
+  escape - `\;`, `\&`, `\"`, `\`-newline, evaluated on the RAW command because `Masked` eats the
+  backslash it would look for, while a Windows path such as `src\App\Notes.txt` is not an escape
+  and still rewrites - or a **non-uniform separator run**. That last one covers both
+  `A ; B && C`, where dropping `B` would re-parent `C`'s condition onto `A`, and a trailing `&&`
+  before a newline (`npm test &&` / `npm publish`), where the separator sits between two commands
+  that both survive and dropping it would publish on a failed test.
+- Covered by `Guard_ForAStrippableBatch_RewritesItInsteadOfDenyingTheWholeCommand`,
+  `Guard_ForAStrippableBatch_DropsTheWholePipelineHoldingTheDeniedStage`,
+  `Guard_ForAStrippableBatchSeparatedBySemicolons_KeepsTheSeparator`,
+  `Guard_ForAStrippableBatch_KeepsThePipesAndMarkersOfTheCommandsItLetsRun`,
+  `Guard_ForAStrippableBatch_StillRewritesAWindowsPathThatIsNotAnEscape`,
+  `Guard_ForAStrippableBatch_StillRewritesAcrossABlankLine`,
+  `Guard_ForABatchWhoseEveryCommandIsReplaced_DeniesItWhole`,
+  `Entry_ForAStrippableBatch_RecordsTheRewriteRatherThanAPlainDenial`,
+  `Render_ForAStrippableBatch_EmitsUpdatedInputAndNoPermissionDecision`,
+  `Render_ForACommandThatCannotBeSplit_StillEmitsADenyDecision` and
+  `Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole` - a theory over thirteen unsound
+  shapes, each traced to the concrete wrong rewrite it would otherwise produce, and observed failing
+  6 of 6 with the fence neutralized.
+
 ## [0.50.0] - 2026-08-26
 
 ### Changed

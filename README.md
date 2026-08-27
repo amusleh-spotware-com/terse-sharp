@@ -177,9 +177,16 @@ Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outl
 A denial is not only a prohibition. It returns `additionalContext` — the **complete replacement call,
 arguments filled in from the command it just denied** — which Claude Code places beside the tool
 result: `Call this instead: get_file_outline path="src/App/OrderService.cs"`. A positive routing
-instruction at the moment the agent is about to fall back beats a negation. When only ONE segment of a
-compound command is denied, nothing of the command runs and that same line names both halves of the
-re-issue — the tool call for the denied segment, then the allowed remainder to run in `Bash`. `terse install --skill`
+instruction at the moment the agent is about to fall back beats a negation. **A batch is not denied
+whole for one covered command in it.** When a compound command mixes commands the server answers with
+commands it does not, the hook returns `updatedInput` with the covered ones stripped out and no
+`permissionDecision` at all — so the rest of the batch runs under your normal permission rules, and
+`additionalContext` names both what was stripped and the tool call that answers it. That rewrite is
+only attempted where it is provably sound: every top-level separator is `&&`, `;` or a newline, a
+pipeline containing a covered stage is dropped whole, and a command carrying `||`, a background `&`,
+a subshell, a redirect, a substitution, a comment, any backslash escape, a mixed `;`/`&&` run or a
+shell keyword falls back to denying the command as
+before. `terse install --skill`
 ships the skill that teaches the swaps; on any other agent, a short rule in `CLAUDE.md` / `AGENTS.md` /
 `.cursorrules` does the same job.
 

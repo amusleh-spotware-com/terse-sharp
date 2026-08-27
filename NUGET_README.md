@@ -136,9 +136,16 @@ Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outl
 
 A denial is not only a prohibition. It returns `additionalContext` — the **complete replacement call,
 arguments filled in from the command it just denied** — which Claude Code places beside the tool result:
-`Call this instead: get_file_outline path="src/App/OrderService.cs"`. When only ONE segment of a
-compound command is denied, nothing of the command runs and that same line names both halves of the
-re-issue — the tool call for the denied segment, then the allowed remainder to run in `Bash`.
+`Call this instead: get_file_outline path="src/App/OrderService.cs"`. **A batch is not denied whole for
+one covered command in it.** When a compound command mixes commands the server answers with commands it
+does not, the hook returns `updatedInput` with the covered ones stripped out and no `permissionDecision`
+at all — the rest of the batch runs under your normal permission rules, and `additionalContext` names
+both what was stripped and the tool call that answers it. The rewrite is only attempted where it is
+provably sound: every top-level separator is `&&`, `;` or a newline, and a pipeline holding a covered
+stage is dropped whole. A command carrying `||`, a background `&`, a subshell, a redirect, a
+substitution, a comment, any backslash escape, a mixed `;`/`&&` run or a shell keyword is denied
+whole, as before, and that denial names both halves of the
+re-issue.
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them; `dotnet build`/`test`/`format`/`clean`,

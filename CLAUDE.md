@@ -351,6 +351,17 @@ If yes, all four hold, in the same commit:
    A row whose replacement only answers inside a loaded workspace is **scoped** — the git rows check
    the hook payload's `cwd` for a `.sln`/`.slnx`/`.slnf`/`.csproj` at or above it, because the guard
    is installed user-wide and `git status` in a TypeScript repo has no replacement.
+   **"Denies" means the command does not reach `Bash`, not that the whole call is refused.** In a
+   compound command the guard STRIPS the replaced pipelines and returns `updatedInput` with the
+   remainder — `Denied` stays `true` on the verdict, `Render` chooses the shape. So a new row is
+   still written as a plain denial and needs nothing extra; but **never make the rewrite path wider
+   without a fence**. `Fenced` is the whole safety argument: a false negative there hands the user a
+   command that means something else, and three review rounds each found one — a `#` comment
+   promoting commented-out text, a `\`-escaped separator splitting mid-word, and a trailing `&&`
+   before a newline that the blank-pipeline filter deleted along with its `&&`. Every one of them
+   passed the build, the analyzers and the suite. Add the shape to
+   `Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole` and trace the concrete wrong
+   rewrite before you argue it is safe.
 3. **`ToolGuardTests` covers both directions** — the new command denied, and the neighbouring command
    nothing replaces (`dotnet restore`, `git commit`, `git log`) still allowed. A guard that denies a
    command the server cannot answer is worse than no guard.

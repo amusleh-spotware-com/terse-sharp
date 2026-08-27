@@ -1,10 +1,11 @@
+using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TerseSharp.Server;
 
-public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null, string? Replaces = null);
+public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null, string? Replaces = null, string? Rewrite = null);
 
 public static class ToolGuard
 {
@@ -84,15 +85,7 @@ public static class ToolGuard
         if (!verdict.Denied)
             return "{}";
 
-        var hook = new JsonObject
-        {
-            ["hookEventName"] = "PreToolUse",
-            ["permissionDecision"] = "deny",
-            ["permissionDecisionReason"] = verdict.Reason,
-        };
-
-        if (verdict.Routing is { Length: > 0 } routing)
-            hook["additionalContext"] = "Call this instead: " + routing;
+        var hook = verdict.Rewrite is { Length: > 0 } rewrite ? Rewriting(verdict, rewrite) : Denying(verdict);
 
         return new JsonObject { ["hookSpecificOutput"] = hook }.ToJsonString();
     }
@@ -648,7 +641,8 @@ public static class ToolGuard
         return new JsonObject
         {
             ["tool"] = Text(root, "tool_name"),
-            ["denied"] = verdict.Denied,
+            ["denied"] = verdict.Denied && verdict.Rewrite is not { Length: > 0 },
+            ["rewrite"] = verdict.Rewrite,
             ["standDown"] = !verdict.Denied && verdict.Reason.Length is not 0,
             ["routing"] = verdict.Routing,
             ["reason"] = verdict.Reason is { Length: > 0 } reason ? reason : null,
@@ -831,6 +825,161 @@ public static class ToolGuard
     private static GuardVerdict Compound(string command, string? cwd)
     {
         var segments = Segments(command);
+
+        return segments.Length > 1 && Fenced(command) && Splitting(command, cwd) is { } stripped
+            ? stripped
+            : Blocking(segments, command, cwd);
+    }
+
+    private static bool IsSleepCall(string segment) =>
+        IsSleep(Command(segment).FirstOrDefault() ?? string.Empty);
+
+    private static bool OnlyAnded(string command) =>
+        Masked(command).Replace("&&", "  ", StringComparison.Ordinal).AsSpan().IndexOfAny("&|;\n") < 0;
+
+    private readonly record struct Pipeline(string Lead, string Text);
+
+    private readonly record struct Judgement(Pipeline Pipeline, GuardVerdict Verdict);
+
+    private static readonly SearchValues<char> Hazards = SearchValues.Create("(){}`<>$#");
+    private static readonly string[] ShellKeywords =
+        [
+            "for", "foreach", "while", "until", "do", "done", "if", "then",
+        "elif", "else", "fi", "case", "esac", "select", "function",
+    ];
+
+    private static bool Fenced(string command)
+    {
+        var masked = Masked(command);
+
+        return masked.AsSpan().IndexOfAny(Hazards) < 0
+            && !masked.Contains("||", StringComparison.Ordinal)
+            && !Escaping(command.AsSpan())
+            && !Backgrounded(masked.AsSpan())
+            && !Keyworded(masked);
+    }
+
+    private static bool Backgrounded(ReadOnlySpan<char> masked)
+    {
+        for (var index = masked.IndexOf('&'); index >= 0; index = Ampersand(masked, index))
+        {
+            if (!masked[index..].StartsWith("&&", StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static int Ampersand(ReadOnlySpan<char> masked, int index)
+    {
+        var next = masked[(index + 2)..].IndexOf('&');
+
+        return next < 0 ? -1 : index + 2 + next;
+    }
+
+    private static bool Keyworded(string masked) =>
+            Array.Exists(Tokens(masked), token => ShellKeywords.Contains(Bare(token), StringComparer.OrdinalIgnoreCase));
+
+    private static int Divider(ReadOnlySpan<char> text) => text switch
+    {
+        ['&', '&', ..] => 2,
+        [';', ..] or ['\n', ..] => 1,
+        _ => 0,
+    };
+
+    private static (int Index, int Width) NextDivider(ReadOnlySpan<char> masked, int start)
+    {
+        for (var index = start; index < masked.Length; index++)
+        {
+            if (Divider(masked[index..]) is var width and > 0)
+                return (index, width);
+        }
+
+        return (masked.Length, 0);
+    }
+
+    private static List<Pipeline> Pipelines(string command)
+    {
+        var masked = Masked(command).AsSpan();
+        var pipelines = new List<Pipeline>();
+        var lead = string.Empty;
+        var start = 0;
+
+        while (NextDivider(masked, start) is var (index, width) && width > 0)
+        {
+            pipelines.Add(new Pipeline(lead, command[start..index]));
+            lead = command.Substring(index, width);
+            start = index + width;
+        }
+
+        pipelines.Add(new Pipeline(lead, command[start..]));
+
+        return pipelines;
+    }
+
+    private static GuardVerdict Judged(string pipeline, string? cwd)
+    {
+        foreach (var segment in Segments(pipeline))
+        {
+            var verdict = Denial(segment, cwd, false);
+
+            if (verdict.Denied)
+                return verdict;
+        }
+
+        return Allowed;
+    }
+
+    private static string Rejoined(List<Pipeline> kept)
+    {
+        var capacity = 0;
+
+        foreach (var pipeline in kept)
+            capacity += pipeline.Lead.Length + pipeline.Text.Length;
+
+        var builder = new StringBuilder(capacity);
+
+        foreach (var pipeline in kept)
+            builder.Append(builder.Length is 0 ? string.Empty : pipeline.Lead).Append(pipeline.Text);
+
+        return builder.ToString().Trim();
+    }
+
+    private static string Stripped(List<Judgement> dropped, int total)
+    {
+        var names = string.Join(" and ", dropped.ConvertAll(entry => "'" + entry.Pipeline.Text.Trim() + "'"));
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"TerseSharp guard: this is a batch, so the rest of it RAN - only {dropped.Count} of its {total} parts were stripped out, {names}, because the terse-sharp MCP answers them. Exactly what is quoted there produced no output, a whole pipeline at a time; everything else ran, and what followed the stripped part is no longer gated on it. Do not re-issue the quoted commands in Bash.");
+    }
+
+    private static GuardVerdict? Splitting(string command, string? cwd)
+    {
+        var pipelines = Pipelines(command);
+
+        if (!Uniform(pipelines))
+            return null;
+
+        var judged = pipelines
+            .FindAll(pipeline => pipeline.Text.Trim().Length > 0)
+            .ConvertAll(pipeline => new Judgement(pipeline, Judged(pipeline.Text, cwd)));
+        var kept = judged.FindAll(entry => !entry.Verdict.Denied);
+        var dropped = judged.FindAll(entry => entry.Verdict.Denied);
+
+        if (dropped.Count is 0 || kept.Count is 0)
+            return null;
+
+        return dropped[0].Verdict with
+        {
+            Reason = Stripped(dropped, judged.Count),
+            Routing = Routes(dropped),
+            Rewrite = Rejoined(kept.ConvertAll(entry => entry.Pipeline)),
+        };
+    }
+
+    private static GuardVerdict Blocking(string[] segments, string command, string? cwd)
+    {
         var compound = segments.Length > 1;
         var allowed = new List<string>(segments.Length);
         var calls = new List<string>();
@@ -856,11 +1005,58 @@ public static class ToolGuard
         return refused is null ? Allowed : refused with { Routing = Reissue(calls, allowed, OnlyAnded(command)) };
     }
 
-    private static bool IsSleepCall(string segment) =>
-        IsSleep(Command(segment).FirstOrDefault() ?? string.Empty);
+    private static JsonObject Denying(GuardVerdict verdict)
+    {
+        var hook = new JsonObject
+        {
+            ["hookEventName"] = "PreToolUse",
+            ["permissionDecision"] = "deny",
+            ["permissionDecisionReason"] = verdict.Reason,
+        };
 
-    private static bool OnlyAnded(string command) =>
-        Masked(command).Replace("&&", "  ", StringComparison.Ordinal).AsSpan().IndexOfAny("&|;\n") < 0;
+        if (verdict.Routing is { Length: > 0 } routing)
+            hook["additionalContext"] = "Call this instead: " + routing;
+
+        return hook;
+    }
+
+    private static JsonObject Rewriting(GuardVerdict verdict, string rewrite) => new()
+    {
+        ["hookEventName"] = "PreToolUse",
+        ["updatedInput"] = new JsonObject { ["command"] = rewrite },
+        ["additionalContext"] = verdict.Reason + Calling(verdict.Routing),
+    };
+
+    private static string Calling(string? routing) =>
+            routing is { Length: > 0 } ? " Call this instead: " + routing : string.Empty;
+
+    private static bool Escaping(ReadOnlySpan<char> command)
+    {
+        var index = command.IndexOf('\\');
+
+        while (index >= 0)
+        {
+            if (index + 1 == command.Length || Escapable.Contains(command[index + 1]))
+                return true;
+
+            var next = command[(index + 2)..].IndexOf('\\');
+
+            index = next < 0 ? -1 : index + 2 + next;
+        }
+
+        return false;
+    }
+
+    private static readonly SearchValues<char> Escapable = SearchValues.Create("\"'`\\;&|<>$(){}# \t\r\n");
+
+    private static bool Uniform(List<Pipeline> pipelines) =>
+            pipelines.Select(pipeline => pipeline.Lead)
+                .Where(lead => lead.Length is not 0)
+                .Distinct(StringComparer.Ordinal)
+                .Count() is <= 1;
+
+    private static string Routes(List<Judgement> dropped) =>
+            string.Join("  then  ", dropped.Select(entry => entry.Verdict.Routing).OfType<string>().Distinct(StringComparer.Ordinal));
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

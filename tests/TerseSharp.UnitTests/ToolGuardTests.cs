@@ -861,9 +861,13 @@ public sealed class ToolGuardTests
     [Fact]
     public void Guard_ForACompoundCommandWhoseLastSegmentIsReplaced_SaysNoPartOfItRan()
     {
-        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git add src && git commit -m \"x\" && git show --stat HEAD" });
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git add src || git show --stat HEAD" },
+            Fixtures.RepositoryRoot);
 
         Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
         Assert.Contains("git show --stat HEAD", verdict.Reason, StringComparison.Ordinal);
         Assert.Contains("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
     }
@@ -1004,12 +1008,13 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git fetch origin && git tag --list && gh auth status" },
+            new JsonObject { ["command"] = "echo done > out.txt && git tag --list && gh auth status" },
             Fixtures.RepositoryRoot);
 
         Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
         Assert.Contains("history tags=true", verdict.Routing!, StringComparison.Ordinal);
-        Assert.Contains("git fetch origin && gh auth status", verdict.Routing!, StringComparison.Ordinal);
+        Assert.Contains("echo done > out.txt && gh auth status", verdict.Routing!, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1074,5 +1079,174 @@ public sealed class ToolGuardTests
 
         Assert.True(verdict.Denied);
         Assert.DoesNotContain("re-issue the allowed remainder", verdict.Routing!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForAStrippableBatch_RewritesItInsteadOfDenyingTheWholeCommand()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git add src && git commit -m \"x\" && git show --stat HEAD" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("git add src && git commit -m \"x\"", verdict.Rewrite);
+        Assert.Contains("the rest of it RAN", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("'git show --stat HEAD'", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForAStrippableBatch_NamesTheTerseCallAndNoReIssueClause()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git fetch origin && git tag --list && gh auth status" },
+            Fixtures.RepositoryRoot);
+
+        Assert.Equal("history tags=true", verdict.Routing);
+        Assert.Equal("git fetch origin && gh auth status", verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Guard_ForAStrippableBatch_DropsTheWholePipelineHoldingTheDeniedStage()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git branch -a && git status --short | head -20" },
+            Fixtures.RepositoryRoot);
+
+        Assert.Equal("git branch -a", verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Guard_ForAStrippableBatch_KeepsThePipesAndMarkersOfTheCommandsItLetsRun()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git branch -a | head -40 && echo mid && git log --oneline -3 && git remote -v" },
+            Fixtures.RepositoryRoot);
+
+        Assert.Equal("git branch -a | head -40 && echo mid && git remote -v", verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Guard_ForAStrippableBatchSeparatedBySemicolons_KeepsTheSeparator()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "echo one; git log --oneline -3; echo two" },
+            Fixtures.RepositoryRoot);
+
+        Assert.Equal("echo one; echo two", verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Guard_ForABatchWhoseEveryCommandIsReplaced_DeniesItWhole()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git status --short && git diff --stat" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+        Assert.Contains("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("for f in a b; do echo hi; done; git log --oneline -3")]
+    [InlineData("git branch -a && git fetch || git log --oneline -3")]
+    [InlineData("echo done > out.txt && git log --oneline -3")]
+    [InlineData("echo $(date) && git log --oneline -3")]
+    [InlineData("(echo hi) && git log --oneline -3")]
+    [InlineData("git log --oneline -3 && echo hi & echo bye")]
+    [InlineData("git log --oneline -3 # && echo hi")]
+    [InlineData("cat Foo.cs \\\n  Bar.txt && echo hi")]
+    [InlineData("printf \"a \\\"x ; git log --oneline -3 ; y\\\" b\" && echo hi")]
+    [InlineData("echo \"a \\\" ; git log --oneline -3\" && echo hi")]
+    [InlineData("echo a\\;git log --oneline -3 && echo hi")]
+    [InlineData("test -f foo ; dotnet build && rm -rf artifacts")]
+    [InlineData("git log --oneline -3\nnpm test &&\nnpm publish")]
+    public void Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Render_ForAStrippableBatch_EmitsUpdatedInputAndNoPermissionDecision()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git branch -a && git log --oneline -3 && git remote -v" },
+            Fixtures.RepositoryRoot);
+
+        var hook = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!.AsObject();
+
+        Assert.Equal("git branch -a && git remote -v", hook["updatedInput"]!["command"]!.GetValue<string>());
+        Assert.False(hook.ContainsKey("permissionDecision"));
+        Assert.Contains("history", hook["additionalContext"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForACommandThatCannotBeSplit_StillEmitsADenyDecision()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git fetch origin || git log --oneline -3" },
+            Fixtures.RepositoryRoot);
+
+        var hook = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!.AsObject();
+
+        Assert.Equal("deny", hook["permissionDecision"]!.GetValue<string>());
+        Assert.False(hook.ContainsKey("updatedInput"));
+    }
+
+    [Fact]
+    public void Entry_ForAStrippableBatch_RecordsTheRewriteRatherThanAPlainDenial()
+    {
+        const string payload = """
+            {
+              "tool_name": "Bash",
+              "session_id": "s-1",
+              "tool_input": { "command": "git branch -a && git log --oneline -3" }
+            }
+            """;
+
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git branch -a && git log --oneline -3" },
+            Fixtures.RepositoryRoot);
+
+        var line = ToolGuard.Entry(payload, verdict);
+
+        Assert.Contains("\"denied\":false", line, StringComparison.Ordinal);
+        Assert.Contains("\"rewrite\":\"git branch -a\"", line, StringComparison.Ordinal);
+        Assert.Contains("\"standDown\":false", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForAStrippableBatch_StillRewritesAWindowsPathThatIsNotAnEscape()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "gh run list && cat src\\App\\Notes.txt && git log --oneline -3" },
+            Fixtures.RepositoryRoot);
+
+        Assert.Equal("gh run list && cat src\\App\\Notes.txt", verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Guard_ForAStrippableBatch_StillRewritesAcrossABlankLine()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git log --oneline -3\n\nnpm test\nnpm pack" },
+            Fixtures.RepositoryRoot);
+
+        Assert.Equal("npm test\nnpm pack", verdict.Rewrite);
     }
 }

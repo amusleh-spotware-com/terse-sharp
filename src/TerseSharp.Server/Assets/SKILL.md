@@ -188,14 +188,13 @@ denial is not a reason to try a different spelling of the same shell command —
 Run that call verbatim; it is chosen from the file kind, so a `.xaml` read routes to `xaml_outline`
 and a `.resx` read to `resx_get`, not to `get_file_outline`.
 
-`dotnet format` and `dotnet clean` are covered too, and the guard names the **exact** replacement per
-sub-command: `dotnet format analyzers` -> `cleanup fix=analyzers` (`cleanup verify=true fix=analyzers`
-for `--verify-no-changes`), `dotnet format style` -> `cleanup fix=style`, a bare `dotnet format` ->
-`format` for whitespace plus `cleanup fix=all`, and `dotnet clean` -> `clean`. Those two verify modes
-check exactly the rule sets the two CI commands check, so there is never a reason to shell out for
-them. `dotnet list package` is covered too and routes to `package_list`, whose `vulnerable=true` and
-`outdated=true` answer from the same restored graph. `dotnet restore`, `pack`, `publish`, `run` and
-`tool` are **not** covered: no TerseSharp tool replaces them, so shelling out is the right call.
+`dotnet format` and `dotnet clean` are covered too, with the **exact** replacement per sub-command:
+`dotnet format analyzers` -> `cleanup fix=analyzers` (add `verify=true` for `--verify-no-changes`),
+`dotnet format style` -> `cleanup fix=style`, a bare `dotnet format` -> `format` plus `cleanup fix=all`,
+and `dotnet clean` -> `clean`. Those two verify modes check exactly the rule sets the two CI commands
+check, so never shell out for them. `dotnet list package` routes to `package_list`
+(`vulnerable=true`, `outdated=true`, same restored graph). `dotnet restore`, `pack`,
+`publish`, `run` and `tool` are **not** covered: nothing here replaces them.
 
 **A bare `sleep` is denied too, and nothing replaces it.** A segment whose COMMAND WORD is `sleep`,
 outside a `while`/`until`/`for` loop, is refused: 156 such calls burned **7.0 h** of wall clock in one
@@ -204,10 +203,12 @@ re-invokes you when it finishes, and when you need its result and have nothing e
 turn** — stopping is free, sleeping is billed. The one allowed shape is the pause inside a loop that
 also detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; done`.
 
-**A denial of ONE segment of a compound command hands back the whole re-issue.** No part of it ran, and
-`Call this instead:` names the tool call for each denied segment **and** the allowed remainder to run in
-`Bash`. The shell-text denial is priced too: that class cost **18.1 h — 51.5% of all `Bash` wall time**
-in one measured week, at a 13.2% error rate.
+**One replaced command no longer kills a batch.** The guard strips those commands, rewrites the
+rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
+rewrites only sound shapes: uniform `&&`/`;`/newline separators, a whole pipeline at a time. `||`, a background `&`, a subshell, a redirect, a substitution, a comment, a backslash escape, a mixed `;`/`&&` run or a shell keyword is **denied
+whole** — `NO part of the command ran`, and `Call this instead:` names each denied segment's tool call
+**and** the allowed remainder for `Bash`. That class cost **18.1 h — 51.5% of all `Bash` wall time** in
+one week, at a 13.2% error rate.
 
 **The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff`,
 `git diff <ref>` and the whole `git diff --cached` family are served by `changed_files`
