@@ -340,7 +340,7 @@ public sealed class EditTools(ToolContext context)
             : error.Render();
 
     private static bool Holdable(TerseErrorCode code) =>
-            code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol;
+            code is TerseErrorCode.CompileRegression or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol;
 
     private static string Note(TerseErrorCode code, Carry carry) => code switch
     {
