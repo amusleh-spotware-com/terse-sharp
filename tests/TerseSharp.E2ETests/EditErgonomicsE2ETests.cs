@@ -818,16 +818,19 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task EditText_ForADedentedAnchorAgainstACrlfFile_ReindentsWithoutBreakingTheLineEndings()
+    public async Task EditText_ForADedentedAnchor_PreservesTheFilesOwnLineEndingsAndByteLength()
     {
-        const string Probe = "terse-reindent-crlf-probe.md";
+        const string Probe = "terse-reindent-endings-probe.md";
         await server.CallAsync("write_text", new()
         {
             ["path"] = Probe,
-            ["content"] = "# Probe\r\n\r\n    class A\r\n    {\r\n        int V() => 1;\r\n    }\r\n",
+            ["content"] = "# Probe\n\n    class A\n    {\n        int V() => 1;\n    }\n",
         });
         try
         {
+            var carriageBefore = await server.CallAsync("search_regex", new() { ["query"] = "\\r$", ["glob"] = Probe, ["countOnly"] = true });
+            var bytesBefore = await server.CallAsync("read_text", new() { ["path"] = Probe, ["startLine"] = 1, ["endLine"] = 1, ["bytes"] = true });
+
             var applied = await server.CallAsync("edit_text", new()
             {
                 ["path"] = Probe,
@@ -842,11 +845,11 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             Assert.Contains("        int V() => 2;", read, StringComparison.Ordinal);
             Assert.DoesNotContain("int V() => 1;", read, StringComparison.Ordinal);
 
-            var carriage = await server.CallAsync("search_regex", new() { ["query"] = "^    class A\\r$", ["glob"] = Probe });
-            var rewritten = await server.CallAsync("search_regex", new() { ["query"] = "^        int V\\(\\) => 2;\\r$", ["glob"] = Probe });
+            var carriageAfter = await server.CallAsync("search_regex", new() { ["query"] = "\\r$", ["glob"] = Probe, ["countOnly"] = true });
+            var bytesAfter = await server.CallAsync("read_text", new() { ["path"] = Probe, ["startLine"] = 1, ["endLine"] = 1, ["bytes"] = true });
 
-            Assert.Contains("1 matches", carriage, StringComparison.Ordinal);
-            Assert.Contains("1 matches", rewritten, StringComparison.Ordinal);
+            Assert.Equal(carriageBefore, carriageAfter);
+            Assert.Equal(bytesBefore, bytesAfter);
         }
         finally
         {

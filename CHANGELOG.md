@@ -69,6 +69,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `NO part of the command ran` used to name only the replacing tool, so a 25-line commit message had to
   be re-sent verbatim; it now reads `…, because it carries '<' at offset 41, in "…" - re-issue that ONE
   segment on its own`. The rewrite path was not widened. Closes `I431`.
+- **Two new tests were made checkout-independent.** `SnippetSearchTests` held its fixture in raw string
+  literals, whose newlines are whatever the runner checked the file out as - CRLF on the windows leg,
+  LF locally - so an assertion comparing a matched slice against a `\n`-escaped expectation was red on
+  windows only. The fixture is now escaped `\n` strings, which the compiler fixes on every platform.
+  The line-ending E2E made the mirror mistake in the other direction: it wrote a probe with `\r\n` and
+  asserted `\r$`, but `write_text` gives a NEW file the workspace's dominant ending, so on the LF legs
+  the probe was never CRLF and the assertion could not match. It now asserts that the edit leaves the
+  file's own CR-terminated line count and byte length unchanged, whatever those are - still
+  mutation-sensitive on a CRLF checkout (removing `LineEndings.Adopt` takes the count from 6 to 3) and
+  never wrong on an LF one.
+
 
 ## [0.52.0] - 2026-08-28
 

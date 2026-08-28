@@ -4,22 +4,9 @@ namespace TerseSharp.UnitTests;
 
 public sealed class SnippetSearchTests
 {
-    private const string Source = """
-        class A
-        {
-            public int Value()
-            {
-                return 1;
-            }
-        }
-        """;
+    private const string Source = "class A\n{\n    public int Value()\n    {\n        return 1;\n    }\n}";
 
-    private const string Dedented = """
-        public int Value()
-        {
-            return 1;
-        }
-        """;
+    private const string Dedented = "public int Value()\n{\n    return 1;\n}";
 
     [Fact]
     public void Find_ForADedentedAnchor_MatchesTheIndentedRegion()
