@@ -12,7 +12,10 @@ public readonly record struct TextSearchRequest(
     string? Root = null,
     string? Exclude = null,
     bool MatchesOnly = false,
-    bool CountOnly = false)
+    bool CountOnly = false,
+    bool Containers = false,
+    bool Word = false,
+    bool Chosen = false)
 {
     public const int MaxContext = 5;
 

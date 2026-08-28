@@ -334,7 +334,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         var picked = await server.CallAsync("history", new() { ["contains"] = "SubmitTwice", ["maxResults"] = 20 });
 
         Assert.StartsWith("20 commits", all, StringComparison.Ordinal);
-        Assert.Contains("more commits match than were listed", all, StringComparison.Ordinal);
+        Assert.DoesNotContain("raise maxResults=", all, StringComparison.Ordinal);
         Assert.DoesNotContain("/21", all, StringComparison.Ordinal);
         Assert.True(picked.Split('\n').Length < all.Split('\n').Length, picked);
     }

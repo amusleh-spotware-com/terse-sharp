@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-08-28
+
 ### Added
 
 - **`BacklogShapeTests` now census-gates backlog id uniqueness.** The rule that ids are "allocated in
@@ -17,6 +19,107 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   existed (`I28`, `I38`, `I70`, `I74`, `I81`, `I81/I82`, `I93`, `I216`, `I217`, `I314`) and which the
   append-only archive rule forbids renumbering. A second test asserts that set only ever shrinks, so a
   new duplicate is a build failure rather than a historical row.
+- **`search_text` and `search_regex` name the declaration each hit sits in.** `containers=true` prints
+  the C# declaration containing every hit - `Type.Member`, read from syntax - between the position and
+  the matched line, so a text hit is an id `get_symbol_source` takes rather than a coordinate that cost
+  an outline plus a ranged read to resolve. Only a `.cs` file carries one, and it is refused beside
+  `countOnly=`, which returns no matched line. Closes `I392`.
+- **`search_text word=true` matches whole words.** A literal is kept only where the characters either
+  side of it are neither a letter, a digit nor an underscore, so a short literal no longer drags in
+  every longer identifier that contains it; it applies to `query=` and to every entry of `queries=`.
+  `search_regex` answers the same question with `\b` and does not declare it. Closes `I393`.
+- **`edit_text force=true` is documented as the sanctioned way to amend a declaration's attributes.**
+  Editing a tool `[Description]` through `replace_symbol` costs the whole declaration - measured at
+  ~1 175 tokens for one `read_text` parameter - while a short unique anchor addresses the same
+  attribute for about 30. The tool description, `SKILL.md` and `CLAUDE.md` now say so, and
+  `FileToolsE2ETests.EditText_WithForce_AmendsADeclarationsAttributeWithoutResendingTheDeclaration`
+  pins the path. Closes `I394`.
+- **A `CS0104` rollback names the `usings=` entry that caused it.** When every new error is an
+  ambiguity and the added import declares one of the candidates, the remedy now reads `the ambiguity
+  was introduced by usings=["X"] which this edit added - retry with usings=[] and the retryWith token
+  below to drop it`, instead of the generic "fix the edit" that named nothing actionable. `usings=[]`
+  on a retry already dropped the held imports; that is now documented and pinned by a test. Closes
+  `I395`.
+- **A rollback remedy names only parameters the rejecting tool declares.** `write_text` and `edit_text`
+  take neither `usings=` nor `retryWith=`, so a missing-import rollback under them no longer answers
+  `retry with usings=[...] and the retryWith token below` - an argument their schema refuses - and says
+  to put the directive in the content instead. The same scoping covers the broken-caller and the
+  generic arms, so a `write_text` or `razor_*` rollback is no longer told to send a `replace_symbol
+  symbolIds/declarations` batch it cannot send. Closes `I404`.
+
+- **A listing no longer argues with a `maxResults=` you passed.** `search_text`, `search_regex`,
+  `find_files`, `changed_files` and `history` steered you to raise a cap you had just chosen -
+  `history tags=true maxResults=3` answered `3 tags` and then `more tags exist than were listed - raise
+  maxResults=`. The count that says the cap bit stays; the advice to widen it is suppressed when the
+  bound came from the caller. Closes `I409`.
+- **`history describe=true` answers HEAD's position.** Nothing answered `git describe` - the nearest
+  tag, the commits since it, the short sha and whether the tree is dirty - which is the MinVer question
+  this repo asks at every release and the one a `git tag --list` denial used to take down with it. One
+  line, through the same `GitRunner` as every other git answer, and the guard now denies `git describe`
+  naming it. Closes `I408`.
+- **A denied compound always names the segments nothing replaces.** The advisory text printed the
+  allowed remainder only when the whole command was `&&`-chained, so an unfenceable compound - one
+  carrying a redirect or a pipe - was denied whole with no word about the part the server cannot
+  answer, while the denial text promised otherwise. `Fenced` still governs what may be REWRITTEN and
+  re-executed; the advisory now lists every segment either way, chained when that is sound and one by
+  one when it is not. Closes `I407`.
+- **`diff_text` and `diff_symbols` take `staged=true`.** A `git diff --cached` asked for its HUNK TEXT
+  was denied by the guard and handed `changed_files staged=true`, which answers per-file counts - the
+  one question a pre-commit review must ask and the surface could not answer. Both tools now prepend
+  `--cached` exactly as `changed_files` does, the guard row names all three staged forms, and the
+  `baseRef` description on both is corrected: an empty `baseRef` compares the working tree against the
+  INDEX, not against HEAD, so a fully staged change set reads `0 lines`. Closes `I406`.
+- **`allowPolicy` reaches every tool the code policy can block.** `write_text`, `extract_interface`,
+  `move_type_to_file`, `move_type_to_namespace` and `change_signature` built their `EditOptions` with
+  `AllowPolicy` defaulted false, so a policy-violating refactor - `move_type_to_file` on a legacy type
+  - was unbypassable. Closes `I401`.
+- **The `allowPolicy` census discovers its subject instead of listing it.**
+  `SchemaCensusE2ETests.EveryToolTheCodePolicyCanBlock_TakesAllowPolicy` reads `tools/list`, takes
+  every tool declaring `dryRun`, and fails on one that declares no `allowPolicy` and sits in no
+  reasoned exemption - replacing a test that named five tools by hand and could not see the five it
+  was missing. `ToolCensus.PolicyExempt` carries 23 entries, each with a written reason and ratcheted
+  by `MaxPolicyExemptions`. Closes `I402`.
+- **The E2E suite runs at half the machine's lanes.** `tests/TerseSharp.E2ETests/xunit.runner.json`
+  sets `maxParallelThreads` to `0.5x`, which on a two-to-four-core CI runner is what stops several
+  server fixtures, MSBuild loads and background update checks from contending for the same cores - the
+  measured cause of a windows-only red on a different pre-existing test almost every release attempt.
+  It scales with the machine, so a developer box keeps half its cores rather than a fixed cap. Closes
+  `I400` together with the `.csproj` serialization above.
+- **The batch-build-timeout test no longer races the runner.** `fixtures/SelectionSolution` gained a
+  `Directory.Build.targets` whose `TerseStallBuild` target sleeps 90 s when `-p:TerseStallBuild=true`
+  is passed, and the test passes that property, so the build phase cannot finish inside the budget on
+  any runner. Before, the test drove a two-project batch with `timeoutSeconds=1` and hoped the build
+  was the slow half - on the macos leg of CI run 33065740734 the tiny fixtures built inside the second
+  and the RUN timed out instead, reddening a leg the change set had not touched. Closes `I399`.
+- **A locked `build` classifies a bare `dotnet` holder against the process table.** Telling "another
+  session's live E2E run" from "a stranded fixture host" cost two `Get-CimInstance` calls (~700 tokens);
+  the holder line now names any test host running out of the same tree, by name and pid, and says to
+  wait for it - or states that none is running, so stopping the holder is the safe move. The
+  association is by tree, not by parentage, and is tagged `HEURISTIC` for that reason. The match is on
+  the executable's file name, not on `Process.ProcessName`, which Linux truncates to 15 characters and
+  macOS to 16 - `TerseSharp.UnitTests` would otherwise never match off Windows. Closes `I405`.
+- **Two concurrent writes that add a `.cs` file to the same project no longer race its `.csproj`.**
+  `LoadedWorkspace.TryApplyAsync` now takes a per-project-path gate (`ProjectFileGate`) around the
+  snapshot, the apply and the restore, so two adds under one SDK-globbing project cannot both be
+  replacing that file; a losing race answers `EditConflict` rather than letting an
+  `UnauthorizedAccessException` surface as `ERROR InvalidArgument`, whose remedy - "use search_symbols
+  or find_files to get a valid id or path" - was a confidently wrong answer for a write race. Closes
+  `I398`.
+- **`read_text bytes=true` answers under `ref=` too.** The stamp was silently dropped on the `ref=`
+  shape, making the parameter's own "on every shape read_text returns" false there. It now reports the
+  BLOB's size at that revision through `git cat-file -s` - not `Encoding.UTF8.GetByteCount` of the
+  decoded text, which a CRLF checkout makes wrong - and answers `bytes=UNRESOLVED` rather than nothing
+  when git cannot size it. Closes `I397`.
+- **`get_symbol_source symbolIds=` keeps its batch contract at length one.** A single unresolvable id
+  answered `ERROR SymbolNotFound` instead of the batch's own `NOT_RESOLVED` line, so a caller had to
+  handle two answer shapes for one parameter; `symbolIds=` now routes through the batch renderer
+  whatever its length. Closes `I396`.
+
+### Changed
+
+- **A rejection's `retryWith` token is alone on its own last line.** The sentence explaining what is
+  held moved to the line above it, so reading the token to the end of the line - the obvious
+  extraction, and the one `SKILL.md` invites - can no longer capture the note. Closes `I403`.
 
 
 ## [0.51.0] - 2026-08-27
@@ -4769,7 +4872,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.51.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.52.0...HEAD
+[0.52.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.52.0
 [0.51.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.51.0
 [0.50.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.50.0
 [0.49.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.49.0

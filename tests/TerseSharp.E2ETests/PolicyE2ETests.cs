@@ -93,19 +93,6 @@ public sealed class PolicyE2ETests : IAsyncLifetime
         }
     }
 
-    [Fact]
-    public async Task ToolsList_ForEveryEditToolThePolicyGates_AdvertisesAllowPolicy()
-    {
-        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
-
-        Assert.All(
-            ["replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol"],
-            name => Assert.Contains(
-                "allowPolicy",
-                tools.Single(tool => string.Equals(tool.Name, name, StringComparison.Ordinal)).JsonSchema.ToString(),
-                StringComparison.Ordinal));
-    }
-
     private static string Long() =>
         "public int Long()\n{\n" + string.Concat(Enumerable.Range(0, 10).Select(index => "    var a" + index.ToString(CultureInfo.InvariantCulture) + " = " + index.ToString(CultureInfo.InvariantCulture) + ";\n")) + "    return 0;\n}";
 
@@ -170,4 +157,41 @@ public sealed class PolicyE2ETests : IAsyncLifetime
 
         return length < 0 ? rejected[start..] : rejected.Substring(start, length);
     }
+
+    [Fact]
+    public async Task WriteText_WithContentTheProjectPolicyRejects_IsRolledBackUnlessAllowPolicyIsPassed()
+    {
+        const string probe = "src/Fixture.Policy/PolicyWriteProbe.cs";
+        const string content = "namespace Fixture.Policy;\n\npublic sealed class PolicyWriteProbe\n{\n    public int Go() => 1;\n}\n";
+
+        try
+        {
+            var rejected = await WrittenAsync(probe, content, allowPolicy: false);
+            var applied = await WrittenAsync(probe, content, allowPolicy: true);
+
+            Assert.Contains("ERROR", rejected, StringComparison.Ordinal);
+            Assert.Contains("TERSE105", rejected, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("WARNING policy overridden", applied, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync(
+                "write_text",
+                new() { ["path"] = probe, ["delete"] = true, ["force"] = true },
+                TestContext.Current.CancellationToken);
+        }
+    }
+
+    private Task<string> WrittenAsync(string path, string content, bool allowPolicy) =>
+        server.CallAsync(
+            "write_text",
+            new()
+            {
+                ["path"] = path,
+                ["content"] = content,
+                ["force"] = true,
+                ["allowPolicy"] = allowPolicy,
+            },
+            TestContext.Current.CancellationToken);
 }

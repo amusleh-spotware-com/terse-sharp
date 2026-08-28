@@ -7,7 +7,7 @@ namespace TerseSharp.UnitTests;
 public sealed class LoadedWorkspacePartialApplyTests
 {
     [Fact]
-    public async Task TryApplyAsync_WhenOneDocumentCannotBeWritten_LeavesTheSolutionMatchingDisk()
+    public async Task TryApplyAsync_WhenOneDocumentCannotBeWritten_AnswersFalseAndLeavesTheSolutionMatchingDisk()
     {
         using var temporary = TemporarySolution.Create();
         using var registry = new WorkspaceRegistry(watch: false);
@@ -29,13 +29,14 @@ public sealed class LoadedWorkspacePartialApplyTests
 
         Unwritable(last.FilePath!);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => workspace.TryApplyAsync(
+        var applied = await workspace.TryApplyAsync(
             updated,
             [first.Id, last.Id],
-            TestContext.Current.CancellationToken));
+            TestContext.Current.CancellationToken);
 
         var onDisk = await File.ReadAllTextAsync(first.FilePath!, TestContext.Current.CancellationToken);
 
+        Assert.False(applied);
         Assert.Contains("// rewritten", onDisk, StringComparison.Ordinal);
 
         var known = await workspace.Solution

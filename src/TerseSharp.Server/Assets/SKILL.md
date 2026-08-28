@@ -68,6 +68,9 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `grep -n -e A -e B -e C` / one search per literal | `search_text(queries: ["I175", "I176", "I177"])` | up to 10 literals in **one** pass over the same file set; every record carries `q1`..`qN` for the position of its literal in `queries=`, which a regex alternation cannot tell you. A line matching several is **one** record tagged `q1,q3` in query order, so a tag absent from a record means that literal is absent from that line. No legend is echoed back — you passed the array |
 | **Files** | a search that keeps hitting a folder you do not want | `search_text(query, exclude: ".research/**")` | dropped after `glob=` has selected, so one call answers what two used to |
 | **Files** | `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
+| **Files** | a text hit, then "which declaration is that line in?" | `search_text(query, containers: true)` / `search_regex(query, containers: true)` | names the C# declaration each hit sits in — `Type.Member`, from syntax — between the position and the matched line, so the record is an id `get_symbol_source` takes and no outline plus ranged read follows. Only a `.cs` file carries one; refused beside `countOnly:` |
+| **Files** | `grep -w` / a short literal that drags in every longer identifier | `search_text(query, word: true)` | keeps a literal only where the characters either side are neither a letter, a digit nor `_`; `search_regex` answers it with `\b` and does not declare it |
+| **Edits** | change a declaration's **attributes** — a tool `[Description]`, an `[Obsolete]` — without re-sending it | `edit_text(path, force: true, oldText: "<short unique fragment>")` | the sanctioned attribute edit: an anchor costs ~30 tokens where `replace_symbol` re-sends the whole declaration (~1 175 tokens for one `[Description]`). **Not compile-gated** - `edit_text` writes straight through, so `analyze` the file after |
 | **Files** | `grep -o` | `search_regex(query, matchesOnly: true)` | prints the matched span instead of the whole line; compose with `unique: true` for "which distinct values of this shape exist". **`search_text` refuses it** — a literal's matched span is the literal you passed |
 | **Files** | `grep -c` / "is X in these files at all?" | `search_text(query, countOnly: true)` | ONE line per file — path and match count, plus `q1=N` per `queries=` entry — and no matched text. Refused beside `matchesOnly=`, `unique=`, `context=` |
 | **Files** | `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` | an absolute directory outside every workspace, tagged `outside-workspace` |
@@ -114,8 +117,10 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Projects** | editing a `.sln`/`.slnx` by hand | `solution_add_project` · `solution_remove_project` | the solution file only, no MSBuild evaluation |
 | **Projects** | "which projects does this solution contain?" for a solution that is **not** loaded | `solution_projects(path: …)` | reads the `.slnx`, `.sln` or `.slnf` directly and loads nothing, so a fixture-scoped question does not cost a `load_workspace` that makes every later un-hinted call ambiguous |
 | **Git** | `Bash: git log` / `git show --stat` | `history` | commits touching a path, one line each - short sha, date, author, subject - `baseRef=` for a ref or a range, `contains=` for git's pickaxe (only the commits whose diff added or removed that literal), `message=` for the subject grep, and `commit=<sha>` for one commit's per-file stat. `git blame` stays on the shell: it ran **once** in 683 sessions |
+| **Git** | `Bash: git describe` | `history(describe: true)` | HEAD's position in one line - `tag=`, `ahead=`, `sha=`, `dirty=` - which is the MinVer question a release asks; creating or verifying a tag stays on the shell |
 | **Git** | `Bash: git tag --list` / `git tag -l "v*"` | `history(tags: true)` | every tag newest version first, one line each - name, the short sha it names, its date - bounded by `maxResults`; refused beside `baseRef=`, `path=`, `contains=`, `message=` or `commit=` rather than ignoring them, and creating, annotating or deleting a tag stays on the shell |
-| **Git** | `Bash: git diff --cached` / `git status --untracked-files=no` | `changed_files(staged: true)` · `changed_files(untracked: false)` | `staged=true` reads the INDEX against `HEAD` - or against `baseRef=` - which is what a pre-commit check asks; `untracked=false` answers tracked changes only |
+| **Git** | `Bash: git diff --cached` for its hunk text or its declarations | `diff_symbols(staged: true)` · `diff_text(staged: true)` | the index against `HEAD`, which is what a pre-commit review asks; without it a bare `diff` compares the working tree against the INDEX, so a fully staged change set answers nothing |
+| **Git** | `Bash: git diff --cached --name-only` / `git status --untracked-files=no` | `changed_files(staged: true)` · `changed_files(untracked: false)` | `staged=true` reads the INDEX against `HEAD` - or against `baseRef=` - which is what a pre-commit check asks; `untracked=false` answers tracked changes only |
 | **Git** | `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, `path=` scopes it to one pathspec on a shared tree, and `exclude=` drops what a pathspec cannot leave out - `exclude: ".research/**"` for another session's notes; an excluded file is not counted |
 | **Git** | `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
 | **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `paths=[...]` takes up to 10 pathspecs in the same git invocation, `maxLines=` caps it at 1000 and a truncated answer names the exact `maxLines=` that returns the rest |
@@ -210,13 +215,19 @@ also detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; d
 rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
 rewrites only sound shapes: uniform `&&`/`;`/newline separators, a whole pipeline at a time. `||`, a background `&`, a subshell, a redirect, a substitution, a comment, a backslash escape, a mixed `;`/`&&` run or a shell keyword is **denied
 whole** — `NO part of the command ran`, and `Call this instead:` names each denied segment's tool call
-**and** the allowed remainder for `Bash`. That class cost **18.1 h — 51.5% of all `Bash` wall time** in
+**and** every segment nothing replaces — chained with `&&` when re-issuing them together is sound,
+listed one by one when it is not, because printing a segment executes nothing. That class cost **18.1 h — 51.5% of all `Bash` wall time** in
 one week, at a 13.2% error rate.
+
+**A `maxResults=` you pass is taken as your bound.** `search_text`, `search_regex`, `find_files`,
+`changed_files` and `history` still say the cap bit - `2/38 matches truncated` - but never advise
+raising a number you chose; the steer returns as soon as you drop the argument.
 
 **The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff`,
 `git diff <ref>` and the whole `git diff --cached` family are served by `changed_files`
 (`staged=true` for the index, `untracked=false` for `--untracked-files=no`), `diff_symbols` and
-`diff_text` — all three take
+`diff_text` — **all three take `staged=true`**, so a `--cached` diff asked for its declarations or its
+hunk text is answered rather than handed the counts tool, and all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
@@ -617,7 +628,17 @@ that answers nothing, and the clip always names `next: startLine=`.
    declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
    Better still, do not earn the rollback: `replace_symbol add=[…]` appends the helper in the same
    edit. **`add=`, `addTo=` and `usings=` are held with the token too**, so a retry names the token
-   and nothing else; pass any of them again only to override what is held.
+   and nothing else; pass any of them again only to override what is held, and **pass `usings: []` to
+   DROP the imports it holds** - an empty list means "none", not "keep what you sent".
+   **The token is the last line of the rejection and is alone on it**, so reading it to the end of the
+   line is safe; the sentence explaining what is held sits on the line above it.
+   **When every new error is a `CS0104` ambiguity caused by an import this edit added**, the remedy
+   names that `usings=` entry - `the ambiguity was introduced by usings=["ModelContextProtocol.Protocol"]
+   which this edit added - retry with usings=[] and the retryWith token below to drop it` - rather than
+   telling you to fix an edit whose text was fine.
+   **A remedy never names a parameter the rejecting tool does not declare**: `write_text` and
+   `edit_text` take no `usings=` and no `retryWith=`, so their rollback says to put the directive in
+   the content you send instead.
    **When every new error is just a missing import, the remedy names the one-call fix**: a rollback
    whose errors are all `CS0246`/`CS0103` for names the project resolves in exactly one namespace each
    answers `remedy: retry with usings=["System.Collections.Immutable"] and the retryWith token below`.
@@ -765,8 +786,10 @@ Each is `reject`, `warn` or `off`; a `warn` rule lets the edit land and answers 
 Cognitive complexity is a **percentage of a threshold** - default `150`% of `10`, so a score above 15
 fails: `cognitive complexity 21 (210% of threshold 10) exceeds 150% (15)`.
 
-**`allowPolicy=true` is the escape hatch and is never silent.** `replace_symbol_body`,
-`replace_symbol`, `add_member`, `delete_symbol` and `rename_symbol` take it; the edit lands and the
+**`allowPolicy=true` is the escape hatch and is never silent.** Every tool whose edit reaches the gate
+takes it - `replace_symbol_body`, `replace_symbol`, `add_member`, `delete_symbol`, `rename_symbol`,
+`write_text`, `extract_interface`, `move_type_to_file`, `move_type_to_namespace` and
+`change_signature`; the edit lands and the
 response carries `WARNING policy overridden` naming every rule bypassed. A project setting
 `"allowOverride": false` refuses it. A rejection also names a `retryWith` token holding your
 declaration, so the corrected retry costs a token, not the payload.
@@ -974,7 +997,11 @@ named, one
 under the root, which tells a test host running out of *this* tree's `bin/` from another session's —
 classified as this terse server, an MSBuild or BuildHost (including one an earlier terse load spawned
 out of this tree's `bin/`), a live `testhost` to wait for rather than stop, a bare `dotnet` host, or a
-pid already gone. The one holder it rules out is the analyzer set, mapped from a shadow copy and never
+pid already gone. **A bare `dotnet` holder is classified against the process table**: when a test host
+of *this* tree is running, the line says so by name and pid and tells you to wait rather than stop it -
+tagged `HEURISTIC`, because the association is by tree and not by parentage - and when none is, it says
+that too, which is what makes "another session's live E2E run" distinguishable from "a stranded fixture
+host" without a shell-out. The one holder it rules out is the analyzer set, mapped from a shadow copy and never
 from a project's own output; read the `holder` lines before stopping anything.
 
 **One lock is refused before it happens**: when the loaded solution builds the assembly this server

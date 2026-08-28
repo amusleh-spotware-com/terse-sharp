@@ -215,4 +215,37 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
     private static bool Has(IList<McpClientTool> surface, string tool, string parameter) =>
         surface.FirstOrDefault(entry => string.Equals(entry.Name, tool, StringComparison.Ordinal)) is { } found
         && Has(found, parameter);
+
+    [Fact]
+    public async Task EveryToolTheCodePolicyCanBlock_TakesAllowPolicy()
+    {
+        var surface = await Surface();
+        var mutating = surface.Where(tool => Has(tool, "dryRun")).ToArray();
+
+        var missing = mutating
+            .Where(tool => !Has(tool, "allowPolicy") && !Exempt(tool.Name))
+            .Select(tool => tool.Name)
+            .ToArray();
+
+        Assert.NotEmpty(mutating);
+        Assert.True(missing.Length is 0, "tools the code policy gates with no allowPolicy: " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public async Task EveryPolicyExemption_CarriesAReasonNamesAnAdvertisedToolAndTheSetOnlyShrinks()
+    {
+        var surface = await Surface();
+
+        Assert.True(
+            ToolCensus.PolicyExempt.Length <= ToolCensus.MaxPolicyExemptions,
+            string.Create(CultureInfo.InvariantCulture, $"{ToolCensus.PolicyExempt.Length} policy exemptions against a ratchet of {ToolCensus.MaxPolicyExemptions}"));
+
+        Assert.All(ToolCensus.PolicyExempt, entry => Assert.False(string.IsNullOrWhiteSpace(entry.Reason), entry.Tool));
+        Assert.All(
+            ToolCensus.PolicyExempt,
+            entry => Assert.Contains(surface, tool => string.Equals(tool.Name, entry.Tool, StringComparison.Ordinal)));
+    }
+
+    private static bool Exempt(string tool) =>
+        Array.Exists(ToolCensus.PolicyExempt, entry => string.Equals(entry.Tool, tool, StringComparison.Ordinal));
 }

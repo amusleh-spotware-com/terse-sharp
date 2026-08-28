@@ -33,6 +33,8 @@ one that merely shortens a response, and both beat a faster server.
 | grep, open the hit, open its callers | `find_usages` — real references, each tagged `EXACT` or `HEURISTIC` |
 | read the file to find the member, then read the member | `get_file_outline` → paste the id straight into `get_symbol_source` |
 | one search per identifier | `search_text queries=[…]` — 8 literals, one pass, records tagged `q1`..`qN` |
+| a text hit, then an outline, then a ranged read to find which method it is in | `search_text containers=true` — the declaration each hit sits in, on the record itself |
+| `git describe` to find where HEAD sits before a release | `history describe=true` — nearest tag, commits since it, short sha, dirty flag, one line |
 | one read per file | `read_text paths=[…]` — up to 10 files, one answer |
 | one edit call per site | `edit_text edits=[…]` — 25 edits across files, one write |
 | edit, build, find you broke a caller, edit again | `replace_symbol symbolIds=[…]` — the member and its callers land in **one** compile gate |

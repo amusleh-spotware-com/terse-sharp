@@ -25,7 +25,11 @@ internal static class RefRead
             ? Historic(OutlineService.FromText(label, text, signatures: true, "short", usings: false), reference)
             : FileService.Rendered(relative, label, text, request);
 
-        return NavigationTools.Unwrap(Stamped(answer, request, text.Length));
+        var size = request.Bytes
+            ? await SizeAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false)
+            : null;
+
+        return NavigationTools.Unwrap(Stamped(answer, request, text.Length, size));
     }
 
     public static async Task<string> OutlineAsync(
@@ -69,10 +73,27 @@ internal static class RefRead
     private static Result<string> Historic(Result<string> outline, string reference) =>
             outline.IsOk ? Result.Ok(outline.Value! + "\n" + Historical(reference)) : outline;
 
-    private static Result<string> Stamped(Result<string> answer, FileService.ReadRequest request, int characters) =>
-            answer.IsOk && request.Tokens
-                ? Result.Ok(answer.Value! + FileService.Stamps(request with { Bytes = false, Characters = characters }))
-                : answer;
+    private static Result<string> Stamped(Result<string> answer, FileService.ReadRequest request, int characters, long? bytes)
+    {
+        if (!answer.IsOk || (!request.Tokens && !request.Bytes))
+            return answer;
+
+        var stamps = FileService.Stamps(request with { Bytes = bytes is not null, Length = bytes ?? 0, Characters = characters });
+
+        return Result.Ok(answer.Value! + stamps + (request.Bytes && bytes is null ? "\nbytes=UNRESOLVED  git could not size the blob at this ref" : string.Empty));
+    }
+
+    private static async Task<long?> SizeAsync(string root, string reference, string relative, CancellationToken cancellationToken)
+    {
+        var read = await GitRunner.ReadAsync(
+            root,
+            ["cat-file", "-s", reference + ":./" + relative.Replace('\\', '/')],
+            cancellationToken).ConfigureAwait(false);
+
+        return read.IsOk && long.TryParse(read.Value!.AsSpan().Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var size)
+            ? size
+            : null;
+    }
 }
 
 internal readonly record struct OutlineOptions(bool Signatures, string Ids, bool Usings, bool ParameterNames, string? Contains, bool All = false);

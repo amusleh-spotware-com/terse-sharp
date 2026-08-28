@@ -315,7 +315,10 @@ beat the one it splits, not merely be useful.
    `fixtures/WarningSolution` is a build that succeeds with warnings, `fixtures/RazorSolution`
    and `fixtures/GeneratorSolution` cover Razor and analyzer/generator paths, and
    `fixtures/SelectionSolution` — one source project and **two** test projects, only one of which
-   references it — covers anything that must observe a *selective* run really skipping a project.
+   references it — covers anything that must observe a *selective* run really skipping a project. Its
+   `Directory.Build.targets` also carries a `TerseStallBuild` target that sleeps 90 s when
+   `-p:TerseStallBuild=true` is passed, which is how a test makes a build genuinely unable to finish
+   inside its budget instead of racing the runner's speed.
    Fixtures are intentionally outside `TerseSharp.slnx`.
    `ToolRobustnessE2ETests` then covers the new tool automatically: it reads `tools/list` and calls
    every tool with garbage, empty and missing arguments, asserting a structured answer with a
@@ -791,6 +794,10 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
   times in one release and was self-logged each time. A repetitive change across N members is N
   `replace_symbol_body` calls, or one `write_text force=true` from a *fresh* read — both go through
   `EditGate`; the shell rewrite does not, and it is the precise fallback this repo exists to remove.
+- **A `[Description]` edit is an `edit_text force=true`, not a `replace_symbol`.** Re-sending a whole
+  declaration to change two lines of a tool description cost ~1 175 tokens on `read_text`; a short
+  unique anchor inside the attribute costs ~30. `edit_text` is not compile-gated, so `analyze` the
+  file after it - that is the trade, and it is cheaper than the re-send.
 - **More than one workspace is usually loadable here, so pass `workspace:` on the first call.**
   `.claude/worktrees/agent-*` holds whole copies of this tree, and a task that loads
   `fixtures/FixtureSolution` alongside the solution makes every un-hinted call ambiguous.

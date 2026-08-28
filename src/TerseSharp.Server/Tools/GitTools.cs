@@ -23,18 +23,19 @@ public sealed class GitTools(ToolContext context)
         [Description("Include files git does not track. Default true; false answers tracked changes only, which is what git status --untracked-files=no asks.")] bool untracked = true,
         CancellationToken cancellationToken = default) =>
         root is { Length: > 0 }
-            ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, new ChangeScope(staged, untracked), cancellationToken))
+            ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, new ChangeScope(staged, untracked), maxResults > 0, cancellationToken))
             : context.WithWorkspaceAsync(
                 workspace,
                 path,
-                loaded => ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked), cancellationToken),
+                loaded => ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked), maxResults > 0, cancellationToken),
                 semantic: false,
                 cancellationToken);
 
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
     [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
     public Task<string> DiffSymbols(
-        [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
+        [Description("Commit, branch or range to compare against. Empty compares the working tree against the INDEX, so a fully staged change set maps nothing - pass staged=true for the index against HEAD.")] string? baseRef = null,
+        [Description("Map the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
         [Description("Limit to one path or pathspec.")] string? path = null,
         [Description("Max results (200).")] int maxResults = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -47,13 +48,14 @@ public sealed class GitTools(ToolContext context)
             : context.WithWorkspaceAsync(
                 workspace,
                 path,
-                loaded => SymbolsAsync(loaded, baseRef, path, NavigationTools.Cap(maxResults, 200), cancellationToken),
+                loaded => SymbolsAsync(loaded, baseRef, path, NavigationTools.Cap(maxResults, 200), staged, cancellationToken),
                 cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "diff_text", ReadOnly = true)]
     [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. Pass paths to diff up to 10 files in ONE call. Replaces one call per file: every entry is handed to the same git invocation as its own pathspec, so the answer is one unified diff already labelled per file. It costs about one line of response per changed line, so bound it: path= and paths= scope it and maxLines= caps it at 1000 by default. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
     public Task<string> DiffText(
-    [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD.")] string? baseRef = null,
+    [Description("Commit, branch or range to compare against. Empty compares the working tree against the INDEX, so a fully staged change set reads 0 lines - pass staged=true for the index against HEAD.")] string? baseRef = null,
+    [Description("Answer the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
     [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
     [Description("Several paths or pathspecs answered in one diff, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
     [Description("Max diff lines returned (1000). A truncated answer names the exact maxLines= that returns the rest, so one retry is enough.")] int maxLines = 0,
@@ -72,11 +74,11 @@ public sealed class GitTools(ToolContext context)
         var hint = path ?? (scoped.IsDefaultOrEmpty ? null : scoped[0]);
 
         return root is { Length: > 0 }
-            ? OutsideAsync(root, full => TextAsync(full, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), full, cancellationToken))
+            ? OutsideAsync(root, full => TextAsync(full, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), full, staged, cancellationToken))
             : context.WithWorkspaceAsync(
                 workspace,
                 hint,
-                loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, cancellationToken),
+                loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, staged, cancellationToken),
                 semantic: false,
                 cancellationToken);
     }
@@ -89,6 +91,7 @@ public sealed class GitTools(ToolContext context)
         int maxResults,
         string? outside,
         ChangeScope scope,
+        bool chosen,
         CancellationToken cancellationToken)
     {
         string[] command = scope.Staged ? ["diff", "--cached"] : ["diff"];
@@ -110,7 +113,7 @@ public sealed class GitTools(ToolContext context)
                 cancellationToken).ConfigureAwait(false);
 
         return untracked.IsOk
-            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, maxResults, outside, scope.Staged ? null : Steer(baseRef, path))
+            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen)
             : untracked.Error!.Render();
     }
 
@@ -121,10 +124,11 @@ public sealed class GitTools(ToolContext context)
             string? exclude,
             int maxResults,
             string? outside,
-            string? steer)
+            string? steer,
+            bool chosen)
     {
         var listed = Lines(numstat, nameStatus, untracked, Excluded(exclude));
-        var response = new ResponseBuilder("changed_files", string.Empty);
+        var response = new ResponseBuilder("changed_files", string.Empty).Chosen(chosen);
         var capped = ResultCap.Shown(listed.Rows.Count, maxResults);
         var shown = listed.Rows.Capped(maxResults).ToArray();
 
@@ -159,11 +163,14 @@ public sealed class GitTools(ToolContext context)
         string? baseRef,
         string? path,
         int maxResults,
+        bool staged,
         CancellationToken cancellationToken)
     {
+        string[] command = staged ? ["diff", "--cached", "--unified=0", "--no-color"] : ["diff", "--unified=0", "--no-color"];
+
         var diff = await GitRunner.ReadAsync(
             workspace.Root,
-            Arguments(["diff", "--unified=0", "--no-color"], baseRef, path),
+            Arguments(command, baseRef, path),
             cancellationToken).ConfigureAwait(false);
 
         return diff.IsOk
@@ -177,11 +184,14 @@ public sealed class GitTools(ToolContext context)
             IReadOnlyList<string> paths,
             int maxLines,
             string? outside,
+            bool staged,
             CancellationToken cancellationToken)
     {
+        string[] command = staged ? ["diff", "--cached", "--no-color"] : ["diff", "--no-color"];
+
         var diff = await GitRunner.ReadAsync(
             root,
-            Arguments(["diff", "--no-color"], baseRef, paths),
+            Arguments(command, baseRef, paths),
             cancellationToken).ConfigureAwait(false);
 
         if (!diff.IsOk)
@@ -287,7 +297,7 @@ public sealed class GitTools(ToolContext context)
     }
 
     [McpServerTool(Name = "history", ReadOnly = true)]
-    [Description("Replaces Bash git log and git show --stat and git tag --list. Commits touching a path, one line each - short sha, author date, author, subject - workspace-relative and oneline by default. baseRef takes a commit, a branch or a range such as v0.32.0..HEAD; contains= is git's pickaxe, listing only the commits whose diff added or removed that literal; message= greps subject and body. commit= answers one commit instead - its subject and one line per file with added and deleted counts - and is refused beside baseRef=, contains= or message= rather than ignoring them. tags=true answers the repository's tags instead, newest first, one line each with the commit it names. root= answers about any absolute directory, tagged outside-workspace.")]
+    [Description("Replaces Bash git log and git show --stat and git tag --list and git describe. Commits touching a path, one line each - short sha, author date, author, subject - workspace-relative and oneline by default. baseRef takes a commit, a branch or a range such as v0.32.0..HEAD; contains= is git's pickaxe, listing only the commits whose diff added or removed that literal; message= greps subject and body. commit= answers one commit instead - its subject and one line per file with added and deleted counts - and is refused beside baseRef=, contains= or message= rather than ignoring them. tags=true answers the repository's tags instead, newest first, one line each with the commit it names, and describe=true answers HEAD's own position instead - nearest tag, commits on top of it, short sha, dirty flag - which is the MinVer question a release asks. root= answers about any absolute directory, tagged outside-workspace.")]
     public Task<string> History(
             [Description("Commit, branch or range to list, e.g. main, HEAD~20 or v0.32.0..HEAD. Empty lists from HEAD backwards.")] string? baseRef = null,
             [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
@@ -295,6 +305,7 @@ public sealed class GitTools(ToolContext context)
             [Description("Only commits whose subject or body matches this text.")] string? message = null,
             [Description("One commit instead of a listing: its subject and one line per file with added and deleted counts. Cannot be combined with baseRef=, contains= or message=.")] string? commit = null,
             [Description("List tags instead of commits, newest version first - name, short sha, date. Refused beside baseRef=, path=, contains=, message= or commit=.")] bool tags = false,
+            [Description("Answer HEAD's position instead of a listing: nearest tag, commits since it, short sha, dirty flag - one line. Refused beside every filter.")] bool describe = false,
             [Description("Max commits, or tags (50).")] int maxResults = 0,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Absolute directory to answer about instead of the loaded workspace. The answer is tagged outside-workspace.")] string? root = null,
@@ -306,12 +317,15 @@ public sealed class GitTools(ToolContext context)
         if (Unrelated(tags, commit, baseRef, contains, message, path) is { } tagged)
             return Task.FromResult(tagged.Render());
 
+        if (Solo(describe, tags, commit, baseRef, contains, message, path) is { } positioned)
+            return Task.FromResult(positioned.Render());
+
         return root is { Length: > 0 }
-            ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, tags, NavigationTools.Cap(maxResults, 50), full, cancellationToken))
+            ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, tags, describe, NavigationTools.Cap(maxResults, 50), full, maxResults > 0, cancellationToken))
             : context.WithWorkspaceAsync(
                 workspace,
                 path,
-                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, tags, NavigationTools.Cap(maxResults, 50), null, cancellationToken),
+                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, tags, describe, NavigationTools.Cap(maxResults, 50), null, maxResults > 0, cancellationToken),
                 semantic: false,
                 cancellationToken);
     }
@@ -324,16 +338,21 @@ public sealed class GitTools(ToolContext context)
             string? message,
             string? commit,
             bool tags,
+            bool describe,
             int maxResults,
             string? outside,
+            bool chosen,
             CancellationToken cancellationToken)
     {
-        var arguments = tags ? TagArguments(maxResults) : HistoryArguments(baseRef, path, contains, message, commit, maxResults);
+        var arguments = Requested(baseRef, path, contains, message, commit, tags, describe, maxResults);
         var run = await GitRunner.ReadAsync(root, arguments, cancellationToken).ConfigureAwait(false);
 
-        return run.IsOk
-            ? Rendered(run.Value!, Unit(tags, commit), commit ?? path ?? string.Empty, maxResults, outside)
-            : run.Error!.Render();
+        if (!run.IsOk)
+            return run.Error!.Render();
+
+        return describe
+            ? Describing(run.Value!, outside)
+            : Rendered(run.Value!, Unit(tags, commit), commit ?? path ?? string.Empty, maxResults, outside, chosen);
     }
 
     private static string[] HistoryArguments(
@@ -500,10 +519,10 @@ public sealed class GitTools(ToolContext context)
         return lines;
     }
 
-    private static string Rendered(string output, string unit, string target, int maxResults, string? outside)
+    private static string Rendered(string output, string unit, string target, int maxResults, string? outside, bool chosen = false)
     {
         var lines = Trimmed(output);
-        var response = new ResponseBuilder("history", target);
+        var response = new ResponseBuilder("history", target).Chosen(chosen);
         var shown = Math.Min(lines.Count, maxResults);
 
         response.Summary(shown, shown, unit);
@@ -512,7 +531,7 @@ public sealed class GitTools(ToolContext context)
             response.Note("outside-workspace  " + outside);
 
         if (lines.Count > maxResults)
-            response.Note(More(unit));
+            response.Note(More(unit, chosen));
 
         foreach (var line in lines.Capped(maxResults))
             response.Line(line);
@@ -520,9 +539,13 @@ public sealed class GitTools(ToolContext context)
         return response.ToString();
     }
 
-    private static string More(string unit) => unit is "tags"
-        ? "more tags exist than were listed - raise maxResults="
-        : "more commits match than were listed - raise maxResults=, or narrow with path=, contains=, message= or baseRef=";
+    private static string More(string unit, bool chosen) => (unit, chosen) switch
+    {
+        ("tags", true) => "more tags exist than were listed",
+        ("tags", false) => "more tags exist than were listed - raise maxResults=",
+        (_, true) => "more commits match than were listed - narrow with path=, contains=, message= or baseRef=",
+        _ => "more commits match than were listed - raise maxResults=, or narrow with path=, contains=, message= or baseRef=",
+    };
 
     private static TerseError? Unrelated(bool tags, string? commit, string? baseRef, string? contains, string? message, string? path)
     {
@@ -563,5 +586,73 @@ public sealed class GitTools(ToolContext context)
             arguments.Append(" path=\"").Append(pathspec).Append('"');
 
         return arguments.Append(" - maps each hunk onto the declaration that contains it").ToString();
+    }
+
+    private static string[] Requested(
+        string? baseRef,
+        string? path,
+        string? contains,
+        string? message,
+        string? commit,
+        bool tags,
+        bool describe,
+        int maxResults)
+    {
+        if (describe)
+            return ["describe", "--tags", "--long", "--dirty", "--always"];
+
+        return tags ? TagArguments(maxResults) : HistoryArguments(baseRef, path, contains, message, commit, maxResults);
+    }
+
+    private static string Describing(string output, string? outside)
+    {
+        var response = new ResponseBuilder("history", "describe");
+
+        if (outside is { Length: > 0 })
+            response.Note("outside-workspace  " + outside);
+
+        response.Line(Position(output));
+
+        return response.ToString();
+    }
+
+    private static string Position(string output)
+    {
+        var text = output.AsSpan().Trim();
+        var dirty = text.EndsWith("-dirty", StringComparison.Ordinal);
+        var described = dirty ? text[..^"-dirty".Length] : text;
+        var marker = described.LastIndexOf("-g", StringComparison.Ordinal);
+        var state = dirty ? "true" : "false";
+
+        if (marker < 0)
+            return string.Create(CultureInfo.InvariantCulture, $"tag=NONE  sha={described}  dirty={state}  no tag is reachable from HEAD");
+
+        var head = described[..marker];
+        var ahead = head.LastIndexOf('-');
+
+        return ahead < 0
+            ? string.Create(CultureInfo.InvariantCulture, $"tag=NONE  sha={described[(marker + 2)..]}  dirty={state}  no tag is reachable from HEAD")
+            : string.Create(CultureInfo.InvariantCulture, $"tag={head[..ahead]}  ahead={head[(ahead + 1)..]}  sha={described[(marker + 2)..]}  dirty={state}");
+    }
+
+    private static TerseError? Solo(bool describe, bool tags, string? commit, string? baseRef, string? contains, string? message, string? path)
+    {
+        if (!describe)
+            return null;
+
+        var ignored = new List<string>(6);
+
+        Ignored(ignored, "tags=true", tags ? "true" : null);
+        Ignored(ignored, "commit=", commit);
+        Ignored(ignored, "baseRef=", baseRef);
+        Ignored(ignored, "contains=", contains);
+        Ignored(ignored, "message=", message);
+        Ignored(ignored, "path=", path);
+
+        return ignored.Count is 0
+            ? null
+            : Errors.Invalid(
+                "describe=true answers HEAD's position against the nearest tag, so it cannot be combined with " + string.Join(", ", ignored),
+                "drop describe=true to list commits or tags with those filters, or drop the filters to answer the position");
     }
 }

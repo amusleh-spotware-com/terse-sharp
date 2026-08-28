@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
+using TerseSharp.Core;
 using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
@@ -831,11 +832,13 @@ public sealed class ToolGuardTests
     [InlineData("git diff --cached --name-only")]
     [InlineData("git diff --cached")]
     [InlineData("git diff --staged --stat")]
-    public void Guard_ForAStagedDiff_NamesChangedFilesStaged(string command)
+    public void Guard_ForAStagedDiff_NamesTheStagedFormOfEveryToolThatAnswersIt(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
 
         Assert.True(verdict.Denied, command);
+        Assert.Contains("diff_symbols staged=true", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("diff_text staged=true", verdict.Reason, StringComparison.Ordinal);
         Assert.Contains("changed_files staged=true", verdict.Reason, StringComparison.Ordinal);
     }
 
@@ -1249,4 +1252,58 @@ public sealed class ToolGuardTests
 
         Assert.Equal("npm test\nnpm pack", verdict.Rewrite);
     }
+
+    [Fact]
+    public void LockHolders_LiveTestRun_FindsTheHostThisRunLivesInWhenItRunsOutOfThisTree()
+    {
+        var self = Environment.ProcessPath ?? string.Empty;
+
+        var hosted = self.Length > 0
+            && Path.GetFileNameWithoutExtension(self).Contains("test", StringComparison.OrdinalIgnoreCase)
+            && PathBoundary.Contains(AppContext.BaseDirectory, self);
+
+        Assert.Equal(hosted, LockHolders.LiveTestRun(AppContext.BaseDirectory) is not null);
+        Assert.Null(LockHolders.LiveTestRun(Path.Combine(Path.GetTempPath(), "terse-no-such-tree")));
+    }
+
+    [Fact]
+    public void LockHolders_LiveTestRun_WithNoRoot_AnswersNothingRatherThanScanningEveryProcess() =>
+        Assert.Null(LockHolders.LiveTestRun(string.Empty));
+
+    [Fact]
+    public void Guard_ForADeniedUnfenceableCompound_StillNamesEverySegmentNothingReplaces()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git tag --list \"v*\" | tail -3 && git rev-parse HEAD 2>&1 | head -1" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("history tags=true", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("not replaced", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("git rev-parse HEAD", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git describe")]
+    [InlineData("git describe --tags --long")]
+    public void Guard_ForAGitDescribe_NamesHistoryDescribe(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("history describe=true", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git tag -a v1.0.0 -m release")]
+    [InlineData("git blame src/App/Program.cs")]
+    public void Guard_ForAGitCommandNoToolReplaces_LeavesItAloneBesideDescribe(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("git describe --abbrev=0 --match v*")]
+    [InlineData("git describe --tags 8f2ab21")]
+    [InlineData("git describe --contains HEAD")]
+    public void Guard_ForADescribeFormHistoryCannotAnswer_LeavesItAlone(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 }

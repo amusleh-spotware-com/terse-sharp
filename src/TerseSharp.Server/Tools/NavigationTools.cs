@@ -103,19 +103,19 @@ public sealed class NavigationTools(ToolContext context)
     [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
     public Task<string> GetSymbolSource(
 [Description("Symbol id of the member.")] string? symbolId = null,
-[Description("Several symbol ids returned in one response. Replaces one call per member.")] string[]? symbolIds = null,
+[Description("Several symbol ids returned in one response. Replaces one call per member, and it keeps that contract at every length: ONE entry that does not resolve answers the batch's own NOT_RESOLVED line rather than failing the call.")] string[]? symbolIds = null,
 [Description("Workspace or worktree name.")] string? workspace = null,
 [Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
 [Description("Alias for symbolId.")] string? symbol = null,
 [Description("Include doc comments and inline comments. Default true; false drops them, which is the cheap read when you only need the shape.")] bool comments = true,
 [Description("File the names live in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
 CancellationToken cancellationToken = default) =>
-SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(verbose, comments), path, cancellationToken);
+SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, new SourceFormat(verbose, comments), path, cancellationToken);
 
-    private Task<string> SourceOf(string[] requested, string? workspace, SourceFormat format, string? path, CancellationToken cancellationToken) => requested switch
+    private Task<string> SourceOf(string[] requested, bool batched, string? workspace, SourceFormat format, string? path, CancellationToken cancellationToken) => requested switch
     {
         [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
-        [var only] => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
+        [var only] when !batched => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
             Unwrap(await SourceService.OfSymbolAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken, path, referenced: true),
         _ => context.WithWorkspaceAsync(
             workspace,
@@ -269,7 +269,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
         _ => DiagnosticSeverity.Warning,
     };
 
-    internal static int Cap(int requested, int fallback) => requested <= 0 ? fallback : Math.Min(requested, 1000);
+    internal static int Cap(int requested, int fallback) => requested <= 0 ? fallback : Math.Min(requested, MaxCap);
 
     internal static string Unwrap(Result<string> result) => result.IsOk ? result.Value! : result.Error!.Render();
 
@@ -410,4 +410,6 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), workspace, new SourceFormat(v
 
         return unscoped ? referenced + "\n" + FellBack : referenced;
     }
+
+    internal const int MaxCap = 1000;
 }

@@ -15,9 +15,10 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Alias for typeSymbolId.")] string? symbol = null,
+        [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.ExtractInterfaceAsync(
-            loaded, resolved, interfaceName, Options("extract_interface", dryRun, verbose), cancellationToken), cancellationToken, typesOnly: true);
+            loaded, resolved, interfaceName, Options("extract_interface", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_file")]
     [Description("Move a type out of a shared file into its own file named after it, keeping the usings and namespace. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
@@ -27,9 +28,10 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Alias for typeSymbolId.")] string? symbol = null,
+        [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToFileAsync(
-            loaded, resolved, Options("move_type_to_file", dryRun, verbose), cancellationToken), cancellationToken, typesOnly: true);
+            loaded, resolved, Options("move_type_to_file", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_namespace")]
     [Description("Change the namespace declared in the file containing a type. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
@@ -40,9 +42,10 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Alias for typeSymbolId.")] string? symbol = null,
+        [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToNamespaceAsync(
-            loaded, resolved, targetNamespace, Options("move_type_to_namespace", dryRun, verbose), cancellationToken), cancellationToken, typesOnly: true);
+            loaded, resolved, targetNamespace, Options("move_type_to_namespace", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "change_signature")]
     [Description("Replace a method's parameter list. The compile gate reports every call site the change breaks, so run it with dryRun first. A successful change answers in one line per changed file; pass verbose=true for the diff.")]
@@ -54,9 +57,10 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Alias for symbolId.")] string? symbol = null,
+        [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
         Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => RefactorService.ChangeSignatureAsync(
-            loaded, resolved, parameters, new EditOptions("change_signature", dryRun, allowErrors, verbose), cancellationToken), cancellationToken);
+            loaded, resolved, parameters, new EditOptions("change_signature", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "undo_last_change")]
     [Description("Revert the most recent mutation applied by this server. Keeps the last 10 snapshots.")]
@@ -80,8 +84,8 @@ public sealed class RefactorTools(ToolContext context)
         return response.ToString();
     }
 
-    private static EditOptions Options(string tool, bool dryRun, bool verbose) =>
-        new(tool, dryRun, AllowErrors: false, verbose);
+    private static EditOptions Options(string tool, bool dryRun, bool verbose, bool allowPolicy) =>
+        new(tool, dryRun, AllowErrors: false, verbose, AllowPolicy: allowPolicy);
 
     private Task<string> Guarded(
     string? workspace,

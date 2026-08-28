@@ -1891,4 +1891,106 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.NotEqual("tokens=0", TokenStamp(outlined));
         Assert.True(counted * 4 > outlined.Length, string.Create(CultureInfo.InvariantCulture, $"tokens={counted} counts the outline, not the file it outlines\n{outlined}"));
     }
+
+    [Fact]
+    public async Task GetSymbolSource_WithOneUnresolvableIdInSymbolIds_KeepsTheBatchContract()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "Fixture.Trading.NoSuchMemberAtAll" },
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_RESOLVED Fixture.Trading.NoSuchMemberAtAll", text, StringComparison.Ordinal);
+        Assert.Contains("1 symbols", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithARefAndBytes_AnswersTheBlobSizeAtThatRef()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "notes.md",
+            ["ref"] = "HEAD",
+            ["bytes"] = true,
+        });
+
+        var marker = text.LastIndexOf("bytes=", StringComparison.Ordinal);
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("bytes=UNRESOLVED", text, StringComparison.Ordinal);
+        Assert.True(marker >= 0, text);
+
+        var tail = text.AsSpan(marker + "bytes=".Length);
+        var end = tail.IndexOfAny(" \r\n");
+        var digits = end < 0 ? tail : tail[..end];
+
+        Assert.True(long.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out var size) && size > 0, text);
+    }
+
+    [Fact]
+    public async Task DiffTextAndDiffSymbols_WithStaged_AnswerTheIndexRatherThanTheWorkingTree()
+    {
+        try
+        {
+            await server.CallAsync("edit_text", new()
+            {
+                ["path"] = "notes.md",
+                ["oldText"] = "# Fixture notes",
+                ["newText"] = "# Fixture notes, momentarily changed",
+            });
+
+            var working = await server.CallAsync("diff_text", new() { ["path"] = "notes.md" });
+            var staged = await server.CallAsync("diff_text", new() { ["path"] = "notes.md", ["staged"] = true });
+            var mapped = await server.CallAsync("diff_symbols", new() { ["path"] = "notes.md", ["staged"] = true });
+
+            Assert.Contains("momentarily changed", working, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", staged, StringComparison.Ordinal);
+            Assert.DoesNotContain("momentarily changed", staged, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", mapped, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = "notes.md", ["ref"] = "HEAD" });
+        }
+    }
+
+    [Fact]
+    public async Task History_WithDescribe_AnswersHeadsPositionAgainstTheNearestTag()
+    {
+        var text = await server.CallAsync("history", new() { ["describe"] = true });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("tag=", text, StringComparison.Ordinal);
+        Assert.Contains("sha=", text, StringComparison.Ordinal);
+        Assert.Contains("dirty=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task History_WithDescribeAndAFilter_IsRefusedNamingWhatItCannotCombine()
+    {
+        var text = await server.CallAsync("history", new() { ["describe"] = true, ["tags"] = true });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("tags=true", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AListing_WithAMaxResultsTheCallerPassed_StillCountsTheCapButNeverAdvisesRaisingIt()
+    {
+        var capped = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Order",
+            ["glob"] = "**/*.cs",
+            ["maxResults"] = 2,
+        });
+
+        var tags = await server.CallAsync("history", new() { ["tags"] = true, ["maxResults"] = 2 });
+
+        Assert.Contains("truncated", capped, StringComparison.Ordinal);
+        Assert.Contains("narrow with glob=", capped, StringComparison.Ordinal);
+        Assert.DoesNotContain("maxResults=", capped, StringComparison.Ordinal);
+        Assert.Contains("more tags exist than were listed", tags, StringComparison.Ordinal);
+        Assert.DoesNotContain("raise maxResults=", tags, StringComparison.Ordinal);
+    }
 }

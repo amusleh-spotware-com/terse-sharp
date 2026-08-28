@@ -193,12 +193,13 @@ public static class ToolGuard
         "list-package" => "use package_list, with vulnerable=true or outdated=true for the resolved-graph answers",
         "status" => "use changed_files, with untracked=false for --untracked-files=no, or changed_files root=<that directory> when it is not the loaded workspace",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show; for a directory that is not loaded, diff_text root=<that directory>",
-        "diff-cached" => "use changed_files staged=true, which answers the index against HEAD - or against baseRef= - as one line per file",
+        "diff-cached" => "use diff_symbols staged=true, then diff_text staged=true for the hunk text it cannot show - or changed_files staged=true for the --name-only and --stat answer, one line per file",
         "ls-files" => "use find_files tracked=true",
         "log" => "use history, which takes path=, baseRef=, contains= for the pickaxe and message= for the subject grep",
         "show" => "use history commit=<sha>, which answers the subject and one line per file with added and deleted counts",
         "show-file" => "use read_text ref=<ref> path=<path>, or get_file_outline ref=<ref> path=<path> for a .cs file",
         "tag" => "use history tags=true, which lists every tag newest-first with the commit it names",
+        "describe" => "use history describe=true, which answers the nearest tag, the commits since it, the short sha and whether the tree is dirty, as one line",
         _ => "use run_tests, rerun_failed or list_tests",
     };
 
@@ -208,10 +209,11 @@ public static class ToolGuard
         "list-package" => "package_list answers the declared references from the project file with no restore at all, and vulnerable=true or outdated=true runs the same resolved-graph audit through the shared child-process runner, workspace-relative and without the CLI's table framing.",
         "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, staged= and untracked=, so the end-of-task review costs a listing instead of a diff.",
         "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths.",
-        "diff-cached" => "changed_files staged=true reads the index rather than the working tree, which is the question a pre-commit check asks, and answers one bounded line per file instead of a diff.",
+        "diff-cached" => "diff_symbols, diff_text and changed_files all take staged=true and read the index rather than the working tree, which is the question a pre-commit check asks - the first two answer the declarations and the hunk text, the third one bounded line per file.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
         "log" or "show" => "history answers the same commits workspace-relative and bounded, with the pickaxe and the subject grep as parameters instead of flags. Only git blame and index or history mutation stay on the shell.",
         "show-file" => "read_text ref= gives a revision's text the same numbering gutter, line ranges, tail=, section= and maxChars budget as the working tree, and a whole .cs file answers its outline instead of about three times the tokens.",
+        "describe" => "history describe=true answers HEAD's position - nearest tag, commits since it, short sha, dirty flag - as one line through the same runner as every other git answer, so the release-state question needs no shell. Creating, deleting or verifying a tag stays on the shell.",
         "tag" => "history tags=true answers the tag list newest-first with the commit each names, bounded by maxResults and through the same runner as every other git answer. Only the listing is replaced: creating, deleting, signing or verifying a tag stays on the shell.",
         _ => "Shelling out returns raw MSBuild or VSTest output; the tool returns deduplicated diagnostics, or per-failure messages with expected/actual and one source frame.",
     };
@@ -393,6 +395,7 @@ public static class ToolGuard
             "log" when IsDotNetTree(directed) && !Shaped(tokens) => "log",
             "show" when IsDotNetTree(directed) && !Scripted(tokens) => Showing(tokens),
             "tag" when IsDotNetTree(directed) && TagListing(tokens) => "tag",
+            "describe" when IsDotNetTree(directed) && Described(tokens) => "describe",
             _ => null,
         };
     }
@@ -624,12 +627,13 @@ public static class ToolGuard
         "format-style" => "cleanup fix=style",
         "status" => "changed_files",
         "diff" => "diff_symbols",
-        "diff-cached" => "changed_files staged=true",
+        "diff-cached" => "diff_symbols staged=true",
         "ls-files" => "find_files tracked=true",
         "log" => "history",
         "show" => "history",
         "show-file" => "read_text",
         "tag" => "history tags=true",
+        "describe" => "history describe=true",
         _ => "run_tests",
     };
 
@@ -716,6 +720,11 @@ public static class ToolGuard
     private static string? Listing(string[] tokens) =>
         Array.Exists(tokens, token => token.Equals("package", StringComparison.OrdinalIgnoreCase)) ? "list-package" : null;
 
+    private static bool Described(string[] tokens) =>
+        !Array.Exists(tokens, token => token.StartsWith("--", StringComparison.Ordinal)
+            && token is not ("--tags" or "--long" or "--dirty" or "--always"))
+        && Subcommand(tokens, Array.IndexOf(tokens, "describe") + 1) is null;
+
     private static bool TagListing(string[] tokens) =>
         Array.Exists(tokens, token => token is "--list" or "-l") || Subcommand(tokens, Array.IndexOf(tokens, "tag") + 1) is null;
 
@@ -755,7 +764,7 @@ public static class ToolGuard
     };
 
     private static string Nothing(bool compound) => compound
-            ? " This is a compound command and NO part of the command ran - 'Call this instead' names the tool call for every denied segment, and the allowed remainder when it can be re-issued on its own."
+            ? " This is a compound command and NO part of the command ran - 'Call this instead' names the tool call for every denied segment, and every segment nothing replaces: chained with && when re-issuing them together is sound, listed one by one when it is not."
             : string.Empty;
 
     private static string Cached(string[] tokens) =>
@@ -798,9 +807,12 @@ public static class ToolGuard
     {
         var made = string.Join("  then  ", calls);
 
-        return allowed.Count is 0 || !anded
-            ? made
-            : made + "  then re-issue the allowed remainder in Bash: " + string.Join(" && ", allowed);
+        if (allowed.Count is 0)
+            return made;
+
+        return anded
+            ? made + "  then re-issue the allowed remainder in Bash: " + string.Join(" && ", allowed)
+            : made + "  |  not replaced, re-issue each in Bash as it stands: " + string.Join("  |  ", allowed);
     }
 
     private static readonly string[] SleepCommands = ["sleep", "start-sleep"];

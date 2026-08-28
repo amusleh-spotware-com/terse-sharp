@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
@@ -8,25 +9,25 @@ namespace TerseSharp.Core;
 public static class EditGate
 {
     public static async Task<Result<string>> ApplyAsync(
-            LoadedWorkspace workspace,
-            Solution updated,
-            IReadOnlyList<DocumentId> changed,
-            EditOptions options,
-            CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        Solution updated,
+        IReadOnlyList<DocumentId> changed,
+        EditOptions options,
+        CancellationToken cancellationToken)
     {
         var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
         var diff = await DiffAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
 
         var report = options.AllowErrors
             ? null
-            : await AnalyseAsync(workspace.Solution, adopted, changed, workspace.Root, cancellationToken).ConfigureAwait(false);
+            : await AnalyseAsync(workspace.Solution, adopted, changed, workspace.Root, options.Usings, cancellationToken).ConfigureAwait(false);
 
         var policy = await PolicyGate.EvaluateAsync(workspace, adopted, changed, options.AllowPolicy, cancellationToken).ConfigureAwait(false);
 
         if (options.DryRun)
             return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root, policy));
 
-        if (Blocked(report, policy) is { } failure)
+        if (Blocked(report, policy, options.Tool) is { } failure)
             return Result.Fail<string>(failure);
 
         return await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false)
@@ -49,7 +50,7 @@ public static class EditGate
             response.Note("dryRun");
 
         if (report is not null)
-            Announce(response, report, options.Verbose || options.DryRun);
+            Announce(response, report, options.Verbose || options.DryRun, options.Tool);
 
         Policy(response, policy, options.DryRun);
 
@@ -66,7 +67,7 @@ public static class EditGate
     }
     private const int MaxNewWarnings = 5;
 
-    private static void Announce(ResponseBuilder response, GateReport report, bool verbose)
+    private static void Announce(ResponseBuilder response, GateReport report, bool verbose, string tool)
     {
         if (Describe(report, verbose) is { Length: > 0 } counters)
             response.Note(counters);
@@ -81,7 +82,7 @@ public static class EditGate
             Unresolved(response, report);
 
         if (report.NewErrors.Length > 0)
-            Rejected(response, report);
+            Rejected(response, report, tool);
     }
 
     private static void Unresolved(ResponseBuilder response, GateReport report)
@@ -96,7 +97,7 @@ public static class EditGate
         response.Note("remedy: add the missing reference to the project, or accept it if the name is resolved by a build the workspace has not seen");
     }
 
-    private static void Rejected(ResponseBuilder response, GateReport report)
+    private static void Rejected(ResponseBuilder response, GateReport report, string tool)
     {
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
@@ -105,8 +106,11 @@ public static class EditGate
         foreach (var error in report.NewErrors)
             response.Note(error);
 
+        if (report.Collisions is { Length: > 0 } collisions)
+            response.Note(Errors.Ambiguity(collisions, tool));
+
         if (report.Imports is { Length: > 0 } imports)
-            response.Note("retry with usings=[" + Errors.QuotedList(imports) + "]");
+            response.Note(Errors.Missing(imports, tool));
 
         if (report.Callers is { Length: > 0 } callers)
             response.Note(Errors.CallerBatch(callers));
@@ -136,11 +140,12 @@ public static class EditGate
     }
 
     private static async Task<GateReport> AnalyseAsync(
-            Solution before,
-            Solution after,
-            IReadOnlyList<DocumentId> changed,
-            string root,
-            CancellationToken cancellationToken)
+        Solution before,
+        Solution after,
+        IReadOnlyList<DocumentId> changed,
+        string root,
+        ImmutableArray<string> usings,
+        CancellationToken cancellationToken)
     {
         var projects = Affected(before, changed);
         var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
@@ -158,7 +163,8 @@ public static class EditGate
             current.WarningCount - baseline.WarningCount,
             await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
             await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
-            [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)]);
+            [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
+            Collided(regressions, usings));
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -267,15 +273,16 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-            string[] NewErrors,
-            string[] Unresolved,
-            int Errors,
-            int ErrorDelta,
-            int Warnings,
-            int WarningDelta,
-            string[]? Imports,
-            string[]? Callers,
-            string[] NewWarnings);
+        string[] NewErrors,
+        string[] Unresolved,
+        int Errors,
+        int ErrorDelta,
+        int Warnings,
+        int WarningDelta,
+        string[]? Imports,
+        string[]? Callers,
+        string[] NewWarnings,
+        string[]? Collisions);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,
@@ -552,9 +559,9 @@ public static class EditGate
         return true;
     }
 
-    private static TerseError? Blocked(GateReport? report, PolicyVerdict policy) => report switch
+    private static TerseError? Blocked(GateReport? report, PolicyVerdict policy, string tool) => report switch
     {
-        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers),
+        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers, report.Collisions, tool),
         _ => policy.Blocks ? Errors.PolicyViolation(policy) : null,
     };
 
@@ -577,4 +584,25 @@ public static class EditGate
                 response.Line(string.Create(CultureInfo.InvariantCulture, $"WARNING would be rolled back by policy  {finding.Explain()}"));
         }
     }
+
+    private static string[]? Collided(string[] errors, ImmutableArray<string> usings)
+    {
+        if (errors.Length is 0 || usings.IsDefaultOrEmpty || !errors.All(IsAmbiguity))
+            return null;
+
+        var blamed = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var space in usings)
+        {
+            if (errors.Any(error => Names(error, space)))
+                blamed.Add(space);
+        }
+
+        return blamed.Count is 0 ? null : [.. blamed];
+    }
+
+    private static bool IsAmbiguity(string error) => error.StartsWith("CS0104", StringComparison.Ordinal);
+
+
+    private static bool Names(string error, string space) => error.Contains("'" + space + ".", StringComparison.Ordinal);
 }

@@ -258,7 +258,7 @@ public sealed class EditTools(ToolContext context)
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous CompileRegression or resolution failure, e.g. r3. The rejected declaration is held with its add= and usings=, so a retry names the token instead of re-sending any of them; pass either again to override what is held, combine it with allowErrors=true, or send the missing callee first and then retry. A symbolId or symbolIds you pass OUTRANKS the held one, which is how a mis-typed id is corrected. The token is bound to the workspace the edit was rejected in and to the tool that issued it: a replay that resolves to another workspace is refused instead of landing there, and a replay by the wrong edit tool is refused naming the tool that can apply it.";
+    private const string RetryHelp = "Token from a previous CompileRegression or resolution failure, e.g. r3. The rejected declaration is held with its add= and usings=, so a retry names the token instead of re-sending any of them; pass either again to override what is held, pass usings=[] to DROP the imports it holds, combine it with allowErrors=true, or send the missing callee first and then retry. The token is printed alone on the LAST line of a rejection, so reading it to the end of the line is safe. A symbolId or symbolIds you pass OUTRANKS the held one, which is how a mis-typed id is corrected. The token is bound to the workspace the edit was rejected in and to the tool that issued it: a replay that resolves to another workspace is refused instead of landing there, and a replay by the wrong edit tool is refused naming the tool that can apply it.";
 
     private readonly record struct Carry(
         string? Tool,
@@ -297,7 +297,7 @@ public sealed class EditTools(ToolContext context)
     private static string? Slot(IReadOnlyList<string> targets, int index) =>
         index < targets.Count && targets[index] is { Length: > 0 } value ? value : null;
 
-    private const string UsingsHelp = "Pass usings to add the namespaces this declaration needs in the SAME compile-gated edit. Replaces one edit_text force=true on the file header plus one retryWith after a CS0246 rollback. Each entry is a namespace such as System.Collections.Immutable; one already present is ignored, an entry that is not a namespace is refused by name, and a new directive is inserted at its sorted position without reordering the ones already there. It is carried by a retryWith token, so a retry need not re-send it.";
+    private const string UsingsHelp = "Pass usings to add the namespaces this declaration needs in the SAME compile-gated edit. Replaces one edit_text force=true on the file header plus one retryWith after a CS0246 rollback. Each entry is a namespace such as System.Collections.Immutable; one already present is ignored, an entry that is not a namespace is refused by name, and a new directive is inserted at its sorted position without reordering the ones already there. It is carried by a retryWith token, so a retry need not re-send it - and usings=[] on that retry drops what the token holds, which is the fix when the import this edit added is what made a name ambiguous.";
 
     private static string? RejectedUsings(string[]? usings)
     {
@@ -339,9 +339,8 @@ public sealed class EditTools(ToolContext context)
 
     private static string Rejected(TerseError error, Carry carry, string root) =>
         carry.Tool is { Length: > 0 } tool && Holdable(error.Code) && Worth(carry)
-            ? error.Render() + "\nretryWith=" + RejectedEdits.Remember(
+            ? error.Render() + "\n" + Note(error.Code, carry) + "\nretryWith=" + RejectedEdits.Remember(
                 root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings)
-                + Note(error.Code, carry)
             : error.Render();
 
     private static bool Holdable(TerseErrorCode code) =>
@@ -349,9 +348,9 @@ public sealed class EditTools(ToolContext context)
 
     private static string Note(TerseErrorCode code, Carry carry) => code switch
     {
-        TerseErrorCode.CompileRegression => "  the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them",
-        _ when carry.Targets is { Length: > 1 } => "  the declarations are held, so the retry is the token plus a corrected symbolIds= - one entry per held declaration, and nothing else",
-        _ => "  the declaration is held, so the retry is the token plus a corrected symbolId= and nothing else",
+        TerseErrorCode.CompileRegression => "the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them",
+        _ when carry.Targets is { Length: > 1 } => "the declarations are held, so the retry is the token plus a corrected symbolIds= - one entry per held declaration, and nothing else",
+        _ => "the declaration is held, so the retry is the token plus a corrected symbolId= and nothing else",
     };
 
     private static string[] Corrected(string[]? supplied, IReadOnlyList<string> held) =>

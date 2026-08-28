@@ -479,4 +479,138 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("'Value'", refused, StringComparison.Ordinal);
         Assert.DoesNotContain("CompileRegression", refused, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_WhenAnAddedUsingMakesANameAmbiguous_NamesTheUsingsEntryThatCausedIt()
+    {
+        const string first = "src/Fixture.Broken/AmbiguityFirst.cs";
+        const string second = "src/Fixture.Broken/AmbiguitySecond.cs";
+        const string probe = "src/Fixture.Broken/AmbiguityProbe.cs";
+
+        var written = await CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["files"] = new object[]
+            {
+                new Dictionary<string, object> { ["path"] = first, ["content"] = "namespace Fixture.Broken.First;\n\npublic sealed class ProbeOrder\n{\n}\n" },
+                new Dictionary<string, object> { ["path"] = second, ["content"] = "namespace Fixture.Broken.Second;\n\npublic sealed class ProbeOrder\n{\n}\n" },
+                new Dictionary<string, object> { ["path"] = probe, ["content"] = "using Fixture.Broken.First;\n\nnamespace Fixture.Broken.Consumer;\n\npublic sealed class AmbiguityProbe\n{\n    public int Count() => 1;\n}\n" },
+            },
+        });
+
+        try
+        {
+            Assert.DoesNotContain("ERROR", written, StringComparison.Ordinal);
+
+            var rejected = await CallAsync("replace_symbol_body", new()
+            {
+                ["symbolId"] = "AmbiguityProbe.Count",
+                ["body"] = "ProbeOrder local = null!;\n\nreturn local is null ? 1 : 2;",
+                ["usings"] = new[] { "Fixture.Broken.Second" },
+            });
+
+            Assert.Contains("CS0104", rejected, StringComparison.Ordinal);
+            Assert.Contains("the ambiguity was introduced by usings=[\"Fixture.Broken.Second\"]", rejected, StringComparison.Ordinal);
+            Assert.Contains("retry with usings=[] and the retryWith token below to drop it", rejected, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CallAsync("write_text", new() { ["path"] = probe, ["delete"] = true, ["force"] = true });
+            await CallAsync("write_text", new() { ["path"] = second, ["delete"] = true, ["force"] = true });
+            await CallAsync("write_text", new() { ["path"] = first, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_RetriedWithAnEmptyUsings_DropsTheImportTheTokenHolds()
+    {
+        const string first = "src/Fixture.Broken/DroppedFirst.cs";
+        const string second = "src/Fixture.Broken/DroppedSecond.cs";
+        const string probe = "src/Fixture.Broken/DroppedProbe.cs";
+
+        var written = await CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["files"] = new object[]
+            {
+                new Dictionary<string, object> { ["path"] = first, ["content"] = "namespace Fixture.Broken.DroppedFirst;\n\npublic sealed class DroppedOrder\n{\n}\n" },
+                new Dictionary<string, object> { ["path"] = second, ["content"] = "namespace Fixture.Broken.DroppedSecond;\n\npublic sealed class DroppedOrder\n{\n}\n" },
+                new Dictionary<string, object> { ["path"] = probe, ["content"] = "using Fixture.Broken.DroppedFirst;\n\nnamespace Fixture.Broken.DroppedConsumer;\n\npublic sealed class DroppedProbe\n{\n    public int Count() => 1;\n}\n" },
+            },
+        });
+
+        try
+        {
+            Assert.DoesNotContain("ERROR", written, StringComparison.Ordinal);
+
+            var rejected = await CallAsync("replace_symbol_body", new()
+            {
+                ["symbolId"] = "DroppedProbe.Count",
+                ["body"] = "DroppedOrder local = null!;\n\nreturn local is null ? 1 : 2;",
+                ["usings"] = new[] { "Fixture.Broken.DroppedSecond" },
+            });
+
+            var retried = await CallAsync("replace_symbol_body", new()
+            {
+                ["retryWith"] = Token(rejected),
+                ["usings"] = Array.Empty<string>(),
+            });
+
+            Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", retried, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", retried, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CallAsync("write_text", new() { ["path"] = probe, ["delete"] = true, ["force"] = true });
+            await CallAsync("write_text", new() { ["path"] = second, ["delete"] = true, ["force"] = true });
+            await CallAsync("write_text", new() { ["path"] = first, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_RolledBack_OffersNoParameterItDoesNotDeclare()
+    {
+        var rejected = await CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Broken/CultureProbe.cs",
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Broken;\n\npublic sealed class CultureProbe\n{\n    public string Text => 7.ToString(CultureInfo.InvariantCulture);\n}\n",
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains("write_text declares no usings= and no retryWith=", rejected, StringComparison.Ordinal);
+        Assert.DoesNotContain("retry with usings=[", rejected, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARejectedEdit_EndsWithTheRetryTokenAloneOnItsLine()
+    {
+        var rejected = await CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "OrderService.Unused",
+            ["body"] = "return MissingHelperThatDoesNotExistHere();",
+        });
+
+        var lines = rejected.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var last = lines[^1].TrimEnd('\r');
+
+        Assert.StartsWith("retryWith=", last, StringComparison.Ordinal);
+        Assert.DoesNotContain(' ', last);
+    }
+
+    [Fact]
+    public async Task WriteText_RolledBack_OffersNoSymbolBatchItCannotSend()
+    {
+        var rejected = await CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Broken/MismatchProbe.cs",
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Broken;\n\npublic sealed class MismatchProbe\n{\n    public int Value => \"not an int\";\n}\n",
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains("fix the edit in the content you send", rejected, StringComparison.Ordinal);
+        Assert.DoesNotContain("replace_symbol symbolIds/declarations batch", rejected, StringComparison.Ordinal);
+    }
 }

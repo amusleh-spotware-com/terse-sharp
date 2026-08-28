@@ -42,7 +42,7 @@ internal static partial class LockHolders
 
             return string.Create(
                 CultureInfo.InvariantCulture,
-                $"{process.ProcessName} startedUtc={Started(process)}{Executable(process, root)} - {Kind(process.Id, process.ProcessName)}");
+                $"{process.ProcessName} startedUtc={Started(process)}{Executable(process, root)} - {Kind(process.Id, process.ProcessName, root)}");
         }
         catch (ArgumentException)
         {
@@ -66,7 +66,7 @@ internal static partial class LockHolders
         }
     }
 
-    private static string Kind(int pid, string name)
+    private static string Kind(int pid, string name, string root)
     {
         if (pid == Environment.ProcessId)
             return "this terse server";
@@ -77,9 +77,12 @@ internal static partial class LockHolders
         if (name.Contains("testhost", StringComparison.OrdinalIgnoreCase) || name.Contains("vstest", StringComparison.OrdinalIgnoreCase))
             return "a live test run; wait for it rather than stopping it";
 
-        return name.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
-            ? "a dotnet host; read its start time before stopping it - it may be another session's build or test"
-            : "not a process this server recognises; the exe above says whether it is running out of this tree's own output";
+        if (!name.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+            return "not a process this server recognises; the exe above says whether it is running out of this tree's own output";
+
+        return LiveTestRun(root) is { } host
+            ? "a dotnet host, and " + host + " is running out of this same tree - HEURISTIC, but this holder is almost certainly part of that test run, so wait for it rather than stopping it"
+            : "a dotnet host, and no test host of this tree is running; read its start time before stopping it - it may be another session's build";
     }
 
     [GeneratedRegex("\"([^\"()]+?)\\s*\\((\\d+)\\)\"", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
@@ -99,4 +102,40 @@ internal static partial class LockHolders
 
     private static string Relative(string path, string root) =>
         root.Length > 0 && PathBoundary.Contains(root, path) ? Path.GetRelativePath(root, path) : path;
+
+    public static string? LiveTestRun(string root)
+    {
+        if (root.Length is 0)
+            return null;
+
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                if (Hosted(process, root) is { } named)
+                    return named;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? Hosted(Process process, string root) =>
+        Located(process) is { Length: > 0 } path
+        && Path.GetFileNameWithoutExtension(path.AsSpan()).Contains("test", StringComparison.OrdinalIgnoreCase)
+        && PathBoundary.Contains(root, path)
+            ? string.Create(CultureInfo.InvariantCulture, $"{process.ProcessName} pid={process.Id}")
+            : null;
+
+    private static string? Located(Process process)
+    {
+        try
+        {
+            return process.MainModule?.FileName;
+        }
+        catch (Exception failure) when (failure is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            return null;
+        }
+    }
 }

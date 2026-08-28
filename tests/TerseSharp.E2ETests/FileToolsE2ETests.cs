@@ -1107,4 +1107,127 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task SearchText_WithContainers_NamesTheDeclarationEachHitSitsIn()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "repository.Submit",
+            ["glob"] = "**/OrderService.cs",
+            ["containers"] = true,
+        });
+
+        Assert.Contains("OrderService.Submit", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs:11", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithContainers_AndCountOnly_IsRefusedByName()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Submit",
+            ["glob"] = "**/OrderService.cs",
+            ["containers"] = true,
+            ["countOnly"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("containers=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithWord_DropsTheLongerIdentifiersThatContainTheLiteral()
+    {
+        var loose = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Count",
+            ["glob"] = "**/OrderService.cs",
+        });
+
+        var whole = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Count",
+            ["glob"] = "**/OrderService.cs",
+            ["word"] = true,
+        });
+
+        Assert.Contains("PendingCount", loose, StringComparison.Ordinal);
+        Assert.DoesNotContain("PendingCount", whole, StringComparison.Ordinal);
+        Assert.Contains("0 matches", whole, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithWord_KeepsAStandaloneLiteral()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Unused",
+            ["glob"] = "**/OrderService.cs",
+            ["word"] = true,
+        });
+
+        Assert.Contains("OrderService.cs:15", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchRegex_WithContainers_NamesTheDeclarationEachHitSitsIn()
+    {
+        var text = await server.CallAsync("search_regex", new()
+        {
+            ["query"] = "Submit\\(order\\) &&",
+            ["glob"] = "**/OrderService.cs",
+            ["containers"] = true,
+        });
+
+        Assert.Contains("OrderService.SubmitTwice", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithForce_AmendsADeclarationsAttributeWithoutResendingTheDeclaration()
+    {
+        const string probe = "src/Fixture.Trading/AttributeProbe.cs";
+
+        var written = await server.CallAsync("write_text", new()
+        {
+            ["path"] = probe,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\n[System.Obsolete(\"the first reason\")]\npublic sealed class AttributeProbe\n{\n    public int Value => 7;\n}\n",
+        });
+
+        try
+        {
+            Assert.DoesNotContain("ERROR", written, StringComparison.Ordinal);
+
+            var edited = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = probe,
+                ["force"] = true,
+                ["oldText"] = "the first reason",
+                ["newText"] = "the second reason",
+            });
+
+            Assert.Contains("changedLines=1", edited, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new()
+            {
+                ["path"] = probe,
+                ["startLine"] = 1,
+                ["endLine"] = 7,
+            });
+
+            Assert.Contains("the second reason", read, StringComparison.Ordinal);
+            Assert.DoesNotContain("the first reason", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new()
+            {
+                ["path"] = probe,
+                ["delete"] = true,
+                ["force"] = true,
+            });
+        }
+    }
 }

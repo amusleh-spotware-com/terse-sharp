@@ -68,17 +68,25 @@ public static class Errors
     public static TerseError CompileRegression(
             IReadOnlyList<string> diagnostics,
             IReadOnlyList<string>? imports = null,
-            IReadOnlyList<string>? callers = null) => new(
+            IReadOnlyList<string>? callers = null,
+            IReadOnlyList<string>? collisions = null,
+            string? tool = null) => new(
             TerseErrorCode.CompileRegression,
             "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
-            Rollback(imports, callers));
+            Rollback(imports, callers, collisions, tool));
 
-    private static string Rollback(IReadOnlyList<string>? imports, IReadOnlyList<string>? callers) => (imports, callers) switch
-    {
-        ({ Count: > 0 }, _) => "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway",
-        (_, { Count: > 0 }) => CallerBatch(callers) + ", or pass allowErrors=true to apply it anyway",
-        _ => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
-    };
+    private static string Rollback(
+        IReadOnlyList<string>? imports,
+        IReadOnlyList<string>? callers,
+        IReadOnlyList<string>? collisions,
+        string? tool) => (imports, callers, collisions) switch
+        {
+            (_, _, { Count: > 0 }) => Ambiguity(collisions, tool),
+            ({ Count: > 0 }, _, _) => Missing(imports, tool),
+            (_, { Count: > 0 }, _) => Broken(callers, tool),
+            _ when HoldsUsings(tool) => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
+            _ => "fix the edit in the content you send, or pass allowErrors=true to apply it anyway",
+        };
 
     internal static string CallerBatch(IReadOnlyList<string> callers) =>
         "send these callers in the same replace_symbol symbolIds/declarations batch: " + string.Join(", ", callers);
@@ -196,4 +204,21 @@ public static class Errors
 
     private static string Violations(PolicyVerdict verdict) =>
         string.Join("\n", verdict.Rejected.Select(finding => finding.Explain()));
+
+    internal static bool HoldsUsings(string? tool) =>
+        tool is null or "replace_symbol" or "replace_symbol_body" or "add_member";
+
+
+    internal static string Missing(IReadOnlyList<string> imports, string? tool) => HoldsUsings(tool)
+        ? "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway"
+        : tool + " declares no usings= and no retryWith=, so put " + QuotedList(imports) + " in the file's own using directives in the content you send, or pass allowErrors=true to apply it anyway";
+
+
+    internal static string Ambiguity(IReadOnlyList<string> collisions, string? tool) => HoldsUsings(tool)
+        ? "the ambiguity was introduced by usings=[" + QuotedList(collisions) + "] which this edit added - retry with usings=[] and the retryWith token below to drop it, fully qualify the name, or pass allowErrors=true to apply it anyway"
+        : tool + " declares no usings=, so the ambiguity comes from the file's own using directives - fully qualify the name in the content you send, or pass allowErrors=true to apply it anyway";
+
+    internal static string Broken(IReadOnlyList<string> callers, string? tool) => HoldsUsings(tool)
+        ? CallerBatch(callers) + ", or pass allowErrors=true to apply it anyway"
+        : tool + " cannot batch a symbol edit, so fix these callers in the content you send: " + string.Join(", ", callers) + ", or pass allowErrors=true to apply it anyway";
 }

@@ -152,6 +152,7 @@ public sealed class ChangedTestSelectionE2ETests
             {
                 ["projects"] = new[] { "Selection.Core.Tests", "Selection.Other.Tests" },
                 ["timeoutSeconds"] = 1,
+                ["properties"] = new[] { "TerseStallBuild=true" },
             });
 
             Assert.DoesNotContain("run_tests PASSED", text, StringComparison.Ordinal);

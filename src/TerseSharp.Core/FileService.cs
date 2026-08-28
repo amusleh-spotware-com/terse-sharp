@@ -39,6 +39,7 @@ public static class FileService
             bool force,
             bool allowErrors,
             bool verbose,
+            bool allowPolicy,
             CancellationToken cancellationToken)
     {
         var resolved = Writable(workspace, path, force);
@@ -52,7 +53,7 @@ public static class FileService
             return refusal;
 
         return PathBoundary.Contains(workspace.Root, full)
-            ? await InsideAsync(workspace, path, full, content, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false)
+            ? await InsideAsync(workspace, path, full, content, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false)
             : await OutsideWriteAsync(workspace, full, content, dryRun, verbose, cancellationToken).ConfigureAwait(false);
     }
 
@@ -443,6 +444,7 @@ public static class FileService
         bool dryRun,
         bool allowErrors,
         bool verbose,
+        bool allowPolicy,
         CancellationToken cancellationToken)
     {
         if (!SourceFile.IsCSharp(path))
@@ -451,7 +453,7 @@ public static class FileService
         if (await StagedAsync(workspace, path, full, content, cancellationToken).ConfigureAwait(false) is not { } staged)
             return null;
 
-        var options = new EditOptions("write_text", dryRun, allowErrors, verbose);
+        var options = new EditOptions("write_text", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy);
 
         return await EditGate.ApplyAsync(workspace, staged.Updated, [staged.Id], options, cancellationToken).ConfigureAwait(false);
     }
@@ -795,6 +797,7 @@ public static class FileService
         bool force,
         bool allowErrors,
         bool verbose,
+        bool allowPolicy,
         CancellationToken cancellationToken)
     {
         var pending = new List<PendingWrite>(files.Count);
@@ -809,7 +812,7 @@ public static class FileService
             pending.Add(prepared.Value);
         }
 
-        var gated = await GateManyAsync(workspace, pending, new EditOptions("write_text", dryRun, allowErrors, verbose), cancellationToken).ConfigureAwait(false);
+        var gated = await GateManyAsync(workspace, pending, new EditOptions("write_text", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy), cancellationToken).ConfigureAwait(false);
 
         if (gated is { IsOk: false })
             return gated.Value;
@@ -1085,6 +1088,7 @@ public static class FileService
             force: false,
             allowErrors: false,
             request.Verbose,
+            allowPolicy: false,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -1277,11 +1281,12 @@ public static class FileService
             bool dryRun,
             bool allowErrors,
             bool verbose,
+            bool allowPolicy,
             CancellationToken cancellationToken)
     {
         var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
 
-        if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, cancellationToken).ConfigureAwait(false) is { } gated)
+        if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
             return gated;
 
         if (!dryRun)
@@ -1369,6 +1374,7 @@ public static class FileService
                 force: false,
                 allowErrors: false,
                 request.Verbose,
+                allowPolicy: false,
                 cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(moved.Error!);
     }

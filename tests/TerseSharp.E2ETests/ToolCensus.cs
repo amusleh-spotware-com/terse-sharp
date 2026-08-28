@@ -290,6 +290,34 @@ internal static class ToolCensus
         + "The advertised tools/list cost is a session number: workspace_status prints it as "
         + "advertised=<n> tools <t> tokens - split by verbose=true into toolDescriptions, "
         + "parameterDescriptions, schemaFrame and names - inside an MCP session, not from that one-shot probe";
+    public const int MaxPolicyExemptions = 23;
+
+    public static ToolExemption[] PolicyExempt =>
+    [
+        new("format", "the whitespace formatter is one of the policy's own fixers and constructs its EditOptions with AllowPolicy: true, so it can never be blocked by it"),
+        new("cleanup", "the code-fix pass is one of the policy's own fixers and constructs its EditOptions with AllowPolicy: true"),
+        new("gate", "the analyze-format-cleanup composite runs those same exempt fixers and authors no declaration of its own"),
+        new("clean", "deletes bin and obj; it never edits a document, so no EditGate call and no policy evaluation exists to bypass"),
+        new("edit_text", "writes the file directly and never reaches EditGate.ApplyAsync, so the policy does not evaluate it; write_text force=true is the gated path"),
+        new("xaml_set_property", "XamlEditService writes markup through its own path, not EditGate.ApplyAsync"),
+        new("xaml_add_element", "XamlEditService writes markup through its own path, not EditGate.ApplyAsync"),
+        new("xaml_remove_element", "XamlEditService writes markup through its own path, not EditGate.ApplyAsync"),
+        new("razor_set_attribute", "RazorEditGate is a separate gate over .razor markup and evaluates no C# code policy"),
+        new("razor_add_element", "RazorEditGate is a separate gate over .razor markup and evaluates no C# code policy"),
+        new("razor_remove_element", "RazorEditGate is a separate gate over .razor markup and evaluates no C# code policy"),
+        new("razor_set_directive", "RazorEditGate is a separate gate over .razor markup and evaluates no C# code policy"),
+        new("resx_set", "ResxEditService writes XML resources, which carry no C# declaration for the policy to judge"),
+        new("resx_remove", "ResxEditService writes XML resources, which carry no C# declaration for the policy to judge"),
+        new("resx_rename", "ResxEditService writes XML resources, which carry no C# declaration for the policy to judge"),
+        new("project_create", "writes a .csproj and a solution entry, not a C# declaration the policy judges"),
+        new("project_add_reference", "edits MSBuild XML, which the policy does not evaluate"),
+        new("project_remove_reference", "edits MSBuild XML, which the policy does not evaluate"),
+        new("project_set_property", "edits MSBuild XML, which the policy does not evaluate"),
+        new("package_add", "edits MSBuild XML and Directory.Packages.props, which the policy does not evaluate"),
+        new("package_remove", "edits MSBuild XML and Directory.Packages.props, which the policy does not evaluate"),
+        new("solution_add_project", "edits the .slnx solution file, which the policy does not evaluate"),
+        new("solution_remove_project", "edits the .slnx solution file, which the policy does not evaluate"),
+    ];
 }
 
 internal sealed record ToolPair(string First, string Second, string Reason);

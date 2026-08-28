@@ -108,35 +108,33 @@ public sealed class LoadedWorkspace : IDisposable
         var before = workspace.CurrentSolution;
         var entry = await CaptureAsync(before, changed, cancellationToken).ConfigureAwait(false);
         var rebased = await RebasedAsync(solution, changed, cancellationToken).ConfigureAwait(false);
-        var snapshots = await ProjectSnapshotsAsync(before, solution, changed, cancellationToken).ConfigureAwait(false);
+        var added = AddedByProject(before, solution, changed);
+        var snapshots = new List<ProjectSnapshot>(added.Count);
+
+        await using var gate = await ProjectFileGate.EnterAsync(ProjectPaths(solution, added), cancellationToken).ConfigureAwait(false);
 
         try
         {
-            if (!Committed(rebased, solution, entry))
-                return false;
+            await SnapshotsAsync(snapshots, solution, added, cancellationToken).ConfigureAwait(false);
 
-            foreach (var path in entry.Paths)
-                Sync.Settled(path);
+            return Landed(before, solution, rebased, entry, changed);
+        }
+        catch (Exception failure) when (failure is UnauthorizedAccessException or IOException)
+        {
+            Sync.Bumped(ChangeKind.Files);
 
-            Sync.Bumped(ChangeKind.Code);
-
-            if (Moved(before, Solution, changed))
-                Sync.Bumped(ChangeKind.Files);
-
-            return true;
+            return false;
         }
         finally
         {
-            foreach (var snapshot in snapshots)
-                await ProjectFileGuard.RestoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+            await RestoredAsync(snapshots, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static async Task<List<ProjectSnapshot>> ProjectSnapshotsAsync(
+    private static Dictionary<ProjectId, List<string>> AddedByProject(
         Solution before,
         Solution after,
-        IReadOnlyList<DocumentId> changed,
-        CancellationToken cancellationToken)
+        IReadOnlyList<DocumentId> changed)
     {
         var byProject = new Dictionary<ProjectId, List<string>>();
 
@@ -151,15 +149,7 @@ public sealed class LoadedWorkspace : IDisposable
             files.Add(path);
         }
 
-        var snapshots = new List<ProjectSnapshot>(byProject.Count);
-
-        foreach (var (projectId, files) in byProject)
-        {
-            if (await ProjectFileGuard.CaptureAsync(after.GetProject(projectId)?.FilePath, files, cancellationToken).ConfigureAwait(false) is { } snapshot)
-                snapshots.Add(snapshot);
-        }
-
-        return snapshots;
+        return byProject;
     }
 
     private static bool Moved(Solution before, Solution after, IReadOnlyList<DocumentId> changed)
@@ -620,6 +610,61 @@ public sealed class LoadedWorkspace : IDisposable
 
                 return [.. edited.Order(StringComparer.OrdinalIgnoreCase)];
             }
+        }
+    }
+
+    private bool Landed(
+        Solution before,
+        Solution forked,
+        Solution rebased,
+        HistoryEntry entry,
+        IReadOnlyList<DocumentId> changed)
+    {
+        if (!Committed(rebased, forked, entry))
+            return false;
+
+        foreach (var path in entry.Paths)
+            Sync.Settled(path);
+
+        Sync.Bumped(ChangeKind.Code);
+
+        if (Moved(before, Solution, changed))
+            Sync.Bumped(ChangeKind.Files);
+
+        return true;
+    }
+
+    private static string[] ProjectPaths(Solution solution, Dictionary<ProjectId, List<string>> added) =>
+        [.. added.Keys.Select(id => solution.GetProject(id)?.FilePath).OfType<string>()];
+
+    private static async Task SnapshotsAsync(
+        List<ProjectSnapshot> snapshots,
+        Solution after,
+        Dictionary<ProjectId, List<string>> added,
+        CancellationToken cancellationToken)
+    {
+        foreach (var (projectId, files) in added)
+        {
+            if (await ProjectFileGuard.CaptureAsync(after.GetProject(projectId)?.FilePath, files, cancellationToken).ConfigureAwait(false) is { } snapshot)
+                snapshots.Add(snapshot);
+        }
+    }
+
+    private async Task RestoredAsync(List<ProjectSnapshot> snapshots, CancellationToken cancellationToken)
+    {
+        foreach (var snapshot in snapshots)
+            await SettledAsync(snapshot, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SettledAsync(ProjectSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ProjectFileGuard.RestoreAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (failure is UnauthorizedAccessException or IOException)
+        {
+            Sync.Bumped(ChangeKind.Files);
         }
     }
 }

@@ -65,7 +65,7 @@ public sealed class ResponseBuilder(string tool, string argument)
         return text.ToString().TrimEnd('\n');
     }
 
-    private static string Full(Counted count)
+    private string Full(Counted count)
     {
         var truncated = count.Total > count.Shown;
 
@@ -74,15 +74,16 @@ public sealed class ResponseBuilder(string tool, string argument)
             $"{count.Shown} {count.Unit} (truncated={(truncated ? "true" : "false")}, total={count.Total}){(truncated ? Steer(count) : Advertised(count))}\n");
     }
 
-    private static string Brief(Counted count) => count.Total > count.Shown
+    private string Brief(Counted count) => count.Total > count.Shown
         ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit} truncated{Steer(count)}")
         : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit}{Advertised(count)}");
 
-    private static string Advertised(Counted count) =>
+    private string Advertised(Counted count) =>
         count.Shown >= SteerThreshold ? Steer(count) : string.Empty;
 
-    private static string Steer(Counted count) =>
-        count.NarrowWith is { Length: > 0 } narrow ? " - narrow with " + narrow : string.Empty;
+    private string Steer(Counted count) => count.NarrowWith is { Length: > 0 } narrow && Trimmed(narrow) is { Length: > 0 } kept
+        ? " - narrow with " + kept
+        : string.Empty;
 
     private enum EntryKind
     {
@@ -94,4 +95,29 @@ public sealed class ResponseBuilder(string tool, string argument)
     private readonly record struct Counted(int Shown, int Total, string Unit, string? NarrowWith);
 
     private readonly record struct Entry(EntryKind Kind, string Text, Counted Count);
+
+    private bool chosen;
+
+    public ResponseBuilder Chosen(bool byCaller)
+    {
+        chosen = byCaller;
+
+        return this;
+    }
+
+    private string Trimmed(string narrow)
+    {
+        if (!chosen)
+            return narrow;
+
+        var kept = new List<string>(4);
+
+        foreach (var part in narrow.Split(" or ", StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!part.Contains("maxResults", StringComparison.Ordinal))
+                kept.Add(part.TrimEnd(','));
+        }
+
+        return string.Join(" or ", kept);
+    }
 }

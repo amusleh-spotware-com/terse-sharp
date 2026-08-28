@@ -474,6 +474,7 @@ public sealed class WorkspaceSyncE2ETests
 
         Assert.All(written, text => Assert.DoesNotContain("ERROR Internal", text, StringComparison.Ordinal));
         Assert.All(written, text => Assert.DoesNotContain("ERROR Transient", text, StringComparison.Ordinal));
+        Assert.All(written, text => Assert.DoesNotContain("UnauthorizedAccessException", text, StringComparison.Ordinal));
         Assert.All(written, text => Assert.True(
             text.Contains("changedLines=", StringComparison.Ordinal) || text.Contains("ERROR EditConflict", StringComparison.Ordinal),
             text));

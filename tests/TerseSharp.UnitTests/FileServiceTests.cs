@@ -256,6 +256,7 @@ public sealed class FileServiceTests
                 force: true,
                 allowErrors: false,
                 verbose: false,
+                allowPolicy: false,
                 TestContext.Current.CancellationToken);
 
             Assert.False(result.IsOk);
@@ -310,6 +311,7 @@ public sealed class FileServiceTests
                 force: true,
                 allowErrors: false,
                 verbose: false,
+                allowPolicy: false,
                 TestContext.Current.CancellationToken);
 
             Assert.True(result.IsOk, result.Error?.Message);

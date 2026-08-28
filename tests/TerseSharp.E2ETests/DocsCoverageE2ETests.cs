@@ -64,5 +64,5 @@ public sealed class DocsCoverageE2ETests(TerseServerFixture server)
         Assert.True(absent.Length is 0, "tools no table row names: " + string.Join(", ", absent));
     }
 
-    private const int SkillTokenBudget = 26600;
+    private const int SkillTokenBudget = 27400;
 }

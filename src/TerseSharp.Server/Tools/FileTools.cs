@@ -16,7 +16,7 @@ public sealed class FileTools(ToolContext context)
                 [Description("Maximum lines returned, default 2000. The response is truncated, never refused. With headings=true it bounds the SECTIONS listed, and the summary says how many of the total were shown.")] int maxLines = 0,
                 [Description("Maximum characters of file text returned, default 40960 and at most 131072, and it bounds the text only - the line-number gutter, the notes and the count line are not charged to it. With paths= it is the budget for the whole batch. The default is set so a whole-file read stays inline in the client instead of being spilled to a file that answers nothing; a clipped read names the line to continue from. Raise it on a file you truly need whole, lower it on a file whose lines are very long, which maxLines cannot bound. Not applied to headings=true.")] int maxChars = 0,
                 [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
-                [Description("End the answer with the file's byte length as bytes=N, on every shape read_text returns and once per paths= entry. find_files stamps=true answers the same number without reading the file. Default false.")] bool bytes = false,
+                [Description("End the answer with the file's byte length as bytes=N, on every shape read_text returns and once per paths= entry. Under ref= it is the BLOB's size at that revision, from git cat-file -s rather than the decoded text, so a CRLF checkout cannot skew it; a blob that cannot be sized answers bytes=UNRESOLVED. find_files stamps=true answers the same number without reading the file. Default false.")] bool bytes = false,
                 [Description("End the answer with the whole file's token cost as tokens=N, whatever range was read - the count the shipped-doc budgets assert. Default false.")] bool tokens = false,
                 [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
                 [Description("With headings=true, the deepest heading level to list: 2 keeps # and ## and drops every ### below them, which is how a long changelog or backlog answers its top-level shape. Anchors stay the ones GitHub assigns over the whole document. Default 0, every level. Refused without headings=true.")] int maxLevel = 0,
@@ -112,6 +112,7 @@ bool verbose) =>
         [Description("Apply a .cs write even if it introduces compile errors.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Apply a write the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default)
     {
         if (@ref is { Length: > 0 } && (delete || content is not null || files is { Length: > 0 }))
@@ -122,8 +123,8 @@ bool verbose) =>
         }
 
         return files is { Length: > 0 } batch
-            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, new WriteOptions(dryRun, force, allowErrors, verbose), cancellationToken)
-            : WrittenOne(workspace, path, content, delete, @ref, allowEmpty, new WriteOptions(dryRun, force, allowErrors, verbose), cancellationToken);
+            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy), cancellationToken)
+            : WrittenOne(workspace, path, content, delete, @ref, allowEmpty, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy), cancellationToken);
     }
 
     private Task<string> Written(
@@ -145,13 +146,13 @@ bool verbose) =>
             return Task.FromResult(foreign.Render());
 
         return Guarded(workspace, path, async loaded => NavigationTools.Unwrap(await FileService.WriteTextAsync(
-            loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken);
+            loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken);
     }
 
-    private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose);
+    private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. With toPath=, section= MOVES the section into another markdown file in one write, and row=\"I286\" moves ONE table row, matched by its first cell, so the row costs its identifier instead of its text; rows=[{row,newText}, ...] moves up to 25 of them as ONE write per file. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. The top-level path may be omitted entirely when every entry declares its own. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. A successful edit answers in one line per changed file - the file name and changedLines; pass verbose=true for the diff.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. With toPath=, section= MOVES the section into another markdown file in one write, and row=\"I286\" moves ONE table row, matched by its first cell, so the row costs its identifier instead of its text; rows=[{row,newText}, ...] moves up to 25 of them as ONE write per file. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. The top-level path may be omitted entirely when every entry declares its own. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. On a .cs file, force=true is the sanctioned way to amend a declaration's ATTRIBUTES - a tool [Description], an [Obsolete] - since a short anchor costs ~30 tokens where replace_symbol re-sends the whole declaration; it is NOT compile-gated, so analyze the file after. A successful edit answers in one line per changed file - the file name and changedLines; pass verbose=true for the diff.")]
     public Task<string> EditText(
         [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry that carries no path of its own - and it may be omitted entirely when every entry declares one.")] string? path = null,
         [Description("Replacement text. With section=, the whole new section including its heading line, unless place= writes inside it. With row=, the row as it should read in the target; empty moves it verbatim. Omit it when edits= carries the edits.")] string? newText = null,
@@ -256,19 +257,20 @@ bool verbose) =>
                     NavigationTools.Cap(maxResults, 100),
                     stamps,
                     name,
-                    depth)));
+                    depth,
+                    maxResults > 0)));
         }
 
         return context.WithWorkspaceAsync(
             workspace,
             null,
-            loaded => ListedAsync(loaded, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, cancellationToken),
+            loaded => ListedAsync(loaded, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
             semantic: false,
             cancellationToken);
     }
 
     [McpServerTool(Name = "search_text", ReadOnly = true)]
-    [Description("Literal text search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 literals in ONE pass over the same file set. Replaces one call per literal, and the shell grep alternation that cannot say which alternative matched, because every record is tagged q1..qN by the position of its literal in queries=. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An entry that matches across a line break is reported once, at the line its text starts on, and the scan resumes on the next line, so every other entry still sees the lines it spanned. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. countOnly=true answers ONE line per file with its match count and no matched text, tagged q1=N per query, which is what a presence check across a large tree costs instead of the matching lines themselves. context=N adds the surrounding lines so a hit needs no follow-up read, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. matchesOnly= belongs to search_regex and is refused here, because a literal's matched span is the literal you passed. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
+    [Description("Literal text search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 literals in ONE pass over the same file set. Replaces one call per literal, and the shell grep alternation that cannot say which alternative matched, because every record is tagged q1..qN by the position of its literal in queries=. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An entry that matches across a line break is reported once, at the line its text starts on, and the scan resumes on the next line, so every other entry still sees the lines it spanned. Also the counting tool: the count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. countOnly=true answers ONE line per file with its match count and no matched text, tagged q1=N per query, which is what a presence check across a large tree costs instead of the matching lines themselves. context=N adds the surrounding lines so a hit needs no follow-up read, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. matchesOnly= belongs to search_regex and is refused here, because a literal's matched span is the literal you passed. containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes rather than a coordinate you must outline first, and word=true keeps a literal only where neither side is a letter, a digit or an underscore. Results are tagged HEURISTIC: for a type or member name use search_symbols or find_usages instead.")]
     public Task<string> SearchText(
         [Description("Literal text to find.")] string? query = null,
         [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -283,11 +285,13 @@ bool verbose) =>
         [Description("Refused on search_text: a literal query's matched span is the query itself, so every record would read back what you passed. Use search_regex, where the matched span varies, or countOnly=true for one count per file.")] bool matchesOnly = false,
         [Description("Answer one line per file - path and its match count, and q1=N per query when queries= is passed - with no matched text at all. Bounded by the same maxResults. Refused beside matchesOnly=, unique= and context=, which have nothing to act on. Default false.")] bool countOnly = false,
         [Description("Pass queries to search several literals in one pass over the same file set, at most 10. Replaces one call per literal. Every record is tagged q1..qN by the position of its literal here, so one call answers where are these N things and no legend is echoed back. A line matching several literals is ONE record tagged with all of them, comma-separated in query order. An entry that spans a line break is reported once, at the line its text starts on, and hides nothing from the other entries. Combines with query, which is taken first; more than 10 entries is refused rather than truncated.")] string?[]? queries = null,
+        [Description("Name the C# declaration each hit sits in - Type.Member, from syntax - before the matched line, so the record is an id get_symbol_source takes. .cs only; refused beside countOnly=. Default false.")] bool containers = false,
+        [Description("Match whole words only: a literal is kept only where neither side is a letter, a digit or an underscore. Applies to query= and every queries= entry. Default false.")] bool word = false,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries, countOnly), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, word), cancellationToken);
 
     [McpServerTool(Name = "search_regex", ReadOnly = true)]
-    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 expressions in ONE pass over the same file set. Replaces one call per expression, and every record is tagged q1..qN by the position of its expression in queries=, which is what an alternation cannot do: it returns one undifferentiated list. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An expression that spans a line break - a literal newline, [\\s\\S] or (?s). - is reported once, at the line its text starts on, and the scan resumes on the next line, so every other expression still sees the lines it spanned. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. countOnly=true answers ONE line per file with its match count and no matched text, tagged q1=N per expression. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. Results are tagged HEURISTIC.")]
+    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 expressions in ONE pass over the same file set. Replaces one call per expression, and every record is tagged q1..qN by the position of its expression in queries=, which is what an alternation cannot do: it returns one undifferentiated list. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An expression that spans a line break - a literal newline, [\\s\\S] or (?s). - is reported once, at the line its text starts on, and the scan resumes on the next line, so every other expression still sees the lines it spanned. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are skipped. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. countOnly=true answers ONE line per file with its match count and no matched text, tagged q1=N per expression. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes; word= belongs to search_text, because \\b answers it here. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
         [Description(".NET regular expression.")] string? query = null,
         [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -302,8 +306,9 @@ bool verbose) =>
         [Description("Print the matched span instead of the whole line, the way grep -o does, and compose it with unique=true to answer which distinct values of this shape exist. A match that is only whitespace still prints its line, so no record is ever empty. Default false.")] bool matchesOnly = false,
         [Description("Answer one line per file - path and its match count, and q1=N per expression when queries= is passed - with no matched text at all. Bounded by the same maxResults. Refused beside matchesOnly=, unique= and context=, which have nothing to act on. Default false.")] bool countOnly = false,
         [Description("Pass queries to search several expressions in one pass over the same file set, at most 10. Replaces one call per expression. Every record is tagged q1..qN by the position of its expression here, so the caller can tell which expression produced which record - which one alternation cannot. A line matching several expressions is ONE record tagged with all of them, comma-separated in query order. An expression that spans a line break is reported once, at the line its text starts on, and hides nothing from the other expressions. Combines with query, which is taken first; more than 10 entries is refused rather than truncated.")] string?[]? queries = null,
+        [Description("Name the C# declaration each hit sits in - Type.Member, from syntax - before the matched line, so the record is an id get_symbol_source takes. .cs only; refused beside countOnly=. Default false.")] bool containers = false,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries, countOnly), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries, countOnly, containers), cancellationToken);
 
     private Task<string> Search(TextQuery request, CancellationToken cancellationToken)
     {
@@ -354,7 +359,10 @@ bool verbose) =>
             request.Root,
             request.Exclude,
             request.MatchesOnly,
-            request.CountOnly);
+            request.CountOnly,
+            request.Containers,
+            request.Word,
+            request.MaxResults is > 0 and <= NavigationTools.MaxCap);
 
     private Task<string> Scanned(TextQuery request, TextSearchRequest search, CancellationToken cancellationToken) =>
         request.Root is { Length: > 0 }
@@ -378,7 +386,9 @@ bool verbose) =>
         string? Exclude = null,
         bool MatchesOnly = false,
         IReadOnlyList<string?>? Texts = null,
-        bool CountOnly = false);
+        bool CountOnly = false,
+        bool Containers = false,
+        bool Word = false);
 
     private Task<string> Guarded(
 string? workspace,
@@ -441,15 +451,16 @@ context.RejectWrite() is { } rejection
         bool tracked,
         string? name,
         int depth,
+        bool chosen,
         CancellationToken cancellationToken)
     {
         if (!tracked)
-            return TextSearchService.FindFiles(loaded, glob, maxResults, stamps, null, name, depth);
+            return TextSearchService.FindFiles(loaded, glob, maxResults, stamps, null, name, depth, chosen);
 
         var known = await TrackedAsync(loaded, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
-            ? TextSearchService.FindFiles(loaded, glob, maxResults, stamps, known.Value!, name, depth)
+            ? TextSearchService.FindFiles(loaded, glob, maxResults, stamps, known.Value!, name, depth, chosen)
             : known.Error!.Render();
     }
 
@@ -685,7 +696,7 @@ context.RejectWrite() is { } rejection
             workspace,
             files[0].Path,
             async loaded => NavigationTools.Unwrap(await FileService.WriteTextManyAsync(
-                loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, cancellationToken).ConfigureAwait(false)),
+                loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)),
             files.Any(file => SourceFile.IsCSharp(file.Path)),
             cancellationToken);
     }
@@ -760,7 +771,7 @@ context.RejectWrite() is { } rejection
         }
 
         return NavigationTools.Unwrap(await FileService.WriteTextAsync(
-            loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, cancellationToken).ConfigureAwait(false));
+            loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false));
     }
 
     private static async Task<string> RowMovedAsync(
@@ -849,6 +860,13 @@ context.RejectWrite() is { } rejection
             return Errors.Invalid(
                 "'countOnly' answers one line per file with no matched text, so matchesOnly=, unique= and context= have nothing to act on",
                 "drop countOnly= to read the matching lines, or drop matchesOnly=, unique= and context=");
+        }
+
+        if (request.CountOnly && request.Containers)
+        {
+            return Errors.Invalid(
+                "'countOnly' answers one line per file with no matched line, so containers= has no hit to name a declaration for",
+                "drop countOnly= to read the matching lines with their declarations, or drop containers=");
         }
 
         return null;
