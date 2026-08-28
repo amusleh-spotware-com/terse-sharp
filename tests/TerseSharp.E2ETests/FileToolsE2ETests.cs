@@ -1187,13 +1187,13 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task EditText_WithForce_AmendsADeclarationsAttributeWithoutResendingTheDeclaration()
     {
-        const string probe = "src/Fixture.Trading/AttributeProbe.cs";
+        const string probe = "attribute-probe.cs";
 
         var written = await server.CallAsync("write_text", new()
         {
             ["path"] = probe,
             ["force"] = true,
-            ["content"] = "namespace Fixture.Trading;\n\n[System.Obsolete(\"the first reason\")]\npublic sealed class AttributeProbe\n{\n    public int Value => 7;\n}\n",
+            ["content"] = "namespace Fixture.Probes;\n\n[System.Obsolete(\"the first reason\")]\npublic sealed class AttributeProbe\n{\n    public int Value => 7;\n}\n",
         });
 
         try
