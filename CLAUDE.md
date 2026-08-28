@@ -679,6 +679,14 @@ siblings are **CI-breaking** here, not suggestions — and the build will not te
 `.editorconfig` carries them at `suggestion` and `TreatWarningsAsErrors` escalates warnings, not
 suggestions.
 
+**Pre-sizing beats the collection expression, and that is settled — stop re-deriving it.** The
+allocation gate mandates pre-sizing the one collection you must build; the style rule above prefers
+`[]` over `new List<T>()`. Where you know the count, `new List<T>(count)` / `new
+Dictionary<K,V>(count)` / `EnsureCapacity` **wins**, and it is not a style breach. C# 15 collection
+expression arguments (`[with(capacity: n), .. items]`) resolve the tension properly and are the form to
+adopt the moment the SDK pin moves: they need the .NET 11 SDK plus `LangVersion=preview`, and
+`global.json` pins `10.0.300` on three CI runners. Logged as `I428`.
+
 ## 🚫 HARD GATE — a release is not cut until the review is closed and the changelog links it
 
 **No tag, no `dotnet pack`, no `dotnet nuget push`, no GitHub release, while a code review is open.**

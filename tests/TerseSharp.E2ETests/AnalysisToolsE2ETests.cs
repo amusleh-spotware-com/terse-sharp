@@ -324,4 +324,39 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.Contains("OrderService.cs:15:16 OrderService.Unused", text, StringComparison.Ordinal);
         Assert.Contains("OrderService.cs:17:17 OrderService.NeverCalled", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Analyze_WhenThePathsBatchSaturatesItsCap_NamesTheOneCallThatAnswersTheWholeSweep()
+    {
+        string[] batch =
+        [
+            "src/Fixture.Trading/Awkward.cs",
+            "src/Fixture.Trading/Compactness.cs",
+            "src/Fixture.Trading/Composition.cs",
+            "src/Fixture.Trading/InMemoryOrderRepository.cs",
+            "src/Fixture.Trading/IOrderRepository.cs",
+            "src/Fixture.Trading/Localization.cs",
+            "src/Fixture.Trading/NullOrderRepository.cs",
+            "src/Fixture.Trading/Order.cs",
+            "src/Fixture.Trading/OrderBook.cs",
+            "src/Fixture.Trading/OrderRouter.cs",
+        ];
+
+        var saturated = await server.CallAsync("analyze", new() { ["paths"] = batch, ["minSeverity"] = "warning" });
+        var narrow = await server.CallAsync("analyze", new() { ["paths"] = batch[..3], ["minSeverity"] = "warning" });
+
+        Assert.Contains("next: analyze changed=true", saturated, StringComparison.Ordinal);
+        Assert.DoesNotContain("next: analyze changed=true", narrow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_ForAPathsBatchOfRepeatedEntries_DoesNotClaimTheCapWasReached()
+    {
+        var repeated = new string[10];
+        Array.Fill(repeated, "src/Fixture.Trading/Order.cs");
+
+        var text = await server.CallAsync("analyze", new() { ["paths"] = repeated, ["minSeverity"] = "warning" });
+
+        Assert.DoesNotContain("next: analyze changed=true", text, StringComparison.Ordinal);
+    }
 }

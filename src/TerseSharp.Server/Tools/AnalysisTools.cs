@@ -8,7 +8,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class AnalysisTools(ToolContext context)
 {
     [McpServerTool(Name = "analyze")]
-    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares is named NOT_ENABLED instead of answering a silent zero.")]
+    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares is named NOT_ENABLED instead of answering a silent zero. A paths= batch that saturates the 10-path cap ends with next: analyze changed=true, which answers the same end-of-task sweep over every modified file in ONE call.")]
     public Task<string> Analyze(
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
             [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
@@ -28,8 +28,12 @@ public sealed class AnalysisTools(ToolContext context)
                 var scope = Scoped(loaded, path, paths);
 
                 return scope.IsOk
-                    ? AnalysisService.AnalyzeAsync(
-                        loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken)
+                    ? Steered(
+                        AnalysisService.AnalyzeAsync(
+                            loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
+                        path,
+                        paths,
+                        changed)
                     : Task.FromResult(scope.Error!.Render());
             },
             cancellationToken: cancellationToken);
@@ -188,4 +192,29 @@ public sealed class AnalysisTools(ToolContext context)
     }
 
     private static readonly SearchValues<char> GlobCharacters = SearchValues.Create("*?{");
+
+    private static bool Saturated(string? path, string?[]? paths)
+    {
+        var distinct = new HashSet<string>(PluralPaths.MaxPaths + 1, StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(path))
+            distinct.Add(path);
+
+        foreach (var entry in paths ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(entry))
+                distinct.Add(entry);
+        }
+
+        return distinct.Count >= PluralPaths.MaxPaths;
+    }
+
+    private static async Task<string> Steered(Task<string> answer, string? path, string?[]? paths, bool changed)
+    {
+        var text = await answer.ConfigureAwait(false);
+
+        return changed || !Saturated(path, paths)
+            ? text
+            : text + "\nnext: analyze changed=true - ONE pass over every file modified since the workspace loaded, instead of a second paths= batch";
+    }
 }

@@ -1230,4 +1230,29 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             });
         }
     }
+
+    [Fact]
+    public async Task ReadText_WhenAColumnProjectionRunsOutOfCharacters_TruncatesAndNamesTheCheaperShape()
+    {
+        const string Probe = "terse-columns-probe.md";
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "| Finding | Tool |\n|---|---|\n| **A1** aaaaaaaaaaaaaaaaaaaa | read_text |\n| **A2** bbbbbbbbbbbbbbbbbbbb | read_text |\n| **A3** cccccccccccccccccccc | read_text |\n",
+        });
+        try
+        {
+            var clipped = await server.CallAsync("read_text", new() { ["path"] = Probe, ["columns"] = "Finding", ["maxChars"] = 30 });
+            var whole = await server.CallAsync("read_text", new() { ["path"] = Probe, ["columns"] = "Finding" });
+
+            Assert.Contains("1/3 rows truncated", clipped, StringComparison.Ordinal);
+            Assert.Contains("next: search_regex", clipped, StringComparison.Ordinal);
+            Assert.DoesNotContain("**A3**", clipped, StringComparison.Ordinal);
+            Assert.Contains("**A3**", whole, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }

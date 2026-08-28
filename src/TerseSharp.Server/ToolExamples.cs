@@ -1,4 +1,6 @@
 using System.Collections.Frozen;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server;
 
@@ -31,4 +33,25 @@ public static class ToolExamples
         tool is { Length: > 0 } name && Worked.TryGetValue(name, out var example)
             ? "; example: " + example
             : string.Empty;
+
+    private static readonly FrozenSet<string> Advertised = new[]
+    {
+        "find_files", "search_text", "search_regex", "package_add", "package_remove",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    public static IReadOnlyCollection<string> Promoted => Advertised;
+
+    public static McpRequestFilter<ListToolsRequestParams, ListToolsResult> Filter() =>
+        next => async (request, cancellationToken) =>
+        {
+            var listed = await next(request, cancellationToken).ConfigureAwait(false);
+
+            foreach (var tool in listed.Tools)
+            {
+                if (Advertised.Contains(tool.Name) && tool.Description is { Length: > 0 } text && !text.Contains("  example: ", StringComparison.Ordinal))
+                    tool.Description = text + "  example: " + Worked[tool.Name];
+            }
+
+            return listed;
+        };
 }

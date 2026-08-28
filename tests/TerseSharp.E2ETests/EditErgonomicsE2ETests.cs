@@ -741,4 +741,146 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_ForAnAnchorPastedFromADedentedSymbolRead_MatchesAndReindentsTheReplacement()
+    {
+        const string Probe = "terse-reindent-probe.md";
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Probe\n\n    class A\n    {\n        int V() => 1;\n    }\n",
+        });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "class A\n{\n    int V() => 1;\n}",
+                ["newText"] = "class A\n{\n    int V() => 2;\n}",
+            });
+
+            Assert.Contains("re-indenting by 4 column(s)", applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("    class A", read, StringComparison.Ordinal);
+            Assert.Contains("        int V() => 2;", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_ForAnEmptyDirectory_RemovesIt_AndRefusesANonEmptyOne()
+    {
+        const string Folder = "terse-stray-folder";
+        string[] inside =
+        [
+            "terse-stray-folder/a.md", "terse-stray-folder/b.md", "terse-stray-folder/c.md",
+            "terse-stray-folder/d.md", "terse-stray-folder/e.md",
+        ];
+        var files = new List<Dictionary<string, object?>>(inside.Length);
+
+        foreach (var path in inside)
+            files.Add(new Dictionary<string, object?> { ["path"] = path, ["content"] = "probe\n" });
+
+        await server.CallAsync("write_text", new() { ["files"] = files });
+        try
+        {
+            var refused = await server.CallAsync("write_text", new() { ["path"] = Folder, ["delete"] = true });
+
+            Assert.Contains("is a directory and it is not empty", refused, StringComparison.Ordinal);
+            Assert.Contains("a.md", refused, StringComparison.Ordinal);
+            Assert.Contains("and more it did not list", refused, StringComparison.Ordinal);
+
+            foreach (var path in inside)
+                await server.CallAsync("write_text", new() { ["path"] = path, ["delete"] = true });
+
+            var removed = await server.CallAsync("write_text", new() { ["path"] = Folder, ["delete"] = true });
+
+            Assert.Contains("deleted", removed, StringComparison.Ordinal);
+            Assert.Contains("directory", removed, StringComparison.Ordinal);
+
+            var gone = await server.CallAsync("find_files", new() { ["glob"] = Folder + "/**" });
+
+            Assert.DoesNotContain("a.md", gone, StringComparison.Ordinal);
+        }
+        finally
+        {
+            foreach (var path in inside)
+                await server.CallAsync("write_text", new() { ["path"] = path, ["delete"] = true });
+
+            await server.CallAsync("write_text", new() { ["path"] = Folder, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_ForADedentedAnchorAgainstACrlfFile_ReindentsWithoutBreakingTheLineEndings()
+    {
+        const string Probe = "terse-reindent-crlf-probe.md";
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Probe\r\n\r\n    class A\r\n    {\r\n        int V() => 1;\r\n    }\r\n",
+        });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "class A\n{\n    int V() => 1;\n}",
+                ["newText"] = "class A\n{\n    int V() => 2;\n}",
+            });
+
+            Assert.Contains("re-indenting by 4 column(s)", applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("        int V() => 2;", read, StringComparison.Ordinal);
+            Assert.DoesNotContain("int V() => 1;", read, StringComparison.Ordinal);
+
+            var carriage = await server.CallAsync("search_regex", new() { ["query"] = "^    class A\\r$", ["glob"] = Probe });
+            var rewritten = await server.CallAsync("search_regex", new() { ["query"] = "^        int V\\(\\) => 2;\\r$", ["glob"] = Probe });
+
+            Assert.Contains("1 matches", carriage, StringComparison.Ordinal);
+            Assert.Contains("1 matches", rewritten, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_ForADedentedAnchorThatMatchesAtTwoIndents_IsRefusedRatherThanApplied()
+    {
+        const string Probe = "terse-reindent-ambiguous-probe.md";
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Probe\n\n    class A\n    {\n        int V() => 1;\n    }\n\n        class B\n        {\n            int V() => 1;\n        }\n",
+        });
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "{\n    int V() => 1;\n}",
+                ["newText"] = "{\n    int V() => 2;\n}",
+            });
+
+            Assert.Contains("matched 2 times", refused, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.DoesNotContain("=> 2;", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }

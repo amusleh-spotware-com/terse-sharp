@@ -77,24 +77,25 @@ public static class FileService
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
         var before = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
-        var rewritten = Rewrite(before, request);
+        var notes = new List<string>();
+        var rewritten = Rewrite(before, request, notes);
 
         return rewritten.IsOk
-            ? await ApplyAsync(workspace, full, path, before, rewritten.Value!, request, cancellationToken).ConfigureAwait(false)
+            ? await ApplyAsync(workspace, full, path, before, rewritten.Value!, request, notes, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(rewritten.Error!);
     }
 
-    private static Result<string> Rewrite(string before, EditRequest request)
+    private static Result<string> Rewrite(string before, EditRequest request, List<string> notes)
     {
         if (Misplaced(request) is { } misplaced)
             return Result.Fail<string>(misplaced);
 
         return request.Section is { Length: > 0 } section
             ? Section(before, section, request.NewText, request.Place, request.Occurrence)
-            : Snippet(before, request.OldText, request.NewText, request.Occurrence);
+            : Snippet(before, request.OldText, request.NewText, request.Occurrence, notes);
     }
 
-    private static Result<string> Snippet(string before, string oldText, string newText, int occurrence)
+    private static Result<string> Snippet(string before, string oldText, string newText, int occurrence, List<string> notes)
     {
         if (oldText.Length is 0)
             return Result.Fail<string>(Errors.Blank("oldText"));
@@ -110,7 +111,7 @@ public static class FileService
 
         return Result.Ok(string.Concat(
             before.AsSpan(0, start),
-            LineEndings.Adopt(newText, ending),
+            LineEndings.Adopt(Reindented(newText, match.Indent, notes), ending),
             before.AsSpan(match.Start + match.Length)));
     }
 
@@ -137,12 +138,13 @@ public static class FileService
         string before,
         string after,
         EditRequest request,
+        IReadOnlyList<string> notes,
         CancellationToken cancellationToken)
     {
         if (!request.DryRun)
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose));
+        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, notes: notes));
     }
 
     private static TerseError NoMatch(string before, string oldText, SnippetMatch match, int occurrence)
@@ -181,9 +183,11 @@ public static class FileService
     private const int MaxCandidateSites = 5;
 
     private static string Nearest(string before, string oldText) =>
-        SnippetSearch.NearMisses(before, oldText, MaxNearMisses) is { Count: > 0 } hits
-            ? "the file's closest lines are - copy one verbatim from read_text: " + string.Join(" | ", hits)
-            : "no line of the file resembles the first line of oldText; re-read the file with read_text, or pass section= for a markdown heading";
+        SnippetSearch.NearestRegion(before, oldText) is { Length: > 0 } region
+            ? region
+            : SnippetSearch.NearMisses(before, oldText, MaxNearMisses) is { Count: > 0 } hits
+                ? "the file's closest lines are - copy one verbatim from read_text: " + string.Join(" | ", hits)
+                : "no line of the file resembles the first line of oldText; re-read the file with read_text, or pass section= for a markdown heading";
 
     private static async Task WriteAsync(LoadedWorkspace workspace, string full, string content, CancellationToken cancellationToken)
     {
@@ -192,15 +196,27 @@ public static class FileService
         workspace.Indexes.Noticed(full);
     }
 
-    private static string DiffResponse(string tool, string path, string before, string after, bool dryRun, bool verbose, string? outside = null)
+    private static string DiffResponse(
+        string tool,
+        string path,
+        string before,
+        string after,
+        bool dryRun,
+        bool verbose,
+        string? outside = null,
+        IReadOnlyList<string>? notes = null)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
         var escaped = EscapedMarkup(path, after);
+        var noted = notes is { Count: > 0 };
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
 
-        if (!dryRun && !verbose && !escaped && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
+        foreach (var note in notes ?? [])
+            response.Note(note);
+
+        if (!dryRun && !verbose && !escaped && !noted && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
         {
             return response
                 .Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={quick}"))
@@ -521,6 +537,9 @@ public static class FileService
 
         var full = resolved.Value!;
 
+        if (!File.Exists(full) && Directory.Exists(full))
+            return RemovedDirectory(path, full, dryRun);
+
         if (SourceFile.Reject(path, full, force) is { } refusal)
             return refusal;
 
@@ -641,6 +660,7 @@ public static class FileService
         string before,
         string after,
         List<string> failures,
+        List<string> notes,
         int applied,
         int total,
         EditRequest request)
@@ -652,13 +672,16 @@ public static class FileService
             CultureInfo.InvariantCulture,
             $"{Path.GetFileName(path.AsSpan())}  changedLines={report.ChangedLines}  edits={applied}/{total}");
 
-        if (!request.DryRun && !request.Verbose && failures.Count is 0)
+        if (!request.DryRun && !request.Verbose && failures.Count is 0 && notes.Count is 0)
             return response.Line(summary).ToString();
 
         response.Line(summary);
 
         if (request.DryRun)
             response.Note("dryRun");
+
+        foreach (var note in notes)
+            response.Note(note);
 
         foreach (var failure in failures)
             response.Note(failure);
@@ -683,6 +706,7 @@ public static class FileService
 
         var (full, before) = opened.Value;
         var failures = new List<string>();
+        var notes = new List<string>();
         var after = before;
         var applied = 0;
 
@@ -690,7 +714,7 @@ public static class FileService
         {
             var rewritten = edits[index].NewText is null
                 ? Result.Fail<string>(Errors.Blank("newText"))
-                : Rewrite(after, Requested(edits[index], request));
+                : Rewrite(after, Requested(edits[index], request), notes);
 
             if (rewritten.IsOk)
             {
@@ -706,7 +730,7 @@ public static class FileService
         if (applied > 0 && !request.DryRun)
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(BatchResponse(path, before, after, failures, applied, edits.Count, request));
+        return Result.Ok(BatchResponse(path, before, after, failures, notes, applied, edits.Count, request));
     }
 
     private static int ReachableLines(LineSelection selection) =>
@@ -1003,7 +1027,7 @@ public static class FileService
         var window = Windowed(text, request.Section, request.Occurrence);
 
         return window.IsOk
-            ? MarkdownTable.Projected(label, text, columns, window.Value.Start, window.Value.End, request.Range.MaxLines, request.Section)
+            ? MarkdownTable.Projected(label, text, columns, window.Value.Start, window.Value.End, request.Range.MaxLines, request.Section, request.Range.Budget)
             : Result.Fail<string>(window.Error!);
     }
 
@@ -1488,4 +1512,79 @@ public static class FileService
             ArrayPool<char>.Shared.Return(buffer);
         }
     }
+
+    private static bool Carries(string text, string indent)
+    {
+        foreach (var line in text.AsSpan().EnumerateLines())
+        {
+            if (!line.IsWhiteSpace() && !line.StartsWith(indent, StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static string Indented(string text, string indent)
+    {
+        var builder = new StringBuilder(text.Length + (indent.Length * 4));
+        var first = true;
+
+        foreach (var line in text.AsSpan().EnumerateLines())
+        {
+            if (!first)
+                builder.Append('\n');
+
+            first = false;
+
+            if (!line.IsWhiteSpace())
+                builder.Append(indent);
+
+            builder.Append(line);
+        }
+
+        return builder.ToString();
+    }
+
+    private static string Reindented(string newText, string? indent, List<string> notes)
+    {
+        if (indent is not { Length: > 0 } || Carries(newText, indent))
+            return newText;
+
+        notes.Add(string.Create(
+            CultureInfo.InvariantCulture,
+            $"NOTE oldText matched after re-indenting by {indent.Length} column(s) - it was pasted from a dedented payload such as get_symbol_source, and newText was re-indented to match the file"));
+
+        return Indented(newText, indent);
+    }
+
+    private const int MaxDirectoryEntries = 4;
+
+    private static Result<string> RemovedDirectory(string path, string full, bool dryRun)
+    {
+        var held = new List<string>(MaxDirectoryEntries + 1);
+
+        foreach (var entry in Directory.EnumerateFileSystemEntries(full))
+        {
+            held.Add(new string(Path.GetFileName(entry.AsSpan())));
+
+            if (held.Count > MaxDirectoryEntries)
+                break;
+        }
+
+        if (held.Count > 0)
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "'" + path + "' is a directory and it is not empty: " + Listed(held),
+                "only an EMPTY directory is removed - delete the files inside it first with write_text delete=true; no tool here removes more than it was pointed at"));
+        }
+
+        if (!dryRun)
+            Directory.Delete(full);
+
+        return Result.Ok("write_text " + (dryRun ? "dryRun" : "deleted") + "  " + path + "  directory");
+    }
+
+    private static string Listed(List<string> held) => held.Count > MaxDirectoryEntries
+        ? string.Join(", ", held.GetRange(0, MaxDirectoryEntries)) + " and more it did not list"
+        : string.Join(", ", held);
 }

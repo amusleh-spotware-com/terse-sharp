@@ -146,7 +146,6 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
         _ => null,
     };
 
-
     private static bool IsArray(JsonElement properties, string name) =>
     properties.TryGetProperty(name, out var property)
     && property.TryGetProperty("type", out var type)
@@ -173,12 +172,10 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
         _ => false,
     };
 
-
     private static bool NoisyProperty(JsonProperty property) =>
         property.Value.ValueKind is JsonValueKind.Null && property.NameEquals("default")
         || property.NameEquals("type") && HasNullArm(property.Value)
         || Noisy(property.Value);
-
 
     private static bool HasNullArm(JsonElement type) =>
         type.ValueKind is JsonValueKind.Array
@@ -248,4 +245,19 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
 
     private static bool Exempt(string tool) =>
         Array.Exists(ToolCensus.PolicyExempt, entry => string.Equals(entry.Tool, tool, StringComparison.Ordinal));
+
+    [Fact]
+    public async Task EveryAdvertisedToolThatDeclaresDryRun_IsProvenRefusedUnderReadOnly()
+    {
+        var enrolled = ReadOnlyServerE2ETests.Writers.ToHashSet(StringComparer.Ordinal);
+        var gated = (await Surface())
+            .Where(tool => tool.ProtocolTool.InputSchema.TryGetProperty("properties", out var properties)
+                && properties.TryGetProperty("dryRun", out _))
+            .Select(tool => tool.Name)
+            .ToArray();
+        var missing = gated.Where(name => !enrolled.Contains(name)).ToArray();
+
+        Assert.True(gated.Length >= 20, string.Create(CultureInfo.InvariantCulture, $"only {gated.Length} advertised tools declare dryRun"));
+        Assert.True(missing.Length is 0, "declares dryRun but no read-only theory proves it is refused: " + string.Join(", ", missing));
+    }
 }

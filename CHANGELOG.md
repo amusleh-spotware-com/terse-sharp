@@ -8,6 +8,68 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-08-28
+
+### Added
+
+- **The three XAML writers are now read-only tested, and the enrolment is census-gated.**
+  `xaml_set_property`, `xaml_add_element` and `xaml_remove_element` were absent from
+  `ReadOnlyServerE2ETests.MutatingTools()`, so nothing proved they refuse under `--read-only` before
+  looking at their arguments. All three are enrolled with their own argument cases - the shared
+  fallback arguments were rejected by the binder before the read-only gate was reached, which is what
+  the theory exists to catch. Because a hand-enrolled list is exactly the gate shape `CLAUDE.md`
+  forbids, the set is now census-gated:
+  `SchemaCensusE2ETests.EveryAdvertisedToolThatDeclaresDryRun_IsProvenRefusedUnderReadOnly` discovers
+  every advertised tool declaring `dryRun` from `tools/list` and fails on one the read-only theory
+  does not enrol. Found while investigating `I416`.
+- **`write_text delete=true` removes an EMPTY directory.** A folder left behind after its last file was
+  deleted was the one file-system action no tool served, and it needed `Bash: rmdir`. A non-empty
+  directory is refused naming up to four entries it still holds - no tool here removes more than it was
+  pointed at. Closes `I411`.
+- **The worked example of the five least-derivable tools is now advertised, not only offered after a
+  rejection.** `find_files`, `search_text`, `search_regex`, `package_add` and `package_remove` carry
+  `example: …` in their description, appended by a `tools/list` filter from the same `ToolExamples`
+  entry the `remedy:` uses, so the two cannot drift. The ten `razor_*` examples stay behind the remedy.
+  Census-gated by `ToolCensusE2ETests.EveryPromotedExample_ReachesTheAdvertisedDescriptionRatherThanOnlyARejectedCall`.
+  Measured cost of this release as a whole - the five examples plus the `analyze`, `read_text` and
+  `write_text` description edits - is `tools/list` moving from 28 800 to **28 921** tokens over 88
+  tools: 121 tokens, about half of one tool, against this repo's own break-even of 32 calls per 508
+  sessions. `AdvertisedPayloadBudget` is therefore re-asserted at 29 000, the two narrowed-surface
+  budgets at 23 900 and 24 400, and `SkillTokenBudget` at 27 700. Those four numbers are the new
+  ratchet, not headroom. Closes `I427`.
+- **A census gate that every truncated answer names what widens it.**
+  `ToolCensusE2ETests.EveryTruncatedAnswer_NamesTheCallThatWidensIt` discovers every advertised tool
+  declaring `maxResults`, calls it at `maxResults=1`, and fails on a truncated answer carrying neither
+  `narrow with` nor `next:`. It probes 15 tools and was observed red for all 15 with the steer
+  neutered. Closes `I425`.
+
+### Changed
+
+- **`edit_text` matches an anchor pasted from a dedented `get_symbol_source` read.** When the exact and
+  line-ending-relaxed searches both miss, `SnippetSearch.Find` now matches the anchor line by line
+  allowing ONE uniform whitespace prefix, and `edit_text` re-indents `newText` by that same prefix -
+  unless `newText` already carries it - and reports what it did as a `NOTE`. Six such anchors failed in
+  one measured run at ~1 500 tokens and 4 extra calls. Response format: a re-indented edit keeps the
+  full response instead of the one-line success form, because it carries something to act on. Closes
+  `I410`.
+- **A zero-match multi-line anchor gets the closest REGION and its line range.**
+  `SnippetSearch.NearestRegion` slides the anchor's trimmed lines over the file and, when at least half
+  match, answers `the file's closest region is lines N-M, where K of the anchor's L lines match -
+  re-read exactly that with read_text startLine=N endLine=M verbose=true`. A single-line anchor still
+  falls through to the existing closest-lines answer. Closes `I421`.
+- **`read_text columns=` honours `maxChars`.** The projection that exists to make a large checked-in
+  table cheap to scan returned 69.3 KB on this repo's own archive and spilled to a tool-results file. It
+  now stops on the read's character budget, reports
+  `N/T rows truncated - narrow with maxLines=, columns= or section=`, and a character-clipped projection
+  ends with `next: search_regex matchesOnly=true unique=true`. Closes `I430`.
+- **A saturated `analyze paths=` batch names the one call that answers the whole sweep.** A call whose
+  combined `path` plus `paths` reaches the 10-path cap ends with `next: analyze changed=true`. A 21-file
+  end-of-task sweep cost 3 calls before. Closes `I412`.
+- **A compound the guard cannot fence now names the segment that forced the whole-command refusal.**
+  `NO part of the command ran` used to name only the replacing tool, so a 25-line commit message had to
+  be re-sent verbatim; it now reads `…, because it carries '<' at offset 41, in "…" - re-issue that ONE
+  segment on its own`. The rewrite path was not widened. Closes `I431`.
+
 ## [0.52.0] - 2026-08-28
 
 ### Added
@@ -4872,7 +4934,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.52.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.53.0...HEAD
+[0.53.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.53.0
 [0.52.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.52.0
 [0.51.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.51.0
 [0.50.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.50.0

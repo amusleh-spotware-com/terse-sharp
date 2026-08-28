@@ -54,19 +54,15 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
     private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
 
-    public static TheoryData<string> MutatingTools() =>
-    [
-        "write_text", "edit_text",
-        "replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol",
-        "format", "cleanup", "clean", "gate",
-        "extract_interface", "move_type_to_file", "move_type_to_namespace", "change_signature",
-        "undo_last_change",
-        "solution_add_project", "solution_remove_project",
-        "project_create", "project_set_property", "project_add_reference", "project_remove_reference",
-        "package_add", "package_remove",
-        "resx_set", "resx_remove", "resx_rename",
-        "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
-    ];
+    public static TheoryData<string> MutatingTools()
+    {
+        var data = new TheoryData<string>();
+
+        foreach (var tool in Writers)
+            data.Add(tool);
+
+        return data;
+    }
 
     [Theory]
     [MemberData(nameof(MutatingTools))]
@@ -105,6 +101,9 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
         "razor_add_element" => new() { ["path"] = RazorFile, ["parent"] = "div", ["markup"] = "<span />" },
         "razor_remove_element" => new() { ["path"] = RazorFile, ["target"] = "div" },
         "razor_set_directive" => new() { ["path"] = RazorFile, ["directive"] = "using", ["value"] = "System" },
+        "xaml_set_property" => new() { ["path"] = XamlFile, ["target"] = "Grid", ["property"] = "Margin", ["value"] = "4" },
+        "xaml_add_element" => new() { ["path"] = XamlFile, ["target"] = "Grid", ["markup"] = "<TextBlock />" },
+        "xaml_remove_element" => new() { ["path"] = XamlFile, ["target"] = "Grid" },
         _ => new() { ["project"] = ProjectFile, ["package"] = "Serilog" },
     };
 
@@ -117,4 +116,20 @@ public sealed class ReadOnlyServerE2ETests : IAsyncLifetime
     private const string Unused = "M:Fixture.Trading.OrderService.Unused";
 
     private const string ResourceFile = "src/Fixture.Trading/Scratch.resx";
+    private const string XamlFile = "src/Fixture.Trading/Views/ShellView.xaml";
+
+    public static readonly string[] Writers =
+    [
+        "write_text", "edit_text",
+        "replace_symbol_body", "replace_symbol", "add_member", "delete_symbol", "rename_symbol",
+        "format", "cleanup", "clean", "gate",
+        "extract_interface", "move_type_to_file", "move_type_to_namespace", "change_signature",
+        "undo_last_change",
+        "solution_add_project", "solution_remove_project",
+        "project_create", "project_set_property", "project_add_reference", "project_remove_reference",
+        "package_add", "package_remove",
+        "resx_set", "resx_remove", "resx_rename",
+        "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
+        "xaml_set_property", "xaml_add_element", "xaml_remove_element",
+    ];
 }

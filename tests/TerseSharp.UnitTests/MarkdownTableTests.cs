@@ -143,4 +143,33 @@ public sealed class MarkdownTableTests
         Assert.Contains("section '## Open' of IMPROVEMENTS.md", refusal.Error!.Message, StringComparison.Ordinal);
         Assert.Contains("drop section=", refusal.Error!.Remedy, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Projected_WhenTheRowsExceedTheCharacterBudget_TruncatesAndNamesTheCheaperShape()
+    {
+        var answer = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Finding"], maxChars: 20).Value!;
+
+        Assert.StartsWith("1/3 rows truncated", answer, StringComparison.Ordinal);
+        Assert.Contains("next: search_regex", answer, StringComparison.Ordinal);
+        Assert.DoesNotContain("**I2** second", answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Projected_WithinTheCharacterBudget_ReturnsEveryRowAndNoSteer()
+    {
+        var answer = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Finding"], maxChars: 4096).Value!;
+
+        Assert.StartsWith("3 rows", answer, StringComparison.Ordinal);
+        Assert.DoesNotContain("next: search_regex", answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Projected_WhenEvenTheFirstRowExceedsTheBudget_ReportsZeroRowsRatherThanOne()
+    {
+        var answer = MarkdownTable.Projected("IMPROVEMENTS.md", Table, ["Finding"], maxChars: 3).Value!;
+
+        Assert.StartsWith("0/3 rows truncated", answer, StringComparison.Ordinal);
+        Assert.Contains("next: search_regex", answer, StringComparison.Ordinal);
+        Assert.DoesNotContain("**I1** first", answer, StringComparison.Ordinal);
+    }
 }

@@ -36,6 +36,7 @@ public static class McpHost
                 filters.AddCallToolFilter(ToolArgumentFilter.Structured);
                 filters.AddCallToolFilter(RepeatSteer.Filter());
                 filters.AddListToolsFilter(AdvertisedCost.Filter());
+                filters.AddListToolsFilter(ToolExamples.Filter());
 
                 if (surface.Advertised is not null || surface.MarkupDerived || overrides.Configured)
                     filters.AddListToolsFilter(ToolProfile.Filter(surface, context));

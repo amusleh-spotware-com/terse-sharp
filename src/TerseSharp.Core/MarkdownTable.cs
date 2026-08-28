@@ -9,7 +9,8 @@ public static class MarkdownTable
         int startLine = 0,
         int endLine = 0,
         int maxRows = 0,
-        string? section = null)
+        string? section = null,
+        int maxChars = 0)
     {
         var scan = new Scan(columns);
         var number = 0;
@@ -31,18 +32,25 @@ public static class MarkdownTable
 
         return scan.Headers.Count is 0 || missed.Count > 0
             ? Result.Fail<string>(Missing(label, missed, scan.Headers, section))
-            : Result.Ok(Rendered(label, scan.Rows, maxRows));
+            : Result.Ok(Rendered(label, scan.Rows, maxRows, maxChars));
     }
 
-    private static string Rendered(string label, List<string> rows, int maxRows)
+    private static string Rendered(string label, List<string> rows, int maxRows, int maxChars)
     {
-        var shown = maxRows > 0 ? Math.Min(rows.Count, maxRows) : rows.Count;
+        var limit = maxRows > 0 ? Math.Min(rows.Count, maxRows) : rows.Count;
+        var shown = Fitted(rows, limit, maxChars);
         var response = new ResponseBuilder("read_text", label + " columns");
 
-        response.Summary(shown, rows.Count, "rows", "maxLines=");
+        response.Summary(shown, rows.Count, "rows", "maxLines=, columns= or section=");
 
         for (var index = 0; index < shown; index++)
             response.Line(rows[index]);
+
+        if (shown < limit)
+        {
+            response.Note(
+                "next: search_regex matchesOnly=true unique=true - the projection ran out of its maxChars budget before its maxLines one, so a regex over the one column you actually want answers this in ONE bounded call; raise maxChars only if you really need every row");
+        }
 
         return response.ToString();
     }
@@ -176,4 +184,22 @@ public static class MarkdownTable
         section is { Length: > 0 }
             ? remedy + "; drop section= to project every table of the file, which may declare it elsewhere"
             : remedy;
+
+    private static int Fitted(List<string> rows, int limit, int maxChars)
+    {
+        if (maxChars <= 0)
+            return limit;
+
+        var used = 0;
+
+        for (var index = 0; index < limit; index++)
+        {
+            used += rows[index].Length + 1;
+
+            if (used > maxChars)
+                return index;
+        }
+
+        return limit;
+    }
 }

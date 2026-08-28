@@ -370,4 +370,52 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
         Assert.Contains("advertised=", status, StringComparison.Ordinal);
         Assert.Contains("toolDescriptions", status, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task EveryTruncatedAnswer_NamesTheCallThatWidensIt()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var capped = tools
+            .Where(tool => Parameters(tool).Contains("maxResults"))
+            .Select(tool => tool.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var silent = new List<string>();
+        var probed = 0;
+
+        foreach (var (tool, arguments, _) in ToolHappyPathE2ETests.Cases.Where(Reads).Where(probe => capped.Contains(probe.Tool)))
+        {
+            var text = await server.CallAsync(tool, new Dictionary<string, object?>(arguments) { ["maxResults"] = 1 });
+
+            probed++;
+
+            if (Unsteered(text))
+                silent.Add(tool + ": " + ToolCensus.FirstLine(text));
+        }
+
+        Assert.True(probed >= 10, $"only {probed} capped read tools were probed");
+        Assert.True(silent.Count is 0, "a truncated answer ended at a count, naming nothing that widens it: " + string.Join(" | ", silent));
+    }
+
+    private static bool Unsteered(string text) =>
+        text.Contains("truncated", StringComparison.Ordinal)
+        && !text.Contains("narrow with", StringComparison.Ordinal)
+        && !text.Contains("next:", StringComparison.Ordinal);
+
+    [Fact]
+    public async Task EveryPromotedExample_ReachesTheAdvertisedDescriptionRatherThanOnlyARejectedCall()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var missing = new List<string>();
+
+        foreach (var name in ToolExamples.Promoted)
+        {
+            var tool = tools.FirstOrDefault(candidate => candidate.Name.Equals(name, StringComparison.Ordinal));
+
+            if (tool is null || !(tool.Description ?? string.Empty).Contains("example: " + ToolExamples.For(name), StringComparison.Ordinal))
+                missing.Add(name);
+        }
+
+        Assert.True(ToolExamples.Promoted.Count >= 3, "the promoted set went vacuous");
+        Assert.True(missing.Count is 0, "promoted but never advertised: " + string.Join(", ", missing));
+    }
 }

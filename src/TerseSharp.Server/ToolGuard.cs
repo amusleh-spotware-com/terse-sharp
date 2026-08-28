@@ -763,9 +763,9 @@ public static class ToolGuard
         _ => 0,
     };
 
-    private static string Nothing(bool compound) => compound
-            ? " This is a compound command and NO part of the command ran - 'Call this instead' names the tool call for every denied segment, and every segment nothing replaces: chained with && when re-issuing them together is sound, listed one by one when it is not."
-            : string.Empty;
+    private static string Nothing(bool compound, string unfenceable) => compound
+        ? " This is a compound command and NO part of the command ran" + Because(unfenceable) + ". 'Call this instead' names the tool call for every denied segment, and every segment nothing replaces: chained with && when re-issuing them together is sound, listed one by one when it is not."
+        : string.Empty;
 
     private static string Cached(string[] tokens) =>
             Array.Exists(tokens, token => token is "--cached" or "--staged") ? "diff-cached" : "diff";
@@ -793,13 +793,13 @@ public static class ToolGuard
         name.Equals("sed", StringComparison.OrdinalIgnoreCase)
             && Array.Exists(command, token => token.StartsWith("-i", StringComparison.Ordinal) || token.Equals("--in-place", StringComparison.Ordinal));
 
-    private static GuardVerdict Denial(string segment, string? cwd, bool compound)
+    private static GuardVerdict Denial(string segment, string? cwd, bool compound, string unfenceable = "")
     {
         if (Replaced(segment, cwd) is { } subcommand)
-            return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound), BuildRouting(subcommand), BuildReplacement(subcommand));
+            return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound, unfenceable), BuildRouting(subcommand), BuildReplacement(subcommand));
 
         return Covered(segment) && IsTextRead(segment)
-            ? new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()))
+            ? new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound, unfenceable), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()))
             : Allowed;
     }
 
@@ -860,16 +860,7 @@ public static class ToolGuard
         "elif", "else", "fi", "case", "esac", "select", "function",
     ];
 
-    private static bool Fenced(string command)
-    {
-        var masked = Masked(command);
-
-        return masked.AsSpan().IndexOfAny(Hazards) < 0
-            && !masked.Contains("||", StringComparison.Ordinal)
-            && !Escaping(command.AsSpan())
-            && !Backgrounded(masked.AsSpan())
-            && !Keyworded(masked);
-    }
+    private static bool Fenced(string command) => Unfenceable(command).Length is 0;
 
     private static bool Backgrounded(ReadOnlySpan<char> masked)
     {
@@ -993,13 +984,14 @@ public static class ToolGuard
     private static GuardVerdict Blocking(string[] segments, string command, string? cwd)
     {
         var compound = segments.Length > 1;
+        var unfenceable = compound ? Unfenceable(command) : string.Empty;
         var allowed = new List<string>(segments.Length);
         var calls = new List<string>();
         GuardVerdict? refused = null;
 
         foreach (var segment in segments)
         {
-            var verdict = Denial(segment, cwd, compound);
+            var verdict = Denial(segment, cwd, compound, unfenceable);
 
             if (!verdict.Denied)
             {
@@ -1069,6 +1061,37 @@ public static class ToolGuard
 
     private static string Routes(List<Judgement> dropped) =>
             string.Join("  then  ", dropped.Select(entry => entry.Verdict.Routing).OfType<string>().Distinct(StringComparer.Ordinal));
+
+    private static string Around(string command, int at, string what)
+    {
+        var start = Math.Max(0, at - 16);
+        var end = Math.Min(command.Length, at + 16);
+
+        return string.Create(CultureInfo.InvariantCulture, $"{what} at offset {at}, in \"{command.AsSpan(start, end - start)}\"");
+    }
+
+    private static string Unfenceable(string command)
+    {
+        var masked = Masked(command);
+
+        if (masked.AsSpan().IndexOfAny(Hazards) is var hazard and >= 0)
+            return Around(command, hazard, "'" + masked[hazard] + "'");
+
+        if (masked.IndexOf("||", StringComparison.Ordinal) is var either and >= 0)
+            return Around(command, either, "'||'");
+
+        if (Escaping(command.AsSpan()))
+            return "a backslash escape";
+
+        if (Backgrounded(masked.AsSpan()))
+            return "a background '&'";
+
+        return Keyworded(masked) ? "a shell keyword" : string.Empty;
+    }
+
+    private static string Because(string unfenceable) => unfenceable.Length is 0
+        ? string.Empty
+        : ", because it carries " + unfenceable + ", which cannot be rewritten soundly - re-issue that ONE segment on its own instead of re-deriving the whole command";
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

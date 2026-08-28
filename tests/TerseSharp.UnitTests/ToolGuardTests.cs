@@ -1306,4 +1306,31 @@ public sealed class ToolGuardTests
     [InlineData("git describe --contains HEAD")]
     public void Guard_ForADescribeFormHistoryCannotAnswer_LeavesItAlone(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void Guard_WhenACompoundCannotBeFenced_NamesTheSegmentThatForcedTheWholeRefusal()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git add IMPROVEMENTS.md && git commit -q -F - <<'EOF'\nsubject\nEOF\n&& git status" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+        Assert.Contains("NO part of the command ran, because it carries", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("at offset", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("re-issue that ONE segment on its own", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_WhenACompoundIsFenced_DeniesWithoutNamingAnUnfenceableSegment()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "git status && git commit -q -m subject" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.DoesNotContain("because it carries", verdict.Reason, StringComparison.Ordinal);
+    }
 }
