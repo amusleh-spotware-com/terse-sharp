@@ -596,7 +596,7 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ReplaceSymbol_WithAddInsideANestedEnum_IsRefusedInsteadOfAppendingToTheOuterClass()
+    public async Task ReplaceSymbol_WithAdd_RefusesAnEnumMemberTargetAndAppendsANestedTypeTargetToItsDeclaringClass()
     {
         const string Probe = "src/Fixture.Trading/NestedEnumProbe.cs";
 
@@ -628,8 +628,9 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             Assert.Contains("ERROR InvalidArgument", member, StringComparison.Ordinal);
             Assert.Contains("the enum Mode", member, StringComparison.Ordinal);
             Assert.DoesNotContain("NestedEnumProbe,", member, StringComparison.Ordinal);
-            Assert.Contains("ERROR InvalidArgument", declared, StringComparison.Ordinal);
-            Assert.Contains("the enum Mode", declared, StringComparison.Ordinal);
+
+            Assert.DoesNotContain("ERROR", declared, StringComparison.Ordinal);
+            Assert.Contains("private static int Zero() => 0;", declared, StringComparison.Ordinal);
         }
         finally
         {

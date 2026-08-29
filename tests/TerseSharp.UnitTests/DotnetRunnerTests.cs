@@ -829,4 +829,51 @@ public sealed class DotnetRunnerTests
 
         return new WorkspaceTarget(Path.Combine(root, "A.slnx"), root, [project]);
     }
+
+    [Fact]
+    public void Pathological_ForAnAssemblyWhoseMeanTestCostsSeconds_NamesItAndItsRate()
+    {
+        var report = TestRunReport.Empty with
+        {
+            Passed = 494,
+            Total = 494,
+            DurationMs = 8_587_053,
+            Projects =
+            [
+                new TestProjectSummary("Fast.Tests", 300, 0, 0, 300, 12_043),
+                new TestProjectSummary("ArchitectureTests", 494, 0, 0, 494, 8_587_053),
+            ],
+        };
+
+        var text = DotnetRunner.Pathological(report, "Whole.slnx");
+
+        Assert.Contains("slowAssembly=ArchitectureTests", text, StringComparison.Ordinal);
+        Assert.Contains("17382ms/test", text, StringComparison.Ordinal);
+        Assert.Contains("pass slowest=10", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Pathological_ForASuiteWhoseMeanTestIsOrdinary_SaysNothing()
+    {
+        var report = TestRunReport.Empty with
+        {
+            Passed = 168,
+            Total = 168,
+            DurationMs = 110_328,
+            Projects = [new TestProjectSummary("TerseSharp.E2ETests", 168, 0, 0, 168, 110_328)],
+        };
+
+        Assert.Equal(string.Empty, DotnetRunner.Pathological(report, "TerseSharp.slnx"));
+    }
+
+    [Fact]
+    public void Pathological_ForASingleProjectRunThatReportsNoPerProjectSummary_UsesTheTargetName()
+    {
+        var report = TestRunReport.Empty with { Passed = 2, Total = 2, DurationMs = 40_000 };
+
+        var text = DotnetRunner.Pathological(report, Path.Combine("tests", "Slow.Tests", "Slow.Tests.csproj"));
+
+        Assert.Contains("slowAssembly=Slow.Tests", text, StringComparison.Ordinal);
+        Assert.Contains("20000ms/test", text, StringComparison.Ordinal);
+    }
 }

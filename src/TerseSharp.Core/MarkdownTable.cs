@@ -10,9 +10,10 @@ public static class MarkdownTable
         int endLine = 0,
         int maxRows = 0,
         string? section = null,
-        int maxChars = 0)
+        int maxChars = 0,
+        int cellChars = 0)
     {
-        var scan = new Scan(columns);
+        var scan = new Scan(columns, cellChars);
         var number = 0;
 
         foreach (var line in text.AsSpan().EnumerateLines())
@@ -32,11 +33,12 @@ public static class MarkdownTable
 
         return scan.Headers.Count is 0 || missed.Count > 0
             ? Result.Fail<string>(Missing(label, missed, scan.Headers, section))
-            : Result.Ok(Rendered(label, scan.Rows, maxRows, maxChars));
+            : Result.Ok(Rendered(label, scan, maxRows, maxChars, cellChars));
     }
 
-    private static string Rendered(string label, List<string> rows, int maxRows, int maxChars)
+    private static string Rendered(string label, Scan scan, int maxRows, int maxChars, int cellChars)
     {
+        var rows = scan.Rows;
         var limit = maxRows > 0 ? Math.Min(rows.Count, maxRows) : rows.Count;
         var shown = Fitted(rows, limit, maxChars);
         var response = new ResponseBuilder("read_text", label + " columns");
@@ -45,6 +47,13 @@ public static class MarkdownTable
 
         for (var index = 0; index < shown; index++)
             response.Line(rows[index]);
+
+        if (scan.Clipped > 0)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"cellChars={cellChars} clipped {scan.Clipped} of {scan.Counted} projected cell(s) - raise it, or drop it for the whole cell"));
+        }
 
         if (shown < limit)
         {
@@ -68,13 +77,19 @@ public static class MarkdownTable
                 : "its columns are: " + string.Join(", ", headers)));
     }
 
-    private sealed class Scan(IReadOnlyList<string> columns)
+    private sealed class Scan(IReadOnlyList<string> columns, int cellChars)
     {
+        private const string Ellipsis = "...";
+
         private readonly HashSet<string> matched = new(StringComparer.OrdinalIgnoreCase);
 
         public List<string> Rows { get; } = [];
 
         public List<string> Headers { get; } = [];
+
+        public int Counted { get; private set; }
+
+        public int Clipped { get; private set; }
 
         private int[] wanted = [];
         private bool header;
@@ -114,7 +129,37 @@ public static class MarkdownTable
             }
 
             if (wanted.Length > 0 && !IsDelimiter(cells))
-                Rows.Add(Joined(cells, wanted));
+                Rows.Add(Row(cells));
+        }
+
+        private string Row(string[] cells)
+        {
+            var kept = new List<string>(wanted.Length);
+
+            foreach (var index in wanted)
+                kept.Add(Clamped(index < cells.Length ? cells[index] : string.Empty));
+
+            return string.Join(" | ", kept);
+        }
+
+        private string Clamped(string cell)
+        {
+            Counted++;
+
+            if (cellChars <= 0 || cell.Length <= cellChars)
+                return cell;
+
+            Clipped++;
+
+            if (cellChars <= Ellipsis.Length)
+                return new string(cell.AsSpan(0, cellChars));
+
+            var kept = cellChars - Ellipsis.Length;
+
+            if (char.IsHighSurrogate(cell[kept - 1]))
+                kept--;
+
+            return string.Concat(cell.AsSpan(0, kept), Ellipsis);
         }
 
         private int[] Wanted(string[] cells)
@@ -149,16 +194,6 @@ public static class MarkdownTable
 
     private static bool IsDelimiter(string[] cells) =>
         Array.TrueForAll(cells, cell => cell.Length > 0 && cell.AsSpan().IndexOfAnyExcept('-', ':') < 0);
-
-    private static string Joined(string[] cells, int[] wanted)
-    {
-        var kept = new List<string>(wanted.Length);
-
-        foreach (var index in wanted)
-            kept.Add(index < cells.Length ? cells[index] : string.Empty);
-
-        return string.Join(" | ", kept);
-    }
 
     private static string[] Cells(ReadOnlySpan<char> row)
     {

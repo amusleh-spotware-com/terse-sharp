@@ -150,7 +150,7 @@ adds one line to the next tool response. `TERSE_UPDATE=0` turns it off.
 | Rename across the solution | **~5,000 tok**, misses the interface | `rename_symbol` → **~150 tok**, correct | **30×** |
 | Why is the build red? | **~8,000 tok** of MSBuild spew | `build` → **~600 tok** | **13×** |
 | What did I just change? | `git diff` → the whole patch | `diff_symbols` → the changed **declarations** | **10×** |
-| Which rows does this checked-in table hold? | `Read` the whole `.md`, then grep it | `read_text columns="Finding,Tool"` | **~10×** |
+| Which rows does this checked-in table hold? | `Read` the whole `.md`, then grep it | `read_text columns="Finding,Tool" cellChars=60` | **~10×**, and ~11× again when the column is prose |
 | What does this budgeted doc cost in tokens? | a build plus the E2E suite → **~10 min** | `read_text tokens=true` → **~3 s** | **200×** |
 | Does this `{Binding}` bind? | **no static answer exists in WPF** | `xaml_bindings validate=true` | ∞ |
 
@@ -265,7 +265,7 @@ runs the test module itself.
 An MCP server's fixed cost is its tool list, attached to every request — and past a certain size that
 measurably costs tool-selection accuracy. `workspace_status` prints `advertised=<n> tools <t> tokens`,
 and under `verbose=true` the whole surface beside it, so what a narrowing saves is read off the running
-server. A **27,800-token ceiling over 88 tools** is asserted on every push, and it shrinks three ways —
+server. A **29,700-token ceiling over 88 tools** is asserted on every push, and it shrinks three ways —
 all optional; the default advertises everything.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —

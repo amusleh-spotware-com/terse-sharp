@@ -613,4 +613,84 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("fix the edit in the content you send", rejected, StringComparison.Ordinal);
         Assert.DoesNotContain("replace_symbol symbolIds/declarations batch", rejected, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ARetryCarryingFix_ReplacesOnlyTheHeldDeclarationItNamesAndReplaysTheRest()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "Calculator.NoMemberSpelledLikeThis" },
+            ["declarations"] = new[] { "public int Healthy() => 11;", "public int PreExistingError() => 2;" },
+        });
+
+        var token = Token(rejected);
+        var corrected = new[] { "M:Fixture.Broken.Calculator.Healthy", "M:Fixture.Broken.Calculator.PreExistingError" };
+
+        var retried = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = token,
+            ["symbolIds"] = corrected,
+            ["fix"] = new[] { "1=public int PreExistingError() => 4242;" },
+            ["dryRun"] = true,
+        });
+
+        var outOfRange = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = token,
+            ["symbolIds"] = corrected,
+            ["fix"] = new[] { "7=public int PreExistingError() => 4242;" },
+            ["dryRun"] = true,
+        });
+
+        var malformed = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = token,
+            ["symbolIds"] = corrected,
+            ["fix"] = new[] { "public int PreExistingError() => 4242;" },
+            ["dryRun"] = true,
+        });
+
+        var detached = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => 11;",
+            ["fix"] = new[] { "0=public int Healthy() => 12;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("fix=[\"<index>=<corrected declaration>\"]", rejected, StringComparison.Ordinal);
+        Assert.Contains("public int PreExistingError() => 4242;", retried, StringComparison.Ordinal);
+        Assert.Contains("public int Healthy() => 11;", retried, StringComparison.Ordinal);
+        Assert.DoesNotContain("public int PreExistingError() => 2;", retried, StringComparison.Ordinal);
+
+        Assert.Contains("ERROR InvalidArgument", outOfRange, StringComparison.Ordinal);
+        Assert.Contains("fix[0] names index 7, and the held batch carries 2 declaration(s)", outOfRange, StringComparison.Ordinal);
+        Assert.Contains("name an index between 0 and 1", outOfRange, StringComparison.Ordinal);
+
+        Assert.Contains("fix[0] is not '<index>=<declaration>'", malformed, StringComparison.Ordinal);
+
+        Assert.Contains("ERROR InvalidArgument", detached, StringComparison.Ordinal);
+        Assert.Contains("fix was passed without retryWith", detached, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ABatchMixingANestedTypeWithItsSiblings_AppendsToTheirDeclaringType()
+    {
+        var applied = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "T:Fixture.Broken.Outer.Nested", "M:Fixture.Broken.Outer.Sibling" },
+            ["declarations"] = new[]
+            {
+                "public enum Nested\n    {\n        First,\n        Second,\n    }",
+                "public int Sibling() => Helper();",
+            },
+            ["add"] = new[] { "private int Helper() => 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("do not share one", applied, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+        Assert.Contains("private int Helper() => 2;", applied, StringComparison.Ordinal);
+        Assert.Contains("Second,", applied, StringComparison.Ordinal);
+    }
 }

@@ -38,9 +38,9 @@ public static partial class DotnetRunner
     private static bool IsGreen(ProcessRun run, TestRunReport report) =>
         run.ExitCode is 0 && !run.TimedOut && run.Drained && report.Total > 0 && report.Failures.Length is 0;
 
-    private static string QuietTest(TestRunReport report, ProcessRun run) => string.Create(
+    private static string QuietTest(TestRunReport report, ProcessRun run, string target) => string.Create(
     CultureInfo.InvariantCulture,
-    $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}") + PerProject(report);
+    $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}{Pathological(report, target)}") + PerProject(report);
 
     internal static bool IsLockedOutput(int exitCode, string output) =>
         exitCode is not 0 && LockedOutput().IsMatch(output);
@@ -216,13 +216,13 @@ public static partial class DotnetRunner
             return RenderNoResults(request.Target, run, request.Verbose, root, request.Timeout);
 
         if (IsGreen(run, report) && !request.WantsDetail)
-            return QuietTest(report, run);
+            return QuietTest(report, run, request.Target);
 
         var shown = Math.Min(report.Failures.Length, MaxFailures);
         var response = new ResponseBuilder("run_tests", request.Target).Verbose(request.Verbose);
 
         response.Summary(shown, report.Failures.Length, "failures");
-        response.Note(Counters(report, run));
+        response.Note(Counters(report, run, request.Target));
 
         if (request.Verbose)
             AppendCommand(response, run);
@@ -252,9 +252,9 @@ public static partial class DotnetRunner
     internal static string RenderTestNames(string target, ProcessRun run, string? contains, string root = "") =>
         RenderTestNames(target, run, TestNameList.Parse(run.Output, contains), root);
 
-    private static string Counters(TestRunReport report, ProcessRun run) => string.Create(
+    private static string Counters(TestRunReport report, ProcessRun run, string target) => string.Create(
         CultureInfo.InvariantCulture,
-        $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}{Slowest(report, run)}") + PerProject(report);
+        $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}{Slowest(report, run)}{Pathological(report, target)}") + PerProject(report);
 
     private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter)
     {
@@ -1149,6 +1149,24 @@ public static partial class DotnetRunner
 
         return diagnostics.Errors.Length is 0 ? BuildVerdict(diagnostics.Warnings.Length) : null;
     }
+
+    private const long SlowMillisecondsPerTest = 5000;
+
+    internal static string Pathological(TestRunReport report, string target)
+    {
+        var worst = Worst(report, target);
+        var rate = Rate(worst);
+
+        return rate >= SlowMillisecondsPerTest
+            ? string.Create(CultureInfo.InvariantCulture, $" slowAssembly={worst.Project} {rate}ms/test - pass slowest=10 to see which")
+            : string.Empty;
+    }
+
+    private static TestProjectSummary Worst(TestRunReport report, string target) => report.Projects.IsDefaultOrEmpty
+        ? new TestProjectSummary(Path.GetFileNameWithoutExtension(target), report.Passed, report.Failed, report.Skipped, report.Total, report.DurationMs)
+        : report.Projects.MaxBy(Rate);
+
+    private static long Rate(TestProjectSummary project) => project.Total > 0 ? project.DurationMs / project.Total : 0;
 }
 
 internal sealed record ProcessRun(

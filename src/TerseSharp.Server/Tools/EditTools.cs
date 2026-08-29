@@ -43,7 +43,7 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. rename=true accepts a declaration whose NAME differs from the symbol it is paired with, so a member is renamed and rewritten in one edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload, as is a batch refused for ONE unresolvable id. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. rename=true accepts a declaration whose NAME differs from the symbol it is paired with, so a member is renamed and rewritten in one edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload, as is a batch refused for ONE unresolvable id; fix=[\"2=<corrected>\"] replaces only the held entries that were wrong. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
                     [Description("Symbol id of the member.")] string? symbolId = null,
                     [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
@@ -59,6 +59,7 @@ public sealed class EditTools(ToolContext context)
                     [Description("One complete declaration per entry of symbolIds, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
                     [Description(UsingsHelp)] string[]? usings = null,
                     [Description("Apply a declaration whose name differs from the symbol it is paired with instead of refusing the batch. References are not rewritten, so the gate rolls it back when a caller breaks; rename_symbol makes them follow. Not held by a retryWith token. Default false.")] bool rename = false,
+                    [Description(FixHelp)] string[]? fix = null,
                     [Description(RetryHelp)] string? retryWith = null,
                     CancellationToken cancellationToken = default)
     {
@@ -73,19 +74,22 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "replace_symbol"));
 
+        if (RejectedFix(fix, retryWith, held?.Payloads.Count ?? 0) is { } misfit)
+            return Task.FromResult(misfit);
+
         var imports = Kept(usings, held?.Usings);
         var helpers = Kept(add, held?.Add);
         var container = addTo ?? held?.AddTo;
         var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename, allowPolicy);
 
         if (held is { Targets.Count: > 1 })
-            return Batched(workspace, Corrected(symbolIds, held.Targets), [.. held.Payloads], options, cancellationToken, held.Root, helpers, container, imports);
+            return Batched(workspace, Corrected(symbolIds, held.Targets), Patched(held.Payloads, fix), options, cancellationToken, held.Root, helpers, container, imports);
 
         if (held is null && (symbolIds, declarations) is not (null, null))
             return Batched(workspace, symbolIds ?? [], declarations ?? [], options, cancellationToken, null, helpers, container, imports);
 
         var target = symbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
-        var text = held is null ? declaration : First(held.Payloads, declaration);
+        var text = held is null ? declaration : First(Patched(held.Payloads, fix), declaration);
 
         return Supplied(workspace, target, text, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
             loaded, resolved, text, options, cancellationToken),
@@ -351,12 +355,13 @@ public sealed class EditTools(ToolContext context)
             : error.Render();
 
     private static bool Holdable(TerseErrorCode code) =>
-            code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol;
+            code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol or TerseErrorCode.InvalidArgument;
 
-    private static string Note(TerseErrorCode code, Carry carry) => code switch
+    private static string Note(TerseErrorCode code, Carry carry) => (code, carry.Targets) switch
     {
-        TerseErrorCode.CompileRegression => "the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them",
-        _ when carry.Targets is { Length: > 1 } => "the declarations are held, so the retry is the token plus a corrected symbolIds= - one entry per held declaration, and nothing else",
+        (TerseErrorCode.CompileRegression, { Length: > 1 }) => "the rejected declarations, their add= and their usings= are held, so the retry names the token, and fix=[\"<index>=<corrected declaration>\"] replaces only the entries that were wrong",
+        (TerseErrorCode.CompileRegression, _) => "the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them",
+        (_, { Length: > 1 }) => "the declarations are held, so the retry is the token plus a corrected symbolIds= - one entry per held declaration - or fix=[\"<index>=<corrected declaration>\"] to replace only the entries that were wrong",
         _ => "the declaration is held, so the retry is the token plus a corrected symbolId= and nothing else",
     };
 
@@ -409,6 +414,79 @@ public sealed class EditTools(ToolContext context)
                     "every declarations entry is one complete member declaration").Render();
             }
         }
+
+        return null;
+    }
+
+    private const string FixHelp = "Correct held declarations on a retryWith replay instead of re-sending the batch. Each entry is '<index>=<declaration>', index being the 0-based position the rejection printed; every held entry fix does not name replays unchanged. Only with retryWith, and an index the batch does not carry is refused naming the range.";
+
+    private static (int Index, string Text)? Correction(string entry)
+    {
+        var separator = entry.AsSpan().IndexOf('=');
+
+        if (separator <= 0 || !int.TryParse(entry.AsSpan(0, separator), NumberStyles.None, CultureInfo.InvariantCulture, out var index))
+            return null;
+
+        var text = entry.AsSpan(separator + 1).Trim();
+
+        return text.IsEmpty ? null : (index, new string(text));
+    }
+
+    private static string Detached() => Errors.Invalid(
+        "fix was passed without retryWith, so there is no held batch to correct",
+        "pass the retryWith token the rejection printed, or send the corrected batch as declarations=").Render();
+
+    private static string? Misfit(string entry, int position, int held, List<int> named) => Correction(entry) switch
+    {
+        null => Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"fix[{position}] is not '<index>=<declaration>'"),
+            "each fix entry names the 0-based index the rejection printed and the corrected declaration, e.g. 2=public int Count() => 1;").Render(),
+        { Index: var index } when index >= held => Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names index {index}, and the held batch carries {held} declaration(s)"),
+            held is 0
+                ? "the token holds no declaration to correct - re-send the batch as declarations="
+                : string.Create(CultureInfo.InvariantCulture, $"name an index between 0 and {held - 1}")).Render(),
+        { Index: var index } when named.Contains(index) => Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names index {index}, which an earlier entry already corrected"),
+            "name each held declaration at most once - two corrections of one entry cannot both land").Render(),
+        { Index: var index } => Remembered(named, index),
+    };
+
+    private static string? RejectedFix(string[]? fix, string? retryWith, int held)
+    {
+        if (fix is null || fix.Length is 0)
+            return null;
+
+        if (retryWith is not { Length: > 0 })
+            return Detached();
+
+        var named = new List<int>(fix.Length);
+
+        for (var entry = 0; entry < fix.Length; entry++)
+        {
+            if (Misfit(fix[entry], entry, held, named) is { } refusal)
+                return refusal;
+        }
+
+        return null;
+    }
+
+    private static string[] Patched(IReadOnlyList<string> held, string[]? fix)
+    {
+        string[] payloads = [.. held];
+
+        foreach (var entry in fix ?? [])
+        {
+            if (Correction(entry) is { } slot)
+                payloads[slot.Index] = slot.Text;
+        }
+
+        return payloads;
+    }
+
+    private static string? Remembered(List<int> named, int index)
+    {
+        named.Add(index);
 
         return null;
     }

@@ -110,7 +110,7 @@ background task; `TERSE_UPDATE=0` turns it off.
 | Rename across the solution | **~5,000 tok**, misses the interface | `rename_symbol` → **~150 tok**, correct | **30×** |
 | Why is the build red? | **~8,000 tok** of MSBuild spew | `build` → **~600 tok** | **13×** |
 | What did I just change? | `git diff` → the whole patch | `diff_symbols` → the changed **declarations** | **10×** |
-| Which rows does this checked-in table hold? | `Read` the whole `.md`, then grep it | `read_text columns="Finding,Tool"` | **~10×** |
+| Which rows does this checked-in table hold? | `Read` the whole `.md`, then grep it | `read_text columns="Finding,Tool" cellChars=60` | **~10×**, and ~11× again when the column is prose |
 | What does this budgeted doc cost in tokens? | a build plus the E2E suite → **~10 min** | `read_text tokens=true` → **~3 s** | **200×** |
 | Does this `{Binding}` bind? | **no static answer exists in WPF** | `xaml_bindings validate=true` | ∞ |
 
@@ -201,7 +201,7 @@ list: a build dispatched beside an edit is a race, not a saving.
 Microsoft.Testing.Platform when `global.json` selects it, as xunit.v3, MSTest and NUnit projects use.
 
 **The advertised surface shrinks three ways**, all optional. A solution holding no `.xaml`, `.razor` or
-`.resx` never sees those 31 tools — **57 tools, ≤22,650 tokens** instead of 88 and ≤27,800. A
+`.resx` never sees those 31 tools — **57 tools, ≤24,600 tokens** instead of 88 and ≤29,700. A
 `.terse.json` beside your `.sln` disables groups (`analysis` `build` `edit` `file` `git` `navigation`
 `project` `razor` `refactor` `resx` `workspace` `xaml`) or individual `names`. And
 `terse serve --tools core` advertises the 21 tools that answer most questions. A hidden tool is

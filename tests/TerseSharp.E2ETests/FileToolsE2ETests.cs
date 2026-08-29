@@ -1364,4 +1364,163 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("is outside 0-10", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithCellChars_ClipsEveryProjectedCellAndCountsWhatItClipped()
+    {
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["section"] = "## Open", ["columns"] = "Finding,Proposed change" });
+        var capped = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["section"] = "## Open", ["columns"] = "Finding,Proposed change", ["cellChars"] = 12 });
+        var tooSmall = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["columns"] = "Finding", ["cellChars"] = 4 });
+        var detached = await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["cellChars"] = 40 });
+
+        Assert.Contains("**F1** first row | project the table down to the named columns", whole, StringComparison.Ordinal);
+        Assert.DoesNotContain("clipped", whole, StringComparison.Ordinal);
+
+        Assert.Contains("**F1** fi... | project t...", capped, StringComparison.Ordinal);
+        Assert.Contains("**F3** th... | fold an u...", capped, StringComparison.Ordinal);
+        Assert.DoesNotContain("project the table down to the named columns", capped, StringComparison.Ordinal);
+        Assert.Contains("cellChars=12 clipped 6 of 6 projected cell(s)", capped, StringComparison.Ordinal);
+
+        Assert.StartsWith("ERROR InvalidArgument", tooSmall, StringComparison.Ordinal);
+        Assert.Contains("cellChars=4 is below the 8 characters a clipped cell needs", tooSmall, StringComparison.Ordinal);
+
+        Assert.StartsWith("ERROR InvalidArgument", detached, StringComparison.Ordinal);
+        Assert.Contains("no columns= was passed", detached, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IfUnchangedSince_RefusesAWriteWhoseFileMovedAndLetsOneThroughWhoseFileDidNot()
+    {
+        const string Probe = "terse-stale-write-probe.md";
+        const string Second = "terse-stale-write-probe-two.md";
+        var full = Path.Combine(TerseServerFixture.FixtureRoot, Probe);
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new object[]
+            {
+                new Dictionary<string, object> { ["path"] = Probe, ["content"] = "# Probe\n\noriginal\n" },
+                new Dictionary<string, object> { ["path"] = Second, ["content"] = "# Second\n\noriginal\n" },
+            },
+        });
+        try
+        {
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true, ["stamp"] = true });
+            var stamp = Stamped(read);
+
+            var unmoved = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "original",
+                ["newText"] = "rewritten",
+                ["ifUnchangedSince"] = stamp,
+                ["dryRun"] = true,
+            });
+
+            var spread = await server.CallAsync("edit_text", new()
+            {
+                ["ifUnchangedSince"] = stamp,
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object> { ["path"] = Probe, ["oldText"] = "original", ["newText"] = "a" },
+                    new Dictionary<string, object> { ["path"] = Second, ["oldText"] = "original", ["newText"] = "b" },
+                },
+            });
+
+            var zoneless = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "original",
+                ["newText"] = "rewritten",
+                ["ifUnchangedSince"] = stamp.TrimEnd('Z'),
+            });
+
+            File.SetLastWriteTimeUtc(full, DateTime.UtcNow.AddSeconds(5));
+
+            var moved = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "original",
+                ["newText"] = "rewritten",
+                ["ifUnchangedSince"] = stamp,
+            });
+
+            var restored = await server.CallAsync("write_text", new()
+            {
+                ["path"] = Probe,
+                ["ref"] = "HEAD",
+                ["ifUnchangedSince"] = stamp,
+            });
+
+            var malformed = await server.CallAsync("write_text", new()
+            {
+                ["path"] = Probe,
+                ["content"] = "# Probe\n\nclobbered\n",
+                ["ifUnchangedSince"] = "yesterday",
+            });
+
+            var moving = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["section"] = "# Probe",
+                ["toPath"] = Second,
+                ["ifUnchangedSince"] = stamp,
+            });
+
+            var tracked = Stamped(await server.CallAsync("read_text", new() { ["path"] = "notes.md", ["verbose"] = true, ["stamp"] = true }));
+
+            var fresh = await server.CallAsync("write_text", new()
+            {
+                ["path"] = "notes.md",
+                ["ref"] = "HEAD",
+                ["ifUnchangedSince"] = tracked,
+                ["dryRun"] = true,
+            });
+
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("ERROR InvalidArgument", moving, StringComparison.Ordinal);
+            Assert.Contains("this call writes 2", moving, StringComparison.Ordinal);
+
+            Assert.DoesNotContain("ERROR", fresh, StringComparison.Ordinal);
+
+            Assert.Contains("stamp=", read, StringComparison.Ordinal);
+            Assert.EndsWith("Z", stamp, StringComparison.Ordinal);
+
+            Assert.Contains("changedLines=1", unmoved, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", unmoved, StringComparison.Ordinal);
+
+            Assert.Contains("ERROR InvalidArgument", spread, StringComparison.Ordinal);
+            Assert.Contains("ifUnchangedSince carries ONE file's stamp and this call writes 2", spread, StringComparison.Ordinal);
+
+            Assert.Contains("ERROR InvalidArgument", zoneless, StringComparison.Ordinal);
+            Assert.Contains("is not a round-trip UTC timestamp", zoneless, StringComparison.Ordinal);
+
+            Assert.Contains("ERROR EditConflict", moved, StringComparison.Ordinal);
+            Assert.Contains("so another writer changed it after you read it", moved, StringComparison.Ordinal);
+
+            Assert.Contains("ERROR EditConflict", restored, StringComparison.Ordinal);
+
+            Assert.Contains("ERROR InvalidArgument", malformed, StringComparison.Ordinal);
+            Assert.Contains("ifUnchangedSince='yesterday' is not a round-trip UTC timestamp", malformed, StringComparison.Ordinal);
+
+            Assert.Contains("original", after, StringComparison.Ordinal);
+            Assert.DoesNotContain("rewritten", after, StringComparison.Ordinal);
+            Assert.DoesNotContain("clobbered", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Second, ["delete"] = true });
+        }
+    }
+
+    private static string Stamped(string response)
+    {
+        var marker = response.IndexOf("stamp=", StringComparison.Ordinal) + "stamp=".Length;
+        var tail = response.AsSpan(marker);
+        var end = tail.IndexOfAny(" \r\n");
+
+        return new string(end < 0 ? tail : tail[..end]);
+    }
 }

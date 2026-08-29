@@ -398,7 +398,7 @@ public static class FileService
         ? string.Create(CultureInfo.InvariantCulture, $"{number}: {line}")
         : string.Create(CultureInfo.InvariantCulture, $"{number}: {line[..budget]}... (+{line.Length - budget} chars)");
 
-    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0);
+    public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0, int CellChars = 0, bool Stamp = false, long Ticks = 0);
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0);
 
@@ -501,7 +501,7 @@ public static class FileService
 
         var text = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
 
-        return Present(full, label, text, request with { Length = file.Length, Characters = text.Length });
+        return Present(full, label, text, request with { Length = file.Length, Characters = text.Length, Ticks = file.LastWriteTimeUtc.Ticks });
     }
 
     private const string OutsideSuffix = "  " + OutsideMarker;
@@ -1011,7 +1011,7 @@ public static class FileService
         var window = Windowed(text, request.Section, request.Occurrence);
 
         return window.IsOk
-            ? MarkdownTable.Projected(label, text, columns, window.Value.Start, window.Value.End, request.Range.MaxLines, request.Section, request.Range.Budget)
+            ? MarkdownTable.Projected(label, text, columns, window.Value.Start, window.Value.End, request.Range.MaxLines, request.Section, request.Range.Budget, request.CellChars)
             : Result.Fail<string>(window.Error!);
     }
 
@@ -1457,7 +1457,8 @@ public static class FileService
         start > 0 && before[start] is '\n' && before[start - 1] is '\r';
 
     public static string Stamps(ReadRequest request) => (request.Bytes ? "\n" + Sized(request.Length) : string.Empty)
-            + (request.Tokens ? "\n" + Counted(request.Characters) : string.Empty);
+            + (request.Tokens ? "\n" + Counted(request.Characters) : string.Empty)
+            + (request.Stamp ? "\n" + Marked(request.Ticks) : string.Empty);
 
     public static string Counted(int characters) => string.Create(CultureInfo.InvariantCulture, $"tokens={(characters + 3) / 4}");
 
@@ -1703,4 +1704,92 @@ public static class FileService
 
         return (window.Length > 0 ? response.Line(window) : response).ToString();
     }
+
+    private static TerseError Collision(int earlier, int later, TextEdit first, TextEdit second) => Errors.Invalid(
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"edits[{earlier}] and edits[{later}] anchor on the same oldText in the same file with occurrence={first.Occurrence} and occurrence={second.Occurrence}, and entries are applied in order against the text the previous one produced, so the second cannot address the occurrence you counted"),
+        "lengthen each anchor so it is unique, or send the second in its own call - once the first has landed it is occurrence=1");
+
+    private static int Shadowed(IReadOnlyList<TextEdit> edits, int index, string defaultPath)
+    {
+        var anchor = edits[index].OldText;
+
+        if (anchor is not { Length: > 0 })
+            return -1;
+
+        for (var earlier = 0; earlier < index; earlier++)
+        {
+            if (Same(edits[earlier], edits[index], anchor, defaultPath))
+                return earlier;
+        }
+
+        return -1;
+    }
+
+    public static TerseError? Colliding(IReadOnlyList<TextEdit> edits, string defaultPath)
+    {
+        for (var index = 1; index < edits.Count; index++)
+        {
+            var earlier = Shadowed(edits, index, defaultPath);
+
+            if (earlier >= 0)
+                return Collision(earlier, index, edits[earlier], edits[index]);
+        }
+
+        return null;
+    }
+
+    public static string Marked(long ticks) => ticks > 0
+        ? "stamp=" + new DateTime(ticks, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture)
+        : "stamp=UNRESOLVED";
+
+    private static TerseError Unparseable(string ifUnchangedSince) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"ifUnchangedSince='{ifUnchangedSince}' is not a round-trip UTC timestamp"),
+        "pass the stamp= value read_text stamp=true returned, e.g. 2026-08-29T18:04:11.1234567Z; a value with no zone is refused rather than read as local time");
+
+    private static TerseError Raced(string path, DateTime expected, DateTime found) => Errors.EditConflict(
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{path} was last written at {found.ToString("O", CultureInfo.InvariantCulture)} and ifUnchangedSince names {expected.ToString("O", CultureInfo.InvariantCulture)}, so another writer changed it after you read it"));
+
+    public static TerseError? Moved(LoadedWorkspace workspace, IReadOnlyList<string> paths, string? ifUnchangedSince)
+    {
+        if (ifUnchangedSince is not { Length: > 0 } stamp)
+            return null;
+
+        if (paths.Count is not 1)
+            return Spread(paths);
+
+        if (!DateTime.TryParseExact(stamp, "O", CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var expected)
+            || expected.Kind is DateTimeKind.Unspecified)
+        {
+            return Unparseable(stamp);
+        }
+
+        return Later(workspace, paths[0], expected.ToUniversalTime());
+    }
+
+    private static TerseError? Later(LoadedWorkspace workspace, string path, DateTime expected)
+    {
+        var resolved = PathGuard.Resolve(workspace, path);
+
+        if (!resolved.IsOk)
+            return null;
+
+        var found = new FileInfo(resolved.Value!);
+
+        return found.Exists && found.LastWriteTimeUtc > expected
+            ? Raced(path, expected, found.LastWriteTimeUtc)
+            : null;
+    }
+
+    private static TerseError Spread(IReadOnlyList<string> paths) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"ifUnchangedSince carries ONE file's stamp and this call writes {paths.Count}: {string.Join(", ", paths)}"),
+        "pass it on a call that writes a single file - a stamp cannot be checked against a file it was not taken from, and read_text stamp=true returns one per paths= entry");
+
+    private static bool Same(TextEdit earlier, TextEdit later, string anchor, string defaultPath) =>
+        string.Equals(earlier.OldText, anchor, StringComparison.Ordinal)
+        && string.Equals(earlier.Path ?? defaultPath, later.Path ?? defaultPath, StringComparison.OrdinalIgnoreCase)
+        && (earlier.Occurrence > 0 || later.Occurrence > 0);
 }

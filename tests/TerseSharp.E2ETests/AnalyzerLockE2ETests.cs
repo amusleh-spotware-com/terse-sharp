@@ -185,4 +185,32 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
 
     private static string GeneratorSource { get; } =
         Path.Combine(FixtureRoot, "src", "Fixture.Generator", "GreetingGenerator.cs");
+
+    [Fact]
+    public async Task ALockedOutput_WithASecondWorkspaceLoaded_IsStillRetriedAgainstTheWorkspaceTheCallResolvedTo()
+    {
+        await ArmedAsync();
+
+        var second = Path.Combine(FixtureRoot, "src", "Fixture.Generator", "Fixture.Generator.csproj");
+        var loaded = await CallAsync("load_workspace", new() { ["path"] = second });
+
+        Assert.DoesNotContain("ERROR", loaded, StringComparison.Ordinal);
+        Assert.Contains("Fixture.Generator", await CallAsync("list_workspaces", []), StringComparison.Ordinal);
+
+        try
+        {
+            File.SetLastWriteTimeUtc(GeneratorSource, DateTime.UtcNow);
+
+            using var held = File.Open(AnalyzerAssembly, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+            var text = await CallAsync("build", new() { ["workspace"] = "GeneratorSolution" });
+
+            Assert.DoesNotContain("was not retried", text, StringComparison.Ordinal);
+            Assert.Contains("the workspace was unloaded and the build retried", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CallAsync("unload_workspace", new() { ["path"] = second });
+        }
+    }
 }

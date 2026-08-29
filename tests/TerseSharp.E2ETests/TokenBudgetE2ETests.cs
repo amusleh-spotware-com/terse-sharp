@@ -555,7 +555,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         return int.Parse(tokens[(tokens.LastIndexOf(' ') + 1)..], CultureInfo.InvariantCulture);
     }
 
-    private const int AdvertisedPayloadBudget = 29400;
+    private const int AdvertisedPayloadBudget = 29700;
 
     [Fact]
     public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()

@@ -920,7 +920,7 @@ public static class SymbolEditService
 
     private static Result<AppendedMembers[]> RoutedPlans(IReadOnlyList<PlannedEdit> planned, IReadOnlyList<AddRoute> routes)
     {
-        var types = planned.Select(edit => edit.Target.Node.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>()).ToArray();
+        var types = planned.Select(edit => Container(edit.Target.Node)).ToArray();
         var plans = new AppendedMembers[routes.Count];
 
         for (var index = 0; index < routes.Count; index++)
@@ -1032,6 +1032,10 @@ public static class SymbolEditService
 
         return string.Equals(before, after, StringComparison.Ordinal) ? null : before + " -> " + after;
     }
+
+    private static BaseTypeDeclarationSyntax? Container(SyntaxNode node) => node is BaseTypeDeclarationSyntax type
+        ? node.Parent?.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>() ?? type
+        : node.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>();
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

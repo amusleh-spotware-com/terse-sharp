@@ -8,6 +8,105 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-08-30
+
+### Added
+
+- **`replace_symbol` takes `fix=["<index>=<corrected declaration>"]`**, which corrects individual
+  held declarations on a `retryWith` replay instead of re-sending the batch. The index is the entry's
+  0-based position in the `declarations=` array the token holds, every held entry `fix` does not name is
+  replayed unchanged, and an index the held batch does not carry is refused naming the range it could
+  have used. `fix` without `retryWith` is refused rather than ignored, and a malformed entry is named
+  by its own position. The rejection note now names the parameter, so it is discoverable from the
+  failure that needs it. `InvalidArgument` joins the holdable rejection codes, so a batch refused for
+  a syntax defect in one declaration also mints a token. Measured motivation: a 5-declaration batch
+  rejected twice for two one-line defects cost ~9 400 characters to re-send; the same two retries now
+  cost the token plus the two corrected declarations. Locked by
+  `ARetryCarryingFix_ReplacesOnlyTheHeldDeclarationItNamesAndReplaysTheRest` (I475).
+
+- **`read_text` takes `cellChars=N` beside `columns=`**, capping each projected cell and clipping the
+  rest with a trailing ellipsis. The response says once how many cells it clipped
+  (`cellChars=60 clipped 14 of 32 projected cell(s)`), so the omission is never silent, and the cap
+  applies before the `maxChars` budget so a clipped projection fits more rows. `cellChars` without
+  `columns=` is refused naming `maxChars=`, and a value below 8 is refused naming the floor. Measured
+  motivation: the `Finding` column of this repo's own open backlog is prose - 10 rows totalling ~7 000
+  characters - when the question that projection is used for is almost always "which ids are open",
+  which `cellChars=60` answers in ~600. Locked by
+  `ReadText_WithCellChars_ClipsEveryProjectedCellAndCountsWhatItClipped` (I476).
+
+- **`read_text stamp=true` returns the file's last-write time**, and `edit_text` and `write_text` take
+  `ifUnchangedSince=` to refuse a write whose file moved since that stamp. The stamp is round-trip UTC
+  (`stamp=2026-08-29T18:04:11.1234567Z`), rides on every shape `read_text` returns and once per
+  `paths=` entry, and answers `UNRESOLVED` under `ref=`, which reads a revision rather than a file.
+  The refusal is `ERROR EditConflict` naming the path, the time on disk and the time you passed, and
+  it happens before anything is written - including on a `write_text ref=` restore. It carries ONE
+  file's stamp, so a call that writes more than one file - `edits=` across two paths, `files=`, a
+  `section=`/`row=` move into a `toPath=` - is refused rather than checked against a file the stamp
+  was not taken from, which would be a refusal the tool cannot prove. A value that is not a
+  round-trip UTC timestamp, or one carrying no zone (which would silently be read as local time and
+  could let a racing write land), is refused by name. Measured motivation: a concurrent session on this shared tree rewrote a file between the read
+  and the write, silently reverting a 15-row change set. Locked by
+  `IfUnchangedSince_RefusesAWriteWhoseFileMovedAndLetsOneThroughWhoseFileDidNot` (I478).
+
+- **`run_tests` and `rerun_failed` name an assembly that is pathologically slow FOR ITS OWN SIZE.**
+  When the worst assembly's mean cost crosses 5 000 ms per test the verdict line gains
+  ` slowAssembly=<name> <n>ms/test - pass slowest=10 to see which`, computed from the `durationMs`
+  and test count the run already reports - the same shape as the existing `concurrency=Nx` line, and
+  the same opt-in discipline, because `slowest=` itself stays off by default. A single-project run
+  that reports no per-project summary is named from the target. Measured motivation: an
+  `ArchitectureTests` assembly ran 494 tests at 17.4 s of CPU each - a 31x wall-clock regression that
+  sat in a repo for weeks with every gate green, and that `slowest` had to be asked for by name to
+  see. Locked by `Pathological_ForAnAssemblyWhoseMeanTestCostsSeconds_NamesItAndItsRate` and
+  `Pathological_ForASuiteWhoseMeanTestIsOrdinary_SaysNothing` (I482).
+
+### Fixed
+
+- **`edit_text edits=` refuses two entries of one file that anchor on the same `oldText` and carry
+  `occurrence=`, before anything is written - and before the first FILE of a multi-file batch is
+  written**, naming both by the caller's own index and stating why: entries are
+  applied in order against the text the previous one produced, so once `occurrence=1` has landed the
+  anchor no longer matches twice and `occurrence=2` is refused. It used to apply the first entry,
+  refuse the second and report a partial application, leaving the file half-edited. The remedy names
+  the two calls that work - lengthen each anchor, or send the second on its own, where it is
+  `occurrence=1`. Locked by
+  `TwoBatchEntriesAnchoringOnTheSameOccurrence_AreRefusedBeforeAnythingIsWritten` (I477).
+
+- **`replace_symbol add=` resolves a NESTED TYPE target's container to its declaring type.** It used
+  to report the nested type as its own container - `these targets do not share one: the enum
+  EntryKind, ResponseBuilder, ResponseBuilder` - because the container walk was `FirstAncestorOrSelf`,
+  which returns the node itself when the node is already a type declaration. A batch mixing a nested
+  type with members of the same outer type is legal and now lands; a target that is a TOP-LEVEL type
+  still answers the self-replacement refusal it always did, and an ENUM MEMBER target still answers
+  that its container cannot take member declarations. Locked by
+  `ABatchMixingANestedTypeWithItsSiblings_AppendsToTheirDeclaringType` and
+  `ReplaceSymbol_WithAdd_RefusesAnEnumMemberTargetAndAppendsANestedTypeTargetToItsDeclaringClass`,
+  the latter replacing an expectation that had codified the same defect (I479).
+
+- **`build`, `run_tests`, `rerun_failed`, `list_tests` and `clean` retry a locked output against the
+  workspace the call RESOLVED to, not only when it is the sole one loaded.** The retry used to be
+  refused outright whenever a second workspace was loaded - `more than one workspace is loaded, so the
+  test run was not retried` - even though the call had already resolved to exactly one workspace, by
+  an explicit `workspace:` or by a path hint; an un-hinted call on two roots never reaches that point,
+  because it is refused earlier as `AmbiguousWorkspace`. Only the resolved workspace is unloaded, so a
+  sibling session's undo history and realized compilations are untouched, and an output still locked
+  after the retry answers the holder list as before. Measured motivation: one occurrence cost three
+  calls and two model gaps for one verdict, plus 21.9 s of dead build, while the second workspace held
+  no lock on the target's output at all. Locked by
+  `ALockedOutput_WithASecondWorkspaceLoaded_IsStillRetriedAgainstTheWorkspaceTheCallResolvedTo`
+  (I484).
+
+### Changed
+
+- The four advertised-surface ceilings moved for the four new optional parameters (`fix`, `cellChars`,
+  `stamp`, `ifUnchangedSince`) and the tool descriptions that make them discoverable. Measured after
+  trimming every new description: `tools/list` 29 400 → 29 700, the markup-narrowed surface
+  24 250 → 24 600, the `.terse.json`-narrowed surface 24 800 → 25 250, and `SKILL.md` 29 600 → 30 100.
+  The trim itself gave back ~230 tokens on every surface, so the residual is the real cost of five
+  shipped improvements; the README and NUGET_README numbers were re-stated to match, and the NuGet
+  one had been stale at 27 800 since an earlier move.
+
+
+
 ## [0.55.0] - 2026-08-29
 
 ### Added
@@ -5195,7 +5294,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.55.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.56.0...HEAD
+[0.56.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.56.0
 [0.55.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.55.0
 [0.54.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.54.0
 [0.53.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.53.0

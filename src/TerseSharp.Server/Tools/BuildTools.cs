@@ -266,9 +266,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         if (!first.Locked)
             return first.Response;
 
-        if (context.Registry.All().Count is not 1)
-            return first.Response + NotRecovered(operation);
-
         if (!context.Registry.Unload(target.SolutionPath, reclaim: false))
             return first.Response;
 
@@ -292,10 +289,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             CultureInfo.InvariantCulture,
             $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. Analyzer and source-generator assemblies are normally mapped from a shadow copy under the per-user analyzer cache rather than from a project's own output, so they are the least likely holder - but a copy that could not be made falls back to mapping the file in place, so they are not ruled out either. This server is pid {Environment.ProcessId}, and an MSBuild BuildHost this or an earlier terse load spawned out of this tree's own bin/ is also in play. {(holders.Length is 0 ? "The build named no holding process, so nothing below identifies one - list the holders yourself before stopping anything." : "Resolve each holder below before stopping it.")}{holders}");
     }
-
-    private static string NotRecovered(string operation) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"\nNOTE the output is locked, and more than one workspace is loaded, so the {operation} was not retried; unload_workspace the one you are targeting and try again.");
 
     private const string ReloadFailed =
         "\nWARNING the workspace was unloaded to retry the operation and could not be reloaded; call load_workspace before using the semantic tools again.";

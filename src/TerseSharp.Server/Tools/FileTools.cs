@@ -7,7 +7,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. A markdown file over 8000 characters asked for whole answers its SECTION MAP plus the same steer; verbose=true, a line range, tail=, section= or columns= opt back into the text. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. tokens=true ends it with the whole file's tokens=N, the count the doc budgets assert. On markdown, headings=true returns the heading map with line ranges and GitHub anchor slugs - bounded by maxLines, and narrowed to the top of the tree by maxLevel=2, which lists the ## sections without their ### children - and section=\"## Commands\" returns just that section, and columns=\"Finding,Tool\" projects a markdown table down to the named columns, so a checked-in table answers which rows exist without paying for the whole file - it composes with section=, is bounded by maxLines, and a column no table under the read declares is refused by name rather than dropped, as are headings=true, startLine=, endLine= and tail= beside it. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
+    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. A markdown file over 8000 characters asked for whole answers its SECTION MAP plus the same steer; verbose=true, a line range, tail=, section= or columns= opt back into the text. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. tokens=true ends it with the whole file's tokens=N, the count the doc budgets assert. On markdown, headings=true returns the heading map with line ranges and GitHub anchor slugs - bounded by maxLines, and narrowed to the top of the tree by maxLevel=2, which lists the ## sections without their ### children - and section=\"## Commands\" returns just that section, and columns=\"Finding,Tool\" projects a markdown table down to the named columns, so a checked-in table answers which rows exist without paying for the whole file - it composes with section=, is bounded by maxLines, and a column no table under the read declares is refused by name rather than dropped, as are headings=true, startLine=, endLine= and tail= beside it. cellChars=60 caps each projected CELL, clipping the rest and counting what it clipped. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
                 [Description("Several files answered in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
@@ -18,11 +18,13 @@ public sealed class FileTools(ToolContext context)
                 [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
                 [Description("End the answer with the file's byte length as bytes=N, on every shape read_text returns and once per paths= entry. Under ref= it is the blob's size at that revision; one that cannot be sized answers bytes=UNRESOLVED. Default false.")] bool bytes = false,
                 [Description("End the answer with the whole file's token cost as tokens=N, whatever range was read. Default false.")] bool tokens = false,
+                [Description("End the answer with the file's last-write time as stamp=<round-trip UTC>, once per paths= entry. Feed it back as ifUnchangedSince= and the write is refused if another session rewrote the file in between. UNRESOLVED under ref=. Default false.")] bool stamp = false,
                 [Description("Markdown only: return the heading map (line ranges, no body) instead of the text.")] bool headings = false,
                 [Description("With headings=true, the deepest heading level to list: 2 keeps # and ## and drops every ###. Anchors stay the ones GitHub assigns. Default 0, every level. Refused without headings=true.")] int maxLevel = 0,
                 [Description("Markdown only: return only this section, e.g. '## Commands'. The heading level is optional.")] string? section = null,
                 [Description("With section=, the 1-based index of the section when that heading repeats - '### Added' once per release. Default 0, which requires exactly one match; a multi-match refusal names each candidate's start line.")] int occurrence = 0,
                 [Description("Markdown only: comma-separated column headers to project every markdown table row down to, e.g. 'Finding,Tool'. Which rows a checked-in table holds, without the whole table. Composes with section=, maxLines= and maxChars=; a column no table under the read declares, and headings=/startLine=/endLine=/tail= beside it, are refused by name.")] string? columns = null,
+                [Description("With columns=, the maximum characters per projected cell; a longer one is clipped with an ellipsis and the response counts what it clipped once. Answers which rows a table holds for a fraction of a prose column. Default 0, the whole cell; below 8, or without columns=, refused.")] int cellChars = 0,
                 [Description("Return the file verbatim - every line numbered, blank lines and trailing whitespace kept. On a .cs path this is also the opt-in that returns the text instead of the outline. Default false.")] bool verbose = false,
                 [Description("Git ref to read the file at, e.g. main or HEAD~3; the historical text gets the same gutter, ranges, tail=, section= and maxChars as the working tree, and a whole .cs file answers its outline. Takes one path.")] string? @ref = null,
                 [Description("Workspace or worktree name.")] string? workspace = null,
@@ -33,7 +35,7 @@ public sealed class FileTools(ToolContext context)
         if (!combined.IsOk)
             return Task.FromResult(combined.Error!.Render());
 
-        if (Refused(section, occurrence, headings, maxLevel) is { } refusal)
+        if (Refused(section, occurrence, headings, maxLevel, columns, cellChars) is { } refusal)
             return Task.FromResult(refusal.Render());
 
         var request = new FileService.ReadRequest(
@@ -46,7 +48,9 @@ public sealed class FileTools(ToolContext context)
             Columns: Columned(columns),
             Occurrence: Math.Max(0, occurrence),
             MaxLevel: Math.Max(0, maxLevel),
-            Tokens: tokens);
+            Tokens: tokens,
+            CellChars: Math.Max(0, cellChars),
+            Stamp: stamp);
 
         var whole = WholeRead(startLine, endLine, tail, maxLines, maxChars, section, headings, verbose) && columns is null;
 
@@ -113,6 +117,7 @@ bool verbose) =>
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Apply a write the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
+        [Description(StaleHelp)] string? ifUnchangedSince = null,
         CancellationToken cancellationToken = default)
     {
         if (@ref is { Length: > 0 } && (delete || content is not null || files is { Length: > 0 }))
@@ -123,8 +128,8 @@ bool verbose) =>
         }
 
         return files is { Length: > 0 } batch
-            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy), cancellationToken)
-            : WrittenOne(workspace, path, content, delete, @ref, allowEmpty, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy), cancellationToken);
+            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince), cancellationToken)
+            : WrittenOne(workspace, path, content, delete, @ref, allowEmpty, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince), cancellationToken);
     }
 
     private Task<string> Written(
@@ -145,11 +150,13 @@ bool verbose) =>
         if (Foreign(workspace, path) is { } foreign)
             return Task.FromResult(foreign.Render());
 
-        return Guarded(workspace, path, async loaded => NavigationTools.Unwrap(await FileService.WriteTextAsync(
-            loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken);
+        return Guarded(workspace, path, async loaded => Raced(loaded, [path], options.IfUnchangedSince) is { } raced
+            ? await raced.ConfigureAwait(false)
+            : NavigationTools.Unwrap(await FileService.WriteTextAsync(
+                loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken);
     }
 
-    private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false);
+    private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null);
 
     [McpServerTool(Name = "edit_text")]
     [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. With toPath=, section= MOVES the section into another markdown file in one write, and row=\"I286\" moves ONE table row, matched by its first cell, so the row costs its identifier instead of its text; rows=[{row,newText}, ...] moves up to 25 of them as ONE write per file. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. The top-level path may be omitted entirely when every entry declares its own. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. On a .cs file, force=true is the sanctioned way to amend a declaration's ATTRIBUTES - a tool [Description], an [Obsolete] - since a short anchor costs ~30 tokens where replace_symbol re-sends the whole declaration; it is NOT compile-gated, so analyze the file after. A successful edit answers in one line per changed file - the file name and changedLines; pass context=N for the N lines around each change in their POST-edit state, which is the confirm-read the one-line answer otherwise costs, and verbose=true for the diff.")]
@@ -166,9 +173,10 @@ bool verbose) =>
         [Description("With section=, lowercase: append writes after its last non-blank line, prepend directly under its heading. With toPath=, prepend puts the moved section at the top of the target, anything else appends it. Empty replaces the section.")] string? place = null,
         [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE that section or those rows into. Cut from path, written into toPath as one write, one line per changed file. Naming the same file twice is refused. Not with oldText or edits.")] string? toPath = null,
         [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched against the first cell of each row - e.g. row=\"I286\". It must match exactly one, and the refusal says how many it matched. Not with section=, oldText or edits.")] string? row = null,
-        [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place and path. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total.")] FileService.TextEdit[]? edits = null,
+        [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place and path. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total. Two entries of one file anchoring on the SAME oldText with occurrence= are refused before anything is written, naming both by index.")] FileService.TextEdit[]? edits = null,
         [Description("Markdown only, with toPath=: several table rows moved in ONE call, at most 25, each taking row and optionally newText. Replaces one call per row: cut and landed in order, written once per file. Not with row=, section=, oldText or edits.")] FileService.TextRow[]? rows = null,
-        [Description("Return the N lines around each applied change in their POST-edit state, numbered, instead of only changedLines - the confirm-read a successful edit otherwise costs. 1-10, refused outside that range; 0 (default) returns nothing extra. It is NOT a diff, which stays behind verbose=true, and verbose=true returns the diff instead of the window.")] int context = 0,
+        [Description("Return the N lines around each applied change in their POST-edit state, numbered, instead of only changedLines - the confirm-read a successful edit otherwise costs. 1-10, refused outside that range; 0 (default) adds nothing. Not a diff - verbose=true returns the diff instead.")] int context = 0,
+        [Description(StaleHelp)] string? ifUnchangedSince = null,
         CancellationToken cancellationToken = default)
     {
         var anchor = Anchor(path, edits);
@@ -181,10 +189,15 @@ bool verbose) =>
 
         var target = anchor.Value!;
 
+        if (FileService.Colliding(edits ?? [], path ?? target) is { } collision)
+            return Task.FromResult(collision.Render());
+
+        var targets = Targets(path ?? target, edits, toPath);
+
         return Guarded(
             workspace,
             target,
-            loaded => EditedAsync(
+            loaded => Raced(loaded, targets, ifUnchangedSince) ?? EditedAsync(
                 loaded,
                 path ?? target,
                 new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context),
@@ -711,8 +724,10 @@ context.RejectWrite() is { } rejection
             return Restored(workspace, target, from, allowEmpty, options, cancellationToken);
 
         return delete
-            ? Guarded(workspace, target, async loaded => NavigationTools.Unwrap(
-                await FileService.DeleteAsync(loaded, target, options.DryRun, options.Force, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken)
+            ? Guarded(workspace, target, async loaded => Raced(loaded, [target], options.IfUnchangedSince) is { } raced
+                ? await raced.ConfigureAwait(false)
+                : NavigationTools.Unwrap(
+                    await FileService.DeleteAsync(loaded, target, options.DryRun, options.Force, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken)
             : Written(workspace, target, content, allowEmpty, options, cancellationToken);
     }
 
@@ -729,11 +744,15 @@ context.RejectWrite() is { } rejection
         if (Refused(path, content, delete, allowEmpty, files) is { } refusal)
             return Task.FromResult(refusal.Render());
 
+        var targets = Destinations(null, files);
+
         return Guarded(
             workspace,
             files[0].Path,
-            async loaded => NavigationTools.Unwrap(await FileService.WriteTextManyAsync(
-                loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)),
+            async loaded => Raced(loaded, targets, options.IfUnchangedSince) is { } raced
+                ? await raced.ConfigureAwait(false)
+                : NavigationTools.Unwrap(await FileService.WriteTextManyAsync(
+                    loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)),
             files.Any(file => SourceFile.IsCSharp(file.Path)),
             cancellationToken);
     }
@@ -783,8 +802,9 @@ context.RejectWrite() is { } rejection
         string reference,
         bool allowEmpty,
         WriteOptions options,
-        CancellationToken cancellationToken) =>
-        Guarded(workspace, path, async loaded => await RestoredAsync(loaded, path, reference, allowEmpty, options, cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken);
+        CancellationToken cancellationToken) => Guarded(workspace, path, async loaded => Raced(loaded, [path], options.IfUnchangedSince) is { } raced
+            ? await raced.ConfigureAwait(false)
+            : await RestoredAsync(loaded, path, reference, allowEmpty, options, cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken);
 
     private static async Task<string> RestoredAsync(
         LoadedWorkspace loaded,
@@ -909,7 +929,7 @@ context.RejectWrite() is { } rejection
         return null;
     }
 
-    private static TerseError? Refused(string? section, int occurrence, bool headings, int maxLevel)
+    private static TerseError? Refused(string? section, int occurrence, bool headings, int maxLevel, string? columns, int cellChars)
     {
         if (occurrence > 0 && section is not { Length: > 0 })
         {
@@ -925,7 +945,7 @@ context.RejectWrite() is { } rejection
                 "pass headings=true beside it, or drop maxLevel=");
         }
 
-        return null;
+        return cellChars > 0 ? Clamped(columns, cellChars) : null;
     }
 
     private Task<string> ManyAsync(
@@ -963,5 +983,56 @@ context.RejectWrite() is { } rejection
         return known.IsOk
             ? TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, known.Value!, name, depth, chosen)
             : known.Error!.Render();
+    }
+
+    private const int MinimumCellChars = 8;
+
+    private static TerseError? Clamped(string? columns, int cellChars) => (columns, cellChars) switch
+    {
+        (not { Length: > 0 }, _) => Errors.Invalid(
+            "'cellChars' bounds the cells of a column projection, and no columns= was passed",
+            "pass columns=\"Finding,Tool\" beside it, or maxChars= to bound the whole response"),
+        (_, < MinimumCellChars) => Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"cellChars={cellChars} is below the {MinimumCellChars} characters a clipped cell needs"),
+            string.Create(CultureInfo.InvariantCulture, $"pass cellChars={MinimumCellChars} or more, or drop it to project the whole cell")),
+        _ => null,
+    };
+
+    private const string StaleHelp = "The stamp= value a previous read_text stamp=true returned. The write is refused, before anything is written, when that file's last-write time is NEWER - which is what a concurrent session rewriting it under you looks like. It carries ONE file's stamp, so a call writing more than one file is refused rather than checked against the wrong one. A value that is not a round-trip UTC timestamp, or one with no zone, is refused by name.";
+
+    private static List<string> Targets(string path, FileService.TextEdit[]? edits, string? toPath = null)
+    {
+        var targets = new List<string>((edits?.Length ?? 0) + 2);
+
+        Keep(targets, path);
+        Keep(targets, toPath);
+
+        foreach (var edit in edits ?? [])
+            Keep(targets, edit.Path);
+
+        return targets;
+    }
+
+    private static List<string> Destinations(string? path, FileService.FileWrite[]? files)
+    {
+        var targets = new List<string>((files?.Length ?? 0) + 1);
+
+        Keep(targets, path);
+
+        foreach (var file in files ?? [])
+            Keep(targets, file.Path);
+
+        return targets;
+    }
+
+    private static Task<string>? Raced(LoadedWorkspace loaded, IReadOnlyList<string> targets, string? ifUnchangedSince) =>
+        FileService.Moved(loaded, targets, ifUnchangedSince) is { } conflict
+            ? Task.FromResult(conflict.Render())
+            : null;
+
+    private static void Keep(List<string> targets, string? candidate)
+    {
+        if (candidate is { Length: > 0 } own && !targets.Exists(existing => string.Equals(existing, own, StringComparison.OrdinalIgnoreCase)))
+            targets.Add(own);
     }
 }

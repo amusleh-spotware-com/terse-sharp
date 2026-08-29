@@ -925,4 +925,59 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task TwoBatchEntriesAnchoringOnTheSameOccurrence_AreRefusedBeforeAnythingIsWritten()
+    {
+        const string Probe = "terse-batch-occurrence-probe.md";
+        const string Other = "terse-batch-occurrence-other.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new object[]
+            {
+                new Dictionary<string, object> { ["path"] = Probe, ["content"] = "# Probe\n\nshared anchor\n\nshared anchor\n" },
+                new Dictionary<string, object> { ["path"] = Other, ["content"] = "# Other\n\nshared anchor\n" },
+            },
+        });
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object> { ["path"] = Other, ["oldText"] = "shared anchor", ["newText"] = "other only" },
+                    new Dictionary<string, object> { ["path"] = Probe, ["oldText"] = "shared anchor", ["newText"] = "first only", ["occurrence"] = 1 },
+                    new Dictionary<string, object> { ["path"] = Probe, ["oldText"] = "shared anchor", ["newText"] = "second only", ["occurrence"] = 2 },
+                },
+            });
+
+            var untouched = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+            var neighbour = await server.CallAsync("read_text", new() { ["path"] = Other, ["verbose"] = true });
+
+            Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+            Assert.Contains("edits[1] and edits[2] anchor on the same oldText in the same file with occurrence=1 and occurrence=2", refused, StringComparison.Ordinal);
+            Assert.Contains("lengthen each anchor so it is unique", refused, StringComparison.Ordinal);
+            Assert.DoesNotContain("first only", untouched, StringComparison.Ordinal);
+            Assert.DoesNotContain("second only", untouched, StringComparison.Ordinal);
+            Assert.DoesNotContain("other only", neighbour, StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object> { ["oldText"] = "# Probe", ["newText"] = "# Renamed" },
+                    new Dictionary<string, object> { ["oldText"] = "shared anchor", ["newText"] = "second only", ["occurrence"] = 2 },
+                },
+            });
+
+            Assert.Contains("edits=2/2", applied, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Other, ["delete"] = true });
+        }
+    }
 }

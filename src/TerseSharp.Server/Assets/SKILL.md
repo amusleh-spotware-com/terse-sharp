@@ -82,16 +82,18 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
 | **Files** | `Read` **several** files | `read_text(paths: [...])` | up to 10 in one response, each under its own path line with its own count and `next:` note; an unresolved path is `NOT_FOUND` inline, and `maxChars` is one budget shared across the batch that names the entry it clipped |
 | **Files** | `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
+| **Edit text** | a read-modify-write on a tree another session is also editing | `read_text(path, stamp: true)` then `edit_text(path, …, ifUnchangedSince: "<that stamp>")` | refused `ERROR EditConflict` when the file's last-write time moved after the stamp, naming both times, before anything is written, `write_text ref=` included - the one race no other read can detect. It carries ONE file's stamp, so a call writing more than one file is refused rather than checked against a file the stamp did not come from |
 | **Files** | `wc -c file` for a size you want *while* reading | `read_text(path, bytes: true)` | ends the answer with `bytes=N`, on every shape it returns and once per `paths=` entry |
 | **Files** | guessing what a budgeted document costs before its test runs | `read_text(path, tokens: true)` | ends the answer with `tokens=N` for the **whole** file whatever range was read - the count the shipped-doc budgets assert - on every shape it returns and once per `paths=` entry |
 | **Files** | a file whose lines are enormous | `read_text(path, maxChars: 20000)` | `maxLines` cannot bound those; the clip still names the line to continue from, and says `line N was cut mid-way` when the budget ran out **inside** a line — raise `maxChars` for that line, because a line range cannot resume at a character offset |
 | **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` | the heading map with line ranges and each heading's GitHub anchor slug, then only that section. `maxLines=` bounds the map and `maxLevel: 2` drops every `###`, so a 179-section changelog answers its shape in a dozen lines; anchors stay the ones GitHub assigns over the whole document, and `maxLevel=` without `headings=true` is refused |
 | **Files** | reading a whole `.md` whose content is one long table | `read_text(path, columns: "Finding,Tool")` | one line per table row, those columns only - what `headings=true` cannot give a file with nothing to narrow by. `section=` scopes it to that section's tables and is named in a refusal, `maxLines=` and `maxChars=` bound the rows - a projection that runs out of its CHARACTER budget truncates and ends with `next: search_regex matchesOnly=true unique=true`, the one bounded call that answers the same question, instead of spilling a whole large table; a column no table under the read declares is refused naming the real ones even when the others matched, and `headings=`/`startLine=`/`endLine=`/`tail=` beside it are refused rather than silently winning |
+| **Files** | a projection whose first column is PROSE, when you only want the row ids | `read_text(path, columns: "Finding", cellChars: 60)` | caps every projected CELL and counts what it clipped - a backlog whose `Finding` cells total ~7 000 characters answers in ~600. Refused without `columns=`, and below 8 |
 | **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` | restores the file from that ref through the same compile gate as any write - the way back for a `.csproj` or `.md` that `undo_last_change` cannot cover. A write of markup carrying `&lt;` and no raw `<` warns and names this call, because HTML-escaped markup is not markup |
 | **Files** | a scratch `.cs` probe outside every workspace root | `write_text(path, content, force: true)` | an absolute path under no loaded root is written with `force=true`, tagged `outside-workspace` and never compile-gated, because no project of this workspace compiles it - the read half already worked |
 | **Files** | `Bash: rm file` · `Bash: rmdir` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change`. The same call on a DIRECTORY removes it when it is **empty**, and refuses a non-empty one naming what it still holds |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
-| **Edit text** | re-reading a file to see what an edit landed | `edit_text(path, oldText, newText, context: 2)` | the N lines around each change in their **POST-edit** state, numbered, 1-10 - the confirm-read the one-line answer otherwise costs (771 measured `edit_text` -> `read_text` round trips). Not a diff, which stays behind `verbose=true`; default 0 |
+| **Edit text** | re-reading a file to see what an edit landed | `edit_text(path, oldText, newText, context: 2)` | the N lines around each change in their **POST-edit** state, numbered, 1-10 - the confirm-read the one-line answer otherwise costs. Not a diff; default 0 |
 | **Edit text** | reading a section out of one file and writing it into another | `edit_text(path, section: "## Open", toPath: "other.md")` | cuts the section and lands it in the other file as **one** write, answered as one changed-line count per file - the whole section text never crosses the wire. `place=prepend` puts it at the top of the target, anything else appends; `occurrence=` picks the source section; both paths must be markdown, **both must already exist**, and naming the same file twice is refused |
 | **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", occurrence: 1, place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line. A heading that repeats needs `occurrence=`: the refusal names `occurrence=1..N` and each candidate's start line, so the index is picked with no re-read. `read_text` takes it too, and refuses it without a `section=`. Only with `section=`; supply your own blank lines |
 | **Edit text** | one `edit_text row=` call per row when closing a whole backlog | `edit_text(path, rows: [{row, newText}, ...], toPath: "IMPROVEMENTS-ARCHIVE.md")` | up to 25 rows cut and landed in order as ONE write per file; an identifier matching nothing or several refuses the batch, so a partial move cannot happen |
@@ -99,6 +101,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch. A **partly** refused batch leads with what changed and lists each refusal as `REFUSED <path>: <code> - <message>; remedy: …`, so only a leading `ERROR` means re-send; a malformed entry is named — `edits[1] is the entry that failed to bind` |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` | an entry may name its own `path`, and the top-level `path` may then be omitted entirely; entries are grouped by file, applied as one write each, and answered one line per changed file. A path-less entry with no top-level `path` is refused by index. At most 10 per file and 25 in total |
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` | up to 10 in one call, and every `.cs` document among them shares **one** compile gate — so a type and the consumer it breaks land together instead of the first write being rolled back alone |
+| **Edit text** | two entries of one `edits=` batch addressing occurrence 1 and 2 of the SAME anchor | `edit_text` refuses them up front | naming both by the caller's own index, before ANY file of the batch is written - entries apply in order, so once `occurrence=1` lands the anchor matches once. Lengthen each anchor, or send the second on its own, where it is `occurrence=1` |
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; a multi-match refusal lists the candidate lines with their numbers, so `occurrence=` is picked from the refusal and needs no re-read, and an out-of-range value names the range it could have picked |
 | **Edit text** | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` | line endings normalized before matching; an ambiguous match is refused and a miss names the file's closest lines |
 | **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` already handles it | that payload is **dedented**, and it still matches: the anchor is compared line by line allowing one uniform whitespace prefix, `newText` is re-indented by it, and a `NOTE` says so. A multi-line anchor matching nothing gets the closest REGION and its range, so the retry is a corrected anchor, not a re-read |
@@ -491,7 +494,9 @@ and its line - it used to cost a full compile round trip and the whole rejected 
 overload whose parameter list differs still lands.
 
 **A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
-saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
+saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **A NESTED TYPE's container is its declaring type**, so `symbolIds=["Outer.Nested", "Outer.Sibling"]
+with `add=` lands the members in `Outer` instead of being refused.
+**`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
 type; it must name one of the targets' own containers, and a bare leaf name that matches two of them
 is refused naming both qualified names rather than resolved to the first. **`addTo=` is comma-separated**,
 paired with `add=`: `add=[a, b] addTo="Alpha,Beta"` puts `a` in `Alpha` and `b` in `Beta`. One name
@@ -668,6 +673,10 @@ that answers nothing, and the clip always names `next: startLine=`.
    `replace_symbol_body` and `add_member` take `retryWith: "r3"` to replay exactly what was rejected —
    after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
    declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
+   **When only ONE declaration of a batch was wrong, correct that one and replay the rest**:
+   `replace_symbol retryWith="r3" fix=["2=<corrected>"]` replaces the held entry at the 0-based index
+   the rejection printed and replays the others unchanged — measured at ~4 700 characters saved per
+   retry on a 5-entry batch.
    Better still, do not earn the rollback: `replace_symbol add=[…]` appends the helper in the same
    edit. **`add=`, `addTo=` and `usings=` are held with the token too**, so a retry names the token
    and nothing else; pass any of them again only to override what is held, and **pass `usings: []` to
@@ -977,7 +986,9 @@ server ships. Component and parameter answers are then unavailable rather than e
 **A green run answers in one line** —
 `run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371 elapsedMs=476900` — where
 `durationMs` is summed test time and `elapsedMs` is wall clock — so running the suite after every
-change is nearly free. A run that spanned **more than one project** appends `concurrency=<summed/wall>x` plus
+change is nearly free. **A suite pathologically slow for its own size names itself**: past 5 000 ms per test the verdict gains
+` slowAssembly=<name> <n>ms/test`. That is a 31x regression announcing itself, not a big-suite warning.
+A run that spanned **more than one project** appends `concurrency=<summed/wall>x` plus
 `Name:total/durationMs`
 per project to that same line - and a run that already prints its counters in full adds the slowest
 test when concurrency is under 2x
@@ -1051,9 +1062,9 @@ naming the closest projects and a name two projects share answers `ERROR Ambiguo
 both; neither is ever handed to MSBuild as a path.
 
 When a locked output file blocks the build that `build`, `run_tests`, `rerun_failed`, `list_tests` or
-`clean` runs, the response says so (`WARNING a locked output file blocked the operation`) and, with one
-workspace loaded, the server unloads it, retries and reloads, reporting which happened in a `NOTE` — so
-no `unload_workspace` by hand. When the output is **still** locked it lists every process the build
+`clean` runs, the response says so (`WARNING a locked output file blocked the operation`) and the server unloads the
+workspace THIS CALL RESOLVED TO, retries and reloads, reporting it in a `NOTE` — so no
+`unload_workspace` by hand, even with a second workspace loaded, which keeps its own compilations. When the output is **still** locked it lists every process the build
 named, one
 `holder pid=… <name> startedUtc=… exe=…` line each — the executable workspace-relative when it lives
 under the root, which tells a test host running out of *this* tree's `bin/` from another session's —
