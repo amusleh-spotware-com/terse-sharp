@@ -105,9 +105,9 @@ says so as a degraded run:
    same assistant message as an independent sibling), **(c) shorten the call** (the tool itself gets
    faster), **(d) never make the call** (a rule or a guard stops a run that could not have changed its
    answer). (a), (b) and (d) are worth a multiple of (c), because each also deletes a **6 097 ms**
-   model gap that no server change can touch — and the corpus measured **99.997%** of tool-bearing
-   assistant messages issuing exactly **one** tool call (36 070 of 36 071), so lever (b) is almost
-   entirely unspent.
+   model gap that no server change can touch — and the corpus measured **1.165 tool calls per
+   assistant message, with only 14.3% carrying two or more** (grouped by API `message.id`), so lever
+   (b) is partly spent and still has the largest remaining headroom of the four.
 
 **Also banned:** `AskUserQuestion`, `ExitPlanMode`, editing any file other than `IMPROVEMENTS.md` and
 `IMPROVEMENTS-ARCHIVE.md`, `git add -A`, a `Co-Authored-By:` trailer, and writing any script anywhere
@@ -307,6 +307,7 @@ for path, project, spilled in walk():
         continue
     sessions.add(path)
     pending, seen_calls, order = {}, collections.Counter(), []
+    by_message = collections.Counter()
     for line in open(path, encoding='utf-8', errors='replace'):
         try:
             record = json.loads(line)
@@ -382,7 +383,7 @@ for path, project, spilled in walk():
             continue
         fanout = sum(1 for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use')
         if fanout:
-            parallel[min(fanout, 8)] += 1
+            by_message[message.get('id')] += fanout
         for block in blocks:
             if not isinstance(block, dict):
                 continue
@@ -427,6 +428,8 @@ for path, project, spilled in walk():
                 if 'narrow with' in text or '(truncated=true' in text:
                     steers[tool] += 1
                     structured_trunc['tool steer'] += 1
+    for blocks_in_message in by_message.values():
+        parallel[min(blocks_in_message, 8)] += 1
     for (tool, _), count in seen_calls.items():
         if count > 1:
             dupes[tool] += count - 1
@@ -870,6 +873,8 @@ serial_ms = 0.0; sessions = set(); cycles = 0
 for path in walk():
     sessions.add(path)
     pending, order, seen_calls, events, marks = {}, [], collections.Counter(), [], []
+    by_message = collections.Counter()
+    ms_by_message = collections.defaultdict(float)
     last_result_at = None
     for line in open(path, encoding='utf-8', errors='replace'):
         try:
@@ -894,9 +899,10 @@ for path in walk():
                 last_result_at = at
         if not isinstance(blocks, list):
             continue
+        mid = msg.get('id')
         fan = sum(1 for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use')
         if fan:
-            parallel[min(fan, 8)] += 1
+            by_message[mid] += fan
         for b in blocks:
             if not isinstance(b, dict):
                 continue
@@ -904,14 +910,14 @@ for path in walk():
                 tool = short(b.get('name') or 'none')
                 a = b.get('input') or {}
                 calls[tool] += 1
-                pending[b.get('id')] = (tool, at, fan, a)
+                pending[b.get('id')] = (tool, at, mid, a)
                 enc = json.dumps(a, sort_keys=True)
                 seen_calls[(tool, enc[:4000])] += 1
                 order.append((tool, target(a)))
                 if last_result_at and at and at >= last_result_at:
                     gaps.append((at - last_result_at) * 1000)
             elif b.get('type') == 'tool_result':
-                tool, started, fan_of, a = pending.pop(b.get('tool_use_id'), (None, None, 1, {}))
+                tool, started, mid_of, a = pending.pop(b.get('tool_use_id'), (None, None, None, {}))
                 if at:
                     last_result_at = at
                 if not tool or not started or not at or at < started:
@@ -919,8 +925,7 @@ for path in walk():
                 ms = (at - started) * 1000
                 dur[tool].append(ms)
                 events.append((started, tool, tool in MUTATE, ms))
-                if fan_of == 1:
-                    serial_ms += ms
+                ms_by_message[mid_of] += ms
                 content = b.get('content')
                 text = content if isinstance(content, str) else json.dumps(content or '')
                 if b.get('is_error') or text.lstrip().startswith('ERROR '):
@@ -946,6 +951,11 @@ for path in walk():
                         bash_kind_n['shell text tool'] += 1; bash_kind_ms['shell text tool'] += ms
                     else:
                         bash_kind_n['other'] += 1; bash_kind_ms['other'] += ms
+    for blocks_in_message in by_message.values():
+        parallel[min(blocks_in_message, 8)] += 1
+    for message_id, spent in ms_by_message.items():
+        if by_message.get(message_id, 0) == 1:
+            serial_ms += spent
     for (tool, _), c in seen_calls.items():
         if c > 1:
             dupes[tool] += c - 1
@@ -1005,7 +1015,10 @@ show('turn wall time', f'{turn_ms/3.6e6:.1f} h over {len(turns):,} turns  p50={q
 show('tool wall time', f'{tool_ms/3.6e6:.1f} h  serial={serial_ms*100/max(tool_ms,1):.0f}%')
 show('model gap (result->next call)', f'{gap_ms/3.6e6:.1f} h  p50={gp50:.0f}ms p90={q(gaps,.9):.0f}ms  n={len(gaps):,}')
 show('ROUND-TRIP COST', f'{gp50:.0f}ms of model gap before any tool runs')
-show('fan-out: exactly ONE call', f'{parallel.get(1,0):,} of {msgs:,} = {parallel.get(1,0)*100/max(msgs,1):.3f}%')
+show('fan-out per API message', f'{sum(k*v for k,v in parallel.items())/max(msgs,1):.3f} calls/msg  '
+                                f'multi={sum(v for k,v in parallel.items() if k>1):,} of {msgs:,} = '
+                                f'{sum(v for k,v in parallel.items() if k>1)*100/max(msgs,1):.1f}%  '
+                                f'saved={sum((k-1)*v for k,v in parallel.items() if k>1):,} round trips')
 show('TASK CYCLE wall', f'p50={q(cycles_s,.5)/60:.1f} min  p90={q(cycles_s,.9)/60:.1f} min  mean={sum(cycles_s)/max(len(cycles_s),1)/60:.1f} min')
 show('TASK CYCLE calls', f'p50={q(cycles_c,.5):.0f}  p90={q(cycles_c,.9):.0f}  mean={sum(cycles_c)/max(len(cycles_c),1):.1f}')
 show('  body (to last edit)', f'{sum(body_s)/3600:.1f} h  calls mean={sum(body_c)/max(len(body_c),1):.1f}')
@@ -1059,7 +1072,7 @@ for tool, c in runs.most_common(12):
 
 print(f'\n== SPEEDLINE calls={total_calls} cycles={cycles} callspercycle={sum(cycles_c)/max(len(cycles_c),1):.1f} '
       f'cyclemin={sum(cycles_s)/max(len(cycles_s),1)/60:.1f} turnh={turn_ms/3.6e6:.1f} toolh={tool_ms/3.6e6:.1f} '
-      f'gaph={gap_ms/3.6e6:.1f} gapp50={gp50:.0f} onecallpct={parallel.get(1,0)*100/max(msgs,1):.3f} '
+      f'gaph={gap_ms/3.6e6:.1f} gapp50={gp50:.0f} callspermsg={sum(k*v for k,v in parallel.items())/max(msgs,1):.3f} multipct={sum(v for k,v in parallel.items() if k>1)*100/max(msgs,1):.1f} '
       f'verifyh={tot/3.6e6:.1f} duph={(dms+dt*gp50)/3.6e6:.1f} baresleeps={sleep_bare}')
 ```
 
@@ -1071,7 +1084,7 @@ is calibrated on:
 
 | Measured | Figure | Lever |
 |---|---|---|
-| **fan-out** | **36 070 of 36 071** tool-bearing assistant messages issued exactly **one** tool call; exactly one message issued two | **(b)** — the harness's parallel `tool_use` capability is **99.997% unspent**, and it is free. This is the largest single `[speed]` finding the corpus can produce, and no server change can produce it |
+| **fan-out** | **1.165 calls per assistant message; 14.3% of messages carry two or more** (52 292 messages, 60 912 calls, histogram 1:44 810 2:6 768 3:470 4:170 5+:74), so **8 620 round trips were already deleted = 14.7 h of gap not paid** | **(b)** — free, and the largest remaining `[speed]` headroom. Measured A/B in-loop: 8 outlines one-per-message = **151.4 s** wall (2.9 s tool, **148.5 s gap**) against **10.2 s** as one `paths=[…]` call — **14.8×, 98% of it gap**. NOTE: earlier revisions of this row read `36 070 of 36 071` / `99.997% unspent`; that was the per-record counting artifact, wrong by ~1 800× |
 | **model gap** | **102.9 h**, p50 **6 097 ms**, p90 21 648 ms, over 35 967 gaps | the floor under every round trip. It is why **(a)/(b)/(d) beat (c)** |
 | **verification** | **64.5 h** over **4 856** calls = **41% of all tool wall time**, **7.3 verification calls per task cycle** | **(d)** — `run_tests` alone is **58.0 h**, 2 454 calls, mean **85 s**, p99 **965 s** |
 | **duplicates** | **3 008** identical calls in-session = **15.7 h**; `run_tests` **1 183** of 2 454 (48%), `build` **787** of 1 053 (75%) | **(a)** — 1 154 identical verification calls re-issued **under 5 minutes** apart |
@@ -1662,7 +1675,8 @@ A run of ≥3 consecutive calls of one tool is a batch candidate only when:
 - **the fan-out histogram is read first, and it cuts both ways.** Where the agent already issues
   several `tool_use` blocks in one assistant message, those calls are parallel and a batch parameter
   only wins if the *responses* share framing that could be emitted once. Where the histogram is
-  overwhelmingly `1:` — the 0.08-week probe on 2026-08-08 measured **1:2984 and nothing above it** —
+  overwhelmingly `1:` — a figure only ever produced by counting per transcript record, which is the
+  artifact below and not a real observation —
   the finding is the opposite one and it is bigger: the agent is issuing a run of dependent-looking
   serial calls it never had to serialise. That is a `SKILL.md`/description row (mechanism 1) before it
   is a batch row, because no server change is needed to collect it.
