@@ -105,6 +105,7 @@ public sealed class EditTools(ToolContext context)
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for typeSymbolId.")] string? symbol = null,
+            [Description("Alias for typeSymbolId, so the name every other symbol-addressed tool takes resolves here too.")] string? symbolId = null,
             [Description(UsingsHelp)] string[]? usings = null,
             [Description(RetryHelp)] string? retryWith = null,
             [Description("Alias for declaration; entries join into the one edit.")] string[]? declarations = null,
@@ -121,7 +122,7 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "add_member"));
 
-        var container = typeSymbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
+        var container = typeSymbolId ?? symbol ?? symbolId ?? (held is null ? null : Slot(held.Targets, 0));
         var file = path ?? (held is null ? null : Slot(held.Targets, 1));
         var sent = Merged(declaration, declarations);
         var text = held is null ? sent : First(held.Payloads, sent);

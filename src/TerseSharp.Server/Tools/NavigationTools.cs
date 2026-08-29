@@ -91,16 +91,16 @@ public sealed class NavigationTools(ToolContext context)
             cancellationToken);
 
     [McpServerTool(Name = "get_symbol", ReadOnly = true)]
-    [Description("Signature, kind, accessibility, location and XML doc of one symbol. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
+    [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response - the batch shape get_symbol_source and get_type_outline already take - each under its own block, with an id that does not resolve reported inline as NOT_RESOLVED instead of failing the call, and a summary counting the ids that RESOLVED. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetSymbol(
     [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
     [Description("Workspace or worktree name.")] string? workspace = null,
     [Description("Return the XML documentation verbatim and echo the request. Default false.")] bool verbose = false,
     [Description("Alias for symbolId.")] string? symbol = null,
     [Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
+    [Description("Several symbol ids described in one response. Replaces one call per symbol; an id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call.")] string[]? symbolIds = null,
     CancellationToken cancellationToken = default) =>
-    context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-        Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken, path, referenced: true);
+    Described(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, verbose, path, cancellationToken);
 
     [McpServerTool(Name = "get_symbol_source", ReadOnly = true)]
     [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
@@ -206,11 +206,12 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 },
     public Task<string> GetDiagnostics(
         [Description("File to scope to.")] string? path = null,
         [Description("Minimum severity: error, warning, info. Default warning.")] string? minSeverity = null,
+        [Description("Alias for minSeverity.")] string? severity = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
         CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(workspace, path, loaded =>
-            DiagnosticsService.CollectAsync(loaded, path, Severity(minSeverity), Cap(maxResults, 100), cancellationToken),
+            DiagnosticsService.CollectAsync(loaded, path, Severity(minSeverity ?? severity), Cap(maxResults, 100), cancellationToken),
             cancellationToken: cancellationToken);
 
     private static async Task<string> SearchAsync(
@@ -436,4 +437,16 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 },
                 loaded => OutlineService.TypesAsync(loaded, requested[..Math.Min(requested.Length, MaxBatchedSymbols)], format, path, cancellationToken),
                 cancellationToken: cancellationToken),
             };
+
+    private Task<string> Described(string[] requested, bool batched, string? workspace, bool verbose, string? path, CancellationToken cancellationToken) => requested switch
+    {
+        [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
+        [var only] when !batched => context.WithSymbolAsync(workspace, only, (loaded, resolved) =>
+            Task.FromResult(SourceService.Describe(loaded.Root, resolved, verbose)), cancellationToken, path, referenced: true),
+        _ => context.WithWorkspaceAsync(
+            workspace,
+            path,
+            loaded => SourceService.DescribeManyAsync(loaded, requested[..Math.Min(requested.Length, MaxBatchedSymbols)], verbose, path, cancellationToken),
+            cancellationToken: cancellationToken),
+    };
 }

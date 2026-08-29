@@ -2106,4 +2106,29 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.Contains("ERROR", text, StringComparison.Ordinal);
         Assert.Contains("root", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AddMember_WithSymbolIdInsteadOfTypeSymbolId_ResolvesTheSameContainer()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.OrderBook",
+            ["declaration"] = "public int AliasProbeCount() => 0;",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("AliasProbeCount", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_WithTheSeverityAlias_AcceptsItAndAnswersAsMinSeverityDoes()
+    {
+        var aliased = await server.CallAsync("get_diagnostics", new() { ["severity"] = "error" });
+        var canonical = await server.CallAsync("get_diagnostics", new() { ["minSeverity"] = "error" });
+
+        Assert.DoesNotContain("unrecognized severity", aliased, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR InvalidArgument", aliased, StringComparison.Ordinal);
+        Assert.Equal(canonical, aliased);
+    }
 }
