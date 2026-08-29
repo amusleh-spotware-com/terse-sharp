@@ -142,7 +142,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff; each named file carries the step that would change it - `whitespace`, `fixers` or `fixers+whitespace` - and a mode that also reformats names the byte-equivalent CI pair, so the verdict says whether CI would really be red |
 | **Analyse** | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
-| **Analyse** | reading build output for a consumer you broke | `get_diagnostics` | the solution-wide warning and error sweep a per-file pass cannot see |
+| **Analyse** | reading build output for a consumer you broke | `get_diagnostics` | the solution-wide warning and error sweep a per-file pass cannot see; it takes `severity=` as an alias for `minSeverity=`, exactly as `analyze` does |
 | **XAML** | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
 | **XAML** | `Grep` a `.xaml` file | `xaml_find(query)` · `xaml_names()` · `xaml_resources()` | by element, attribute or content; `x:Name` declarations; every `x:Key` with its dictionary |
 | **XAML** | hunting a resource through `App.xaml` | `xaml_resolve(key)` | every declaration with its scope, one call; a key with no keyed declaration lists the implicit styles targeting it, `HEURISTIC`, and names no winner |
@@ -178,11 +178,19 @@ diagnostics, builds, tests or the working tree.
 forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it in the table above.
 
 **And issue independent calls in ONE message.** Several `tool_use` blocks in one message run
-concurrently; one call per message pays a **6 062 ms (p50)** model gap before its tool even starts, and
-**36 140 of 36 140** tool-bearing messages in a measured week issued exactly ONE call - 100.000%, so
-this lever is entirely unspent. Two concrete shapes are most of it: a `search_text` beside a
-`read_text` of a **different** file (1 395 measured adjacent pairs, **none** sharing a target), and a
-`find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
+concurrently; one call per message pays a **6 136 ms (p50)** model gap before its tool even starts.
+Measured over a fortnight and 647 transcripts, grouping `tool_use` blocks by the API `message.id`
+that carried them: **1.165 calls per assistant message, and only 14.3% of messages carry two or
+more**. That is 8 620 round trips already deleted - 14.7 h of gap not paid - and a large remainder.
+Measured A/B, in-loop, on the same eight files: eight `get_file_outline` calls one-per-message cost
+**151.4 s wall** (2.9 s of tool time, **148.5 s of model gap**); the identical work as one
+`paths=[...]` call cost **10.2 s** - **14.8x faster**. Read the split, because it is the whole
+argument: **98% of that wall clock was the gap, not the tool**. No response-format change can touch
+it; only issuing fewer, wider calls can. (Count this by `message.id`, never per transcript record:
+the JSONL splits one API message carrying N `tool_use` blocks into N records of one block each, so a
+per-record tally always answers 1.0 and reports a real 14.3% as 0.008%.) Two concrete shapes are most
+of it: a `search_text` beside a `read_text` of a **different** file, and a `find_files` or
+`search_symbols` beside a read of a file you already know you need. Send those in one
 message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
 
@@ -591,6 +599,9 @@ that answers nothing, and the clip always names `next: startLine=`.
    their documentation id in outlines, because a name cannot address them. Every one of those tools
    also accepts `symbol:` as an alias for `symbolId:`, and none of them declares the parameter
    required — a call with neither answers `ERROR InvalidArgument` naming `symbolId`.
+   `add_member` addresses a *containing type*, so its canonical name is `typeSymbolId:` — but it
+   takes `symbolId:` as well, because that is the name every other symbol-addressed tool uses and
+   guessing it was the single most frequent rejected argument in a measured fortnight.
    **Need several members?** `get_symbol_source(symbolIds: [...])` returns them in one response, and
    an id that does not resolve is reported inline as `NOT_RESOLVED <id>` plus its nearest ids, instead of
     failing the call.
@@ -738,16 +749,35 @@ that answers nothing, and the clip always names `next: startLine=`.
     `terse serve` rewrites the installed `SKILL.md` and the `terse guard` hook to match the new binary,
     so the skill you are reading always describes the binary you are talking to.
 
-14. **Independent calls go in one message.** If you intend to call several tools and there are no
-    dependencies between them, make all of the independent calls in parallel, in a single assistant
-    message, rather than one after another. `changed_files` beside `workspace_status`, a
-    `search_text` beside a `read_text` of a different file, a `find_files` or `search_symbols`
-    beside a read you already owe - each pair belongs in ONE message.
-    **But when a call needs a value a previous call returns — a symbol id from an outline, a path
-    from `changed_files`, a `retryWith` token from a rollback — call them sequentially, and never
-    guess a parameter to make a call parallel.** A measured week carried 36 140 tool-bearing
-    messages and **not one** parallel message, while 5 989 calls sat in runs of three or more
-    consecutive calls of the same tool.
+14. **Independent calls go in one message.** Before every message that will carry a tool call, answer
+    one question: *is there another call I already know I need, whose arguments do NOT depend on this
+    one's result?* If yes, put them in the SAME message. Several `tool_use` blocks in one assistant
+    message run concurrently; one call per message pays a **6 136 ms** model gap each, and that gap is
+    dead loop no server change can shorten.
+
+    ```
+    GOOD - one message, three tool_use blocks, none depends on another:
+      changed_files
+      workspace_status
+      read_text path="CHANGELOG.md" section="## [Unreleased]"
+
+    GOOD - one message, two blocks, different targets:
+      search_text query="OrderId" glob="src/**/*.cs"
+      get_file_outline path="src/Trading/OrderService.cs"
+
+    BAD - three messages, three gaps, ~18 s of dead loop:
+      read_text path="a.md"  ->  read_text path="b.md"  ->  read_text path="c.md"
+    GOOD - one call:
+      read_text paths=["a.md", "b.md", "c.md"]
+    ```
+
+    **The one exception: when a call needs a value a previous call returns** — a symbol id from an
+    outline, a path from `changed_files`, a `retryWith` token from a rollback — call them
+    sequentially, and **never guess a parameter to make a call parallel**. A measured fortnight
+    carried 52 292 assistant messages bearing 60 912 calls - **1.165 per message** - while **13 820**
+    calls still sat in runs of three or more consecutive calls of the same tool: `Bash` 4 137,
+    `read_text` 2 719, `edit_text` 1 214, `write_text` 632. Every one of those runs was a
+    `paths=`/`edits=`/`files=` batch that was not used, or a parallel message that was not sent.
 15. **A subagent does not inherit this skill — the brief carries it, or the delegate greps.** A spawn
     aimed at this workspace carries, inline: the mandate and ban list above, the workspace name, **the
     `changed_files` output and the `diff_symbols` ids as its scope**, and a call ceiling. A delegate

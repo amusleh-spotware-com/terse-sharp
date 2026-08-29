@@ -8,6 +8,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- `add_member` accepts `symbolId=` as an alias for `typeSymbolId=`, and `get_diagnostics` accepts
+  `severity=` as an alias for `minSeverity=` — the names their sibling tools already take. Measured
+  over 637 transcripts in a fortnight, guessing those two was **48 of the window's 412
+  `InvalidArgument` rejections**: `add_member symbolId=` 41 and `get_diagnostics severity=` 7, the
+  latter against an `analyze` that has declared `severity=` all along. The asymmetry is what earned
+  the rejection, so the fix is the alias, not a description (I468).
+
+### Changed
+
+- `SKILL.md` now carries a **worked example** for issuing independent calls in one message, and its
+  parallelism numbers are re-measured by API `message.id` rather than per transcript record — the
+  old per-record count answered 1.0 by construction and reported a real 14.3% multi-call rate as
+  0.008% (I473). True figures over a fortnight and 647 transcripts: **1.165 calls per assistant
+  message, 14.3% carrying two or more, 8 620 round trips already deleted**. The skill now also
+  carries the in-loop A/B that motivates the lever: eight file outlines one-per-message cost
+  **151.4 s** wall (2.9 s tool, **148.5 s model gap**) against **10.2 s** as one `paths=[...]` call —
+  **14.8x, with 98% of the saving being gap, not tool time** (I465).
+
 ## [0.54.0] - 2026-08-29
 
 ### Added
