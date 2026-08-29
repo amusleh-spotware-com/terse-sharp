@@ -8,6 +8,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- `add_member` accepts `declarations=[...]` as an alias for `declaration`, spelled the way
+  `replace_symbol` spells its batch. Entries are joined into the single compile-gated edit
+  `add_member` already applies, and the tool is now enrolled in the repeat steer's plural map, so a
+  run of consecutive `add_member` calls is steered to the batch like every other plural tool. Like
+  every sibling batch parameter, it refuses a blank entry by index rather than dropping it silently,
+  and caps the batch at 20 declarations (I433).
+- `gate` accepts `changed=`, which documents the scope it already has rather than changing it:
+  `changed=true` is accepted and changes nothing, and `changed=false` is refused naming
+  `solution=true` as the whole-document mode, instead of answering `unrecognized changed` (I434).
+- `SchemaCensusE2ETests` closes the other direction of the read-only writer census. Every advertised
+  tool classified mutating or destructive must now be enrolled in `ReadOnlyServerE2ETests.Writers`
+  or carry a reasoned entry in `ToolCensus.RunsUnderReadOnly`, ratcheted by `MaxReadOnlyExclusions`
+  and asserted to name only live, still-mutating tools; a third test fails a `Writers` entry that is
+  no longer an advertised mutating tool. Previously only tools declaring `dryRun` were proven, which
+  left `undo_last_change` — a real writer declaring none — unproven (I436).
+
+### Changed
+
+- An `edit_text row=` or `rows=` identifier matching more than one table row is still refused whole,
+  because a half-moved backlog is worse than a refused one — but the refusal now names each matching
+  row's line number and first-cell preview, and computes the longer identifier that resolves to
+  exactly one row (`pass row="**I410**"`). An ambiguous 22-row batch therefore costs that identifier
+  on the retry rather than a full re-send of its payload (I432).
+- `SnippetSearch` no longer materialises a string for the candidate indent at every line start of
+  the re-indent fallback. The indent is carried as an offset and length into the file's own text and
+  materialised once, for the winning region only — up to ~5 000 small allocations removed per
+  failed-anchor `edit_text` on a large file, at no behavioural cost (I435).
+
 ## [0.53.0] - 2026-08-28
 
 ### Added

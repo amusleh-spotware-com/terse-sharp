@@ -1,3 +1,4 @@
+using System.Text;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
@@ -106,10 +107,14 @@ public sealed class EditTools(ToolContext context)
             [Description("Alias for typeSymbolId.")] string? symbol = null,
             [Description(UsingsHelp)] string[]? usings = null,
             [Description(RetryHelp)] string? retryWith = null,
+            [Description("Alias for declaration; entries join into the one edit.")] string[]? declarations = null,
             CancellationToken cancellationToken = default)
     {
         if (RejectedUsings(usings) is { } rejected)
             return Task.FromResult(rejected);
+
+        if (RejectedDeclarations(declarations) is { } malformed)
+            return Task.FromResult(malformed);
 
         var held = Held(retryWith, "add_member");
 
@@ -118,7 +123,8 @@ public sealed class EditTools(ToolContext context)
 
         var container = typeSymbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
         var file = path ?? (held is null ? null : Slot(held.Targets, 1));
-        var text = held is null ? declaration : First(held.Payloads, declaration);
+        var sent = Merged(declaration, declarations);
+        var text = held is null ? sent : First(held.Payloads, sent);
         var imports = Kept(usings, held?.Usings);
 
         return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken, held?.Root, imports);
@@ -361,4 +367,48 @@ public sealed class EditTools(ToolContext context)
 
     private const string PolicyHelp = "Apply an edit the project's .terse.json code policy would reject; the response then names every rule it bypassed. Default false.";
 
+    private static string Merged(string declaration, string[]? declarations)
+    {
+        if (declarations is null || declarations.Length is 0)
+            return declaration;
+
+        var builder = new StringBuilder(declaration);
+
+        foreach (var entry in declarations)
+        {
+            if (builder.Length > 0)
+                builder.Append("\n\n");
+
+            builder.Append(entry);
+        }
+
+        return builder.ToString();
+    }
+
+    private const int DeclarationCap = 20;
+
+    private static string? RejectedDeclarations(string[]? declarations)
+    {
+        if (declarations is null)
+            return null;
+
+        if (declarations.Length > DeclarationCap)
+        {
+            return Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"declarations carries {declarations.Length} entries, more than the {DeclarationCap} add_member accepts"),
+                "send the remaining declarations in a second add_member call").Render();
+        }
+
+        for (var index = 0; index < declarations.Length; index++)
+        {
+            if (string.IsNullOrWhiteSpace(declarations[index]))
+            {
+                return Errors.Invalid(
+                    string.Create(CultureInfo.InvariantCulture, $"declarations[{index}] is blank"),
+                    "every declarations entry is one complete member declaration").Render();
+            }
+        }
+
+        return null;
+    }
 }

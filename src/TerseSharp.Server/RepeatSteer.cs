@@ -15,6 +15,7 @@ public static class RepeatSteer
         ["diff_text"] = "paths",
         ["get_symbol_source"] = "symbolIds",
         ["replace_symbol"] = "symbolIds",
+        ["add_member"] = "declarations",
         ["search_text"] = "queries",
         ["search_regex"] = "queries",
         ["run_tests"] = "projects",

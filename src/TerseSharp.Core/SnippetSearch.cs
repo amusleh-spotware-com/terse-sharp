@@ -173,24 +173,27 @@ public static class SnippetSearch
         return text[start..(end < 0 ? text.Length : at + end)].TrimEnd('\r');
     }
 
-    private readonly record struct IndentedRegion(int End, string? Indent);
+    private readonly record struct IndentedRegion(int End, int IndentStart, int IndentLength)
+    {
+        public static IndentedRegion None => new(-1, -1, 0);
+    }
 
     private static int LineEnd(ReadOnlySpan<char> text, int at) =>
         text[at..].IndexOf('\n') is var offset and >= 0 ? at + offset : text.Length;
 
-    private static bool Adopted(ReadOnlySpan<char> line, ReadOnlySpan<char> text, ref string? indent)
+    private static bool Adopted(ReadOnlySpan<char> line, ReadOnlySpan<char> text, ref int pad)
     {
-        var pad = line.Length - text.Length;
+        var width = line.Length - text.Length;
 
-        if (pad <= 0 || !line[..pad].IsWhiteSpace())
+        if (width <= 0 || !line[..width].IsWhiteSpace())
             return false;
 
-        indent = new string(line[..pad]);
+        pad = width;
 
         return true;
     }
 
-    private static bool SameLine(ReadOnlySpan<char> candidate, ReadOnlySpan<char> needle, ref string? indent)
+    private static bool SameLine(ReadOnlySpan<char> candidate, ReadOnlySpan<char> needle, ReadOnlySpan<char> establishedIndent, ref int pad)
     {
         var line = candidate.TrimEnd();
         var text = needle.TrimEnd();
@@ -198,10 +201,12 @@ public static class SnippetSearch
         if (text.IsEmpty)
             return line.IsEmpty;
 
-        if (indent is null && !Adopted(line, text, ref indent))
+        if (pad < 0 && !Adopted(line, text, ref pad))
             return false;
 
-        return line.Length == indent!.Length + text.Length
+        var indent = establishedIndent.IsEmpty ? line[..pad] : establishedIndent;
+
+        return line.Length == pad + text.Length
             && line.StartsWith(indent, StringComparison.Ordinal)
             && line.EndsWith(text, StringComparison.Ordinal);
     }
@@ -215,24 +220,29 @@ public static class SnippetSearch
         var body = trailing ? value[..^1] : value;
         var at = start;
         var end = -1;
-        string? indent = null;
+        var pad = -1;
+        var indentAt = -1;
 
         foreach (var needle in body.EnumerateLines())
         {
             end = LineEnd(text, at);
+            var established = indentAt < 0 ? default : text.Slice(indentAt, pad);
 
-            if (!SameLine(text[at..end], needle, ref indent))
-                return new IndentedRegion(-1, null);
+            if (!SameLine(text[at..end], needle, established, ref pad))
+                return IndentedRegion.None;
+
+            if (indentAt < 0 && pad >= 0)
+                indentAt = at;
 
             at = end < text.Length ? end + 1 : end;
         }
 
-        return indent is null ? new IndentedRegion(-1, null) : new IndentedRegion(Closed(text, end, trailing), indent);
+        return pad < 0 ? IndentedRegion.None : new IndentedRegion(Closed(text, end, trailing), indentAt, pad);
     }
 
     private static SnippetMatch LocateReindented(ReadOnlySpan<char> text, ReadOnlySpan<char> value, int occurrence)
     {
-        var found = new IndentedRegion(-1, null);
+        var found = IndentedRegion.None;
         var chosen = -1;
         var occurrences = 0;
         var start = 0;
@@ -250,7 +260,9 @@ public static class SnippetSearch
                 break;
         }
 
-        return new SnippetMatch(chosen, chosen >= 0 ? found.End - chosen : value.Length, occurrences, false) { Indent = found.Indent };
+        var indent = found.IndentStart >= 0 ? text.Slice(found.IndentStart, found.IndentLength).ToString() : null;
+
+        return new SnippetMatch(chosen, chosen >= 0 ? found.End - chosen : value.Length, occurrences, false) { Indent = indent };
     }
 
     private static SnippetMatch Reindented(string haystack, string needle, int occurrence)

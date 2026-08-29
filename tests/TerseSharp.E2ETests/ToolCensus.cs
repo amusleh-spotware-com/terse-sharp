@@ -318,6 +318,18 @@ internal static class ToolCensus
         new("solution_add_project", "edits the .slnx solution file, which the policy does not evaluate"),
         new("solution_remove_project", "edits the .slnx solution file, which the policy does not evaluate"),
     ];
+
+    public const int MaxReadOnlyExclusions = 7;
+    public static readonly ToolExemption[] RunsUnderReadOnly =
+    [
+        new("analyze", "reads diagnostics; the only state it mutates is this server's own diagnostic history, never the tree"),
+    new("build", "shells out to dotnet build, which writes to obj/ and bin/ and never to source"),
+    new("list_tests", "builds to discover test names and writes no source"),
+    new("load_workspace", "mutates only this server's in-memory workspace registry"),
+    new("rerun_failed", "replays the previous run's failures and writes no source"),
+    new("run_tests", "builds and runs tests, writing only to obj/, bin/ and TestResults"),
+    new("unload_workspace", "releases this server's in-memory registry and the MSBuild file locks it holds"),
+];
 }
 
 internal sealed record ToolPair(string First, string Second, string Reason);

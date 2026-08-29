@@ -260,4 +260,53 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
         Assert.True(gated.Length >= 20, string.Create(CultureInfo.InvariantCulture, $"only {gated.Length} advertised tools declare dryRun"));
         Assert.True(missing.Length is 0, "declares dryRun but no read-only theory proves it is refused: " + string.Join(", ", missing));
     }
+
+    [Fact]
+    public async Task EveryToolClassifiedMutating_IsProvenRefusedUnderReadOnly()
+    {
+        var enrolled = ReadOnlyServerE2ETests.Writers.ToHashSet(StringComparer.Ordinal);
+        var excused = ToolCensus.RunsUnderReadOnly.Select(entry => entry.Tool).ToHashSet(StringComparer.Ordinal);
+        var advertised = (await Surface()).Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        var mutating = ToolCensus.MutatingTools
+            .Concat(ToolCensus.DestructiveTools)
+            .Where(advertised.Contains)
+            .ToArray();
+        var unproven = mutating.Where(name => !enrolled.Contains(name) && !excused.Contains(name)).ToArray();
+
+        Assert.True(mutating.Length >= 35, string.Create(CultureInfo.InvariantCulture, $"only {mutating.Length} advertised tools are classified mutating or destructive"));
+        Assert.True(unproven.Length is 0, "classified mutating but no read-only theory proves it is refused: " + string.Join(", ", unproven));
+    }
+
+    [Fact]
+    public async Task EveryReadOnlyExclusionCarriesAReasonNamesALiveToolAndTheSetOnlyEverShrinks()
+    {
+        var advertised = (await Surface()).Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        var classified = ToolCensus.MutatingTools.Concat(ToolCensus.DestructiveTools).ToHashSet(StringComparer.Ordinal);
+        var enrolled = ReadOnlyServerE2ETests.Writers.ToHashSet(StringComparer.Ordinal);
+
+        Assert.True(
+            ToolCensus.RunsUnderReadOnly.Length <= ToolCensus.MaxReadOnlyExclusions,
+                string.Create(CultureInfo.InvariantCulture, $"the read-only exclusion set is a ratchet: {ToolCensus.RunsUnderReadOnly.Length} > {ToolCensus.MaxReadOnlyExclusions}"));
+
+        Assert.All(ToolCensus.RunsUnderReadOnly, entry =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(entry.Reason), entry.Tool + " is excused with no reason");
+            Assert.Contains(entry.Tool, advertised, StringComparer.Ordinal);
+            Assert.Contains(entry.Tool, classified, StringComparer.Ordinal);
+            Assert.DoesNotContain(entry.Tool, enrolled, StringComparer.Ordinal);
+        });
+    }
+
+    [Fact]
+    public async Task EveryEnrolledWriter_IsStillAnAdvertisedMutatingTool()
+    {
+        var advertised = (await Surface()).Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        var classified = ToolCensus.MutatingTools.Concat(ToolCensus.DestructiveTools).ToHashSet(StringComparer.Ordinal);
+        var stale = ReadOnlyServerE2ETests.Writers
+            .Where(name => !advertised.Contains(name) || !classified.Contains(name))
+            .ToArray();
+
+        Assert.NotEmpty(ReadOnlyServerE2ETests.Writers);
+        Assert.True(stale.Length is 0, "enrolled as a read-only writer but not an advertised mutating tool: " + string.Join(", ", stale));
+    }
 }

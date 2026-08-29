@@ -763,4 +763,53 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Assert.Contains("the body did not parse", text, StringComparison.Ordinal);
         Assert.Contains("at offset", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AddMember_WithDeclarationsArray_AppliesThemAsTheOneEditDeclarationAlreadyApplies()
+    {
+        var batched = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declarations"] = new[] { "public int Alpha() => 1;", "public int Beta() => Alpha() + 1;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", batched, StringComparison.Ordinal);
+        Assert.Contains("Alpha", batched, StringComparison.Ordinal);
+        Assert.Contains("Beta", batched, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithBothDeclarationAndDeclarations_TakesDeclarationFirst()
+    {
+        var combined = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int Head() => 0;",
+            ["declarations"] = new[] { "public int Tail() => Head() + 1;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", combined, StringComparison.Ordinal);
+        Assert.Contains("Head", combined, StringComparison.Ordinal);
+        Assert.Contains("Tail", combined, StringComparison.Ordinal);
+        Assert.True(
+            combined.IndexOf("Head", StringComparison.Ordinal) < combined.IndexOf("Tail", StringComparison.Ordinal),
+            "declaration must be joined before declarations, but Tail preceded Head");
+    }
+
+    [Fact]
+    public async Task AddMember_WithABlankDeclarationsEntry_RefusesItByIndexInsteadOfDroppingIt()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declarations"] = new[] { "public int Kept() => 1;", "   " },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("declarations[1] is blank", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Kept", text, StringComparison.Ordinal);
+    }
 }

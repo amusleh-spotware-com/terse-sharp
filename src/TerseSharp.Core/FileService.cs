@@ -1166,7 +1166,7 @@ public static class FileService
         return end < 0 ? body.Trim() : body[..end].Trim();
     }
 
-    private static List<int> Matching(string[] lines, string identifier)
+    private static List<int> Matching(string[] lines, ReadOnlySpan<char> identifier)
     {
         var matched = new List<int>(2);
 
@@ -1190,13 +1190,13 @@ public static class FileService
         return -1;
     }
 
-    private static TerseError NoRow(string identifier, int count) => count is 0
+    private static TerseError NoRow(string[] lines, List<int> matched, string identifier) => matched.Count is 0
         ? Errors.Invalid(
             string.Create(CultureInfo.InvariantCulture, $"no markdown table row's first cell contains '{identifier}'"),
             "pass the identifier exactly as the table's first column spells it - read_text columns= lists them")
         : Errors.Invalid(
-            string.Create(CultureInfo.InvariantCulture, $"'{identifier}' matches the first cell of {count} table rows"),
-            "pass a longer identifier - a row is addressed by a value unique to its first column");
+            string.Create(CultureInfo.InvariantCulture, $"'{identifier}' matches the first cell of {matched.Count} table rows: {Candidates(lines, matched)}"),
+            Disambiguation(lines, matched, identifier));
 
     private static Result<RowCut> CutRow(string before, string identifier)
     {
@@ -1205,7 +1205,7 @@ public static class FileService
         var matched = Matching(lines, identifier);
 
         if (matched.Count is not 1)
-            return Result.Fail<RowCut>(NoRow(identifier, matched.Count));
+            return Result.Fail<RowCut>(NoRow(lines, matched, identifier));
 
         var cut = matched[0];
         var remainder = string.Join(ending, lines.Where((_, index) => index != cut)).TrimEnd();
@@ -1587,4 +1587,83 @@ public static class FileService
     private static string Listed(List<string> held) => held.Count > MaxDirectoryEntries
         ? string.Join(", ", held.GetRange(0, MaxDirectoryEntries)) + " and more it did not list"
         : string.Join(", ", held);
+
+    private const int CandidateCap = 5;
+    private const int PreviewLength = 40;
+
+    private static string Candidates(string[] lines, List<int> matched)
+    {
+        var builder = new StringBuilder();
+
+        foreach (var index in matched.Take(CandidateCap))
+        {
+            if (builder.Length > 0)
+                builder.Append("; ");
+
+            builder.Append(CultureInfo.InvariantCulture, $"line {index + 1}: {Preview(FirstCell(lines[index]))}");
+        }
+
+        if (matched.Count > CandidateCap)
+            builder.Append(CultureInfo.InvariantCulture, $"; and {matched.Count - CandidateCap} more");
+
+        return builder.ToString();
+    }
+
+    private static string Preview(ReadOnlySpan<char> cell) =>
+        cell.Length <= PreviewLength ? cell.ToString() : string.Concat(cell[..PreviewLength], "...");
+
+    private static string Disambiguation(string[] lines, List<int> matched, string identifier)
+    {
+        var longer = Unique(lines, matched, identifier);
+
+        return longer is null
+            ? "pass a longer identifier - a row is addressed by a value unique to its first column"
+            : string.Create(CultureInfo.InvariantCulture, $"pass row=\"{longer}\", which matches only one of them - a row is addressed by a value unique to its first column");
+    }
+
+    private static string? Unique(string[] lines, List<int> matched, string identifier)
+    {
+        foreach (var index in matched.Take(CandidateCap))
+        {
+            var token = Token(FirstCell(lines[index]), identifier);
+
+            if (token.Length > identifier.Length && Counted(lines, token) is 1)
+                return token.ToString();
+        }
+
+        return null;
+    }
+
+    private static int Counted(string[] lines, ReadOnlySpan<char> identifier)
+    {
+        var count = 0;
+
+        foreach (var line in lines)
+        {
+            if (IsTableRow(line) && !IsDelimiterRow(line) && FirstCell(line).Contains(identifier, StringComparison.Ordinal))
+                count++;
+        }
+
+        return count;
+    }
+
+    private static ReadOnlySpan<char> Token(ReadOnlySpan<char> cell, ReadOnlySpan<char> identifier)
+    {
+        var at = cell.IndexOf(identifier, StringComparison.Ordinal);
+
+        if (at < 0)
+            return default;
+
+        var start = at;
+
+        while (start > 0 && !char.IsWhiteSpace(cell[start - 1]))
+            start--;
+
+        var end = at + identifier.Length;
+
+        while (end < cell.Length && !char.IsWhiteSpace(cell[end]))
+            end++;
+
+        return cell[start..end];
+    }
 }

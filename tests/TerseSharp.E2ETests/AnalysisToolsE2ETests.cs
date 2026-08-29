@@ -359,4 +359,25 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain("next: analyze changed=true", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Gate_WithChangedTrue_AnswersTheSameVerdictBecauseItIsAlreadyScopedThatWay()
+    {
+        var plain = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["dryRun"] = true });
+        var documented = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["dryRun"] = true, ["changed"] = true });
+
+        Assert.DoesNotContain("unrecognized", documented, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", plain, StringComparison.Ordinal);
+        Assert.Contains("analyzed=", plain, StringComparison.Ordinal);
+        Assert.Equal(plain, documented, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public async Task Gate_WithChangedFalse_IsRefusedNamingTheWholeDocumentModeInsteadOfListingParameters()
+    {
+        var text = await server.CallAsync("gate", new() { ["changed"] = false });
+
+        Assert.Contains("always scoped to the files modified since the workspace loaded", text, StringComparison.Ordinal);
+        Assert.Contains("solution=true", text, StringComparison.Ordinal);
+    }
 }

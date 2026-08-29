@@ -886,4 +886,43 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_WithAnAmbiguousRowIdentifier_NamesTheMatchingLinesAndTheIdentifierThatResolves()
+    {
+        const string Source = "terse-i432-ambiguous.md";
+        const string Target = "terse-i432-ambiguous-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+        new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["path"] = Source,
+            ["content"] = "# Backlog\n\n## Open\n\n| Finding |\n|---|\n| **I410** first |\n| **I432** cites I410 |\n",
+        },
+        new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["path"] = Target,
+            ["content"] = "# Archive\n\n## Closed\n\n| Finding |\n|---|\n| **I800** old |\n",
+        },
+    },
+        });
+
+        try
+        {
+            var ambiguous = await server.CallAsync("edit_text", new() { ["path"] = Source, ["row"] = "I410", ["toPath"] = Target });
+
+            Assert.Contains("matches the first cell of 2 table rows", ambiguous, StringComparison.Ordinal);
+            Assert.Contains("line 7: **I410** first", ambiguous, StringComparison.Ordinal);
+            Assert.Contains("line 8: **I432** cites I410", ambiguous, StringComparison.Ordinal);
+            Assert.Contains("pass row=\"**I410**\"", ambiguous, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+        }
+    }
 }

@@ -116,16 +116,19 @@ public sealed class AnalysisTools(ToolContext context)
     [McpServerTool(Name = "gate")]
     [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
     public Task<string> Gate(
-        [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty gates the files modified since the workspace loaded.")] string? path = null,
-        [Description("Gate every document instead of only the files modified since the workspace loaded. Ignored when path is passed. Default false.")] bool solution = false,
-        [Description("Verify instead of writing: format and cleanup report what they would change and nothing is modified. Default false.")] bool dryRun = false,
-        [Description("Add each step's own report under the verdict line. Default false.")] bool verbose = false,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) =>
-        Guarded(workspace, path, loaded => GateService.RunAsync(
-            loaded,
-            new GateRequest(path, Changed: path is null && !solution, dryRun, verbose),
-            cancellationToken));
+            [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty gates the files modified since the workspace loaded.")] string? path = null,
+            [Description("Gate every document instead of only the files modified since the workspace loaded. Ignored when path is passed. Default false.")] bool solution = false,
+            [Description("Verify instead of writing: format and cleanup report what they would change and nothing is modified. Default false.")] bool dryRun = false,
+            [Description("Add each step's own report under the verdict line. Default false.")] bool verbose = false,
+            [Description("Workspace or worktree name.")] string? workspace = null,
+            [Description("Documents gate's changed-file default. Ignored beside path= or solution=; false is refused otherwise.")] bool? changed = null,
+            CancellationToken cancellationToken = default) =>
+            RejectedChanged(changed, path, solution) is { } rejected
+                ? Task.FromResult(rejected)
+                : Guarded(workspace, path, loaded => GateService.RunAsync(
+                    loaded,
+                    new GateRequest(path, Changed: path is null && !solution, dryRun, verbose),
+                    cancellationToken));
 
     private static string? First(string?[]? paths) =>
             paths is { Length: > 0 } ? Array.Find(paths, entry => entry is { Length: > 0 }) : null;
@@ -217,4 +220,10 @@ public sealed class AnalysisTools(ToolContext context)
             ? text
             : text + "\nnext: analyze changed=true - ONE pass over every file modified since the workspace loaded, instead of a second paths= batch";
     }
+
+    private static string? RejectedChanged(bool? changed, string? path, bool solution) => changed is false && path is null && !solution
+            ? Errors.Invalid(
+                "gate is always scoped to the files modified since the workspace loaded, so changed=false has no meaning",
+                "drop changed=, or pass solution=true to gate every document instead").Render()
+            : null;
 }
