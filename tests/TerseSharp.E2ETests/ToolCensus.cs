@@ -69,7 +69,7 @@ internal static class ToolCensus
     [
         new("build", []),
         new("list_tests", new() { ["project"] = TestProject }),
-        new("run_tests", new() { ["project"] = TestProject }),
+        new("run_tests", new() { ["project"] = TestProject, ["force"] = true }),
         new("rerun_failed", []),
     ];
 
@@ -122,16 +122,16 @@ internal static class ToolCensus
         new(
             "run_tests",
             "run_tests PASSED  ",
-            new() { ["project"] = TestProject, ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes" },
-            "the quiet green line is a verdict, not a request echo; it only appears on a green run, so the probe selects the one fixture test that passes"),
+            new() { ["project"] = TestProject, ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes", ["force"] = true },
+            "the quiet green line is a verdict, not a request echo; it only appears on a green run, so the probe selects the one fixture test that passes and forces it past the unchanged-run memo"),
     ];
 
     public static ToolBudget[] BudgetOverrides =>
     [
         new(
             "search_text",
-            1000,
-            "returns a full default page of 100 matches, each a path:line and the matched source line; the response is bounded by maxResults=, not by the read-tool cap"),
+            1050,
+            "returns a full default page of 100 matches, each a path:line and the matched source line; the response is bounded by maxResults=, not by the read-tool cap, and a .cs-scoped page carries the one-line containers=true steer on top of it"),
         new(
             "search_regex",
             2300,

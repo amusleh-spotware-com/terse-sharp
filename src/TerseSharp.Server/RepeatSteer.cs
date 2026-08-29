@@ -15,6 +15,7 @@ public static class RepeatSteer
         ["read_text"] = "paths",
         ["get_file_outline"] = "paths",
         ["diff_text"] = "paths",
+        ["get_symbol"] = "symbolIds",
         ["get_symbol_source"] = "symbolIds",
         ["replace_symbol"] = "symbolIds",
         ["add_member"] = "declarations",
@@ -27,6 +28,7 @@ public static class RepeatSteer
         ["edit_text"] = "edits",
         ["resx_set"] = "entries",
         ["analyze"] = "paths",
+        ["format"] = "paths",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();
@@ -132,6 +134,7 @@ public static class RepeatSteer
         ["read_text"] = "path",
         ["get_file_outline"] = "path",
         ["diff_text"] = "path",
+        ["get_symbol"] = "symbolId",
         ["get_symbol_source"] = "symbolId",
         ["replace_symbol"] = "symbolId",
         ["search_text"] = "query",
@@ -140,6 +143,7 @@ public static class RepeatSteer
         ["find_files"] = "glob",
         ["get_type_outline"] = "symbolId",
         ["analyze"] = "path",
+        ["format"] = "path",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static string? Argument(CallToolRequestParams parameters, string tool)

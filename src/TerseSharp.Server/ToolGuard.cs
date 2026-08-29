@@ -810,9 +810,11 @@ public static class ToolGuard
     private static bool Sleeping(string command)
     {
         var masked = Masked(command);
+        var segments = Segments(masked);
 
-        return !Array.Exists(Tokens(masked), token => LoopKeywords.Contains(Bare(token), StringComparer.OrdinalIgnoreCase))
-            && Array.Exists(Segments(masked), IsSleepCall);
+        return Array.Exists(Tokens(masked), token => LoopKeywords.Contains(Bare(token), StringComparer.OrdinalIgnoreCase))
+            ? Unlooped(segments)
+            : Array.Exists(segments, IsSleepCall);
     }
 
     private static GuardVerdict Napping() => new(true, SleepReason);
@@ -1313,6 +1315,25 @@ public static class ToolGuard
     }
 
     private static readonly string[] PatternCommands = ["grep", "rg", "egrep", "fgrep", "findstr", "select-string", "sls", "awk", "sed"];
+
+    private static bool Unlooped(string[] segments)
+    {
+        var closed = Array.FindLastIndex(segments, Closes);
+
+        if (closed < 0)
+            return false;
+
+        for (var index = closed + 1; index < segments.Length; index++)
+        {
+            if (IsSleepCall(segments[index]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool Closes(string segment) =>
+        Array.Exists(Tokens(segment), token => string.Equals(Bare(token), "done", StringComparison.OrdinalIgnoreCase));
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

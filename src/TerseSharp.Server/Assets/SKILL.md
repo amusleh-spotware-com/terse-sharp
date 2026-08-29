@@ -47,6 +47,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | one `get_type_outline` call per type | `get_type_outline(symbolIds: [...])` | up to 20 types in one response, each under its own header line; an id that does not resolve is `NOT_RESOLVED` inline, never a failed call |
 | **Navigate** | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
 | **Navigate** | — | `get_symbol(symbolId)` | signature, kind, accessibility, location and XML doc of one symbol |
+| **Navigate** | one `get_symbol` call per symbol | `get_symbol(symbolIds: [...])` | several described in ONE response, each under its own block, with an id that does not resolve reported inline as `NOT_RESOLVED` rather than failing the call - the batch shape `get_symbol_source` and `get_type_outline` already take |
 | **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` | `path=` resolves the name inside that file first and only falls back to the solution when the file holds no match — `get_symbol` and `get_type_outline` take it too, `symbolIds=` scopes every id in the batch, and a `path=` naming no document answers `DocumentNotFound` instead of being ignored |
 | **Navigate** | `Grep` for a type or member name | `search_symbols(query)` | declarations only; CamelHump (`OSvc` finds `OrderService`); production declarations first, and when the test half also matches it is folded to one `N more in test projects - scope=test` line |
 | **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` | a name **no source declaration** matches falls back to the **referenced assemblies**: `JsonSerializer` and `System.Threading.Lock` answer real signatures tagged `System.Runtime 10.0.0.0` instead of `0 symbols`/`NOT_RESOLVED`. Exact type name only - no CamelHump, no substring - and no source, so members come with no line ranges. A `kind=` that is not a type kind, or any `scope=`, declines the fallback and says so rather than answering off-filter |
@@ -57,7 +58,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | the `get_file_outline` → `get_symbol_source` pair, when learning what a symbol IS | `explore_symbol(symbolId)` | signature, doc, location, usages split src/test, implementations and XAML sites, in **one** call |
 | **Navigate** | judging a rename before doing it | `impact_of(symbolId)` | every affected file, XAML site and recompiling project |
 | **Navigate** | searching for the tests a change can break | `impact_of(symbolId, tests: true)` | the test classes referencing it, each a ready `run_tests test=` argument; DIRECT references only, so it narrows a run and never replaces one |
-| **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()` |
+| **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` | open generics, factories and `Add*` extensions defeat grep; a registration inside an `Add*` helper is also reported at the call site as `via AddTrading()`; `symbol=` and `name=` are aliases for `query=` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` | every ASP.NET Core `Map*` with the member it sits in |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` | a plain file-name substring, case-insensitive, no glob to get right; combines with `glob=`, which selects first, and a glob that matched nothing names it |
 | **Files** | `ls` in a directory outside the workspace | `find_files(glob, root: "C:/Users/me/AppData/Local/terse-analyzers")` | any absolute directory, tagged `outside-workspace`, with full paths on its `paths=[...]` line; refused beside `tracked=true`, which needs a repository this tool did not load |
@@ -70,7 +71,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `grep -n -e A -e B -e C` / one search per literal | `search_text(queries: ["I175", "I176", "I177"])` | up to 10 literals in **one** pass over the same file set; every record carries `q1`..`qN` for the position of its literal in `queries=`, which a regex alternation cannot tell you. A line matching several is **one** record tagged `q1,q3` in query order, so a tag absent from a record means that literal is absent from that line. No legend is echoed back — you passed the array |
 | **Files** | a search that keeps hitting a folder you do not want | `search_text(query, exclude: ".research/**")` | dropped after `glob=` has selected, so one call answers what two used to |
 | **Files** | `Grep -C3` / a search then a read | `search_text(query, context: 3)` | the surrounding lines arrive on the hit's own record, indented — no follow-up `read_text` |
-| **Files** | a text hit, then "which declaration is that line in?" | `search_text(query, containers: true)` / `search_regex(query, containers: true)` | names the C# declaration each hit sits in — `Type.Member`, from syntax — between the position and the matched line, so the record is an id `get_symbol_source` takes and no outline plus ranged read follows. Only a `.cs` file carries one; refused beside `countOnly:` |
+| **Files** | a text hit, then "which declaration is that line in?" | `search_text(query, containers: true)` / `search_regex(query, containers: true)` | names the C# declaration each hit sits in — `Type.Member`, from syntax — between the position and the matched line, so the record is an id `get_symbol_source` takes and no outline plus ranged read follows. Only a `.cs` file carries one; refused beside `countOnly:`. A search whose glob restricts it to `.cs` files and that did NOT pass it ends by naming it, because that is the parameter that turns hits into ids |
 | **Files** | `grep -w` / a short literal that drags in every longer identifier | `search_text(query, word: true)` | keeps a literal only where the characters either side are neither a letter, a digit nor `_`; `search_regex` answers it with `\b` and does not declare it |
 | **Edits** | change a declaration's **attributes** — a tool `[Description]`, an `[Obsolete]` — without re-sending it | `edit_text(path, force: true, oldText: "<short unique fragment>")` | the sanctioned attribute edit: an anchor costs ~30 tokens where `replace_symbol` re-sends the whole declaration (~1 175 tokens for one `[Description]`). **Not compile-gated** - `edit_text` writes straight through, so `analyze` the file after |
 | **Files** | `grep -o` | `search_regex(query, matchesOnly: true)` | prints the matched span instead of the whole line; compose with `unique: true` for "which distinct values of this shape exist". **`search_text` refuses it** — a literal's matched span is the literal you passed |
@@ -90,6 +91,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | a scratch `.cs` probe outside every workspace root | `write_text(path, content, force: true)` | an absolute path under no loaded root is written with `force=true`, tagged `outside-workspace` and never compile-gated, because no project of this workspace compiles it - the read half already worked |
 | **Files** | `Bash: rm file` · `Bash: rmdir` | `write_text(path, delete: true)` | containment-checked; a `.cs` document goes through the compile gate and is covered by `undo_last_change`. The same call on a DIRECTORY removes it when it is **empty**, and refuses a non-empty one naming what it still holds |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` | no `oldText`, so no read-then-match round trip |
+| **Edit text** | re-reading a file to see what an edit landed | `edit_text(path, oldText, newText, context: 2)` | the N lines around each change in their **POST-edit** state, numbered, 1-10 - the confirm-read the one-line answer otherwise costs (771 measured `edit_text` -> `read_text` round trips). Not a diff, which stays behind `verbose=true`; default 0 |
 | **Edit text** | reading a section out of one file and writing it into another | `edit_text(path, section: "## Open", toPath: "other.md")` | cuts the section and lands it in the other file as **one** write, answered as one changed-line count per file - the whole section text never crosses the wire. `place=prepend` puts it at the top of the target, anything else appends; `occurrence=` picks the source section; both paths must be markdown, **both must already exist**, and naming the same file twice is refused |
 | **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", occurrence: 1, place: "prepend", newText: …)` | writes **inside** the section — `prepend` under its heading, `append` after its last non-blank line. A heading that repeats needs `occurrence=`: the refusal names `occurrence=1..N` and each candidate's start line, so the index is picked with no re-read. `read_text` takes it too, and refuses it without a `section=`. Only with `section=`; supply your own blank lines |
 | **Edit text** | one `edit_text row=` call per row when closing a whole backlog | `edit_text(path, rows: [{row, newText}, ...], toPath: "IMPROVEMENTS-ARCHIVE.md")` | up to 25 rows cut and landed in order as ONE write per file; an identifier matching nothing or several refuses the batch, so a partial move cannot happen |
@@ -134,6 +136,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` | at most 10, run **concurrently**; the timeout applies to **each** project, and one that timed out is named instead of the merged run being reported as passed. Naming the same project twice is refused - two invocations of one assembly race each other and fail tests that pass alone |
 | **Build and test** | bounding parallelism **inside** one test assembly | `run_tests(runSettings: ["xUnit.MaxParallelThreads=1"])` | VSTest RunSettings overrides, passed through as one trailing `-- Name=Value` block - the layer `parallel` deliberately does not touch. `xUnit.StopOnFail`, `MSTest.Parallelize.Workers` and `NUnit.NumberOfTestWorkers` live here too; an entry that is not `Name=Value` is refused before anything runs |
 | **Build and test** | re-running what broke | `rerun_failed` | replays the previous failures only |
+| **Build and test** | re-verifying SOME of what broke, after re-pointing the rest | `rerun_failed(tests: [...], exclude: [...])` | filters the remembered failure list instead of replaying it whole - `tests=` keeps the entries whose name contains one of them, `exclude=` drops them, both capped at 10. A filtered re-run always ends `NOTE partial rerun - N of M remembered failure(s) re-run`, naming what it did **not** verify, and a filter matching nothing is refused rather than quietly replaying everything |
 | **Build and test** | `dotnet test --list-tests` | `list_tests(contains)` | names without running |
 | **Build and test** | `Bash: dotnet clean` | `clean` | freed-byte counters, also removes `obj`, releases the workspace's file locks; `path=` sweeps a `.slnx`/`.sln`/`.slnf`/project that is **not** loaded |
 | **Analyse** | one `analyze` call per touched file | `analyze(paths: [...])` | up to 10 files, directories or globs in one pass, so the end-of-task per-file sweep is one call; an entry carrying a comma or a brace is refused by name rather than mis-scoped. A batch that **saturates** the 10-path cap ends with `next: analyze changed=true`, which answers the same end-of-task sweep over every modified file in ONE call - take it rather than sending a second batch |
@@ -141,6 +144,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0`, where `analyzed` counts the **documents** in scope - and keeping only the diagnostics still unfixed, each carrying the declaration it sits in exactly as `analyze` does |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff; each named file carries the step that would change it - `whitespace`, `fixers` or `fixers+whitespace` - and a mode that also reformats names the byte-equivalent CI pair, so the verdict says whether CI would really be red |
+| **Analyse** | one `format` call per touched file | `format(paths: [...])` | up to 10 files, directories or globs in ONE pass, exactly as `analyze` takes them; an entry carrying a comma or a brace is refused by name rather than mis-scoped |
 | **Analyse** | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
 | **Analyse** | reading build output for a consumer you broke | `get_diagnostics` | the solution-wide warning and error sweep a per-file pass cannot see; it takes `severity=` as an alias for `minSeverity=`, exactly as `analyze` does |
 | **XAML** | `Read` a `.xaml` file | `xaml_outline(path)` | element tree with `x:Name`/`x:Key`, no attributes |
@@ -182,15 +186,21 @@ concurrently; one call per message pays a **6 136 ms (p50)** model gap before it
 Measured over a fortnight and 647 transcripts, grouping `tool_use` blocks by the API `message.id`
 that carried them: **1.165 calls per assistant message, and only 14.3% of messages carry two or
 more**. That is 8 620 round trips already deleted - 14.7 h of gap not paid - and a large remainder.
-Measured A/B, in-loop, on the same eight files: eight `get_file_outline` calls one-per-message cost
-**151.4 s wall** (2.9 s of tool time, **148.5 s of model gap**); the identical work as one
-`paths=[...]` call cost **10.2 s** - **14.8x faster**. Read the split, because it is the whole
-argument: **98% of that wall clock was the gap, not the tool**. No response-format change can touch
-it; only issuing fewer, wider calls can. (Count this by `message.id`, never per transcript record:
-the JSONL splits one API message carrying N `tool_use` blocks into N records of one block each, so a
-per-record tally always answers 1.0 and reports a real 14.3% as 0.008%.) Two concrete shapes are most
-of it: a `search_text` beside a `read_text` of a **different** file, and a `find_files` or
-`search_symbols` beside a read of a file you already know you need. Send those in one
+One session in that same corpus reached **1.78 calls per message, 47.1% carrying two or more**; at
+that rate the corpus's 60 912 calls would have needed 34 220 messages instead of 52 292 - **18 072
+fewer round trips, 30.8 h**. Measured directly, A/B, on the same eight files in the same session:
+eight `get_file_outline` calls one-per-message cost **151.4 s wall** (2.9 s of tool time, **148.5 s of
+model gap**); the identical work as one `paths=[...]` call cost **10.2 s** - **14.8x faster**. Read
+the split, because it is the whole argument: **98% of that wall clock was the gap, not the tool**. No
+response-format change can touch it; only issuing fewer, wider calls can. (Count this by `message.id`, never per transcript record: the JSONL
+splits one API message carrying N `tool_use` blocks into N records of one block each, so a per-record
+tally always answers 1.0 and reports a real 14.3% as 0.008%.) What it is worth has been measured
+elsewhere too:
+three tool calls per turn cut wall clock **40.6%** and turns from 45.7 to 23.8 while accuracy *rose*
+66% -> 68% (arXiv:2602.07359), and doing the same work as one batched call rather than 38 separate
+ones measured **104.5 s against 245.1 s - 57% faster and 41% fewer tokens** (arXiv:2511.19477). Two
+concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
+`find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
 message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
 
@@ -405,7 +415,7 @@ edit, climb only as high as the edit reaches:
 | — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
 
 A tier is never dropped; only how often it is re-run. A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` - read that as the answer you already have. Banned: a full-suite run between two edits of one
-slice · re-issuing `build`/`run_tests` with identical arguments when nothing was written in between · a
+slice · re-issuing `build` with identical arguments when nothing was written in between - `run_tests` no longer lets you: a repeat of a call that already answered GREEN, with no edit and no watcher event on any loaded workspace since, answers `run_tests UNCHANGED` naming the previous verdict and its age instead of running, and `force=true` opts out. `rerun_failed` is never memoized and always runs, because the failure list it replays is not named by any of its arguments · a
 run to "confirm" one that already passed · reading a test result before the build result.
 
 **Analyse — at the end of a task, call `gate` and stop there.** It runs `analyze` at `info`,
@@ -454,6 +464,15 @@ while `fix=all` and the default `fix=usings` do reformat, so those two are super
 files CI accepts. **You no longer have to work that out**: every file a verify names carries the step
 that would change it — `whitespace`, `fixers` or `fixers+whitespace` — and a mode that also reformats
 names the byte-equivalent CI pair. Every file `whitespace` is a green CI leg; any `fixers` is a red one.
+
+**A batched symbol read counts what it ANSWERED, not what it was asked for.** `get_symbol`,
+`get_symbol_source` and `get_type_outline` answer `1/2 symbols` when one id did not resolve - a
+partial batch, not a truncation - and the `NOT_RESOLVED` line names which one.
+
+**A question with a defensible default is answered by taking the default, not by asking.** Stopping
+the loop to ask cost **12.91 h over 90 calls** in one fortnight - p90 **1 011 s**, max **4.23 h on one
+question** - more than every `analyze`, `cleanup`, `format`, `get_diagnostics`, `gate` and
+`list_tests` call combined. Take the default and record it as an ASSUMPTION.
 
 **A missing path is answered, not just refused.** `get_file_outline` and `read_text` on a path named
 after a type the workspace declares elsewhere name the file that declares it, and `add_member path=`
@@ -985,6 +1004,7 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 | several projects at once | `run_tests(projects: [...], parallel: N)` — concurrent; `1` is serial |
 | skip the rebuild | `run_tests(noBuild: true)` |
 | only what just failed | `rerun_failed` |
+| only some of what just failed | `rerun_failed(tests: [...], exclude: [...])` - the answer names how many remembered failures it skipped |
 | the slowest N | `run_tests(slowest: 10)` |
 | names without running | `list_tests(contains)` |
 | the full report on a green run | `run_tests(verbose: true)` |

@@ -50,7 +50,7 @@ public sealed class ResponseBuilder(string tool, string argument)
         text.Append('\n');
 
         foreach (var entry in entries)
-            text.Append(entry.Kind is EntryKind.Summary ? Full(entry.Count) : entry.Text).Append('\n');
+            text.Append(Rendered(entry, verbatim: true)).Append('\n');
 
         return text.ToString().TrimEnd('\n');
     }
@@ -60,7 +60,7 @@ public sealed class ResponseBuilder(string tool, string argument)
         var text = new StringBuilder(512);
 
         foreach (var entry in entries)
-            text.Append(entry.Kind is EntryKind.Summary ? Brief(entry.Count) : entry.Text).Append('\n');
+            text.Append(Rendered(entry, verbatim: false)).Append('\n');
 
         return text.ToString().TrimEnd('\n');
     }
@@ -90,6 +90,7 @@ public sealed class ResponseBuilder(string tool, string argument)
         Summary,
         Note,
         Record,
+        Answered
     }
 
     private readonly record struct Counted(int Shown, int Total, string Unit, string? NarrowWith);
@@ -124,4 +125,26 @@ public sealed class ResponseBuilder(string tool, string argument)
     private string Filled(string narrow, int total) => chosen || total <= 0 || !narrow.EndsWith("maxResults=", StringComparison.Ordinal)
         ? narrow
         : string.Create(CultureInfo.InvariantCulture, $"{narrow}{total}");
+
+    public ResponseBuilder Answered(int answered, int requested, string unit)
+    {
+        entries.Insert(0, new Entry(EntryKind.Answered, string.Empty, new Counted(answered, requested, unit, null)));
+
+        return this;
+    }
+
+    private string Rendered(Entry entry, bool verbatim) => entry.Kind switch
+    {
+        EntryKind.Summary => verbatim ? Full(entry.Count) : Brief(entry.Count),
+        EntryKind.Answered => verbatim ? Restored(entry.Count) : Resolved(entry.Count),
+        _ => entry.Text,
+    };
+
+    private static string Resolved(Counted count) => count.Total > count.Shown
+        ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit}")
+        : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit}");
+
+    private static string Restored(Counted count) => count.Total > count.Shown
+        ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit} (resolved={count.Shown}, total={count.Total})\n")
+        : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit} (truncated=false, total={count.Total})\n");
 }

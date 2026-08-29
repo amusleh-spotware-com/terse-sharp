@@ -144,7 +144,7 @@ public static class FileService
         if (!request.DryRun)
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, notes: notes));
+        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, notes: notes, context: request.Context));
     }
 
     private static TerseError NoMatch(string before, string oldText, SnippetMatch match, int occurrence)
@@ -204,11 +204,12 @@ public static class FileService
         bool dryRun,
         bool verbose,
         string? outside = null,
-        IReadOnlyList<string>? notes = null)
+        IReadOnlyList<string>? notes = null,
+        int context = 0)
     {
         var response = new ResponseBuilder(tool, dryRun ? "dryRun" : "applied").Verbose(verbose);
         var escaped = EscapedMarkup(path, after);
-        var noted = notes is { Count: > 0 };
+        var quiet = !dryRun && !verbose && !escaped && notes is not { Count: > 0 };
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
@@ -216,27 +217,9 @@ public static class FileService
         foreach (var note in notes ?? [])
             response.Note(note);
 
-        if (!dryRun && !verbose && !escaped && !noted && UnifiedDiff.ChangedLines(before, after) is var quick && quick > 0)
-        {
-            return response
-                .Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={quick}"))
-                .ToString();
-        }
-
-        var report = UnifiedDiff.Report(path, before, after);
-
-        response.Summary(1, 1, "files changed");
-
-        if (dryRun && !verbose)
-            response.Note("dryRun");
-
-        if (escaped)
-            response.Note("WARNING the new content carries &lt; or &gt; and no raw '<' - markup written HTML-escaped is not markup; restore the file with write_text ref=HEAD if that was unintended");
-
-        response.Line(report.Text);
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}"));
-
-        return response.ToString();
+        return quiet && UnifiedDiff.ChangedLines(before, after) is var changed && changed > 0
+            ? Condensed(response, path, changed, before, after, context)
+            : Detailed(response, path, before, after, dryRun, verbose, escaped);
     }
 
     private static Result<string> Present(string path, string label, string text, ReadRequest request)
@@ -417,7 +400,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters)
     {
@@ -673,7 +656,7 @@ public static class FileService
             $"{Path.GetFileName(path.AsSpan())}  changedLines={report.ChangedLines}  edits={applied}/{total}");
 
         if (!request.DryRun && !request.Verbose && failures.Count is 0 && notes.Count is 0)
-            return response.Line(summary).ToString();
+            return Windowed(response.Line(summary), before, after, request.Context);
 
         response.Line(summary);
 
@@ -1686,4 +1669,38 @@ public static class FileService
     private static string Steered(string text) => string.Create(
         CultureInfo.InvariantCulture,
         $"the section map replaced {text.Length} characters of markdown - address one with section=\"## Heading\", or pass a line range, tail=, columns= for a table, or verbose=true for the whole text");
+
+    private const int MaxEditContext = 10;
+    private const int MaxContextWindow = 200;
+
+    private static string Condensed(ResponseBuilder response, string path, int changed, string before, string after, int context)
+    {
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={changed}"));
+
+        return Windowed(response, before, after, context);
+    }
+
+    private static string Detailed(ResponseBuilder response, string path, string before, string after, bool dryRun, bool verbose, bool escaped)
+    {
+        var report = UnifiedDiff.Report(path, before, after);
+
+        response.Summary(1, 1, "files changed");
+
+        if (dryRun && !verbose)
+            response.Note("dryRun");
+
+        if (escaped)
+            response.Note("WARNING the new content carries &lt; or &gt; and no raw '<' - markup written HTML-escaped is not markup; restore the file with write_text ref=HEAD if that was unintended");
+
+        response.Line(report.Text);
+
+        return response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}")).ToString();
+    }
+
+    private static string Windowed(ResponseBuilder response, string before, string after, int context)
+    {
+        var window = UnifiedDiff.Around(before, after, Math.Clamp(context, 0, MaxEditContext), MaxContextWindow);
+
+        return (window.Length > 0 ? response.Line(window) : response).ToString();
+    }
 }

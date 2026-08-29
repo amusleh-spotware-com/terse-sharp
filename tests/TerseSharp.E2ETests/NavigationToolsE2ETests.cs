@@ -690,4 +690,82 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("45 members - narrow with contains=", capped, StringComparison.Ordinal);
         Assert.Contains("45 members - narrow with contains=", whole, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbol_WithSymbolIds_DescribesEachAndCountsOnlyTheOnesThatResolved()
+    {
+        var text = await server.CallAsync("get_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Submit", "NoSuchSymbolAnywhere" },
+        });
+
+        Assert.StartsWith("1/2 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_RESOLVED NoSuchSymbolAnywhere", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WhenOneIdDoesNotResolve_CountsWhatItAnsweredNotWhatItWasAsked()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Submit", "NoSuchSymbolAnywhere" },
+        });
+
+        Assert.StartsWith("1/2 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_RESOLVED NoSuchSymbolAnywhere", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WhenOneIdDoesNotResolve_CountsWhatItAnsweredNotWhatItWasAsked()
+    {
+        var text = await server.CallAsync("get_type_outline", new()
+        {
+            ["symbolIds"] = new[] { "OrderService", "NoSuchTypeAnywhere" },
+        });
+
+        Assert.StartsWith("1/2 types", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_RESOLVED NoSuchTypeAnywhere", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindRegistrations_TakesSymbolAndNameAsAliasesForQuery()
+    {
+        var byQuery = await server.CallAsync("find_registrations", new() { ["query"] = "IOrderRepository" });
+        var bySymbol = await server.CallAsync("find_registrations", new() { ["symbol"] = "IOrderRepository" });
+        var byName = await server.CallAsync("find_registrations", new() { ["name"] = "IOrderRepository" });
+
+        Assert.DoesNotContain("ERROR", byQuery, StringComparison.Ordinal);
+        Assert.Equal(byQuery, bySymbol, StringComparer.Ordinal);
+        Assert.Equal(byQuery, byName, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindRegistrations_WithNoQueryAtAll_NamesEveryNameItAccepts()
+    {
+        var text = await server.CallAsync("find_registrations", []);
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.Contains("query", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_BatchedAndVerbose_RestoresTheFullSummaryItAlwaysAnswered()
+    {
+        var complete = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Submit", "OrderService" },
+            ["verbose"] = true,
+        });
+        var partial = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Submit", "NoSuchSymbolAnywhere" },
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("2 symbols (truncated=false, total=2)", complete, StringComparison.Ordinal);
+        Assert.Contains("1/2 symbols (resolved=1, total=2)", partial, StringComparison.Ordinal);
+        Assert.DoesNotContain("truncated=true", partial, StringComparison.Ordinal);
+    }
 }

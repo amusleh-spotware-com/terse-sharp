@@ -380,4 +380,33 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.Contains("always scoped to the files modified since the workspace loaded", text, StringComparison.Ordinal);
         Assert.Contains("solution=true", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Format_WithPaths_ScopesOnePassToEveryEntry()
+    {
+        var text = await server.CallAsync("format", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/Order.cs", "src/Fixture.Trading/OrderSide.cs" },
+            ["verify"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.True(
+            text.Contains("clean", StringComparison.Ordinal) || text.Contains("VERIFY_FAILED", StringComparison.Ordinal),
+            text);
+    }
+
+    [Fact]
+    public async Task Format_WithMorePathsThanItAnalyzesInOneCall_IsRefusedByName()
+    {
+        var text = await server.CallAsync("format", new()
+        {
+            ["paths"] = Enumerable.Repeat("src/Fixture.Trading/Order.cs", 11).ToArray(),
+            ["verify"] = true,
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("paths", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
 }

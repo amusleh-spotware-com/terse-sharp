@@ -19,7 +19,7 @@ public sealed class AnalysisTools(ToolContext context)
             [Description("Max results (200).")] int maxResults = 0,
             [Description("Report only diagnostics that appeared since the previous analyze of the same scope, and which ones were fixed.")] bool sinceLast = false,
             [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
-            [Description("Several files, directories or globs analyzed in one pass, at most 10. Combines with path, which is taken first; an entry carrying a comma or a brace is refused by name rather than mis-scoped.")] string?[]? paths = null,
+            [Description("Several files, directories or globs analyzed in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
             CancellationToken cancellationToken = default) => context.WithWorkspaceAsync(
             workspace,
             path ?? First(paths),
@@ -39,7 +39,7 @@ public sealed class AnalysisTools(ToolContext context)
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "format")]
-    [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob, and changed=true limits the pass to files modified since the workspace loaded; verify=true returns a one-line verdict, replacing dotnet format --verify-no-changes. Reports one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob, paths=[...] takes up to 10 of them in ONE pass exactly as analyze does - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded; verify=true returns a one-line verdict, replacing dotnet format --verify-no-changes. Reports one line per changed file; pass verbose=true for the diff.")]
     public Task<string> Format(
         [Description("File, directory or glob such as src/**/*.cs; empty formats every document.")] string? path = null,
         [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
@@ -47,13 +47,21 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("Report clean or VERIFY_FAILED with the files the Roslyn whitespace formatter would change, and write nothing. This is not the CI gate: dotnet format style and analyzers do not run the whitespace formatter, so a VERIFY_FAILED here can still be a green CI leg. Use cleanup verify=true fix=style and fix=analyzers to pre-empt CI.")] bool verify = false,
         [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Several files, directories or globs formatted in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
         CancellationToken cancellationToken = default) =>
-        Guarded(workspace, path, loaded => FormatService.RunAsync(
-            loaded,
-            new FixScope(path, changed),
-            new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
-            new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
-            cancellationToken));
+        Guarded(workspace, path ?? First(paths), loaded =>
+        {
+            var scope = Scoped(loaded, path, paths);
+
+            return scope.IsOk
+                ? FormatService.RunAsync(
+                    loaded,
+                    new FixScope(scope.Value, changed),
+                    new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
+                    new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
+                    cancellationToken)
+                : Task.FromResult(Result.Fail<string>(scope.Error!));
+        });
 
     [McpServerTool(Name = "cleanup")]
     [Description("Replaces Bash dotnet format style and dotnet format analyzers. fix=usings and fix=all remove unused usings, sort them System-first and reformat; fix=style and fix=analyzers apply code fixes ONLY and never reformat, so each matches its CI command byte for byte. Those three fix modes apply the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]

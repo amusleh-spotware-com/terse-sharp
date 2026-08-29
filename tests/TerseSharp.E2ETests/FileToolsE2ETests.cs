@@ -1255,4 +1255,113 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task SearchText_ScopedToCSharpFiles_SteersToTheParameterThatTurnsHitsIntoIds()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "OrderService",
+            ["glob"] = "src/**/*.cs",
+        });
+
+        Assert.Contains("containers=true names the C# declaration each hit sits in", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_ThatAlreadyAsksForContainers_DoesNotSteerToThemAgain()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "OrderService",
+            ["glob"] = "src/**/*.cs",
+            ["containers"] = true,
+        });
+
+        Assert.DoesNotContain("containers=true names", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_OverFilesThatCarryNoDeclaration_DoesNotSteerToContainers()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "Project",
+            ["glob"] = "**/*.csproj",
+        });
+
+        Assert.DoesNotContain("containers=true names", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithContext_ReturnsThePostEditLinesAroundEachChange()
+    {
+        const string Path = "edit-context-probe.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Path,
+            ["content"] = "alpha\nbravo\ncharlie\ndelta\necho\n",
+        });
+
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = Path,
+            ["oldText"] = "charlie",
+            ["newText"] = "charlie-two",
+            ["context"] = 1,
+        });
+
+        await server.CallAsync("write_text", new() { ["path"] = Path, ["delete"] = true });
+
+        Assert.Contains("changedLines=1", text, StringComparison.Ordinal);
+        Assert.Contains("2: bravo", text, StringComparison.Ordinal);
+        Assert.Contains("3: charlie-two", text, StringComparison.Ordinal);
+        Assert.Contains("4: delta", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("@@", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("1: alpha", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithoutContext_StillAnswersInOneLine()
+    {
+        const string Path = "edit-nocontext-probe.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Path,
+            ["content"] = "alpha\nbravo\ncharlie\n",
+        });
+
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = Path,
+            ["oldText"] = "bravo",
+            ["newText"] = "bravo-two",
+        });
+
+        await server.CallAsync("write_text", new() { ["path"] = Path, ["delete"] = true });
+
+        Assert.Equal("edit-nocontext-probe.md  changedLines=1", text.Split('\n')[0], StringComparer.Ordinal);
+        Assert.DoesNotContain("bravo-two", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(50)]
+    [InlineData(-3)]
+    public async Task EditText_WithAContextOutsideItsRange_IsRefusedByNameRatherThanClamped(int context)
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "README.md",
+            ["oldText"] = "TerseSharp",
+            ["newText"] = "TerseSharp",
+            ["context"] = context,
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("is outside 0-10", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
 }

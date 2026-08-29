@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -45,64 +46,51 @@ public static class SourceService
         response.Line(format.Verbose ? source.Trim() : TextCompressor.Source(source));
     }
 
-    public static string Describe(string root, ISymbol symbol, bool verbose)
-    {
-        var id = SymbolId.From(symbol).Value;
-        var response = new ResponseBuilder("get_symbol", id).Verbose(verbose);
-
-        if (!verbose)
-            response.Note(id);
-
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)}"));
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"at {Where(root, symbol)} in {symbol.ContainingNamespace?.ToDisplayString() ?? "-"}"));
-
-        var documentation = symbol.GetDocumentationCommentXml(CultureInfo.InvariantCulture);
-
-        return string.IsNullOrWhiteSpace(documentation)
-            ? response.ToString()
-            : response.Line(verbose ? documentation.Trim() : TextCompressor.Source(documentation)).ToString();
-    }
+    public static string Describe(string root, ISymbol symbol, bool verbose) =>
+        new ResponseBuilder("get_symbol", SymbolId.From(symbol).Value)
+            .Verbose(verbose)
+            .Note(Described(root, symbol, verbose))
+            .ToString();
 
     public static async Task<string> OfSymbolsAsync(
-    LoadedWorkspace workspace,
-    IReadOnlyList<string> symbolIds,
-    SourceFormat format,
-    CancellationToken cancellationToken,
-    string? path = null)
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> symbolIds,
+        SourceFormat format,
+        CancellationToken cancellationToken,
+        string? path = null)
     {
         var response = new ResponseBuilder("get_symbol_source", string.Join(", ", symbolIds)).Verbose(format.Verbose);
-        response.Summary(symbolIds.Count, symbolIds.Count, "symbols");
+        var answered = 0;
 
         foreach (var symbolId in symbolIds)
-            await AppendResolvedAsync(workspace, response, symbolId, format, path, cancellationToken).ConfigureAwait(false);
+        {
+            if (await AppendResolvedAsync(workspace, response, symbolId, format, path, cancellationToken).ConfigureAwait(false))
+                answered++;
+        }
 
-        return response.ToString();
+        return response.Answered(answered, symbolIds.Count, "symbols").ToString();
     }
 
-    private static async Task AppendResolvedAsync(
-            LoadedWorkspace workspace,
-            ResponseBuilder response,
-            string symbolId,
-            SourceFormat format,
-            string? path,
-            CancellationToken cancellationToken)
+    private static async Task<bool> AppendResolvedAsync(
+        LoadedWorkspace workspace,
+        ResponseBuilder response,
+        string symbolId,
+        SourceFormat format,
+        string? path,
+        CancellationToken cancellationToken)
     {
         var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
 
         if (!resolved.IsOk)
         {
             response.Note("NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, resolved.Error!));
-            return;
+            return false;
         }
 
         if (await OutlinedAsync(workspace, resolved.Value!, format, cancellationToken).ConfigureAwait(false) is { } outlined)
         {
             response.Note(outlined);
-            return;
+            return true;
         }
 
         var references = resolved.Value!.DeclaringSyntaxReferences;
@@ -110,11 +98,13 @@ public static class SourceService
         if (references.Length is 0)
         {
             response.Note(Metadata(resolved.Value!, format));
-            return;
+            return true;
         }
 
         foreach (var reference in references)
             await AppendAsync(workspace.Root, response, reference, format, cancellationToken).ConfigureAwait(false);
+
+        return true;
     }
 
     private static async Task<string?> OutlinedAsync(
@@ -230,4 +220,46 @@ public static class SourceService
             node is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1, Parent: BaseFieldDeclarationSyntax field } }
                 ? field
                 : node;
+
+    private static string Described(string root, ISymbol symbol, bool verbose)
+    {
+        var lines = new StringBuilder(256);
+
+        if (!verbose)
+            lines.Append(SymbolId.From(symbol).Value).Append('\n');
+
+        lines.Append(CultureInfo.InvariantCulture, $"{SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol)}").Append('\n');
+        lines.Append(CultureInfo.InvariantCulture, $"at {Where(root, symbol)} in {symbol.ContainingNamespace?.ToDisplayString() ?? "-"}");
+
+        var documentation = symbol.GetDocumentationCommentXml(CultureInfo.InvariantCulture);
+
+        return string.IsNullOrWhiteSpace(documentation)
+            ? lines.ToString()
+            : lines.Append('\n').Append(verbose ? documentation.Trim() : TextCompressor.Source(documentation)).ToString();
+    }
+
+    public static async Task<string> DescribeManyAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> symbolIds,
+        bool verbose,
+        string? path,
+        CancellationToken cancellationToken)
+    {
+        var response = new ResponseBuilder("get_symbol", string.Join(", ", symbolIds)).Verbose(verbose);
+        var answered = 0;
+
+        foreach (var symbolId in symbolIds)
+        {
+            var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
+
+            if (resolved.IsOk)
+                answered++;
+
+            response.Note(resolved.IsOk
+                ? Described(workspace.Root, resolved.Value!, verbose)
+                : "NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, resolved.Error!));
+        }
+
+        return response.Answered(answered, symbolIds.Count, "symbols").ToString();
+    }
 }

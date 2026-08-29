@@ -1428,4 +1428,16 @@ public sealed class ToolGuardTests
     [InlineData("FOO=$(cat src/App/Notes.cs) later")]
     public void Inspect_ForASubstitutionThatIsItselfTheReplacedCommand_StillDenies(string command) =>
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("for i in 1 2; do echo $i; done && sleep 300")]
+    [InlineData("while :; do kill -0 $PID; done; sleep 120")]
+    public void Bash_WithASleepAfterTheLoopHasClosed_IsDeniedInsteadOfReadingTheKeywordAsCover(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("while :; do kill -0 $PID || break; sleep 1; done")]
+    [InlineData("for i in 1 2 3; do sleep 1; done")]
+    public void Bash_WithASleepBeforeTheLoopCloses_StaysAllowed(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 }

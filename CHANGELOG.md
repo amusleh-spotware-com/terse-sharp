@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-08-29
+
 ### Added
 
 - `add_member` accepts `symbolId=` as an alias for `typeSymbolId=`, and `get_diagnostics` accepts
@@ -17,16 +19,131 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   latter against an `analyze` that has declared `severity=` all along. The asymmetry is what earned
   the rejection, so the fix is the alias, not a description (I468).
 
+- **`rerun_failed` takes `tests=[...]` and `exclude=[...]`**, filtering the remembered failure list
+  rather than replaying it whole. `tests=` keeps the remembered failures whose name contains one of
+  its entries - a test name, a class or a namespace prefix - and `exclude=` drops them; both are
+  capped at 10 and refuse a blank entry by index, exactly as `run_tests tests=` does. A filtered
+  re-run is never condensed to the bare verdict: it ends with
+  `NOTE partial rerun - N of M remembered failure(s) re-run; the K not named here were NOT verified`,
+  because a failure you did not name is exactly the one a partial re-run hides. A filter that matches
+  no remembered failure is refused naming how many are remembered, instead of silently replaying all
+  of them. Measured motivation: one red round in this repo cost a 603 s full-suite replay plus 336 s
+  of four hand-written `run_tests filter=` calls, because `rerun_failed` could only replay all twelve
+  failures including the four the same edit had already re-pointed (I458).
+
+- **`get_symbol` takes `symbolIds=[...]`** - the last symbol-addressed read tool without a batch.
+  Each id gets its own block, an id that does not resolve is reported inline as `NOT_RESOLVED` rather
+  than failing the call, and the summary counts the ids that resolved. It was the asymmetry itself
+  that earned the rejection: `get_symbol_source` has had `symbolIds=` all along and `get_type_outline`
+  gained it in I445, so a batch aimed at `get_symbol` cost a refusal plus a re-issue as separate calls
+  (I460).
+- **`format` takes `paths=[...]`** - up to 10 files, directories or globs in one pass, resolved by the
+  same scope helper `analyze paths=` uses, so an entry carrying a comma or a brace is refused by name
+  rather than mis-scoped. Guessing it was **12** of the fortnight's `InvalidArgument` rejections
+  (I468).
+- **`find_registrations` takes `symbol=` and `name=`** as aliases for `query=`, the names its
+  neighbouring symbol-addressed tools declare; `query` is now optional and a call with none of the
+  three answers `ERROR InvalidArgument` naming all three instead of a binder error. **15** rejections
+  in the window (I468).
+- **`edit_text` takes `context=N`** (1-10, default 0), returning the N lines around each applied
+  change in their **POST-edit** state, numbered - the confirm-read a one-line success otherwise costs.
+  Measured: `edit_text` was followed by a `read_text` **771** times in a fortnight, **238 of them on
+  the same path**, and `read_text` is 42% of all tool-result volume. It is not a diff - the diff stays
+  behind `verbose=true` - and it is opt-in, because 69% of those edits wanted no window at all
+  (I469).
+- **`run_tests` takes `force=true`**, which opts out of the unchanged-run answer below. `rerun_failed`
+  deliberately has no such parameter and is never memoized: the failure list it replays is rewritten
+  by every other run and no argument of the call names it, so an arguments-plus-tree key cannot tell
+  two re-runs of different failure sets apart (I464).
+
 ### Changed
 
 - `SKILL.md` now carries a **worked example** for issuing independent calls in one message, and its
-  parallelism numbers are re-measured by API `message.id` rather than per transcript record — the
-  old per-record count answered 1.0 by construction and reported a real 14.3% multi-call rate as
-  0.008% (I473). True figures over a fortnight and 647 transcripts: **1.165 calls per assistant
-  message, 14.3% carrying two or more, 8 620 round trips already deleted**. The skill now also
-  carries the in-loop A/B that motivates the lever: eight file outlines one-per-message cost
-  **151.4 s** wall (2.9 s tool, **148.5 s model gap**) against **10.2 s** as one `paths=[...]` call —
-  **14.8x, with 98% of the saving being gap, not tool time** (I465).
+  parallelism numbers are re-measured, and **corrected**: grouped by API `message.id` rather than by
+  transcript record, a fortnight carried **52 292** tool-bearing assistant messages and **60 912**
+  calls - **1.165 per message**, **14.3%** carrying more than one, **44 810** carrying exactly one -
+  each single-call message paying a **6 136 ms** model gap. The `99.992% unspent` figure this repo
+  scanned with for three rounds was a counting artifact and is logged as I473. Prior
+  rounds shipped the annotation (`readOnlyHint`) and a per-response plural steer and neither moved
+  the rate; the one form with a published number — a concrete example — had never been tried. The
+  measured payoff is now stated in the skill: three calls per turn cut wall clock **40.6%** and
+  turns 45.7 → 23.8 while accuracy rose (arXiv:2602.07359), and one batched call measured **104.5 s
+  against 245.1 s** for the same work split across 38 (arXiv:2511.19477) (I465).
+
+- **BREAKING (response format) - a repeat of a `run_tests` call that already answered GREEN is no
+  longer re-run.** When the arguments match a call earlier in this session and
+  nothing has been written since - `EditPulse` unmoved and every loaded workspace's per-kind
+  change-generation counters unmoved - the answer is
+  `run_tests UNCHANGED  nothing was written since this exact call <n>s ago - previous: <verdict> - force=true re-runs it`,
+  in one line, and `force=true` runs it anyway. Only a **green, single-line** verdict is ever
+  replayed: a failure, a timeout, a locked output, a partial re-run or any answer carrying a caveat
+  re-runs every time, so nothing a caveat would have told you can be hidden by the memo. The stamp
+  carries each loaded workspace's `LoadedUtc` beside its generations, sorted by root, so an
+  unload-and-reload - which reseeds the counters to zero - can never reproduce an earlier stamp.
+  Measured
+  motivation: `run_tests` is **149.55 h = 49.8% of ALL tool wall time** over a fortnight, **2 069 of
+  its 4 409 calls were byte-identical repeats**, and the p25 gap between two consecutive runs in one
+  session is **42 seconds**. Four prior rounds shipped guidance against re-running and the repeat rate
+  moved 48.7% -> 46.9%; this is the mechanism that guidance could not be (I464).
+- **`search_text` and `search_regex` steer to `containers=true`** when the glob restricts the search to
+  `.cs` files and the call did not pass it. Measured on `ToolGuard.cs` this run: 3 searches plus 3
+  ranged reads - 6 round trips, ~4 400 tokens - to locate four declarations one `containers=true` call
+  would have named. The steer is framing, fires only where a container exists to name, and never on a
+  search that already asked (I459).
+- **A batched symbol read counts the ids it ANSWERED, not the ids it was asked for.**
+  `get_symbol_source symbolIds=["A", "NoSuchType"]` answered `2 symbols` having returned one;
+  `get_type_outline` did the same. Both now answer `1/2 symbols` / `1/2 types` through a new
+  `ResponseBuilder.Answered`, which renders a partial batch **without** the word `truncated` - a
+  narrower call would not return more. An all-resolved batch is byte-identical to
+  before in both modes: compressed it is `2 symbols`, and `verbose=true` still restores
+  `2 symbols (truncated=false, total=2)`. A partial batch reads `1/2 symbols` compressed and
+  `1/2 symbols (resolved=1, total=2)` verbose - deliberately NOT `truncated=`, because a narrower call
+  would not return more (I462).
+- **The bare-`sleep` guard no longer reads an unrelated loop keyword as cover.** It exempted any
+  command containing `while`/`until`/`for`/`foreach` anywhere, so
+  `for i in 1 2; do echo $i; done && sleep 300` was allowed. A sleep segment that occurs **after the
+  last `done`** is now denied, while the sanctioned shape - the pause inside a loop that also detects
+  the process dying - still passes, and a loop with no `done` keeps the old exemption. It is a
+  narrowing, not a closure: a sleep placed *before* a later loop, as in `sleep 300 && for i in 1; do
+  :; done`, is still allowed, because anchoring on the last `done` is the only rule that cannot deny
+  the sanctioned shape. **230** bare
+  sleeps declaring **10.2 h** were measured in a fortnight against a guard that was already installed
+  and is not `cwd`-scoped (I472).
+- **The six longest parameter descriptions were cut** - `read_text`'s `maxChars`, `columns` and
+  `bytes`, `search_text`/`search_regex`'s `queries`, and `write_text`'s `files` - removing **1 747
+  characters (~437 tokens) from every request**, since the behaviour they restated is already in the
+  tool description and in `SKILL.md`. `parameterDescriptions` is the largest component of the
+  28 921-token advertised surface at **11 566 tokens (40%)**, ahead of `toolDescriptions` (34%); the
+  tool descriptions themselves were left alone, because restructuring rather than cutting is what the
+  evidence supports there (I470).
+- **`ToolCensusE2ETests` discovers the verdict-answering family from `tools/list`** - every advertised
+  tool declaring both `configuration` and `targetFramework` must be covered by `ToolCensus.VerdictPrefixed`
+  or `ToolCensus.ProcessProbes`, and every `VerdictPrefixed` entry must still be one of them. A fifth
+  build or test tool can no longer be added without a verdict census calling it (I461).
+- **`SKILL.md` names the measured cost of stopping to ask.** `AskUserQuestion` cost **12.91 h over 90
+  calls** in a fortnight - p90 **1 011 s**, max **4.23 h on one question** - more wall clock than every
+  `analyze`, `cleanup`, `format`, `get_diagnostics`, `gate` and `list_tests` call combined (I471).
+
+- **Tests locking this release.** `RerunFailed_WithTestsAndExclude_ReplaysOnlyThoseAndNamesWhatItSkipped`
+  and `RerunFailed_WhoseFilterMatchesNoRememberedFailure_IsRefusedInsteadOfReplayingEverything` for the
+  filtered re-run; `RunTests_RepeatedWithNothingWrittenInBetween_AnswersUnchangedInsteadOfRunningAgain`,
+  `RunTests_RepeatedWithForce_RunsAgainInsteadOfReplayingTheVerdict` and
+  `RunTests_ThatFailed_IsNeverReplayedAsUnchanged` for the unchanged-run memo;
+  `GetSymbol_WithSymbolIds_DescribesEachAndCountsOnlyTheOnesThatResolved`,
+  `GetSymbolSource_WhenOneIdDoesNotResolve_CountsWhatItAnsweredNotWhatItWasAsked` and
+  `GetTypeOutline_WhenOneIdDoesNotResolve_CountsWhatItAnsweredNotWhatItWasAsked` for the batch counts;
+  `SearchText_ScopedToCSharpFiles_SteersToTheParameterThatTurnsHitsIntoIds`,
+  `SearchText_ThatAlreadyAsksForContainers_DoesNotSteerToThemAgain` and
+  `SearchText_OverFilesThatCarryNoDeclaration_DoesNotSteerToContainers` for the containers steer;
+  `EditText_WithContext_ReturnsThePostEditLinesAroundEachChange` and
+  `EditText_WithoutContext_StillAnswersInOneLine` for `context=N`;
+  `FindRegistrations_TakesSymbolAndNameAsAliasesForQuery`,
+  `FindRegistrations_WithNoQueryAtAll_NamesEveryNameItAccepts`,
+  `Format_WithPaths_ScopesOnePassToEveryEntry` and
+  `Format_WithMorePathsThanItAnalyzesInOneCall_IsRefusedByName` for the aliases;
+  `Bash_WithASleepAfterTheLoopHasClosed_IsDeniedInsteadOfReadingTheKeywordAsCover` and
+  `Bash_WithASleepBeforeTheLoopCloses_StaysAllowed` for the guard, both directions; and
+  `EveryToolWhoseSuccessIsAVerdict_IsDiscoveredFromTheAdvertisedSurface` for the new census.
 
 ## [0.54.0] - 2026-08-29
 
@@ -5078,7 +5195,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.55.0...HEAD
+[0.55.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.55.0
 [0.54.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.54.0
 [0.53.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.53.0
 [0.52.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.52.0

@@ -48,7 +48,7 @@ public sealed class EditTools(ToolContext context)
                     [Description("Symbol id of the member.")] string? symbolId = null,
                     [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
                     [Description(AddHelp)] string[]? add = null,
-                    [Description("Name of the containing type that add= lands in, e.g. ToolBoundary or T:TerseSharp.Server.ToolBoundary. Only needed when the targets do not all share one containing type; it must name one of their containers, so a member can never land in a type none of the targets lives in. Comma-separated routes each add= entry to its own container, in the same order; one name takes them all, and any other count is refused naming both.")] string? addTo = null,
+                    [Description("Name of the containing type that add= lands in, e.g. ToolBoundary or T:TerseSharp.Server.ToolBoundary. Only needed when the targets do not share one container, and it must name one of theirs. Comma-separated routes each add= entry to its own container, in order.")] string? addTo = null,
                     [Description("Diff only, write nothing.")] bool dryRun = false,
                     [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
                     [Description(PolicyHelp)] bool allowPolicy = false,

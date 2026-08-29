@@ -411,4 +411,90 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     }
 
     private static bool IsFraming(string line) => ToolCensus.IsFraming(line);
+
+    [Fact]
+    public async Task RerunFailed_WithTestsAndExclude_ReplaysOnlyThoseAndNamesWhatItSkipped()
+    {
+        await RunAsync(new() { ["project"] = TestProject });
+
+        var text = await server.CallAsync("rerun_failed", new()
+        {
+            ["noBuild"] = true,
+            ["tests"] = new[] { "DeliberateOutcomesTests" },
+            ["exclude"] = new[] { "Throws", "FailsWithData" },
+        });
+
+        Assert.Contains("passed=0 failed=1 skipped=0 total=1", text, StringComparison.Ordinal);
+        Assert.Contains("FAIL Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("FAIL Fixture.Trading.Tests.DeliberateOutcomesTests.Throws", text, StringComparison.Ordinal);
+        Assert.Contains("NOTE partial rerun - 1 of 3 remembered failure(s) re-run", text, StringComparison.Ordinal);
+        Assert.Contains("were NOT verified", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RerunFailed_WhoseFilterMatchesNoRememberedFailure_IsRefusedInsteadOfReplayingEverything()
+    {
+        await RunAsync(new() { ["project"] = TestProject });
+
+        var text = await server.CallAsync("rerun_failed", new()
+        {
+            ["noBuild"] = true,
+            ["tests"] = new[] { "NoSuchFailureAnywhere" },
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("no remembered failure matched", text, StringComparison.Ordinal);
+        Assert.Contains("3 remembered", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("total=3", text, StringComparison.Ordinal);
+    }
+
+    private const string PassingTest = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes";
+
+    [Fact]
+    public async Task RunTests_RepeatedWithNothingWrittenInBetween_AnswersUnchangedInsteadOfRunningAgain()
+    {
+        var first = await server.CallAsync("run_tests", new() { ["project"] = TestProject, ["test"] = PassingTest, ["timeoutSeconds"] = 400 });
+        var second = await server.CallAsync("run_tests", new() { ["project"] = TestProject, ["test"] = PassingTest, ["timeoutSeconds"] = 400 });
+
+        Assert.StartsWith("run_tests PASSED", first, StringComparison.Ordinal);
+        Assert.StartsWith("run_tests UNCHANGED", second, StringComparison.Ordinal);
+        Assert.Contains("nothing was written since this exact call", second, StringComparison.Ordinal);
+        Assert.Contains("force=true re-runs it", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_RepeatedWithForce_RunsAgainInsteadOfReplayingTheVerdict()
+    {
+        await server.CallAsync("run_tests", new() { ["project"] = TestProject, ["test"] = PassingTest, ["timeoutSeconds"] = 500 });
+
+        var forced = await server.CallAsync("run_tests", new() { ["project"] = TestProject, ["test"] = PassingTest, ["timeoutSeconds"] = 500, ["force"] = true });
+
+        Assert.StartsWith("run_tests PASSED", forced, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNCHANGED", forced, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunTests_ThatFailed_IsNeverReplayedAsUnchanged()
+    {
+        var first = await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 450 });
+        var second = await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 450 });
+
+        Assert.Contains("failed=3", first, StringComparison.Ordinal);
+        Assert.Contains("failed=3", second, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNCHANGED", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RerunFailed_RepeatedWithNothingWrittenInBetween_StillRunsBecauseItsArgumentsDoNotNameItsFailureList()
+    {
+        await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 460 });
+
+        var first = await server.CallAsync("rerun_failed", new() { ["noBuild"] = true, ["timeoutSeconds"] = 460 });
+        var second = await server.CallAsync("rerun_failed", new() { ["noBuild"] = true, ["timeoutSeconds"] = 460 });
+
+        Assert.Contains("failed=3", first, StringComparison.Ordinal);
+        Assert.Contains("failed=3", second, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNCHANGED", second, StringComparison.Ordinal);
+    }
 }

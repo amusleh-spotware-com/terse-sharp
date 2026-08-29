@@ -304,6 +304,9 @@ public static class TextSearchService
         if (request.Root is not { Length: > 0 } && ArgumentLine.Paths(records) is { } batch)
             response.Note(batch);
 
+        if (Containable(request, records.Count))
+            response.Note("containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes");
+
         return response.ToString();
     }
 
@@ -997,4 +1000,11 @@ public static class TextSearchService
 
         return response.ToString();
     }
+
+    private static bool Containable(TextSearchRequest request, int records) =>
+        records > 0
+        && !request.Containers
+        && !request.CountOnly
+        && request.Root is not { Length: > 0 }
+        && request.Glob.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 }

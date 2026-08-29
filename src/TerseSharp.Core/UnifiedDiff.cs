@@ -251,6 +251,50 @@ public static class UnifiedDiff
 
         return head;
     }
+
+    public static string Around(string before, string after, int context, int maxLines)
+    {
+        if (context <= 0)
+            return string.Empty;
+
+        var afterLines = Split(after);
+        var text = new StringBuilder(256);
+        var written = 0;
+        var covered = 0;
+        var clipped = false;
+
+        foreach (var block in Blocks(Split(before), afterLines))
+        {
+            if (written >= maxLines)
+            {
+                clipped = true;
+                break;
+            }
+
+            var (Written, Covered, Clipped) = Window(text, afterLines, block, context, maxLines - written, covered);
+
+            written += Written;
+            covered = Covered;
+            clipped = clipped || Clipped;
+        }
+
+        if (clipped)
+            text.Append("... more changed lines than context= can show - pass verbose=true for the whole diff\n");
+
+        return text.ToString().TrimEnd('\n');
+    }
+
+    private static (int Written, int Covered, bool Clipped) Window(StringBuilder text, string[] after, Block block, int context, int budget, int covered)
+    {
+        var start = Math.Max(covered, Math.Max(0, block.AfterStart - context));
+        var end = Math.Min(after.Length, block.AfterStart + block.AfterCount + context);
+        var written = 0;
+
+        for (var index = start; index < end && written < budget; index++, written++)
+            text.Append(CultureInfo.InvariantCulture, $"{index + 1}: {after[index]}\n");
+
+        return (written, Math.Max(covered, start + written), start + written < end);
+    }
 }
 
 public readonly record struct DiffReport(string Text, int ChangedLines);

@@ -19,7 +19,7 @@ public sealed class GitTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Glob of paths to drop after path= has selected them, e.g. .research/** or **/*.md. Dropped files are not counted.")] string? exclude = null,
         [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
-        [Description("List what is STAGED - the index against HEAD, or against baseRef - instead of the working tree. Untracked files are never listed. Default false.")] bool staged = false,
+        [Description("List what is STAGED - the index against HEAD, or against baseRef. Untracked files are never listed. Default false.")] bool staged = false,
         [Description("Include files git does not track. Default true; false answers tracked changes only, which is what git status --untracked-files=no asks.")] bool untracked = true,
         CancellationToken cancellationToken = default) =>
         root is { Length: > 0 }
@@ -301,7 +301,7 @@ public sealed class GitTools(ToolContext context)
     public Task<string> History(
             [Description("Commit, branch or range to list, e.g. main, HEAD~20 or v0.32.0..HEAD. Empty lists from HEAD backwards.")] string? baseRef = null,
             [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
-            [Description("Only commits whose diff added or removed this literal - git's pickaxe, which no text search over the working tree can answer.")] string? contains = null,
+            [Description("Only commits whose diff added or removed this literal - git's pickaxe.")] string? contains = null,
             [Description("Only commits whose subject or body matches this text.")] string? message = null,
             [Description("One commit instead of a listing: its subject and one line per file with added and deleted counts. Cannot be combined with baseRef=, contains= or message=.")] string? commit = null,
             [Description("List tags instead of commits, newest version first - name, short sha, date. Refused beside baseRef=, path=, contains=, message= or commit=.")] bool tags = false,

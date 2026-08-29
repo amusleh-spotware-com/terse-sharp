@@ -41,7 +41,7 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Also list the file's own using directives, so a new member's header can be written without reading source.")] bool usings = false,
         [Description("Print parameter names alongside their types. Default true; false keeps the types and drops the names.")] bool parameterNames = true,
-        [Description("Keep only the members whose name contains this text, case-insensitively, printed under their declaring type with an 'N of M members' line so nothing is dropped silently.")] string? contains = null,
+        [Description("Keep only the members whose name contains this text, case-insensitively, under their declaring type with an 'N of M members' line.")] string? contains = null,
         [Description("List every member instead of the first 40 of each type; the default counts the rest.")] bool all = false,
         [Description("Git ref to outline the file at, e.g. main or HEAD~3, instead of shelling out for that revision's text. Takes one path, and the members are parsed from that revision's own text.")] string? @ref = null,
         CancellationToken cancellationToken = default)
@@ -91,7 +91,7 @@ public sealed class NavigationTools(ToolContext context)
             cancellationToken);
 
     [McpServerTool(Name = "get_symbol", ReadOnly = true)]
-    [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response - the batch shape get_symbol_source and get_type_outline already take - each under its own block, with an id that does not resolve reported inline as NOT_RESOLVED instead of failing the call, and a summary counting the ids that RESOLVED. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
+    [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response. Replaces one call per symbol, and it is the batch shape get_symbol_source and get_type_outline already take: each under its own block, with an id that does not resolve reported inline as NOT_RESOLVED instead of failing the call, and a summary counting the ids that RESOLVED. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetSymbol(
     [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
     [Description("Workspace or worktree name.")] string? workspace = null,
@@ -106,7 +106,7 @@ public sealed class NavigationTools(ToolContext context)
     [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
     public Task<string> GetSymbolSource(
 [Description("Symbol id of the member.")] string? symbolId = null,
-[Description("Several symbol ids returned in one response. Replaces one call per member, and it keeps that contract at every length: ONE entry that does not resolve answers the batch's own NOT_RESOLVED line rather than failing the call.")] string[]? symbolIds = null,
+[Description("Several symbol ids returned in one response. Replaces one call per member; an entry that does not resolve answers NOT_RESOLVED inline rather than failing the call.")] string[]? symbolIds = null,
 [Description("Workspace or worktree name.")] string? workspace = null,
 [Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
 [Description("Alias for symbolId.")] string? symbol = null,
@@ -148,15 +148,19 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 },
             ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
-    [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered.")]
+    [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered. It takes symbol= and name= as aliases for query=, the names the symbol-addressed tools beside it declare; an empty query still lists every registration, and a call carrying none of the three is refused naming all three.")]
     public Task<string> FindRegistrations(
-        [Description("Type name to look for, e.g. IOrderRepository.")] string query,
+        [Description("Type name to look for, e.g. IOrderRepository. Empty lists every registration.")] string? query = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
+        [Description("Alias for query.")] string? symbol = null,
+        [Description("Alias for query.")] string? name = null,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, null, loaded =>
-            RegistrationService.RegistrationsAsync(loaded, query, Cap(maxResults, 100), cancellationToken),
-            cancellationToken: cancellationToken);
+        (query ?? symbol ?? name) is { } wanted
+            ? context.WithWorkspaceAsync(workspace, null, loaded =>
+                RegistrationService.RegistrationsAsync(loaded, wanted, Cap(maxResults, 100), cancellationToken),
+                cancellationToken: cancellationToken)
+            : Task.FromResult(Errors.Blank("query", "symbol", "name").Render());
 
     [McpServerTool(Name = "list_endpoints", ReadOnly = true)]
     [Description("Every ASP.NET Core endpoint registration in the solution - MapGet, MapPost, MapControllers, MapHub and friends - with the member each sits in. Use instead of grepping Program.cs and every extension method it calls.")]

@@ -166,4 +166,33 @@ public sealed class UnifiedDiffTests
         Assert.Equal(3, report.ChangedLines);
         Assert.Equal(["@@ -7,0 +7,2 @@", "@@ -2501,1 +2503,1 @@"], hunks);
     }
+
+    [Fact]
+    public void Around_ForTwoChangesCloserThanTheContext_PrintsNoLineTwice()
+    {
+        var before = string.Join('\n', ["a", "b", "c", "d", "e", "f", "g"]);
+        var after = string.Join('\n', ["a", "B", "c", "d", "E", "f", "g"]);
+
+        var window = UnifiedDiff.Around(before, after, 10, 200);
+        var lines = window.Split('\n');
+
+        Assert.Equal(lines.Length, lines.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains("2: B", lines, StringComparer.Ordinal);
+        Assert.Contains("5: E", lines, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public void Around_WhenTheWindowRunsOutOfBudget_SaysSoRatherThanEndingSilently()
+    {
+        var before = string.Join('\n', Enumerable.Range(0, 60).Select(index => "line" + index.ToString(CultureInfo.InvariantCulture)));
+        var after = string.Join('\n', Enumerable.Range(0, 60).Select(index => "changed" + index.ToString(CultureInfo.InvariantCulture)));
+
+        var window = UnifiedDiff.Around(before, after, 1, 5);
+
+        Assert.Contains("more changed lines than context= can show", window, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Around_WithNoContextAsked_ReturnsNothing() =>
+        Assert.Equal(string.Empty, UnifiedDiff.Around("a\nb", "a\nc", 0, 200), StringComparer.Ordinal);
 }

@@ -420,4 +420,27 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
         Assert.True(ToolExamples.Promoted.Count >= 3, "the promoted set went vacuous");
         Assert.True(missing.Count is 0, "promoted but never advertised: " + string.Join(", ", missing));
     }
+
+    private static readonly string[] VerdictShape = ["configuration", "targetFramework"];
+
+    [Fact]
+    public async Task EveryToolWhoseSuccessIsAVerdict_IsDiscoveredFromTheAdvertisedSurface()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var spawning = tools
+            .Where(tool => Properties(tool.JsonSchema).IsSupersetOf(VerdictShape))
+            .Select(tool => tool.Name)
+            .ToArray();
+        var covered = ToolCensus.VerdictPrefixed
+            .Select(verdict => verdict.Tool)
+            .Concat(ToolCensus.ProcessProbes.Select(probe => probe.Tool))
+            .ToHashSet(StringComparer.Ordinal);
+        var uncensused = spawning.Where(tool => !covered.Contains(tool)).ToArray();
+
+        Assert.True(spawning.Length >= 4, "the verdict-answering family went vacuous: " + string.Join(", ", spawning));
+        Assert.True(
+            uncensused.Length is 0,
+            "advertised as a verdict-answering build or test tool but no verdict census calls it: " + string.Join(", ", uncensused));
+        Assert.All(ToolCensus.VerdictPrefixed, verdict => Assert.Contains(verdict.Tool, spawning));
+    }
 }

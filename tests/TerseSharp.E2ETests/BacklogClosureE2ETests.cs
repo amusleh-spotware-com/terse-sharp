@@ -2060,7 +2060,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             ["symbolIds"] = new[] { "OrderBook", "OrderService", "NoSuchTypeHere" },
         });
 
-        Assert.StartsWith("3 types", text, StringComparison.Ordinal);
+        Assert.StartsWith("2/3 types", text, StringComparison.Ordinal);
         Assert.Contains("OrderBook.Add", text, StringComparison.Ordinal);
         Assert.Contains("OrderService.Submit", text, StringComparison.Ordinal);
         Assert.Contains("NOT_RESOLVED NoSuchTypeHere", text, StringComparison.Ordinal);

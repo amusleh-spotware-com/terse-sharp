@@ -1,12 +1,13 @@
 using System.Buffers;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Text;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
 
 [McpServerToolType]
-public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
+public sealed class BuildTools(ToolContext context, LastTestRun lastRun, UnchangedRun unchanged)
 {
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
@@ -62,14 +63,14 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values, and one source frame, and a build that failed under the run returns error-severity diagnostics only. A stopped run names the test still running, on the dotnet test path. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each built up front then run with --no-build, and a project that times out is named without stopping the rest; a duplicate is refused. parallel bounds how many run at once and defaults to one per core; parallel=1 is serial, stops at the first timeout, and keeps a solution as ONE invocation. runSettings passes VSTest RunSettings overrides, which bound parallelism INSIDE one assembly. tests=[...] runs several tests, classes or namespaces in ONE call, combined into one filter expression. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. verbose=true gives the full report on a green run and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run as they scope build.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values, and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a call that already answered GREEN, with nothing written since - no edit, no watcher event on any loaded workspace - is not re-run: it answers run_tests UNCHANGED naming the previous verdict and its age, and force=true re-runs it anyway. A stopped run names the test still running, on the dotnet test path. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each built up front then run with --no-build, and a project that times out is named without stopping the rest; a duplicate is refused. parallel bounds how many run at once and defaults to one per core; parallel=1 is serial, stops at the first timeout, and keeps a solution as ONE invocation. runSettings passes VSTest RunSettings overrides, which bound parallelism INSIDE one assembly. tests=[...] runs several tests, classes or namespaces in ONE call, combined into one filter expression. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. verbose=true gives the full report on a green run and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run as they scope build.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test. Microsoft.Testing.Platform takes FullyQualifiedName only; anything else is refused naming test=.")] string? filter = null,
         [Description("Project path; empty runs every test project.")] string? project = null,
         [Description("Several test projects in one call, at most 10, each a name or a path to its .csproj, run concurrently under parallel. Not with project=.")] string?[]? projects = null,
-        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded. Falls back to the whole solution, naming the reason, when no document changed, when a changed file belongs to no project, or when no test project depends on the change. Ignored when project is passed. Default false.")] bool changed = false,
-        [Description("How many projects of a batch run at once. A value outside 0-10 is refused whatever the run; 0 is one per core bounded by the batch, 1 is serial and stops at the first timeout.")] int parallel = 0,
+        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded; falls back to the whole solution naming the reason. Ignored when project is passed. Default false.")] bool changed = false,
+        [Description("How many projects of a batch run at once, 0-10. 0 is one per core, 1 is serial and stops at the first timeout.")] int parallel = 0,
         [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] - parallelism inside one assembly, which parallel does not touch. VSTest only; refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
@@ -78,61 +79,67 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         [Description("List passing tests too.")] bool includePassed = false,
         [Description("List the N slowest tests.")] int slowest = 0,
         [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
-    [Description("Timeout seconds, 1-3600 (600). With projects= or a solution, it is the budget for each project rather than for the batch, and it also bounds each project's build. Above 30s it is ALSO a per-test ceiling 15s below it on the dotnet test path.")] int timeoutSeconds = 600,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter expression. Replaces one call per class; a blank entry is refused by index, and it cannot be combined with filter.")] string?[]? tests = null,
-    CancellationToken cancellationToken = default) => context.WithTargetAsync(
-        workspace,
-        project,
-        target =>
-        {
-            if (SelfBuilt(target, !noBuild && projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
-                return Task.FromResult(refused);
+        [Description("Timeout seconds, 1-3600 (600). With projects= or a solution it is the budget for EACH project and its build; above 30s it is also a per-test ceiling 15s below it.")] int timeoutSeconds = 600,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter expression. Replaces one call per class; a blank entry is refused by index, and it cannot be combined with filter.")] string?[]? tests = null,
+        [Description("Run even when this exact call already answered green and nothing has been written since. Default false.")] bool force = false,
+        CancellationToken cancellationToken = default) => Replayable(
+        Key(
+            "run_tests",
+            [test, Joined(tests), filter, project, Joined(projects), Flag(changed), Count(parallel), Joined(runSettings), configuration, targetFramework, Joined(properties), Flag(noBuild), Flag(includePassed), Count(slowest), Flag(verbose), Count(timeoutSeconds), workspace]),
+        force,
+        () => context.WithTargetAsync(
+            workspace,
+            project,
+            target =>
+            {
+                if (SelfBuilt(target, !noBuild && projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
+                    return Task.FromResult(refused);
 
-            var selection = Selection(test, tests, filter);
+                var selection = Selection(test, tests, filter);
 
-            if (!selection.IsOk)
-                return Task.FromResult(selection.Error!.Render());
+                if (!selection.IsOk)
+                    return Task.FromResult(selection.Error!.Render());
 
-            var scope = Scoped(configuration, targetFramework, properties);
+                var scope = Scoped(configuration, targetFramework, properties);
 
-            if (!scope.IsOk)
-                return Task.FromResult(scope.Error!.Render());
+                if (!scope.IsOk)
+                    return Task.FromResult(scope.Error!.Render());
 
-            var degree = Parallelism(parallel);
+                var degree = Parallelism(parallel);
 
-            if (!degree.IsOk)
-                return Task.FromResult(degree.Error!.Render());
+                if (!degree.IsOk)
+                    return Task.FromResult(degree.Error!.Render());
 
-            var settings = Overrides(runSettings);
+                var settings = Overrides(runSettings);
 
-            if (!settings.IsOk)
-                return Task.FromResult(settings.Error!.Render());
+                if (!settings.IsOk)
+                    return Task.FromResult(settings.Error!.Render());
 
-            return TestedAsync(
-                target,
-                project,
-                projects,
-                new TestRunRequest(
-                    target.SolutionPath,
-                    selection.Value,
-                    noBuild,
-                    includePassed,
-                    slowest,
-                    Seconds(timeoutSeconds),
-                    verbose,
-                    scope.Value,
-                    Parallel: degree.Value,
-                    RunSettings: settings.Value),
-                changed,
-                cancellationToken);
-        },
-        changed && WholeSolution(project, projects),
-        WholeSolution(project, projects),
-        cancellationToken);
+                return TestedAsync(
+                    target,
+                    project,
+                    projects,
+                    new TestRunRequest(
+                        target.SolutionPath,
+                        selection.Value,
+                        noBuild,
+                        includePassed,
+                        slowest,
+                        Seconds(timeoutSeconds),
+                        verbose,
+                        scope.Value,
+                        Parallel: degree.Value,
+                        RunSettings: settings.Value),
+                    changed,
+                    cancellationToken);
+            },
+            changed && WholeSolution(project, projects),
+            WholeSolution(project, projects),
+            cancellationToken));
 
     [McpServerTool(Name = "rerun_failed")]
-    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
+    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. tests=[...] and exclude=[...] filter that remembered list instead of replaying it whole, which is how a red round whose expectations the same edit already re-pointed is re-verified selectively; a filtered re-run always ends by naming how many remembered failures it did NOT run. It always runs: unlike run_tests it is never answered from the unchanged-run memo, because the failure list it replays is rewritten by every other run and no argument of this call names it. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
     public Task<string> RerunFailed(
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
         [Description("Build configuration, passed to dotnet as -c. Empty reuses the configuration of the run that produced the failures.")] string? configuration = null,
@@ -141,6 +148,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         [Description("Return the full report even when every re-run test passed, and the warnings of a build that failed under the re-run.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Keep only the remembered failures whose name contains one of these entries, case-insensitively - a test name, a class or a namespace prefix - at most 10. Empty replays every remembered failure.")] string?[]? tests = null,
+        [Description("Drop the remembered failures whose name contains one of these entries, case-insensitively, at most 10. Applied after tests=.")] string?[]? exclude = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, null, target =>
         {
@@ -156,21 +165,28 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
                     "call run_tests in this workspace first; a green run leaves nothing to re-run").Render());
             }
 
+            var chosen = Chosen(memory.FailedTests, tests, exclude);
+
+            if (!chosen.IsOk)
+                return Task.FromResult(chosen.Error!.Render());
+
             var scope = Scoped(configuration, targetFramework, properties);
 
             return scope.IsOk
-                ? RunAsync(
-                    target,
-                    new TestRunRequest(
-                        memory.Target,
-                        Rerun(memory),
-                        noBuild,
-                        false,
-                        0,
-                        Seconds(timeoutSeconds),
-                        verbose,
-                        Remembered(memory.Scope, scope.Value)),
-                    cancellationToken)
+                ? Noted(
+                    RunAsync(
+                        target,
+                        new TestRunRequest(
+                            memory.Target,
+                            Rerun(chosen.Value),
+                            noBuild,
+                            false,
+                            0,
+                            Seconds(timeoutSeconds),
+                            verbose,
+                            Remembered(memory.Scope, scope.Value)),
+                        cancellationToken),
+                    Partial(chosen.Value.Length, memory.FailedTests.Length))
                 : Task.FromResult(scope.Error!.Render());
         },
         cancellationToken: cancellationToken);
@@ -332,7 +348,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
             : Result.Ok<string?>(string.Join('|', requested.Select(One)));
     }
 
-    private static string Rerun(TestRunMemory memory) => string.Join('|', memory.FailedTests.Select(Exact));
+    private static string Rerun(ImmutableArray<string> failed) => string.Join('|', failed.Select(Exact));
 
     private static string Exact(string name) => "FullyQualifiedName=" + Escaped(Method(name));
 
@@ -418,11 +434,11 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         CultureInfo.InvariantCulture,
         $"NOTE the change reaches {tests.Run.Length} test projects, more than the {MaxBatchedProjects} a selective run bounds, so every test project of the solution was run instead - the timeout applies per project");
 
-    private static async Task<string> Noted(Task<string> run, string note)
+    private static async Task<string> Noted(Task<string> run, string? note)
     {
         var text = await run.ConfigureAwait(false);
 
-        return text + "\n" + note;
+        return note is { Length: > 0 } ? text + "\n" + note : text;
     }
 
     private static string FullRunNote(TestSelection tests) => string.Create(
@@ -565,7 +581,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
 
     private const int MaxTests = 10;
 
-    private static TerseError? Rejected(string?[]? tests)
+    private static TerseError? Rejected(string?[]? tests, string parameter = "tests")
     {
         if (tests is not { Length: > 0 } entries)
             return null;
@@ -573,7 +589,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         if (entries.Length > MaxTests)
         {
             return Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"tests carried {entries.Length} entries"),
+                string.Create(CultureInfo.InvariantCulture, $"{parameter} carried {entries.Length} entries"),
                 string.Create(CultureInfo.InvariantCulture, $"pass at most {MaxTests} test names, or filter= for one raw VSTest expression"));
         }
 
@@ -582,8 +598,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
         return blank < 0
             ? null
             : Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"tests[{blank}] is blank"),
-                "remove the blank entry, or drop tests= and pass test= for one name");
+                string.Create(CultureInfo.InvariantCulture, $"{parameter}[{blank}] is blank"),
+                string.Create(CultureInfo.InvariantCulture, $"remove the blank entry from {parameter}="));
     }
 
     private static string[] Names(string? single, string?[]? many) =>
@@ -595,4 +611,96 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun)
     private static string One(string name) => name.Contains('(', StringComparison.Ordinal)
         ? Exact(name)
         : "FullyQualifiedName~" + Escaped(name);
+
+    private static Result<ImmutableArray<string>> Chosen(ImmutableArray<string> failed, string?[]? tests, string?[]? exclude)
+    {
+        var refusal = Rejected(tests) ?? Rejected(exclude, "exclude");
+
+        if (refusal is not null)
+            return Result.Fail<ImmutableArray<string>>(refusal);
+
+        var kept = Filtered(failed, Names(null, tests), Names(null, exclude));
+
+        return kept.IsEmpty
+            ? Result.Fail<ImmutableArray<string>>(NothingMatched(failed.Length))
+            : Result.Ok(kept);
+    }
+
+    private static ImmutableArray<string> Filtered(ImmutableArray<string> failed, string[] kept, string[] dropped) =>
+        kept.Length is 0 && dropped.Length is 0
+            ? failed
+            : [.. failed.Where(name => Wanted(name, kept, dropped))];
+
+    private static bool Wanted(string name, string[] kept, string[] dropped) =>
+        (kept.Length is 0 || Array.Exists(kept, entry => name.Contains(entry, StringComparison.OrdinalIgnoreCase)))
+        && !Array.Exists(dropped, entry => name.Contains(entry, StringComparison.OrdinalIgnoreCase));
+
+    private static TerseError NothingMatched(int remembered) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"no remembered failure matched tests= or survived exclude=: {remembered} remembered"),
+        "widen tests=, drop exclude=, or call rerun_failed with neither to replay every remembered failure");
+
+    private static string? Partial(int chosen, int remembered) => chosen == remembered
+        ? null
+        : string.Create(CultureInfo.InvariantCulture, $"NOTE partial rerun - {chosen} of {remembered} remembered failure(s) re-run; the {remembered - chosen} not named here were NOT verified");
+
+    private const string GreenVerdict = "run_tests PASSED";
+
+    private Task<string> Replayable(string key, bool force, Func<Task<string>> run)
+    {
+        var stamp = Stamp();
+        var now = Stopwatch.GetTimestamp();
+
+        return !force && unchanged.Replay(key, stamp, now) is { } previous
+            ? Task.FromResult(previous)
+            : Memoized(key, stamp, run());
+    }
+
+    private async Task<string> Memoized(string key, string stamp, Task<string> run)
+    {
+        var text = await run.ConfigureAwait(false);
+
+        if (text.StartsWith(GreenVerdict, StringComparison.Ordinal) && !text.Contains('\n', StringComparison.Ordinal))
+            unchanged.Remember(key, stamp, text, Stopwatch.GetTimestamp());
+
+        return text;
+    }
+
+    private string Stamp()
+    {
+        var loaded = context.Registry.All();
+        var stamp = new StringBuilder(128);
+
+        stamp.Append(CultureInfo.InvariantCulture, $"pulse={EditPulse.Changed} loaded={loaded.Count}");
+
+        foreach (var workspace in loaded.OrderBy(entry => entry.Root, StringComparer.Ordinal))
+        {
+            stamp.Append(' ')
+                .Append(workspace.Root)
+                .Append('@')
+                .Append(workspace.LoadedUtc.ToString("O", CultureInfo.InvariantCulture))
+                .Append('=')
+                .Append(workspace.Sync.Generations.ToString());
+        }
+
+        return stamp.ToString();
+    }
+
+    private static string Key(string tool, params ReadOnlySpan<string?> parts)
+    {
+        var key = new StringBuilder(tool, 128);
+
+        foreach (var part in parts)
+            key.Append(KeySeparator).Append(part);
+
+        return key.ToString();
+    }
+
+    private static string Flag(bool value) => value ? "1" : "0";
+
+    private static string Count(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private static string Joined(IReadOnlyList<string?>? values) =>
+        values is { Count: > 0 } ? string.Join(',', values) : string.Empty;
+
+    private static readonly string KeySeparator = new((char)31, 1);
 }

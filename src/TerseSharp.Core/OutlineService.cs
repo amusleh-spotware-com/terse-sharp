@@ -446,13 +446,19 @@ public static class OutlineService
         CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("get_type_outline", string.Join(", ", symbolIds));
-
-        response.Summary(symbolIds.Count, symbolIds.Count, "types");
+        var answered = 0;
 
         foreach (var symbolId in symbolIds)
-            response.Note(await OneTypeAsync(workspace, symbolId, format, path, cancellationToken).ConfigureAwait(false));
+        {
+            var outline = await OneTypeAsync(workspace, symbolId, format, path, cancellationToken).ConfigureAwait(false);
 
-        return response.ToString();
+            if (Resolved(outline))
+                answered++;
+
+            response.Note(outline);
+        }
+
+        return response.Answered(answered, symbolIds.Count, "types").ToString();
     }
 
     private static async Task<string> OneTypeAsync(
@@ -479,4 +485,7 @@ public static class OutlineService
 
         return outline.IsOk ? outline.Value!.TrimEnd('\n') : outline.Error!.Render();
     }
+
+    private static bool Resolved(string outline) =>
+        !outline.StartsWith("NOT_RESOLVED", StringComparison.Ordinal) && !outline.StartsWith("ERROR", StringComparison.Ordinal);
 }
