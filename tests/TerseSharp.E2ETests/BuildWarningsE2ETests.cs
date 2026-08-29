@@ -30,12 +30,14 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
     {
         var text = await RebuiltAsync(new() { ["project"] = SourceProject });
 
-        Assert.StartsWith("build ok  errors=0 warnings=3", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n", text, StringComparison.Ordinal);
+        var verdict = text.Split('\n')[0];
+
+        Assert.StartsWith("build ok  errors=0 warnings=3", verdict, StringComparison.Ordinal);
+        Assert.All(text.Split('\n').Skip(1), line => Assert.True(ToolCensus.IsFraming(line), line));
         Assert.DoesNotContain("CS0169", text, StringComparison.Ordinal);
         Assert.DoesNotContain("CS0414", text, StringComparison.Ordinal);
         Assert.DoesNotContain("CS0219", text, StringComparison.Ordinal);
-        Assert.True(text.Length < 120, text);
+        Assert.True(verdict.Length < 120, text);
     }
 
     [Fact]
@@ -199,7 +201,7 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
 
         var text = await RebuiltAsync(new() { ["project"] = SourceProject });
 
-        Assert.StartsWith("build ok  errors=0 warnings=3", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n", text, StringComparison.Ordinal);
+        Assert.StartsWith("build ok  errors=0 warnings=3", text.Split('\n')[0], StringComparison.Ordinal);
+        Assert.All(text.Split('\n').Skip(1), line => Assert.True(ToolCensus.IsFraming(line), line));
     }
 }

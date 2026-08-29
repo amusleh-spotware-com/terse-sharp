@@ -69,7 +69,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   caching its result. It is appended as a second content block, the way the repeat steer already is,
   so the verdict stays the FIRST line - `build` and `run_tests` no longer answer a success as a
   single line with no newline at all, and their two assertions now check the verdict line and that
-  every later line is framing. Measured: 1 485 of 3 050 `run_tests` calls and 772 of 1 040 `build` calls in one
+  every later line is framing. `ToolCensusE2ETests.EveryVerdictPrefixedTool_StillAnswersWithTheVerdictItIsExemptFor`
+  censuses that shape over every verdict-prefixed tool through the shared `ToolCensus.IsFraming`. Measured: 1 485 of 3 050 `run_tests` calls and 772 of 1 040 `build` calls in one
   week were byte-identical in-session repeats - 18.83 h. Locked by `IdenticalCallTests` and
   `Build_CalledTwiceWithIdenticalArguments_SaysItIsARepeatAndThatNothingWasWrittenInBetween` (I439).
 - `diff_text maxLines` defaults to 3000 instead of 1000, which truncated 85.4% of real calls at a mean

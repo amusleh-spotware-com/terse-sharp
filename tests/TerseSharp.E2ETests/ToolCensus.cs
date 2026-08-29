@@ -330,6 +330,11 @@ internal static class ToolCensus
     new("run_tests", "builds and runs tests, writing only to obj/, bin/ and TestResults"),
     new("unload_workspace", "releases this server's in-memory registry and the MSBuild file locks it holds"),
 ];
+
+    public static bool IsFraming(string line) =>
+        line.Length is 0
+        || line.StartsWith("repeat #", StringComparison.Ordinal)
+        || line.Contains("calls in a row", StringComparison.Ordinal);
 }
 
 internal sealed record ToolPair(string First, string Second, string Reason);

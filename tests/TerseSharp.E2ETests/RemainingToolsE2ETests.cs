@@ -267,8 +267,5 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         return int.Parse(text.AsSpan(start, end - start), CultureInfo.InvariantCulture);
     }
 
-    private static bool IsFraming(string line) =>
-        line.Length is 0
-        || line.StartsWith("repeat #", StringComparison.Ordinal)
-        || line.Contains("calls in a row", StringComparison.Ordinal);
+    private static bool IsFraming(string line) => ToolCensus.IsFraming(line);
 }

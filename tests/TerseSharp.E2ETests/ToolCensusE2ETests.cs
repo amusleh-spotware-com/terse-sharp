@@ -90,8 +90,10 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
         {
             var text = await server.CallAsync(verdict.Tool, verdict.Arguments);
 
-            Assert.StartsWith(verdict.Prefix, text, StringComparison.Ordinal);
-            Assert.DoesNotContain("\n", text, StringComparison.Ordinal);
+            var lines = text.Split('\n');
+
+            Assert.StartsWith(verdict.Prefix, lines[0], StringComparison.Ordinal);
+            Assert.All(lines.Skip(1), line => Assert.True(ToolCensus.IsFraming(line), verdict.Tool + ": " + line));
         }
     }
 

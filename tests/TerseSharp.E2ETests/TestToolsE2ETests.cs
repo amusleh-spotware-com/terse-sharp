@@ -185,10 +185,12 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
         });
 
-        Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
-        Assert.Contains("passed=1 skipped=0 total=1", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n", text, StringComparison.Ordinal);
-        Assert.True(Tokens(text) <= 40, text);
+        var verdict = text.Split('\n')[0];
+
+        Assert.StartsWith("run_tests PASSED", verdict, StringComparison.Ordinal);
+        Assert.Contains("passed=1 skipped=0 total=1", verdict, StringComparison.Ordinal);
+        Assert.All(text.Split('\n').Skip(1), line => Assert.True(IsFraming(line), line));
+        Assert.True(Tokens(verdict) <= 40, text);
     }
 
     private Task<string> RunAsync(Dictionary<string, object?> arguments) => server.CallAsync("run_tests", arguments);
@@ -408,8 +410,5 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
     }
 
-    private static bool IsFraming(string line) =>
-        line.Length is 0
-        || line.StartsWith("repeat #", StringComparison.Ordinal)
-        || line.Contains("calls in a row", StringComparison.Ordinal);
+    private static bool IsFraming(string line) => ToolCensus.IsFraming(line);
 }
