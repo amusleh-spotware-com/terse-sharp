@@ -189,6 +189,8 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
     [Fact]
     public async Task ALockedOutput_WithASecondWorkspaceLoaded_IsStillRetriedAgainstTheWorkspaceTheCallResolvedTo()
     {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows makes FileShare.None a mandatory lock, so only there can a held handle stop MSBuild's copy");
+
         await ArmedAsync();
 
         var second = Path.Combine(FixtureRoot, "src", "Fixture.Generator", "Fixture.Generator.csproj");

@@ -92,8 +92,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   after the retry answers the holder list as before. Measured motivation: one occurrence cost three
   calls and two model gaps for one verdict, plus 21.9 s of dead build, while the second workspace held
   no lock on the target's output at all. Locked by
-  `ALockedOutput_WithASecondWorkspaceLoaded_IsStillRetriedAgainstTheWorkspaceTheCallResolvedTo`
-  (I484).
+  `ALockedOutput_WithASecondWorkspaceLoaded_IsStillRetriedAgainstTheWorkspaceTheCallResolvedTo`,
+  which is Windows-only because `FileShare.None` is a mandatory lock only there (I484).
 
 ### Changed
 
