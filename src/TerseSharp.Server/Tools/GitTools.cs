@@ -39,7 +39,7 @@ public sealed class GitTools(ToolContext context)
         [Description("Limit to one path or pathspec.")] string? path = null,
         [Description("Max results (200).")] int maxResults = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Not supported here: a hunk is mapped to a declaration through the Roslyn compilation, which needs the directory loaded. Pass it to changed_files or diff_text, or load_workspace that directory first.")] string? root = null,
+        [Description("Not supported here: mapping a hunk to a declaration needs the directory loaded. Pass it to changed_files or diff_text.")] string? root = null,
         CancellationToken cancellationToken = default) =>
         root is { Length: > 0 }
             ? Task.FromResult(Errors.Invalid(

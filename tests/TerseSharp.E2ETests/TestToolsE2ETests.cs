@@ -183,12 +183,14 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         {
             ["project"] = TestProject,
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+            ["force"] = true,
         });
 
         var verdict = text.Split('\n')[0];
 
         Assert.StartsWith("run_tests PASSED", verdict, StringComparison.Ordinal);
         Assert.Contains("passed=1 skipped=0 total=1", verdict, StringComparison.Ordinal);
+        Assert.DoesNotContain("slowAssembly=", verdict, StringComparison.Ordinal);
         Assert.All(text.Split('\n').Skip(1), line => Assert.True(IsFraming(line), line));
         Assert.True(Tokens(verdict) <= 40, text);
     }
@@ -217,6 +219,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         {
             ["project"] = "Fixture.Trading.Tests",
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+            ["force"] = true,
         });
 
         Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
@@ -335,6 +338,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         {
             ["project"] = "Fixture.Trading.Tests",
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+            ["force"] = true,
         });
 
         Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
@@ -371,6 +375,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         {
             ["project"] = TestProject,
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+            ["force"] = true,
         });
 
         var skipped = await server.CallAsync("run_tests", new()
@@ -378,6 +383,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
             ["project"] = TestProject,
             ["test"] = "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
             ["noBuild"] = true,
+            ["force"] = true,
         });
 
         var verdict = built.Split('\n')[0];
@@ -451,6 +457,8 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
 
     private const string PassingTest = "Fixture.Trading.Tests.DeliberateOutcomesTests.Passes";
 
+    private const string FailingTest = "Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion";
+
     [Fact]
     public async Task RunTests_RepeatedWithNothingWrittenInBetween_AnswersUnchangedInsteadOfRunningAgain()
     {
@@ -477,24 +485,24 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RunTests_ThatFailed_IsNeverReplayedAsUnchanged()
     {
-        var first = await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 450 });
-        var second = await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 450 });
+        var first = await RunAsync(new() { ["project"] = TestProject, ["test"] = FailingTest, ["timeoutSeconds"] = 450 });
+        var second = await RunAsync(new() { ["project"] = TestProject, ["test"] = FailingTest, ["timeoutSeconds"] = 450 });
 
-        Assert.Contains("failed=3", first, StringComparison.Ordinal);
-        Assert.Contains("failed=3", second, StringComparison.Ordinal);
+        Assert.Contains("failed=1", first, StringComparison.Ordinal);
+        Assert.Contains("failed=1", second, StringComparison.Ordinal);
         Assert.DoesNotContain("UNCHANGED", second, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task RerunFailed_RepeatedWithNothingWrittenInBetween_StillRunsBecauseItsArgumentsDoNotNameItsFailureList()
     {
-        await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 460 });
+        await RunAsync(new() { ["project"] = TestProject, ["test"] = FailingTest, ["timeoutSeconds"] = 460 });
 
         var first = await server.CallAsync("rerun_failed", new() { ["noBuild"] = true, ["timeoutSeconds"] = 460 });
         var second = await server.CallAsync("rerun_failed", new() { ["noBuild"] = true, ["timeoutSeconds"] = 460 });
 
-        Assert.Contains("failed=3", first, StringComparison.Ordinal);
-        Assert.Contains("failed=3", second, StringComparison.Ordinal);
+        Assert.Contains("failed=1", first, StringComparison.Ordinal);
+        Assert.Contains("failed=1", second, StringComparison.Ordinal);
         Assert.DoesNotContain("UNCHANGED", second, StringComparison.Ordinal);
     }
 }

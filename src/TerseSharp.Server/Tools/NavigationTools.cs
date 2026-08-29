@@ -91,7 +91,7 @@ public sealed class NavigationTools(ToolContext context)
             cancellationToken);
 
     [McpServerTool(Name = "get_symbol", ReadOnly = true)]
-    [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response. Replaces one call per symbol, and it is the batch shape get_symbol_source and get_type_outline already take: each under its own block, with an id that does not resolve reported inline as NOT_RESOLVED instead of failing the call, and a summary counting the ids that RESOLVED. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
+    [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response. Replaces one call per symbol: each under its own block, an id that does not resolve reported inline as NOT_RESOLVED, and a summary counting the ids that RESOLVED. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetSymbol(
     [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
     [Description("Workspace or worktree name.")] string? workspace = null,
@@ -148,7 +148,7 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 },
             ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
-    [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered. It takes symbol= and name= as aliases for query=, the names the symbol-addressed tools beside it declare; an empty query still lists every registration, and a call carrying none of the three is refused naming all three.")]
+    [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered. symbol= and name= are aliases for query=; an empty query lists every registration, and a call carrying none of the three is refused naming all three.")]
     public Task<string> FindRegistrations(
         [Description("Type name to look for, e.g. IOrderRepository. Empty lists every registration.")] string? query = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
