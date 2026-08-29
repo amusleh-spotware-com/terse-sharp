@@ -779,11 +779,14 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         await server.CallAsync("workspace_status", []);
 
         var first = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
-        var second = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+        var second = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/Order.cs" });
         var batched = await server.CallRawAsync("get_file_outline", new() { ["paths"] = new[] { "src/Fixture.Trading/OrderSide.cs" } });
 
         Assert.DoesNotContain("calls in a row", first, StringComparison.Ordinal);
-        Assert.Contains("2 get_file_outline calls in a row - pass paths=[...] with the next 2+ in ONE call", second, StringComparison.Ordinal);
+        Assert.Contains(
+            "2 get_file_outline calls in a row - these are ONE call: paths=[\"src/Fixture.Trading/OrderSide.cs\", \"src/Fixture.Trading/Order.cs\"]",
+            second,
+            StringComparison.Ordinal);
         Assert.DoesNotContain("calls in a row", batched, StringComparison.Ordinal);
     }
 

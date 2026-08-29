@@ -33,6 +33,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   row's line number and first-cell preview, and computes the longer identifier that resolves to
   exactly one row (`pass row="**I410**"`). An ambiguous 22-row batch therefore costs that identifier
   on the retry rather than a full re-send of its payload (I432).
+- The repeat steer names the concrete call instead of a placeholder: when every call of a run carried
+  a short identifier argument, it answers `these are ONE call: paths=["src/A.cs", "src/B.cs"]` with
+  the run's own distinct values. It falls back to `pass paths=[...]` when a call carried no such
+  argument, when the values repeat (a repeated batch is not a batch), and when a value is longer than
+  80 characters, so a payload-carrying argument is never echoed - `add_member`, `write_text`,
+  `edit_text` and `resx_set` are excluded from the value map outright (I437).
 - `SnippetSearch` no longer materialises a string for the candidate indent at every line start of
   the re-indent fallback. The indent is carried as an offset and length into the file's own text and
   materialised once, for the winning region only — up to ~5 000 small allocations removed per

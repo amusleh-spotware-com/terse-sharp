@@ -497,8 +497,9 @@ is also a property name — `Errors`, `Report`, `Tally` — resolves to the type
 hiding them.
 
 **From the second consecutive call of one tool the response gains one line** —
-`2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call` — naming the plural
-parameter that tool declares. It is framing, never payload, it says nothing when the call already
+`2 read_text calls in a row - these are ONE call: paths=["src/A.cs", "src/B.cs"]` — the run's own
+DISTINCT arguments, already filled in, whenever every call of the run carried a short identifier one;
+otherwise `pass paths=[...]`, naming the plural parameter that tool declares. It is framing, never payload, it says nothing when the call already
 used the plural parameter, and the counter resets on any different tool - and on a `read_text` that
 carried `startLine`, `endLine`, `tail` or `section`, because `paths=` cannot express a per-entry
 range and a steer that asks for the wrong lines is worse than none. Obey it literally: 571 runs

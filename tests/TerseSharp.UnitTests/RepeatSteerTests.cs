@@ -109,6 +109,72 @@ public sealed class RepeatSteerTests
         Assert.Equal(expected, RepeatSteer.Unbatchable(parameters, "read_text"));
         Assert.False(RepeatSteer.Unbatchable(parameters, "get_file_outline"));
     }
+
+    [Fact]
+    public void Steer_WhenEveryCallOfTheRunCarriedItsSingularArgument_NamesTheConcreteBatchInsteadOfAPlaceholder()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("read_text", value: "src/A.cs"));
+
+        Assert.Equal(
+            "2 read_text calls in a row - these are ONE call: paths=[\"src/A.cs\", \"src/B.cs\"]",
+            RepeatSteer.Steer("read_text", value: "src/B.cs"));
+    }
+
+    [Fact]
+    public void Steer_WhenACallOfTheRunCarriedNoSingularArgument_FallsBackToThePlaceholder()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("read_text", value: "src/A.cs"));
+
+        Assert.Equal(
+            "2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call",
+            RepeatSteer.Steer("read_text"));
+    }
+
+    [Fact]
+    public void Steer_ForAnArgumentLongerThanTheCap_FallsBackToThePlaceholderRatherThanEchoingIt()
+    {
+        RepeatSteer.Forget();
+
+        var oversized = new string('x', 200);
+
+        Assert.Null(RepeatSteer.Steer("search_text", value: oversized));
+
+        var steer = RepeatSteer.Steer("search_text", value: oversized);
+
+        Assert.Equal("2 search_text calls in a row - pass queries=[...] with the next 2+ in ONE call", steer);
+        Assert.DoesNotContain(oversized, steer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Singular_NamesNoToolWhoseSingularArgumentIsAPayloadRatherThanAnIdentifier()
+    {
+        string[] payloadCarrying = ["add_member", "write_text", "edit_text", "resx_set"];
+
+        Assert.All(payloadCarrying, tool =>
+        {
+            Assert.Contains(tool, RepeatSteer.Plural.Keys, StringComparer.Ordinal);
+            Assert.DoesNotContain(tool, RepeatSteer.Singular.Keys, StringComparer.Ordinal);
+        });
+
+        Assert.All(RepeatSteer.Singular.Keys, tool => Assert.Contains(tool, RepeatSteer.Plural.Keys, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Steer_WhenTheRunKeepsAskingForTheSameTarget_FallsBackRatherThanOfferingARepeatedBatch()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("read_text", value: "src/A.cs"));
+
+        var steer = RepeatSteer.Steer("read_text", value: "src/A.cs");
+
+        Assert.Equal("2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call", steer);
+        Assert.DoesNotContain("\"src/A.cs\", \"src/A.cs\"", steer, StringComparison.Ordinal);
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

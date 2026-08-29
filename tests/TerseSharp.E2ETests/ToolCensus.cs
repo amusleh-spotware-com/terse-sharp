@@ -188,8 +188,8 @@ internal static class ToolCensus
 ];
 
     public static string WithoutSteer(string text) => string.Join(
-        '\n',
-        text.Split('\n').Where(line => !line.Contains(" calls in a row - pass ", StringComparison.Ordinal)));
+            '\n',
+            text.Split('\n').Where(line => !line.Contains(" calls in a row", StringComparison.Ordinal)));
 
     public const double RedundancyThreshold = 0.45;
     public const int MaxSimilarByDesignPairs = 7;
