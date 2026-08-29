@@ -4,12 +4,12 @@ namespace TerseSharp.Core;
 
 public static class AtomicWrite
 {
-    public static Task TextAsync(string path, string content, CancellationToken cancellationToken = default) =>
-        PersistAsync(path, content, cancellationToken);
+    public static Task TextAsync(string path, string content, bool workspaceDocument, CancellationToken cancellationToken = default) =>
+        PersistAsync(path, content, workspaceDocument, cancellationToken);
 
     public static Encoding EncodingOf(string path) => new UTF8Encoding(HasByteOrderMark(path));
 
-    private static async Task PersistAsync(string path, string content, CancellationToken cancellationToken)
+    private static async Task PersistAsync(string path, string content, bool workspaceDocument, CancellationToken cancellationToken)
     {
         var temporary = path + ".terse-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ".tmp";
 
@@ -19,6 +19,9 @@ public static class AtomicWrite
         {
             await WriteAsync(temporary, content, EncodingOf(path), cancellationToken).ConfigureAwait(false);
             await MoveAsync(temporary, path, cancellationToken).ConfigureAwait(false);
+
+            if (workspaceDocument)
+                EditPulse.Bump(1);
         }
         finally
         {
@@ -112,4 +115,7 @@ public static class AtomicWrite
             }
         }
     }
+
+    public static Task TextAsync(string path, string content, CancellationToken cancellationToken = default) =>
+        PersistAsync(path, content, workspaceDocument: true, cancellationToken);
 }

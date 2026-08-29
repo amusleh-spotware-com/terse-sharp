@@ -44,6 +44,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id | answers `get_type_outline`'s member list plus a steer to one member, not the whole file's text; `verbose: true` opts back into the source. A type with ONE declaring reference whose **rendered source** - the declaration *plus* its doc comment, which is what the response carries - is at most 4 lines and 200 characters answers that source instead, because withholding something shorter than the steer saves nothing |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
 | **Navigate** | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` | all of them in one response; an id that does not resolve is reported `NOT_RESOLVED <id>` carrying the nearest ids when the miss is close, never a failed call |
+| **Navigate** | one `get_type_outline` call per type | `get_type_outline(symbolIds: [...])` | up to 20 types in one response, each under its own header line; an id that does not resolve is `NOT_RESOLVED` inline, never a failed call |
 | **Navigate** | `Read` to learn a class's API | `get_type_outline(symbolId)` | member list, no bodies; `parameterNames: false` there too |
 | **Navigate** | — | `get_symbol(symbolId)` | signature, kind, accessibility, location and XML doc of one symbol |
 | **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` | `path=` resolves the name inside that file first and only falls back to the solution when the file holds no match — `get_symbol` and `get_type_outline` take it too, `symbolIds=` scopes every id in the batch, and a `path=` naming no document answers `DocumentNotFound` instead of being ignored |
@@ -60,6 +61,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` | every ASP.NET Core `Map*` with the member it sits in |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` | a plain file-name substring, case-insensitive, no glob to get right; combines with `glob=`, which selects first, and a glob that matched nothing names it |
 | **Files** | `ls` in a directory outside the workspace | `find_files(glob, root: "C:/Users/me/AppData/Local/terse-analyzers")` | any absolute directory, tagged `outside-workspace`, with full paths on its `paths=[...]` line; refused beside `tracked=true`, which needs a repository this tool did not load |
+| **Files** | one `find_files` call per glob | `find_files(globs: [...])` | up to 10 globs in ONE response, each under its own header line with its own count, so a glob that matched nothing is visible rather than indistinguishable from one never asked |
 | **Files** | `Glob` / `ls` | `find_files(glob)` | `bin`, `obj`, `.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks excluded |
 | **Files** | globbing a whole tree to learn its shape | `find_files(glob, depth: 2)` | everything below the 2nd path segment folds into one `src/TerseSharp.Core/**  x94 files` row - 11 rows here against 367; the count line still counts every file, and a single-match directory stays its file |
 | **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` | each record gains the file's UTC last-write time and byte length, so "when was this written, and how big is it?" needs no shell; `glob` takes a **concrete path** as readily as a pattern, so one file's size is one call |
@@ -123,8 +125,8 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Git** | `Bash: git diff --cached` for its hunk text or its declarations | `diff_symbols(staged: true)` · `diff_text(staged: true)` | the index against `HEAD`, which is what a pre-commit review asks; without it a bare `diff` compares the working tree against the INDEX, so a fully staged change set answers nothing |
 | **Git** | `Bash: git diff --cached --name-only` / `git status --untracked-files=no` | `changed_files(staged: true)` · `changed_files(untracked: false)` | `staged=true` reads the INDEX against `HEAD` - or against `baseRef=` - which is what a pre-commit check asks; `untracked=false` answers tracked changes only |
 | **Git** | `Bash: git status` / `git diff --stat` | `changed_files` | one line per file - path, `+added -deleted`, status letter; untracked files included, `path=` scopes it to one pathspec on a shared tree, and `exclude=` drops what a pathspec cannot leave out - `exclude: ".research/**"` for another session's notes; an excluded file is not counted |
-| **Git** | `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source` - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
-| **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `paths=[...]` takes up to 10 pathspecs in the same git invocation, `maxLines=` caps it at 1000 and a truncated answer names the exact `maxLines=` that returns the rest |
+| **Git** | `Bash: git diff` to decide what to review | `diff_symbols` | every hunk mapped onto the declaration containing it, answered as symbol ids you feed straight to `get_symbol_source`, several hunks inside ONE declaration folded onto one record carrying the id once and its line ranges after it - `EXACT` inside one declaration, `HEURISTIC` with the raw line range otherwise, and it ends by naming the exact `diff_text path=…` call for the hunks it could not map |
+| **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` | the raw unified diff: whitespace, a non-`.cs` file, a pure deletion, and whatever `diff_symbols` mapped only `HEURISTIC`. It costs about a response line per changed line, so bound it - `path=` scopes it, `paths=[...]` takes up to 10 pathspecs in the same git invocation, `maxLines=` caps it at 3000 - raised from 1000, which truncated 85% of real calls - and a truncated answer names the exact `maxLines=` that returns the rest |
 | **Build and test** | `Bash: dotnet build` / `msbuild` | `build` | deduplicated diagnostics, no MSBuild spew; a successful build is one line whatever it warned about, a failed one lists errors only |
 | **Build and test** | `Bash: dotnet build -c Release` | `build(configuration: "Release")` | `configuration` and `targetFramework` map to `-c` and `-f` on `build`, `run_tests`, `rerun_failed` and `list_tests` |
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` | `properties` maps to one `-p:` per entry on the same four tools, applied after `-c` and `-f`; an entry that is not `Name=Value` is refused before anything runs |
@@ -176,10 +178,12 @@ diagnostics, builds, tests or the working tree.
 forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it in the table above.
 
 **And issue independent calls in ONE message.** Several `tool_use` blocks in one message run
-concurrently; one call per message pays a **6 097 ms (p50)** model gap before its tool even starts, and
-**36 070 of 36 071** tool-bearing messages in a measured week issued exactly ONE call. Before every
-message carrying a call: *is there another call I already need whose arguments do not depend on this
-one's result?* If yes, send them together — but never guess an argument to make a call parallel. Inside
+concurrently; one call per message pays a **6 062 ms (p50)** model gap before its tool even starts, and
+**36 140 of 36 140** tool-bearing messages in a measured week issued exactly ONE call - 100.000%, so
+this lever is entirely unspent. Two concrete shapes are most of it: a `search_text` beside a
+`read_text` of a **different** file (1 395 measured adjacent pairs, **none** sharing a target), and a
+`find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
+message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
 
 **The shell does not launder it.** `grep`, `rg`, `find`, `fd`, `cat`, `head`, `tail`, `sed`, `awk`,
@@ -188,6 +192,8 @@ one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=
 `msbuild` run through `Bash` are built-ins
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
+
+**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs. A `2>&1` no longer forces a whole-command refusal, a `$( )` no longer shadows the real command, and a denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
 
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
 denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
@@ -390,7 +396,7 @@ edit, climb only as high as the edit reaches:
 | 4 | `run_tests` over the whole solution | 85 s+, p99 **16 min** | ONCE, at the end of the task |
 | — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
 
-A tier is never dropped; only how often it is re-run. Banned: a full-suite run between two edits of one
+A tier is never dropped; only how often it is re-run. A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` - read that as the answer you already have. Banned: a full-suite run between two edits of one
 slice · re-issuing `build`/`run_tests` with identical arguments when nothing was written in between · a
 run to "confirm" one that already passed · reading a test result before the build result.
 
@@ -553,6 +559,8 @@ the same set every index uses, so a nested agent worktree never doubles a result
 
 **A `.cs` file returned verbatim ends with `symbolIds=[...]`** when the read covered the whole file and
 it has at most ten members, so the *next* read is member-scoped. A line-ranged read gets nothing.
+
+**A markdown file over 8 000 characters asked for whole answers its SECTION MAP plus a steer**, not its text - a whole `.md` read averages 5 699 characters against 3 278 for a `.cs` path - and `verbose=true`, a line range, `tail=`, `section=` or `columns=` opt back into the text.
 
 **`read_text` on a `.cs` path asked for whole answers the outline, not the text** — no `startLine`,
 `endLine`, `tail`, `section` or `verbose`. Whole-file `.cs` reads were 71 % of everything this tool
@@ -732,15 +740,14 @@ that answers nothing, and the clip always names `next: startLine=`.
 
 14. **Independent calls go in one message.** If you intend to call several tools and there are no
     dependencies between them, make all of the independent calls in parallel, in a single assistant
-    message, rather than one after another. `changed_files` and `workspace_status` have nothing to do
-    with each other and belong in the same message. Prioritize calling tools simultaneously whenever
-    the actions can be done in parallel.
+    message, rather than one after another. `changed_files` beside `workspace_status`, a
+    `search_text` beside a `read_text` of a different file, a `find_files` or `search_symbols`
+    beside a read you already owe - each pair belongs in ONE message.
     **But when a call needs a value a previous call returns — a symbol id from an outline, a path
     from `changed_files`, a `retryWith` token from a rollback — call them sequentially, and never
-    guess a parameter to make a call parallel.** A measured week of this server's own sessions
-    carried 17 567 tool calls and **not one** parallel message, while 5 989 of them sat in runs of
-    three or more consecutive calls of the same tool; at this server's median call latency that is
-    hours of wall clock nothing depended on.
+    guess a parameter to make a call parallel.** A measured week carried 36 140 tool-bearing
+    messages and **not one** parallel message, while 5 989 calls sat in runs of three or more
+    consecutive calls of the same tool.
 15. **A subagent does not inherit this skill — the brief carries it, or the delegate greps.** A spawn
     aimed at this workspace carries, inline: the mandate and ban list above, the workspace name, **the
     `changed_files` output and the `diff_symbols` ids as its scope**, and a call ceiling. A delegate
@@ -942,6 +949,7 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 | whole solution | `run_tests` — built **once**, then each test assembly run directly where its runner allows, **concurrently**, one process each; `timeoutSeconds` bounds **each**, `parallel: 1` restores the single `dotnet test` |
 | one project | `run_tests(project)` — a project **name** or a path to the `.csproj` |
 | one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
+| several tests or classes of the same project | `run_tests(tests: [...])` — at most 10, combined into ONE filter expression and ONE verdict line, which replaces one targeted run per class |
 | a raw VSTest expression | `run_tests(filter)` |
 | only the test projects your change can reach | `run_tests(changed: true)` — the test projects that transitively reference a project you changed since the workspace loaded, at **assembly** granularity, naming both what it ran and what it skipped. Falls back to one whole-solution run, saying why, whenever it cannot reason (nothing changed, a changed file belongs to no project, no test project depends on it) or the change reaches more than 10 test projects. It never silently runs less than it should. Ignored when `project=` is passed |
 | several projects at once | `run_tests(projects: [...], parallel: N)` — concurrent; `1` is serial |

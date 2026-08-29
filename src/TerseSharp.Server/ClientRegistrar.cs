@@ -33,7 +33,7 @@ public static class ClientRegistrar
     {
         var target = SkillPath();
 
-        await AtomicWrite.TextAsync(target, SkillAsset.Read()).ConfigureAwait(false);
+        await AtomicWrite.TextAsync(target, SkillAsset.Read(), workspaceDocument: false).ConfigureAwait(false);
 
         return "installed skill -> " + target;
     }
@@ -212,7 +212,7 @@ public static class ClientRegistrar
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
-        await AtomicWrite.TextAsync(path, root.ToJsonString(Indented)).ConfigureAwait(false);
+        await AtomicWrite.TextAsync(path, root.ToJsonString(Indented), workspaceDocument: false).ConfigureAwait(false);
     }
 
     internal static string Home() =>

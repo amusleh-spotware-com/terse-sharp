@@ -139,10 +139,12 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     {
         var quiet = await server.CallAsync("build", []);
 
-        Assert.StartsWith("build ok", quiet, StringComparison.Ordinal);
-        Assert.Contains("errors=0 warnings=0", quiet, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n", quiet, StringComparison.Ordinal);
-        Assert.True(quiet.Length < 120, quiet);
+        var verdict = quiet.Split('\n')[0];
+
+        Assert.StartsWith("build ok", verdict, StringComparison.Ordinal);
+        Assert.Contains("errors=0 warnings=0", verdict, StringComparison.Ordinal);
+        Assert.True(verdict.Length < 120, quiet);
+        Assert.All(quiet.Split('\n').Skip(1), line => Assert.True(IsFraming(line), line));
     }
 
     [Fact]
@@ -264,4 +266,9 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
 
         return int.Parse(text.AsSpan(start, end - start), CultureInfo.InvariantCulture);
     }
+
+    private static bool IsFraming(string line) =>
+        line.Length is 0
+        || line.StartsWith("repeat #", StringComparison.Ordinal)
+        || line.Contains("calls in a row", StringComparison.Ordinal);
 }

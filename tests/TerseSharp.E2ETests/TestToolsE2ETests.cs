@@ -378,11 +378,38 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
             ["noBuild"] = true,
         });
 
-        Assert.StartsWith("run_tests PASSED", built, StringComparison.Ordinal);
-        Assert.Contains("build=ok errors=0 warnings=", built, StringComparison.Ordinal);
-        Assert.DoesNotContain("\n", built, StringComparison.Ordinal);
+        var verdict = built.Split('\n')[0];
+
+        Assert.StartsWith("run_tests PASSED", verdict, StringComparison.Ordinal);
+        Assert.Contains("build=ok errors=0 warnings=", verdict, StringComparison.Ordinal);
+        Assert.All(built.Split('\n').Skip(1), line => Assert.True(IsFraming(line), line));
 
         Assert.StartsWith("run_tests PASSED", skipped, StringComparison.Ordinal);
         Assert.DoesNotContain("build=ok", skipped, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task RunTests_WithSeveralTests_RunsAllOfThemInOneCall()
+    {
+        var text = await server.CallAsync("run_tests", new()
+        {
+            ["project"] = TestProject,
+            ["tests"] = new[]
+            {
+                "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+                "Fixture.Trading.Tests.DeliberateOutcomesTests.SkippedByDesign",
+            },
+            ["timeoutSeconds"] = 300,
+        });
+
+        Assert.Contains("total=2", text, StringComparison.Ordinal);
+        Assert.Contains("passed=1", text, StringComparison.Ordinal);
+        Assert.Contains("skipped=1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    private static bool IsFraming(string line) =>
+        line.Length is 0
+        || line.StartsWith("repeat #", StringComparison.Ordinal)
+        || line.Contains("calls in a row", StringComparison.Ordinal);
 }

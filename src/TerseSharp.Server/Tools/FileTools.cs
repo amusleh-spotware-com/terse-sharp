@@ -7,7 +7,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. tokens=true ends it with the whole file's tokens=N, the count the doc budgets assert. On markdown, headings=true returns the heading map with line ranges and GitHub anchor slugs - bounded by maxLines, and narrowed to the top of the tree by maxLevel=2, which lists the ## sections without their ### children - and section=\"## Commands\" returns just that section, and columns=\"Finding,Tool\" projects a markdown table down to the named columns, so a checked-in table answers which rows exist without paying for the whole file - it composes with section=, is bounded by maxLines, and a column no table under the read declares is refused by name rather than dropped, as are headings=true, startLine=, endLine= and tail= beside it. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
+    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. A markdown file over 8000 characters asked for whole answers its SECTION MAP plus the same steer; verbose=true, a line range, tail=, section= or columns= opt back into the text. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. tokens=true ends it with the whole file's tokens=N, the count the doc budgets assert. On markdown, headings=true returns the heading map with line ranges and GitHub anchor slugs - bounded by maxLines, and narrowed to the top of the tree by maxLevel=2, which lists the ## sections without their ### children - and section=\"## Commands\" returns just that section, and columns=\"Finding,Tool\" projects a markdown table down to the named columns, so a checked-in table answers which rows exist without paying for the whole file - it composes with section=, is bounded by maxLines, and a column no table under the read declares is refused by name rather than dropped, as are headings=true, startLine=, endLine= and tail= beside it. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
                 [Description("Several files answered in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
@@ -214,7 +214,7 @@ bool verbose) =>
     }
 
     [McpServerTool(Name = "find_files", ReadOnly = true)]
-    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell. depth=N answers the shape of a tree instead of its files: everything below the Nth path segment folds into one src/Core/**  xN files row, and the count line still counts every file. root= lists any absolute directory instead of the workspace, tagged outside-workspace, so no shell ls is needed.")]
+    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .claude, .vs, .idea, artifacts, TestResults, node_modules and directory symlinks are excluded. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell. depth=N answers the shape of a tree instead of its files: everything below the Nth path segment folds into one src/Core/**  xN files row, and the count line still counts every file. root= lists any absolute directory instead of the workspace, tagged outside-workspace, so no shell ls is needed. Pass globs to answer up to 10 globs in ONE response. Replaces one call per glob: each is answered under its own header line with its own count.")]
     public Task<string> FindFiles(
             [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator, and {a,b} matches either alternative.")] string? glob = null,
             [Description("Workspace or worktree name.")] string? workspace = null,
@@ -227,15 +227,23 @@ bool verbose) =>
             [Description("Keep only the files whose FILE NAME contains this text, case-insensitively - no glob to get right. Used alone it searches every file; with glob= it filters what the glob selected.")] string? name = null,
             [Description("Fold every file below the Nth path segment into one directory row carrying its file count, so an orientation call answers the shape of the tree rather than every file in it. A directory holding a single match is still printed as that file. 0, the default, lists every file.")] int depth = 0,
             [Description("Absolute directory to list instead of the workspace, tagged outside-workspace; its paths= line carries full paths. Refused beside tracked=true.")] string? root = null,
+            [Description("Several globs in ONE response, at most 10. Replaces one call per glob: each gets its own header line and count, so a glob that matched nothing is visible. Combines with glob, taken first.")] string?[]? globs = null,
             CancellationToken cancellationToken = default)
     {
         var matcher = glob ?? pattern ?? query ?? path;
 
-        if (matcher is not { Length: > 0 } && name is not { Length: > 0 })
+        if (matcher is not { Length: > 0 } && name is not { Length: > 0 } && globs is not { Length: > 0 })
         {
             return Task.FromResult(Errors.Invalid(
                 "neither 'glob' nor 'name' was supplied",
                 "pass a glob, spelled glob or pattern or query or path, or 'name' to match a file name substring instead").Render());
+        }
+
+        if (globs is { Length: > 0 } && root is { Length: > 0 })
+        {
+            return Task.FromResult(Errors.Invalid(
+                "'globs' was passed with 'root', and a batch answers about the loaded workspace only",
+                "drop root= to answer several globs over the workspace, or pass one glob= beside root= for that directory").Render());
         }
 
         if (depth < 0)
@@ -261,12 +269,29 @@ bool verbose) =>
                     maxResults > 0)));
         }
 
-        return context.WithWorkspaceAsync(
-            workspace,
-            null,
-            loaded => ListedAsync(loaded, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
-            semantic: false,
-            cancellationToken);
+        if (globs is not { Length: > 0 })
+        {
+            return context.WithWorkspaceAsync(
+                workspace,
+                null,
+                loaded => ListedAsync(loaded, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+                semantic: false,
+                cancellationToken);
+        }
+
+        var combined = PluralPaths.Combine(matcher, globs, "globs");
+
+        if (!combined.IsOk)
+            return Task.FromResult(combined.Error!.Render());
+
+        return combined.Value is [var single]
+            ? context.WithWorkspaceAsync(
+                workspace,
+                null,
+                loaded => ListedAsync(loaded, single, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+                semantic: false,
+                cancellationToken)
+            : ManyAsync(combined.Value, workspace, maxResults, stamps, tracked, name, depth, cancellationToken);
     }
 
     [McpServerTool(Name = "search_text", ReadOnly = true)]
@@ -889,5 +914,42 @@ context.RejectWrite() is { } rejection
         }
 
         return null;
+    }
+
+    private Task<string> ManyAsync(
+        ImmutableArray<string> globs,
+        string? workspace,
+        int maxResults,
+        bool stamps,
+        bool tracked,
+        string? name,
+        int depth,
+        CancellationToken cancellationToken) =>
+        context.WithWorkspaceAsync(
+            workspace,
+            null,
+            loaded => ListedManyAsync(loaded, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+            semantic: false,
+            cancellationToken);
+
+    private static async Task<string> ListedManyAsync(
+        LoadedWorkspace loaded,
+        IReadOnlyList<string> globs,
+        int maxResults,
+        bool stamps,
+        bool tracked,
+        string? name,
+        int depth,
+        bool chosen,
+        CancellationToken cancellationToken)
+    {
+        if (!tracked)
+            return TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, null, name, depth, chosen);
+
+        var known = await TrackedAsync(loaded, cancellationToken).ConfigureAwait(false);
+
+        return known.IsOk
+            ? TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, known.Value!, name, depth, chosen)
+            : known.Error!.Render();
     }
 }

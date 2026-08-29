@@ -1996,4 +1996,114 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.Contains("more tags exist than were listed", tags, StringComparison.Ordinal);
         Assert.DoesNotContain("raise maxResults=", tags, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Build_CalledTwiceWithIdenticalArguments_SaysItIsARepeatAndThatNothingWasWrittenInBetween()
+    {
+        await server.CallAsync("build", new() { ["project"] = "Fixture.Trading" });
+
+        var second = await server.CallAsync("build", new() { ["project"] = "Fixture.Trading" });
+
+        Assert.StartsWith("build ok", second, StringComparison.Ordinal);
+        Assert.Contains("of this exact build call", second, StringComparison.Ordinal);
+        Assert.Contains("previous verdict: build ok", second, StringComparison.Ordinal);
+        Assert.Contains("nothing was written in between", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForAFieldWithAnInitializer_ReturnsADeclarationReplaceSymbolAccepts()
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderBook.bySymbol" });
+        var body = source
+            .Split('\n')
+            .SkipWhile(line => !line.StartsWith("private", StringComparison.Ordinal))
+            .TakeWhile(line => !line.StartsWith("compilations=", StringComparison.Ordinal))
+            .ToArray();
+
+        var declaration = string.Join('\n', body).TrimEnd('\n');
+
+        var diff = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderBook.bySymbol",
+            ["declaration"] = declaration,
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("private readonly Dictionary<string, List<Order>> bySymbol =", declaration, StringComparison.Ordinal);
+        Assert.EndsWith(";", declaration, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", diff, StringComparison.Ordinal);
+        Assert.Contains("0 files changed", diff, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithGlobs_AnswersEveryGlobUnderItsOwnHeaderInOneCall()
+    {
+        var text = await server.CallAsync("find_files", new()
+        {
+            ["globs"] = new[] { "**/OrderBook.cs", "**/*.csproj", "**/nothing-matches-this.zzz" },
+        });
+
+        Assert.StartsWith("3 globs", text, StringComparison.Ordinal);
+        Assert.Contains("**/OrderBook.cs", text, StringComparison.Ordinal);
+        Assert.Contains("**/*.csproj", text, StringComparison.Ordinal);
+        Assert.Contains("**/nothing-matches-this.zzz", text, StringComparison.Ordinal);
+        Assert.Contains("OrderBook.cs", text, StringComparison.Ordinal);
+        Assert.Contains("1 files", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithSymbolIds_OutlinesEveryTypeInOneCallAndReportsAnUnresolvedIdInline()
+    {
+        var text = await server.CallAsync("get_type_outline", new()
+        {
+            ["symbolIds"] = new[] { "OrderBook", "OrderService", "NoSuchTypeHere" },
+        });
+
+        Assert.StartsWith("3 types", text, StringComparison.Ordinal);
+        Assert.Contains("OrderBook.Add", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.Submit", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_RESOLVED NoSuchTypeHere", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_ForAWholeLargeMarkdownFile_AnswersTheSectionMapAndASteerInsteadOfTheText()
+    {
+        const string Probe = "terse-markdown-map-probe.md";
+        var filler = string.Join('\n', Enumerable.Repeat("body text that is long enough to pass the map threshold for a markdown read", 200));
+        var content = "# Probe\n\n## First\n\n" + filler + "\n\nUNIQUE-BODY-MARKER\n\n## Second\n\nlast line\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = content });
+
+        try
+        {
+            var mapped = await server.CallAsync("read_text", new() { ["path"] = Probe });
+
+            Assert.Contains("## First", mapped, StringComparison.Ordinal);
+            Assert.Contains("## Second", mapped, StringComparison.Ordinal);
+            Assert.Contains("the section map replaced", mapped, StringComparison.Ordinal);
+            Assert.DoesNotContain("UNIQUE-BODY-MARKER", mapped, StringComparison.Ordinal);
+
+            var whole = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("UNIQUE-BODY-MARKER", whole, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task FindFiles_WithGlobsAndRoot_IsRefusedRatherThanAnsweringAboutTheWorkspace()
+    {
+        var text = await server.CallAsync("find_files", new()
+        {
+            ["globs"] = new[] { "**/*.cs", "**/*.md" },
+            ["root"] = Path.GetTempPath(),
+        });
+
+        Assert.Contains("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("root", text, StringComparison.Ordinal);
+    }
 }

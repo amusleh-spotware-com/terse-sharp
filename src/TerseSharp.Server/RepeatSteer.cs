@@ -21,6 +21,8 @@ public static class RepeatSteer
         ["search_text"] = "queries",
         ["search_regex"] = "queries",
         ["run_tests"] = "projects",
+        ["find_files"] = "globs",
+        ["get_type_outline"] = "symbolIds",
         ["write_text"] = "files",
         ["edit_text"] = "edits",
         ["resx_set"] = "entries",
@@ -32,19 +34,21 @@ public static class RepeatSteer
     private static string last = string.Empty;
     private static int run;
 
-    public static McpRequestFilter<CallToolRequestParams, CallToolResult> Filter() =>
-        next => async (request, cancellationToken) =>
-        {
-            var result = await next(request, cancellationToken).ConfigureAwait(false);
+    public static McpRequestFilter<CallToolRequestParams, CallToolResult> Filter() => next => async (request, cancellationToken) =>
+{
+    var result = await next(request, cancellationToken).ConfigureAwait(false);
 
-            if (request.Params?.Name is { Length: > 0 } tool
-                && Steer(tool, Batched(request.Params, tool), Unbatchable(request.Params, tool), Argument(request.Params, tool)) is { } note)
-            {
-                result.Content.Add(new TextContentBlock { Text = note });
-            }
+    if (request.Params is not { Name.Length: > 0 } parameters)
+        return result;
 
-            return result;
-        };
+    if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
+        result.Content.Add(new TextContentBlock { Text = repeat });
+
+    if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name)) is { } note)
+        result.Content.Add(new TextContentBlock { Text = note });
+
+    return result;
+};
 
     private static readonly string[] PerEntryOnly = ["startLine", "endLine", "tail", "section"];
 
@@ -133,6 +137,8 @@ public static class RepeatSteer
         ["search_text"] = "query",
         ["search_regex"] = "query",
         ["run_tests"] = "project",
+        ["find_files"] = "glob",
+        ["get_type_outline"] = "symbolId",
         ["analyze"] = "path",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 

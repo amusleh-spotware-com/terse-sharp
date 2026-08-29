@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace TerseSharp.Core;
 
@@ -28,13 +29,13 @@ public static class SourceService
     }
 
     private static async Task AppendAsync(
-        string root,
-        ResponseBuilder response,
-        SyntaxReference reference,
-        SourceFormat format,
-        CancellationToken cancellationToken)
+            string root,
+            ResponseBuilder response,
+            SyntaxReference reference,
+            SourceFormat format,
+            CancellationToken cancellationToken)
     {
-        var node = await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
+        var node = Declaration(await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false));
         var span = node.GetLocation().GetLineSpan();
         var source = format.Comments ? node.ToFullString() : CommentStripper.Without(node);
 
@@ -224,4 +225,9 @@ public static class SourceService
                 ? message[length..]
                 : message;
     }
+
+    private static SyntaxNode Declaration(SyntaxNode node) =>
+            node is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1, Parent: BaseFieldDeclarationSyntax field } }
+                ? field
+                : node;
 }

@@ -8,7 +8,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class GitTools(ToolContext context)
 {
-    private const int MaxDiffLines = 1000;
+    private const int MaxDiffLines = 3000;
 
     [McpServerTool(Name = "changed_files", ReadOnly = true)]
     [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed.")]
@@ -58,7 +58,7 @@ public sealed class GitTools(ToolContext context)
     [Description("Answer the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
     [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
     [Description("Several paths or pathspecs answered in one diff, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
-    [Description("Max diff lines returned (1000). A truncated answer names the exact maxLines= that returns the rest, so one retry is enough.")] int maxLines = 0,
+    [Description("Max diff lines returned (3000). A truncated answer names the exact maxLines= that returns the rest, so one retry is enough.")] int maxLines = 0,
     [Description("Workspace or worktree name.")] string? workspace = null,
     [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
     CancellationToken cancellationToken = default)

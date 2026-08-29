@@ -435,4 +435,48 @@ public static class OutlineService
     private const int MaxListedMembers = 40;
 
     private readonly record struct MemberTally(int Total, int Omitted);
+
+    public readonly record struct TypeOutlineFormat(bool Signatures, string Ids, bool ParameterNames, string? Contains, bool All);
+
+    public static async Task<string> TypesAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> symbolIds,
+        TypeOutlineFormat format,
+        string? path,
+        CancellationToken cancellationToken)
+    {
+        var response = new ResponseBuilder("get_type_outline", string.Join(", ", symbolIds));
+
+        response.Summary(symbolIds.Count, symbolIds.Count, "types");
+
+        foreach (var symbolId in symbolIds)
+            response.Note(await OneTypeAsync(workspace, symbolId, format, path, cancellationToken).ConfigureAwait(false));
+
+        return response.ToString();
+    }
+
+    private static async Task<string> OneTypeAsync(
+        LoadedWorkspace workspace,
+        string symbolId,
+        TypeOutlineFormat format,
+        string? path,
+        CancellationToken cancellationToken)
+    {
+        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
+
+        if (!resolved.IsOk)
+            return "NOT_RESOLVED " + symbolId + "  " + resolved.Error!.Message;
+
+        var outline = await TypeAsync(
+            workspace,
+            resolved.Value!,
+            format.Signatures,
+            format.Ids,
+            cancellationToken,
+            format.ParameterNames,
+            format.Contains,
+            format.All).ConfigureAwait(false);
+
+        return outline.IsOk ? outline.Value!.TrimEnd('\n') : outline.Error!.Render();
+    }
 }

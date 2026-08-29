@@ -48,9 +48,13 @@ public static class DiffSymbolService
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
         var model = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
         var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var folded = new List<Folded>();
 
         foreach (var hunk in hunks)
-            Add(records, seen, Declared(root, model, text, path, hunk, cancellationToken));
+            Place(folded, records, seen, Declared(root, model, text, path, hunk, cancellationToken), hunk);
+
+        foreach (var entry in folded)
+            Add(records, seen, string.Create(CultureInfo.InvariantCulture, $"{path}:{string.Join(',', entry.Ranges)}  EXACT  {entry.Id}"));
     }
 
     private static void Add(List<string> records, HashSet<string> seen, string record)
@@ -59,7 +63,7 @@ public static class DiffSymbolService
             records.Add(record);
     }
 
-    private static string Declared(
+    private static Mapped Declared(
         SyntaxNode? root,
         SemanticModel? model,
         SourceText text,
@@ -68,7 +72,7 @@ public static class DiffSymbolService
         CancellationToken cancellationToken)
     {
         if (root is null || model is null || Span(text, hunk) is not { } span)
-            return Raw(path, hunk, "the hunk covers no line of the current file");
+            return new Mapped(null, Raw(path, hunk, "the hunk covers no line of the current file"));
 
         var containing = root.FindNode(span, getInnermostNodeForTie: true)
             .AncestorsAndSelf()
@@ -76,15 +80,13 @@ public static class DiffSymbolService
             .FirstOrDefault();
 
         if (containing is null)
-            return Raw(path, hunk, "the hunk spans no single declaration");
+            return new Mapped(null, Raw(path, hunk, "the hunk spans no single declaration"));
 
         var symbol = model.GetDeclaredSymbol(containing, cancellationToken);
 
         return symbol is null
-            ? Raw(path, hunk, "the declaration has no symbol")
-            : string.Create(
-                CultureInfo.InvariantCulture,
-                $"{path}:{hunk.Start}-{hunk.End}  EXACT  {SymbolId.From(symbol).Value}");
+            ? new Mapped(null, Raw(path, hunk, "the declaration has no symbol"))
+            : new Mapped(SymbolId.From(symbol).Value, null);
     }
 
     private static TextSpan? Span(SourceText text, DiffHunk hunk)
@@ -122,4 +124,25 @@ public static class DiffSymbolService
             return;
         response.Note("for the hunk text these could not map, call " + string.Join(" then ", unmapped.Select(path => "diff_text path=" + path)));
     }
+
+    private static void Place(List<Folded> folded, List<string> records, HashSet<string> seen, Mapped mapped, DiffHunk hunk)
+    {
+        if (mapped.Raw is { Length: > 0 } raw)
+        {
+            Add(records, seen, raw);
+
+            return;
+        }
+
+        var range = string.Create(CultureInfo.InvariantCulture, $"{hunk.Start}-{hunk.End}");
+
+        if (folded.Find(entry => string.Equals(entry.Id, mapped.Id, StringComparison.Ordinal)).Ranges is { } ranges)
+            ranges.Add(range);
+        else
+            folded.Add(new Folded(mapped.Id!, [range]));
+    }
+
+    private readonly record struct Mapped(string? Id, string? Raw);
+
+    private readonly record struct Folded(string Id, List<string> Ranges);
 }

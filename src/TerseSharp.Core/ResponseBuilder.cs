@@ -82,7 +82,7 @@ public sealed class ResponseBuilder(string tool, string argument)
         count.Shown >= SteerThreshold ? Steer(count) : string.Empty;
 
     private string Steer(Counted count) => count.NarrowWith is { Length: > 0 } narrow && Trimmed(narrow) is { Length: > 0 } kept
-        ? " - narrow with " + kept
+        ? " - narrow with " + Filled(kept, count.Total)
         : string.Empty;
 
     private enum EntryKind
@@ -120,4 +120,8 @@ public sealed class ResponseBuilder(string tool, string argument)
 
         return string.Join(" or ", kept);
     }
+
+    private string Filled(string narrow, int total) => chosen || total <= 0 || !narrow.EndsWith("maxResults=", StringComparison.Ordinal)
+        ? narrow
+        : string.Create(CultureInfo.InvariantCulture, $"{narrow}{total}");
 }

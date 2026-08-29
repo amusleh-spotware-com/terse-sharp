@@ -30,9 +30,12 @@ public static class EditGate
         if (Blocked(report, policy, options.Tool) is { } failure)
             return Result.Fail<string>(failure);
 
-        return await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false)
-            ? Result.Ok(Render(options, diff, "applied", report, workspace.Root, policy))
-            : Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
+        if (!await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false))
+            return Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
+
+        EditPulse.Bump(diff.Length);
+
+        return Result.Ok(Render(options, diff, "applied", report, workspace.Root, policy));
     }
 
     private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root, PolicyVerdict policy)
@@ -602,7 +605,6 @@ public static class EditGate
     }
 
     private static bool IsAmbiguity(string error) => error.StartsWith("CS0104", StringComparison.Ordinal);
-
 
     private static bool Names(string error, string space) => error.Contains("'" + space + ".", StringComparison.Ordinal);
 }

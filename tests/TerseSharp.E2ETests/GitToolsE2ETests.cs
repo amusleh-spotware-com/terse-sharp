@@ -526,6 +526,38 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Contains("contains=", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task DiffSymbols_ForTwoHunksInsideOneDeclaration_FoldsThemOntoOneRecordCarryingTheIdOnce()
+    {
+        const string Probe = "src/Fixture.Trading/OrderBook.cs";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderBook.cs");
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var written = File.GetLastWriteTimeUtc(path);
+
+        try
+        {
+            var edited = original
+                .Replace("            return 0m;", "            return 0.0m;", StringComparison.Ordinal)
+                .Replace("        return largest;", "        return largest + 0m;", StringComparison.Ordinal);
+
+            await File.WriteAllTextAsync(path, edited, TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("diff_symbols", new() { ["path"] = Probe });
+            var mapped = text.Split('\n').Where(line => line.Contains("  EXACT  ", StringComparison.Ordinal)).ToArray();
+
+            var folded = Assert.Single(mapped, record => record.Contains("LargestVolume", StringComparison.Ordinal));
+
+            Assert.Contains(",", folded.Split("  EXACT  ")[0], StringComparison.Ordinal);
+            Assert.Equal(mapped.Length, mapped.Distinct(StringComparer.Ordinal).Count());
+            Assert.DoesNotContain("3 declarations", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(path, written);
+        }
+    }
 }
 
 internal static class DiffSymbolProbe

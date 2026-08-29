@@ -524,24 +524,11 @@ public static class ToolGuard
 
     private static string[] Command(string segment)
     {
-        var opened = segment.Contains("$(", StringComparison.Ordinal)
-            ? segment.Replace("$(", " ", StringComparison.Ordinal)
-            : segment;
-        var tokens = opened.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var start = 0;
+        var outer = Tokenized(Substituted(segment));
 
-        while (start < tokens.Length && (Bare(tokens[start]).Length is 0 || IsAssignment(Bare(tokens[start]))))
-            start++;
-
-        if (start >= tokens.Length)
-            return [];
-
-        var command = new string[tokens.Length - start];
-
-        for (var index = 0; index < command.Length; index++)
-            command[index] = Bare(tokens[start + index]);
-
-        return command;
+        return outer.Length > 0
+            ? outer
+            : Tokenized(segment.Replace("$(", " ", StringComparison.Ordinal));
     }
 
     private static bool Unflagged(string[] tokens, string subcommand)
@@ -731,7 +718,7 @@ public static class ToolGuard
     private static string Masked(string command)
     {
         if (command.AsSpan().IndexOfAny('"', '\'') < 0)
-            return command;
+            return Duplications(command);
 
         var masked = command.ToCharArray();
         var quote = '\0';
@@ -746,7 +733,7 @@ public static class ToolGuard
                 masked[index] = 'x';
         }
 
-        return new string(masked);
+        return Duplications(new string(masked));
     }
 
     private static char Quote(char quote, char current) => (quote, current) switch
@@ -795,12 +782,11 @@ public static class ToolGuard
 
     private static GuardVerdict Denial(string segment, string? cwd, bool compound, string unfenceable = "")
     {
-        if (Replaced(segment, cwd) is { } subcommand)
-            return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound, unfenceable), BuildRouting(subcommand), BuildReplacement(subcommand));
+        var direct = Direct(segment, cwd, compound, unfenceable);
 
-        return Covered(segment) && IsTextRead(segment)
-            ? new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound, unfenceable), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()))
-            : Allowed;
+        return direct.Denied || !segment.Contains("$(", StringComparison.Ordinal)
+            ? direct
+            : Direct(segment.Replace("$(", " ", StringComparison.Ordinal), cwd, compound, unfenceable);
     }
 
     private static string Reissue(List<string> calls, List<string> allowed, bool anded)
@@ -1092,6 +1078,241 @@ public static class ToolGuard
     private static string Because(string unfenceable) => unfenceable.Length is 0
         ? string.Empty
         : ", because it carries " + unfenceable + ", which cannot be rewritten soundly - re-issue that ONE segment on its own instead of re-deriving the whole command";
+
+    private static readonly SearchValues<char> PathMarks = SearchValues.Create("/\\");
+    private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdefABCDEF");
+
+    private static string BuildRouting(string subcommand, string segment) => BuildRouting(subcommand) + GitArguments(subcommand, segment);
+
+    private static string GitArguments(string subcommand, string segment) => subcommand switch
+    {
+        "log" => LogArguments(segment),
+        "show" => CommitArgument(segment),
+        "status" or "diff" or "diff-cached" => DiffArguments(segment),
+        _ => string.Empty,
+    };
+
+    private static string LogArguments(string segment)
+    {
+        var count = 0;
+        string? path = null;
+        string? contains = null;
+        string? message = null;
+        var previous = string.Empty;
+        var separated = false;
+
+        foreach (var token in Tokens(segment))
+        {
+            count = Counted(token, previous, count);
+            path ??= PathOperand(token, separated);
+            contains ??= Contained(token, previous);
+            message ??= Messaged(token, previous);
+            separated |= token is "--";
+            previous = token;
+        }
+
+        return Appended("maxResults", count > 0 ? count.ToString(CultureInfo.InvariantCulture) : null)
+            + Appended("path", path)
+            + Appended("contains", contains)
+            + Appended("message", message);
+    }
+
+    private static string DiffArguments(string segment)
+    {
+        string? path = null;
+        string? baseRef = null;
+        var separated = false;
+
+        foreach (var token in Tokens(segment))
+        {
+            path ??= PathOperand(token, separated);
+            baseRef ??= RefOperand(token);
+            separated |= token is "--";
+        }
+
+        return Appended("baseRef", baseRef) + Appended("path", path);
+    }
+
+    private static string CommitArgument(string segment)
+    {
+        foreach (var token in Tokens(segment))
+        {
+            if (IsSha(token))
+                return " commit=" + token;
+        }
+
+        return string.Empty;
+    }
+
+    private static string Appended(string name, string? value) =>
+        value is { Length: > 0 } ? string.Create(CultureInfo.InvariantCulture, $" {name}={value}") : string.Empty;
+
+    private static int Counted(string token, string previous, int current)
+    {
+        if (current > 0)
+            return current;
+
+        if (previous is "--max-count" or "-n")
+            return int.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var after) ? after : current;
+
+        var digits = token.StartsWith('-') && token.Length > 1 ? token.AsSpan(1) : default;
+
+        return int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : current;
+    }
+
+    private static string? PathOperand(string token, bool separated) =>
+            !token.StartsWith('-') && !token.Contains("..", StringComparison.Ordinal) && (separated || HasExtension(token.AsSpan()))
+                ? token
+                : null;
+
+    private static string? RefOperand(string token) =>
+        token.Contains("..", StringComparison.Ordinal) || token.StartsWith("HEAD", StringComparison.Ordinal) ? token : null;
+
+    private static string? Prefixed(string token, string prefix) =>
+        token.StartsWith(prefix, StringComparison.Ordinal) && token.Length > prefix.Length ? token[prefix.Length..] : null;
+
+    private static bool IsSha(string token) =>
+        token.Length is >= 7 and <= 40 && !token.AsSpan().ContainsAnyExcept(HexDigits);
+
+    private static string[] Tokenized(string text)
+    {
+        var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var start = 0;
+
+        while (start < tokens.Length && (Bare(tokens[start]).Length is 0 || IsAssignment(Bare(tokens[start]))))
+            start++;
+
+        if (start >= tokens.Length)
+            return [];
+
+        var command = new string[tokens.Length - start];
+
+        for (var index = 0; index < command.Length; index++)
+            command[index] = Bare(tokens[start + index]);
+
+        return command;
+    }
+
+    private static string Substituted(string segment)
+    {
+        if (!segment.Contains("$(", StringComparison.Ordinal))
+            return segment;
+
+        var masked = segment.ToCharArray();
+        var depth = 0;
+
+        for (var index = 0; index < masked.Length; index++)
+            depth = Masking(masked, index, depth);
+
+        return new string(masked);
+    }
+
+    private static int Masking(char[] masked, int index, int depth)
+    {
+        if (depth is 0)
+            return Opens(masked, index) ? Started(masked, index) : 0;
+
+        var next = depth + (masked[index] is '(' ? 1 : masked[index] is ')' ? -1 : 0);
+
+        masked[index] = ' ';
+
+        return next;
+    }
+
+    private static bool Opens(char[] masked, int index) =>
+        masked[index] is '$' && index + 1 < masked.Length && masked[index + 1] is '(';
+
+    private static int Started(char[] masked, int index)
+    {
+        masked[index] = ' ';
+        masked[index + 1] = ' ';
+
+        return 1;
+    }
+
+    private static string Duplications(string command)
+    {
+        if (!command.Contains(">&", StringComparison.Ordinal))
+            return command;
+
+        var masked = command.ToCharArray();
+
+        for (var index = 0; index + 2 < masked.Length; index++)
+            MaskDuplication(masked, index);
+
+        return new string(masked);
+    }
+
+    private static void MaskDuplication(char[] masked, int index)
+    {
+        if (masked[index] is not '>' || masked[index + 1] is not '&' || !char.IsAsciiDigit(masked[index + 2]))
+            return;
+
+        masked[index] = 'x';
+        masked[index + 1] = 'x';
+        masked[index + 2] = 'x';
+
+        if (index > 0 && char.IsAsciiDigit(masked[index - 1]))
+            masked[index - 1] = 'x';
+    }
+
+    private static string? Contained(string token, string previous) =>
+            previous is "-S" ? token : Prefixed(token, "-S");
+
+    private static string? Messaged(string token, string previous) =>
+            previous is "--grep" ? token : Prefixed(token, "--grep=");
+
+    private static bool Operanded(string segment)
+    {
+        var command = Command(segment);
+        var name = command.Length > 0 ? Path.GetFileNameWithoutExtension(command[0]) : string.Empty;
+        var listing = ListCommands.Contains(name, StringComparer.OrdinalIgnoreCase);
+        var patterns = PatternCommands.Contains(name, StringComparer.OrdinalIgnoreCase) ? 1 : 0;
+
+        for (var index = 1; index < command.Length; index++)
+        {
+            if (command[index].StartsWith('-') || IsCount(command[index]) || patterns-- > 0)
+                continue;
+
+            if (listing || IsPathLike(command[index]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsCount(string token) => token.Length > 0 && !token.AsSpan().ContainsAnyExcept(Digits);
+
+    private static readonly SearchValues<char> Digits = SearchValues.Create("0123456789");
+
+    private static bool IsPathLike(string token) =>
+            token.AsSpan().ContainsAny(PathMarks) || HasExtension(token.AsSpan());
+
+    private static bool HasExtension(ReadOnlySpan<char> token)
+    {
+        var dot = token.LastIndexOf('.');
+
+        if (dot <= 0 || dot == token.Length - 1)
+            return false;
+
+        var suffix = token[(dot + 1)..];
+
+        return suffix.Length <= 4 && !suffix.ContainsAnyExcept(Letters);
+    }
+
+    private static readonly SearchValues<char> Letters = SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
+
+    private static GuardVerdict Direct(string segment, string? cwd, bool compound, string unfenceable)
+    {
+        if (Replaced(segment, cwd) is { } subcommand)
+            return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound, unfenceable), BuildRouting(subcommand, segment), BuildReplacement(subcommand));
+
+        return (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment))) && IsTextRead(segment)
+            ? new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound, unfenceable), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()))
+            : Allowed;
+    }
+
+    private static readonly string[] PatternCommands = ["grep", "rg", "egrep", "fgrep", "findstr", "select-string", "sls", "awk", "sed"];
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

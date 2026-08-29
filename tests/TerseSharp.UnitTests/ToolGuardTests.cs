@@ -50,9 +50,8 @@ public sealed class ToolGuardTests
     [InlineData("dotnet pack src/App/App.csproj")]
     [InlineData("dotnet restore src/App/App.csproj")]
     [InlineData("git add src/App/OrderService.cs")]
-    [InlineData("grep -rn TODO docs/")]
-    [InlineData("ls src/App")]
-    [InlineData("find . -name \"*.md\"")]
+    [InlineData("head -40")]
+    [InlineData("wc -l")]
     public void Inspect_ForAShellCommandThatIsNotATextRead_Allows(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
@@ -330,10 +329,17 @@ public sealed class ToolGuardTests
             Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 
     [Theory]
-    [InlineData("git log --oneline -20", "history")]
-    [InlineData("git log -S RepeatSteer", "history")]
+    [InlineData("git log --oneline -20", "history maxResults=20")]
+    [InlineData("git log -S RepeatSteer", "history contains=RepeatSteer")]
     [InlineData("git show --stat HEAD", "history")]
     [InlineData("git show HEAD:src/App/OrderService.cs", "read_text")]
+    [InlineData("git log -3 -- src/App/OrderService.cs", "history maxResults=3 path=src/App/OrderService.cs")]
+    [InlineData("git log --max-count=5 --grep=release", "history maxResults=5 message=release")]
+    [InlineData("git log -SRepeatSteer", "history contains=RepeatSteer")]
+    [InlineData("git show 1a2b3c4d", "history commit=1a2b3c4d")]
+    [InlineData("git diff main...HEAD", "diff_symbols baseRef=main...HEAD")]
+    [InlineData("git diff -- src/App/OrderService.cs", "diff_symbols path=src/App/OrderService.cs")]
+    [InlineData("git status", "changed_files")]
     public void Inspect_ForGitHistoryInADotNetTree_NamesTheToolThatReplacesIt(string command, string replacement)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
@@ -1239,7 +1245,9 @@ public sealed class ToolGuardTests
             new JsonObject { ["command"] = "gh run list && cat src\\App\\Notes.txt && git log --oneline -3" },
             Fixtures.RepositoryRoot);
 
-        Assert.Equal("gh run list && cat src\\App\\Notes.txt", verdict.Rewrite);
+        Assert.Equal("gh run list", verdict.Rewrite);
+        Assert.Contains("cat src\\App\\Notes.txt", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("git log --oneline -3", verdict.Reason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1275,12 +1283,12 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git tag --list \"v*\" | tail -3 && git rev-parse HEAD 2>&1 | head -1" });
+            new JsonObject { ["command"] = "git tag --list \"v*\" | tail -3 && git rev-parse HEAD > sha.txt" });
 
         Assert.True(verdict.Denied);
         Assert.Contains("history tags=true", verdict.Routing, StringComparison.Ordinal);
         Assert.Contains("not replaced", verdict.Routing, StringComparison.Ordinal);
-        Assert.Contains("git rev-parse HEAD", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("git rev-parse HEAD > sha.txt", verdict.Routing, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1333,4 +1341,91 @@ public sealed class ToolGuardTests
         Assert.True(verdict.Denied);
         Assert.DoesNotContain("because it carries", verdict.Reason, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("VAR=\"$(cat secrets-file)\" dotnet test tests/Some.Tests.csproj", "run_tests")]
+    [InlineData("PAGER=$(which less) dotnet build", "build")]
+    public void Inspect_ForACommandSubstitutionThatShadowsTheRealCommand_RoutesTheOuterCommandInstead(string command, string routing)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(routing, verdict.Routing);
+    }
+
+    [Fact]
+    public void Inspect_ForAReplacedCommandCarryingAnFdDuplication_StripsItInsteadOfRefusingTheWholeCommand()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build 2>&1 && echo finished" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("build", verdict.Routing ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("echo finished", verdict.Rewrite ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAReplacedCommandCarryingAFileRedirection_StillRefusesTheWholeCommand()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build > build.log && echo finished" });
+
+        Assert.True(verdict.Denied);
+        Assert.True(verdict.Rewrite is not { Length: > 0 }, verdict.Rewrite);
+    }
+
+    [Theory]
+    [InlineData("grep -rn \"OrderService\" src/")]
+    [InlineData("cat appsettings.json")]
+    [InlineData("ls src")]
+    [InlineData("head -20 build.log")]
+    [InlineData("grep -rn TODO docs/")]
+    [InlineData("ls src/App")]
+    [InlineData("find . -name \"*.md\"")]
+    public void Inspect_ForAShellTextToolInADotNetTree_DeniesItEvenWhenNoDotNetFileIsNamed(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory);
+
+        Assert.True(verdict.Denied, command);
+        Assert.True(verdict.Routing is { Length: > 0 }, command);
+    }
+
+    [Theory]
+    [InlineData("grep -rn \"handler\" src/")]
+    [InlineData("cat package.json")]
+    public void Inspect_ForAShellTextToolOutsideEveryDotNetTree_StillAllowsIt(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Path.GetTempPath()).Denied, command);
+
+    [Theory]
+    [InlineData("git branch -a | head -40")]
+    [InlineData("gh run list | tail -5")]
+    public void Inspect_ForATextToolReadingStdinInAPipeline_StillAllowsIt(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
+
+    [Theory]
+    [InlineData("dotnet --list-sdks | grep 10.0")]
+    [InlineData("git branch -a | grep feature")]
+    [InlineData("ps aux | grep terse")]
+    [InlineData("env | grep TERSE")]
+    [InlineData("dotnet --list-runtimes | grep NETCore.App")]
+    [InlineData("ps aux | grep terse.dll")]
+    [InlineData("docker ps | grep app.exe")]
+    [InlineData("sed -n '1,10p'")]
+    public void Inspect_ForAPatternMatchOnAPipeInADotNetTree_StillAllowsIt(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
+
+    [Theory]
+    [InlineData("git log origin/main", "history")]
+    [InlineData("git diff release/1.2", "diff_symbols")]
+    public void Inspect_ForAGitRefThatLooksLikeAPath_DoesNotTranslateItIntoAPathArgument(string command, string routing)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(routing, verdict.Routing);
+    }
+
+    [Theory]
+    [InlineData("$(cat src/App/Notes.cs) later")]
+    [InlineData("FOO=$(cat src/App/Notes.cs) later")]
+    public void Inspect_ForASubstitutionThatIsItselfTheReplacedCommand_StillDenies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 }

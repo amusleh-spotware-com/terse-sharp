@@ -151,7 +151,8 @@ whole, as before, and that denial names both halves of the
 re-issue.
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text
-tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them; `dotnet build`/`test`/`format`/`clean`,
+tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that
+names a path operand at all, while a piped `head -40` reading stdin still runs; `dotnet build`/`test`/`format`/`clean`,
 `dotnet watch build`/`test`, `msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose
 command word is `sleep`, outside a `while`/`until`/`for` loop — because waiting is not work and nothing
 replaces it; and the working-tree half of git —
@@ -161,7 +162,10 @@ replaces it; and the working-tree half of git —
 under a `.sln`/`.slnx`/`.slnf`/`.csproj`, because the hook is installed user-wide. Plain `.css`, `.js`,
 `dotnet restore`/`pack`/`publish`/`run`, and git mutation (`blame`, `add`, `commit`, `push`, `tag`
 creation) are allowed — nothing here replaces those. Malformed hook input allows the call, so a guard
-fault can never wedge a session. `TERSE_GUARD_LOG=<path>` appends one JSON line per decision.
+fault can never wedge a session. A denial names the replacing call with the command's own arguments
+translated — `git log --oneline -1` answers `history maxResults=1` — a `2>&1` no longer forces a
+whole-command refusal, and a `$( )` no longer shadows the real command.
+`TERSE_GUARD_LOG=<path>` appends one JSON line per decision.
 
 `terse install --skill` ships Claude Code the skill that teaches the swaps. On any other agent, a short
 rule in `CLAUDE.md` / `AGENTS.md` / `.cursorrules` does the same job.

@@ -456,7 +456,6 @@ public static class TextSearchService
         private static bool Bounded(ReadOnlySpan<char> text, int start, int length) =>
             !IsWordCharacter(text, start - 1) && !IsWordCharacter(text, start + length);
 
-
         private static bool IsWordCharacter(ReadOnlySpan<char> text, int at) =>
             (uint)at < (uint)text.Length && (char.IsLetterOrDigit(text[at]) || text[at] is '_');
     }
@@ -974,5 +973,28 @@ public static class TextSearchService
         return UsageContainer.Of(root, new TextSpan(at, 0)) is { } declaration
             ? declaration + RecordSeparator
             : string.Empty;
+    }
+
+    public static string FindFilesMany(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> globs,
+        int maxResults,
+        bool stamps,
+        IReadOnlySet<string>? tracked = null,
+        string? name = null,
+        int depth = 0,
+        bool chosen = false)
+    {
+        var response = new ResponseBuilder("find_files", string.Join(", ", globs));
+
+        response.Summary(globs.Count, globs.Count, "globs");
+
+        foreach (var glob in globs)
+        {
+            response.Note(glob);
+            response.Line(FindFiles(workspace, glob, maxResults, stamps, tracked, name, depth, chosen).TrimEnd('\n'));
+        }
+
+        return response.ToString();
     }
 }

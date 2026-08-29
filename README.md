@@ -197,7 +197,11 @@ ships the skill that teaches the swaps; on any other agent, a short rule in `CLA
 <summary>Exactly what the guard denies, what it allows, and how to log or remove it</summary>
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text
-tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them; `dotnet build`/`test`/`format`/`clean`,
+tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that
+names a path operand at all, while a piped `head -40` reading stdin still runs. A denial names the
+replacing call with the command's own arguments translated (`git log --oneline -1` → `history
+maxResults=1`), a `2>&1` no longer forces a whole-command refusal, and a `$( )` no longer shadows the
+real command. It also covers `dotnet build`/`test`/`format`/`clean`,
 `dotnet watch build`/`test`, `msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose
 command word is `sleep`, outside a `while`/`until`/`for` loop — because waiting is not work and nothing
 replaces it; and the working-tree half of git —

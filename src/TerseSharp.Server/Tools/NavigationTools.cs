@@ -69,7 +69,7 @@ public sealed class NavigationTools(ToolContext context)
     }
 
     [McpServerTool(Name = "get_type_outline", ReadOnly = true)]
-    [Description("Every member of one type with signatures and line ranges, without the bodies. An unfiltered outline lists at most 40 members and counts the rest as 'N of M members - contains= or all=true'. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
+    [Description("Every member of one type with signatures and line ranges, without the bodies. Pass symbolIds to outline up to 20 types in ONE response. Replaces one call per type. An unfiltered outline lists at most 40 members and counts the rest as 'N of M members - contains= or all=true'. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetTypeOutline(
         [Description("Symbol id of the type.")] string? symbolId = null,
         [Description("Include member signatures. false gives ids and line ranges only.")] bool signatures = true,
@@ -80,12 +80,15 @@ public sealed class NavigationTools(ToolContext context)
         [Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
         [Description("Keep only the members whose name contains this text, case-insensitively, with an 'N of M members' line so nothing is dropped silently.")] string? contains = null,
         [Description("List every member instead of the first 40; the default counts the rest.")] bool all = false,
+        [Description("Several types in ONE response, at most 20. Replaces one call per type: each under its own header line, an id that does not resolve reported inline as NOT_RESOLVED.")] string[]? symbolIds = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId ?? symbol, async (loaded, resolved) =>
-            Unwrap(await OutlineService.TypeAsync(loaded, resolved, signatures, ids ?? "short", cancellationToken, parameterNames, contains, all).ConfigureAwait(false)),
-            cancellationToken,
+        Outlined(
+            Requested(symbolId ?? symbol, symbolIds),
+            symbolIds is { Length: > 0 },
+            workspace,
+            new OutlineService.TypeOutlineFormat(signatures, ids ?? "short", parameterNames, contains, all),
             path,
-            referenced: true);
+            cancellationToken);
 
     [McpServerTool(Name = "get_symbol", ReadOnly = true)]
     [Description("Signature, kind, accessibility, location and XML doc of one symbol. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
@@ -412,4 +415,25 @@ SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 },
     }
 
     internal const int MaxCap = 1000;
+
+    private Task<string> Outlined(
+            string[] requested,
+            bool batched,
+            string? workspace,
+            OutlineService.TypeOutlineFormat format,
+            string? path,
+            CancellationToken cancellationToken) => requested switch
+            {
+                [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
+                [var only] when !batched => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
+                Unwrap(await OutlineService.TypeAsync(loaded, resolved, format.Signatures, format.Ids, cancellationToken, format.ParameterNames, format.Contains, format.All).ConfigureAwait(false)),
+                cancellationToken,
+                path,
+                referenced: true),
+                _ => context.WithWorkspaceAsync(
+                workspace,
+                path,
+                loaded => OutlineService.TypesAsync(loaded, requested[..Math.Min(requested.Length, MaxBatchedSymbols)], format, path, cancellationToken),
+                cancellationToken: cancellationToken),
+            };
 }

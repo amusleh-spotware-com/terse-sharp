@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-08-29
+
 ### Added
 
 - `add_member` accepts `declarations=[...]` as an alias for `declaration`, spelled the way
@@ -25,6 +27,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   and asserted to name only live, still-mutating tools; a third test fails a `Writers` entry that is
   no longer an advertised mutating tool. Previously only tools declaring `dryRun` were proven, which
   left `undo_last_change` — a real writer declaring none — unproven (I436).
+- `find_files` accepts `globs=[...]` - up to 10 globs answered in ONE response, each under its own
+  header line with its own count, so a glob that matched nothing is visible rather than
+  indistinguishable from one never asked. Measured: 809 `find_files` calls in a week, 0% batched,
+  93 consecutive runs totalling 221 calls (I445).
+- `get_type_outline` accepts `symbolIds=[...]` - up to 20 types in one response, each under its own
+  header line, an id that does not resolve reported inline as `NOT_RESOLVED` rather than failing the
+  call. Measured: 129 calls, 0% batched, 16 runs totalling 38 calls (I445). Both tools are now in the
+  repeat steer's plural map.
+- `run_tests` accepts `tests=[...]` - several tests, classes or namespace prefixes, at most 10,
+  combined into ONE filter expression and one verdict line. Each entry is matched exactly the way
+  `test=` matches it, a blank entry is refused by index, an 11th is refused rather than truncated, and
+  it cannot be combined with `filter=`. Measured: four sequential single-class re-verifications cost
+  25.4 minutes of wall clock against ~600 s for one run. Locked by five `BuildToolsTests` on
+  `Selection` and by `RunTests_WithSeveralTests_RunsAllOfThemInOneCall` (I454).
 
 ### Changed
 
@@ -43,6 +59,66 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   the re-indent fallback. The indent is carried as an offset and length into the file's own text and
   materialised once, for the winning region only — up to ~5 000 small allocations removed per
   failed-anchor `edit_text` on a large file, at no behavioural cost (I435).
+- `SKILL.md` names the parallel case with the shapes the corpus shows instead of the generic
+  phrasing that measured **36 140 of 36 140** single-call tool-bearing messages (100.000%): a
+  `search_text` beside a `read_text` of a **different** file — 1 395 measured adjacent pairs, none
+  sharing a target — and a `find_files` or `search_symbols` beside a read you already owe (I438).
+- A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one
+  session is answered with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was
+  written in between`, counting the documents written since the previous identical call rather than
+  caching its result. It is appended as a second content block, the way the repeat steer already is,
+  so the verdict stays the FIRST line - `build` and `run_tests` no longer answer a success as a
+  single line with no newline at all, and their two assertions now check the verdict line and that
+  every later line is framing. Measured: 1 485 of 3 050 `run_tests` calls and 772 of 1 040 `build` calls in one
+  week were byte-identical in-session repeats - 18.83 h. Locked by `IdenticalCallTests` and
+  `Build_CalledTwiceWithIdenticalArguments_SaysItIsARepeatAndThatNothingWasWrittenInBetween` (I439).
+- `diff_text maxLines` defaults to 3000 instead of 1000, which truncated 85.4% of real calls at a mean
+  payload of 10 032 characters, and every truncation steer that offers `maxResults=` now names the
+  value that returns the rest (`narrow with glob= or maxResults=9`) instead of the bare parameter. A
+  caller who chose the cap is still never told to raise it (I440).
+- The guard's deny text is a worked example: the denied command's own arguments are translated into
+  the replacing call - `git log --oneline -1` answers `history maxResults=1`, `git log -3 -- src/A.cs`
+  answers `history maxResults=3 path=src/A.cs`, `git show <sha>` answers `history commit=<sha>`, and
+  `git diff main...HEAD` answers `diff_symbols baseRef=main...HEAD`. Measured: 297 guard denials in one
+  week, each a denied call the agent then re-issued as a terse call (I441).
+- In a .NET tree the guard denies a shell text tool even when the command names no .NET file, as long
+  as it names a path operand - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json`. A text tool
+  that reads STDIN is untouched, so `git branch -a | head -40` still runs, because nothing replaces it.
+  Measured: 3 057 shell-text `Bash` calls in one week, 16.58 h, at 34x the latency of the tool that
+  replaces them (I446).
+- The guard's rewrite fence masks FD-duplication redirections (`2>&1`, `N>&M`) before its hazard scan,
+  so one of them no longer refuses a whole batch that is otherwise rewritable; a redirection to a FILE
+  still refuses it whole, because stripping the pipeline would silently discard the write. Measured:
+  2 128 of 4 608 `Bash` calls carry `2>&1`, and 1 434 compound commands were fenced off by a
+  redirection alone (I452).
+- A command substitution no longer shadows the real command: `$( ... )` is masked as a span, so
+  `VAR="$(cat secrets-file)" dotnet test` is denied as `run_tests` rather than reported as a
+  shell-text-tool denial quoting the credential read. A substitution that IS the whole command still
+  routes on what is inside it, so `$(git status)` is still denied (I453).
+- A markdown file over 8 000 characters read whole answers its section map plus a steer instead of its
+  text, the way a whole `.cs` read already answers its outline; `verbose=true`, a line range, `tail=`,
+  `section=` or `columns=` opt back into the text. Measured: `read_text` is 42.3% of all tool-result
+  volume, 57.9% of it whole-file reads, and markdown costs 5 699 characters per path against 3 278 for
+  a `.cs` path that already steers (I444).
+- `diff_symbols` folds every hunk that lands in the SAME declaration onto one record carrying the id
+  once and its hunk line ranges after it, the way `analyze` folds findings sharing an id; unmapped
+  `HEURISTIC` hunks stay one per hunk. Measured on a 14-file change set: 37 records for 20 distinct
+  declarations, 17 of them a repeated id of up to 138 characters. The folded records of a file are
+  emitted after its unmapped ones, so within a file the order is now HEURISTIC-then-EXACT rather than
+  hunk order. Locked by
+  `DiffSymbols_ForTwoHunksInsideOneDeclaration_FoldsThemOntoOneRecordCarryingTheIdOnce` (I456).
+- `SKILL.md`'s token budget rises to 28 300 and the advertised-surface budgets to 29 300 / 24 150 /
+  24 650, because the surface gained three batch parameters and eight behaviours the skill has to
+  teach. A skill that does not describe the tools as they behave now is worse than a bigger one.
+
+### Fixed
+
+- `get_symbol_source` on a FIELD returns the whole declaration - modifiers, type, declarator,
+  initializer and semicolon - instead of the initializer clause alone, so the documented
+  read-then-`replace_symbol` round trip holds for fields as it already did for properties and methods.
+  A field declaring several variables still answers its declarator, because the whole declaration
+  would carry its siblings. Locked by
+  `GetSymbolSource_ForAFieldWithAnInitializer_ReturnsADeclarationReplaceSymbolAccepts` (I455).
 
 ## [0.53.0] - 2026-08-28
 
@@ -4981,7 +5057,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.53.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.54.0...HEAD
+[0.54.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.54.0
 [0.53.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.53.0
 [0.52.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.52.0
 [0.51.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.51.0

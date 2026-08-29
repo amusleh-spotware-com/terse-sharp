@@ -78,7 +78,7 @@ public static class UpdateCheck
     {
         try
         {
-            await AtomicWrite.TextAsync(path, state.Render(), cancellationToken).ConfigureAwait(false);
+            await AtomicWrite.TextAsync(path, state.Render(), workspaceDocument: false, cancellationToken).ConfigureAwait(false);
 
             return true;
         }

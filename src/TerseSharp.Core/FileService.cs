@@ -879,9 +879,10 @@ public static class FileService
         if (request.Headings)
             return Outline(path, label, text, request);
 
-        return request.Section is { Length: > 0 } heading
-            ? Slice(label, text, heading, request)
-            : Result.Ok(Render(label, text, Tailed(text, request), request));
+        if (request.Section is { Length: > 0 } heading)
+            return Slice(label, text, heading, request);
+
+        return Mapped(path, label, text, request) ?? Result.Ok(Render(label, text, Tailed(text, request), request));
     }
 
     public static string Sized(long bytes) => string.Create(CultureInfo.InvariantCulture, $"bytes={bytes}");
@@ -1666,4 +1667,23 @@ public static class FileService
 
         return cell[start..end];
     }
+
+    private const int MarkdownMapCharacters = 8000;
+
+    private static Result<string>? Mapped(string path, string label, string text, ReadRequest request)
+    {
+        if (request.Verbose || request.Tail > 0 || request.Range.Start > 0 || request.Range.End > 0)
+            return null;
+
+        if (text.Length < MarkdownMapCharacters || !DocumentOutline.IsMarkdown(Located(label)))
+            return null;
+
+        var map = Outline(path, label, text, request with { Headings = true, MaxLevel = 2 });
+
+        return map.IsOk ? Result.Ok(map.Value!.TrimEnd('\n') + "\n" + Steered(text)) : map;
+    }
+
+    private static string Steered(string text) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"the section map replaced {text.Length} characters of markdown - address one with section=\"## Heading\", or pass a line range, tail=, columns= for a table, or verbose=true for the whole text");
 }

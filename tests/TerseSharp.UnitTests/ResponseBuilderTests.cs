@@ -118,4 +118,20 @@ public sealed class ResponseBuilderTests
 
         Assert.Equal("900 endpoints", text);
     }
+
+    [Fact]
+    public void Summary_WhenTheCallerChoseNoCap_NamesTheMaxResultsValueThatReturnsTheRest()
+    {
+        var text = new ResponseBuilder("search_text", "Order").Summary(2, 9, "matches", "glob= or maxResults=").ToString();
+
+        Assert.Equal("2/9 matches truncated - narrow with glob= or maxResults=9", text);
+    }
+
+    [Fact]
+    public void Summary_WhenTheCallerChoseTheCap_NeitherNamesNorRaisesIt()
+    {
+        var text = new ResponseBuilder("search_text", "Order").Chosen(true).Summary(2, 9, "matches", "glob= or maxResults=").ToString();
+
+        Assert.Equal("2/9 matches truncated - narrow with glob=", text);
+    }
 }
