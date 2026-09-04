@@ -956,7 +956,7 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             var neighbour = await server.CallAsync("read_text", new() { ["path"] = Other, ["verbose"] = true });
 
             Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
-            Assert.Contains("edits[1] and edits[2] anchor on the same oldText in the same file with occurrence=1 and occurrence=2", refused, StringComparison.Ordinal);
+            Assert.Contains("edits[1] and edits[2] address the same oldText in the same file with occurrence=1 and occurrence=2", refused, StringComparison.Ordinal);
             Assert.Contains("lengthen each anchor so it is unique", refused, StringComparison.Ordinal);
             Assert.DoesNotContain("first only", untouched, StringComparison.Ordinal);
             Assert.DoesNotContain("second only", untouched, StringComparison.Ordinal);
@@ -978,6 +978,193 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
             await server.CallAsync("write_text", new() { ["path"] = Other, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithAPerEntryForce_LandsACSharpEntryBesideAMarkdownOneInTheSameBatch()
+    {
+        const string Notes = "terse-i486-notes.md";
+        const string Code = "terse-i486-probe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Notes, ["content"] = "# Notes\n\nmarker\n" },
+            new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Code, ["content"] = "public sealed class TerseProbe\n{\n    public int Marker => 1;\n}\n" },
+            },
+        });
+
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Notes, ["oldText"] = "marker", ["newText"] = "MARKER" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Code, ["oldText"] = "Marker => 1", ["newText"] = "Marker => 2" },
+                },
+            });
+
+            Assert.Contains("REFUSED", refused, StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Notes, ["oldText"] = "MARKER", ["newText"] = "marker" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Code, ["oldText"] = "Marker => 1", ["newText"] = "Marker => 2", ["force"] = true },
+                },
+            });
+
+            Assert.DoesNotContain("REFUSED", applied, StringComparison.Ordinal);
+            Assert.Contains(Code, applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Code, ["verbose"] = true });
+
+            Assert.Contains("Marker => 2", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Code, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Notes, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task TwoBatchEntriesNamingOneFileTwoWays_AreOneWriteAndAreCollisionChecked()
+    {
+        const string Probe = "terse-i490-probe.md";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\nshared anchor\n\nshared anchor\n" });
+
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Probe, ["oldText"] = "shared anchor", ["newText"] = "first only", ["occurrence"] = 1 },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = "./" + Probe, ["oldText"] = "shared anchor", ["newText"] = "second only", ["occurrence"] = 2 },
+                },
+            });
+
+            Assert.Contains("edits[0] and edits[1] address the same oldText", refused, StringComparison.Ordinal);
+
+            var untouched = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.DoesNotContain("first only", untouched, StringComparison.Ordinal);
+            Assert.DoesNotContain("second only", untouched, StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = Probe, ["oldText"] = "# Probe", ["newText"] = "# Renamed" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = "./" + Probe, ["oldText"] = "shared anchor", ["newText"] = "second only", ["occurrence"] = 2 },
+                },
+            });
+
+            Assert.Contains("edits=2/2", applied, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task TwoBatchEntriesAddressingOneSectionHeading_AreRefusedOnlyWhenTheFirstMovesTheOrdinals()
+    {
+        const string Probe = "terse-i491-probe.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Probe\n\n### Added\n\nalpha\n\n## Later\n\n### Added\n\nbeta\n",
+        });
+
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 1, ["newText"] = "gone\n" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 2, ["newText"] = "### Added\n\ngamma\n" },
+                },
+            });
+
+            Assert.Contains("edits[0] and edits[1] address the same section heading", refused, StringComparison.Ordinal);
+            Assert.Contains("the ordinals move under it", refused, StringComparison.Ordinal);
+
+            var legal = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 1, ["place"] = "append", ["newText"] = "one\n" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 2, ["place"] = "append", ["newText"] = "two\n" },
+                },
+            });
+
+            Assert.DoesNotContain("ERROR", legal, StringComparison.Ordinal);
+            Assert.Contains("edits=2/2", legal, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("one", read, StringComparison.Ordinal);
+            Assert.Contains("two", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task TwoBatchEntriesAddressingOneSectionHeading_CountHeadingsTheWayTheSectionEngineDoes()
+    {
+        const string Probe = "terse-i491-fence.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "# Probe\n\n### Added\n\nalpha\n\n## Later\n\n### Added\n\nbeta\n",
+        });
+
+        try
+        {
+            var fenced = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 1, ["newText"] = "prose\n```sh\n# build it\n```\n" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 2, ["newText"] = "### Added\n\ngamma\n" },
+                },
+            });
+
+            var legal = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 1, ["newText"] = "### Added\n\n```sh\n# build it\n```\n" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["section"] = "### Added", ["occurrence"] = 2, ["newText"] = "### Added\n\ngamma\n" },
+                },
+            });
+
+            Assert.Contains("address the same section heading", fenced, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", legal, StringComparison.Ordinal);
+            Assert.Contains("edits=2/2", legal, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
 }

@@ -130,7 +130,41 @@ public static class ToolProfile
         return surface.MarkupDerived && !markup.Complete
             ? string.Create(
                 CultureInfo.InvariantCulture,
-                $"tools={markup.Hidden()} hidden - this workspace holds no such file")
+                $"tools={markup.Hidden()} hidden - this workspace holds no such file, or cannot answer for the ones it holds")
             : null;
+    }
+
+    public static async Task<WorkspaceMarkup> ServedAsync(WorkspaceRegistry registry, CancellationToken cancellationToken)
+    {
+        var loaded = registry.All();
+
+        if (loaded.Count is 0)
+            return WorkspaceMarkup.Every;
+
+        var served = default(WorkspaceMarkup);
+
+        foreach (var workspace in loaded)
+            served = served.Union(await ServedByAsync(workspace, cancellationToken).ConfigureAwait(false));
+
+        return served;
+    }
+
+    private static async Task<WorkspaceMarkup> ServedByAsync(LoadedWorkspace workspace, CancellationToken cancellationToken)
+    {
+        var families = workspace.Indexes.MarkupFamilies();
+
+        if (!families.Razor)
+            return families;
+
+        try
+        {
+            return await RazorGeneratedMap.GeneratorRanAsync(workspace, cancellationToken).ConfigureAwait(false)
+                ? families
+                : families with { Razor = false };
+        }
+        catch (ObjectDisposedException)
+        {
+            return families;
+        }
     }
 }

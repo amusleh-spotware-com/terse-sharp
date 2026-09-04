@@ -62,12 +62,13 @@ public sealed class ResxTools(ToolContext context)
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "resx_set")]
-    [Description("Add or update one key, or many at once by passing entries as Key=Value lines. Replaces one call per key: they are written in a single pass over the file, and a line with no separator is named and refuses the batch instead of being dropped silently. Preserves the file's schema header, ordering, indentation, line endings and byte order mark, and refuses an edit that would produce malformed XML. Use instead of Edit on a .resx file. Not covered by undo_last_change - pass dryRun first if unsure.")]
+    [Description("Add or update one key, many at once with entries as Key=Value lines, or a family with files=[{path, entries}, ...], since entries= is same-file only. Replaces one call per key and one per FILE: written in a single pass, and a line with no separator refuses the batch instead of being dropped. Preserves the file's schema header, ordering, indentation, line endings and byte order mark, and refuses an edit that would produce malformed XML. Use instead of Edit on a .resx file. Not covered by undo_last_change - pass dryRun first if unsure.")]
     public Task<string> ResxSet(
-        [Description("Path to the .resx/.resw file, or to any file of its family when culture is given.")] string path,
+        [Description("Path to the .resx/.resw file, or to any file of its family when culture is given. With files=, the default target of every entry that carries no path of its own.")] string path,
         [Description("The key to add or update.")] string? key = null,
         [Description("The value for key.")] string? value = null,
         [Description("Several entries, one Key=Value per line, written as one pass over the file. Mutually exclusive with key.")] string? entries = null,
+        [Description("Up to 10 files, each taking path and its own entries - the cross-culture sweep entries= cannot express. A blank entry, an 11th, or a top-level key/value/entries beside it is refused by index.")] ResxWrite[]? files = null,
         [Description("Target culture, e.g. fr. Omitted writes the file named by path; a missing culture file is created from the neutral header.")] string? culture = null,
         [Description("Optional comment for the entry.")] string? comment = null,
         [Description("Return the diff without writing.")] bool dryRun = false,
@@ -76,7 +77,9 @@ public sealed class ResxTools(ToolContext context)
         context.RejectWrite() is { } refusal
             ? Task.FromResult(refusal)
             : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
-                await ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun, verbose).ConfigureAwait(false)));
+                files is { Length: > 0 } batch
+                    ? Mixed(key, value, entries) ?? await ResxEditService.SetManyAsync(loaded, path, batch, culture, comment, dryRun, verbose).ConfigureAwait(false)
+                    : await ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun, verbose).ConfigureAwait(false)));
 
     [McpServerTool(Name = "resx_remove", Destructive = true)]
     [Description("Remove a key from one culture, or from every file of the family when culture is omitted. Refused while the key is still referenced - by the designer property through Roslyn or by a textual lookup - unless force=true. Not covered by undo_last_change.")]
@@ -122,4 +125,11 @@ public sealed class ResxTools(ToolContext context)
         [Description("Max results (200).")] int maxResults = 0) =>
         context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(
             ResxValidation.Validate(loaded, path, rules, includeUnused, NavigationTools.Cap(maxResults, 200))));
+
+    private static Result<string>? Mixed(string? key, string? value, string? entries) =>
+        key is { Length: > 0 } || value is { Length: > 0 } || entries is { Length: > 0 }
+            ? Result.Fail<string>(Errors.Invalid(
+                "files= was passed together with a top-level key, value or entries, and the top-level write would have been silently dropped",
+                "put every write in files=, or send the single write without files="))
+            : null;
 }

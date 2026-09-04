@@ -121,4 +121,20 @@ public static class DocumentOutline
 
         return level is > 0 and <= 6 && level < line.Length && line[level] is ' ' ? level : 0;
     }
+
+    public static int Headings(ReadOnlySpan<char> text)
+    {
+        var count = 0;
+        var fenced = false;
+
+        foreach (var line in text.EnumerateLines())
+        {
+            if (IsFence(line))
+                fenced = !fenced;
+            else if (!fenced && Level(line) > 0)
+                count++;
+        }
+
+        return count;
+    }
 }

@@ -283,11 +283,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     internal static string StillLocked(string operation, string output, string root = "")
     {
-        var holders = LockHolders.Describe(output, root);
+        var named = LockHolders.Describe(output, root);
+        var holders = named.Length > 0 ? named : LockHolders.Scanned(root);
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. Analyzer and source-generator assemblies are normally mapped from a shadow copy under the per-user analyzer cache rather than from a project's own output, so they are the least likely holder - but a copy that could not be made falls back to mapping the file in place, so they are not ruled out either. This server is pid {Environment.ProcessId}, and an MSBuild BuildHost this or an earlier terse load spawned out of this tree's own bin/ is also in play. {(holders.Length is 0 ? "The build named no holding process, so nothing below identifies one - list the holders yourself before stopping anything." : "Resolve each holder below before stopping it.")}{holders}");
+            $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. Analyzer and source-generator assemblies are normally mapped from a shadow copy under the per-user analyzer cache rather than from a project's own output, so they are the least likely holder - but a copy that could not be made falls back to mapping the file in place, so they are not ruled out either. This server is pid {Environment.ProcessId}, and an MSBuild BuildHost this or an earlier terse load spawned out of this tree's own bin/ is also in play. {Guidance(named.Length, holders.Length, root.Length > 0)}{holders}");
     }
 
     private const string ReloadFailed =
@@ -696,4 +697,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         values is { Count: > 0 } ? string.Join(',', values) : string.Empty;
 
     private static readonly string KeySeparator = new((char)31, 1);
+
+    private static string Guidance(int named, int holders, bool scanned) => (named, holders, scanned) switch
+    {
+        ( > 0, _, _) => "Resolve each holder below before stopping it.",
+        (_, > 0, _) => "The build named no holding process, so the holders below were found in-server by scanning this machine for processes that map a file of this tree - HEURISTIC, so each is a candidate rather than a proven holder. Resolve each before stopping it, and do not list them again in a shell.",
+        (_, _, true) => "The build named no holding process, and no process on this machine maps a file of this tree, so the holder is outside it - an editor, a file browser or an antivirus scan over this output directory.",
+        _ => "The build named no holding process, and no workspace root was known here, so nothing was scanned for one.",
+    };
 }

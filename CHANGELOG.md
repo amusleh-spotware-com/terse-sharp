@@ -8,6 +8,138 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-09-04
+
+### Added
+
+- **`edit_text edits=` entries take their own `force`**, exactly as they already take their own
+  `path`. The top-level `force` stays the default for entries that omit it, so nothing an existing
+  call means changes, and the docs-gate shape of this repository - one `.cs` attribute edit beside
+  three markdown files - is one call instead of two. Measured motivation: a 5-entry batch across
+  `DotnetRunner.cs`, `CHANGELOG.md`, `SKILL.md` and `IMPROVEMENTS-ARCHIVE.md` landed 4 entries and
+  answered `REFUSED src/TerseSharp.Server/DotnetRunner.cs: InvalidArgument - is a C# file`, costing a
+  second call and a ~6 s model gap. Locked by
+  `EditText_WithAPerEntryForce_LandsACSharpEntryBesideAMarkdownOneInTheSameBatch` (I486).
+
+- **`resx_set` takes `files=[{path, entries}, ...]`**, at most 10, writing a whole culture family in
+  one call. `entries=` is same-file only, so a localization sweep across culture files could not be
+  expressed by any parameter the tool declared: measured at 329 calls across 36 sessions with a
+  longest unbroken run of 115 consecutive calls, 250 of whose responses had already named a batch
+  parameter that could not answer them. An entry with no `entries`, an 11th entry, and a `files=`
+  beside a top-level `key`, `value` or `entries` are each refused by name rather than dropped. Locked
+  by `ResxSet_WithFiles_WritesAWholeCultureSweepInOneCall` and
+  `ResxSet_WithFilesBesideATopLevelWriteOrABlankEntry_IsRefusedByIndexInsteadOfDroppingOne` (I496).
+  The parameter costs **75 tokens of advertised surface**, which is the whole of this release's
+  growth: `AdvertisedPayloadBudget` moves 29 700 -> 29 800 and the settings-narrowed budget
+  25 250 -> 25 400, and every other description this release touched was trimmed back to at or below
+  its previous length so the ceilings absorb the capability and nothing else. `SKILL.md` was cut by
+  ~1 500 tokens over the same round to stay inside its unchanged 30 100 budget. **I504** is the open
+  row that must give this back: `parameterDescriptions` is 11 578 tokens, 39% of the whole frame.
+
+- **A wide `find_files` listing ends with the `depth=` that would fold it** -
+  `next: depth=1 folds this to 2 rows` - computed from the paths already in hand, the way
+  `changed_files` ends with the exact `diff_symbols` call. It rides only on an unfolded listing of 25
+  files or more and only when some depth really halves the rows, so a listing with nothing to fold
+  says nothing. Measured motivation: `find_files glob="src/**/*.cs"` answered 215 paths (~4 000
+  tokens, ~3 500 of them never read) to locate the ~12 files ten backlog rows lived in, and neither
+  `depth=` nor `name=` was reachable from that question. Locked by
+  `FindFiles_WhenTheListingIsWide_EndsWithTheDepthThatWouldFoldIt` (I487).
+
+- **An edit reports the info-severity compiler diagnostics it introduced** - `info=N introduced`, with
+  `verbose=true` naming them. The tier is the compiler's own: the project's analyzers are not run on an
+  edit, and the response says so rather than letting `info=` read as a claim about `CA`/`IDE` rules.
+  Locked by `AnEditIntroducingAnInfoDiagnostic_CountsItInsteadOfAnsweringAsIfTheTierDidNotExist`
+  (I492, I498, I499).
+
+- **`rename_symbol` reports the comment and string-literal occurrences it did not rewrite** -
+  `HEURISTIC  comment|string  <name>  NOT rewritten, a match inside a comment is not decidable`, up to
+  ten, over every document the rename touched. Roslyn's `RenameInComments` and `RenameInStrings` stay
+  off, because no compiler checks that text and the compile gate could not catch a wrong rewrite; the
+  gap is now reported instead of silent. Locked by
+  `RenameSymbol_WithTheOldNameLeftInACommentOrString_ReportsThemAsNotRewritten` (I493).
+
+- **The `PreToolUse` guard records why it allowed a command it could have replaced** -
+  `no-tool <driver subcommand>` when the tree is a .NET one and nothing here serves that command
+  (`no-tool git commit`, `no-tool dotnet restore`), `cwd-not-dotnet` when the command is replaceable
+  but the working directory is not a .NET tree, and nothing at all for a command no tool here
+  replaces. The subcommand rides in the label so a scan can group the deliberate carve-outs apart
+  from a genuine gap. It rides on the `GuardVerdict` and on the `TERSE_GUARD_LOG` entry, so the next scan
+  can separate the leak classes instead of inferring them: one measured week recorded 463 leading
+  shell text tools and 308 replaceable `git` subcommands against 252 denials of every kind. Locked by
+  `Inspect_WhenItAllowsACommandItCouldHaveReplacedInADotNetTree_RecordsThatNoToolServesIt`,
+  `Inspect_WhenItAllowsAReplaceableCommandOutsideADotNetTree_RecordsThatTheCwdWasNotRecognised`,
+  `Inspect_ForACommandNothingCouldReplace_RecordsNoAllowanceAtAll` and
+  `GuardLogEntry_ForAnAllowedReplaceableCommand_CarriesTheAllowanceSoAScanCanSeparateTheCases` (I495).
+
+### Changed
+
+- **An unfiltered outline of a type declaring more than 40 members answers its member COUNT instead
+  of its members** - `45 members - contains= or all=true` - where it used to print the first 40 and
+  count the rest. `contains=` and `all=true` open it, and a filtered outline is unchanged. This is a
+  **response format change**: measured motivation is that the cap paid for a payload nobody asked for
+  - `BuildTools.cs` answered `44 of 62 members` and `DotnetRunner.cs` `47 of 125 members`, together
+  ~3 000 tokens, to locate 6 members, and `contains=` could not have been passed first because the
+  member names were what the call was for. `get_type_outline` is deliberately **not** collapsed - the
+  caller has already named the type there, so it keeps its 40-member cap - and the `symbolIds=[...]`
+  batch line is suppressed whenever any type collapsed, so a partial batch is never offered. Locked by
+  `GetFileOutline_OnAWideType_AnswersItsMemberCountInsteadOfItsMembers` and
+  `GetTypeOutline_OnAWideType_StillListsItsMembersBecauseTheCallerAlreadyNamedIt` (I488).
+
+- **The `razor_*` family is hidden from a workspace whose Razor source generator did not run**, not
+  only from one that holds no `.razor`/`.cshtml` file. Those ten tools cannot resolve a component or a
+  parameter in that state at all, and they cost roughly 3 400 tokens of advertised surface. This is an
+  **advertised-surface change**: `workspace_status` now reads
+  `tools=razor_* hidden - this workspace holds no such file, or cannot answer for the ones it holds`.
+  Locked by `LoadingASecondWorkspaceThatHoldsMarkup_ReAdvertisesTheFamiliesItServes` and
+  `WorkspaceStatus_NamesEveryFamilyTheWorkspaceCannotServe` (I497).
+
+- **A refusal naming an unrecognized parameter ends with the running version** -
+  `running terse=0.56.0 - a parameter absent from that set is version drift, not a typo`. The shipped
+  `SKILL.md` describes the binary it shipped with, and the connected server is whatever
+  `dotnet tool install/update` last put on PATH; when they differ the refusal is now legible as drift
+  rather than as a typo. `InvalidArgument` was the only error code a measured 246-transcript week
+  produced, 242 times. Locked by
+  `ATool_RefusingAnUnrecognizedParameter_NamesTheRunningVersionSoSkillDriftIsLegible` (I485).
+
+- **When a locked build names no holding process, the holders are found in-server** by scanning this
+  machine for processes that map a file of this tree, tagged `HEURISTIC` and classified with the
+  wording `LockHolders` already produces, instead of the note telling the agent to list them itself.
+  Measured motivation: that instruction produced 2 `Bash` PowerShell calls and ~2 000 tokens of
+  process table. When nothing maps the tree the note says that too, which points at an editor or a
+  file browser over the output directory. Locked by
+  `LockHolders_Scanned_FindsTheProcessesMappingThisTreeAndAnswersNothingOutsideIt` and
+  `StillLocked_WithNoNamedHolder_ScansForThemInServerInsteadOfDelegatingToAShell` (I489).
+
+- **The duplicate-anchor refusal now reads `address the same oldText`** rather than `anchor on the
+  same oldText`, because it also covers `section=`-addressed entries, where it reads
+  `address the same section heading` and carries its own remedy (I491).
+
+- **`SKILL.md`**: the polling half of the sleep gate (reading `TaskOutput`/`TaskList` to obtain a
+  result the harness delivers by itself is the same breach as `sleep N` - 14.08 h and 13.0% of all
+  tool wall time in one measured week), the input side of the batching rule (20.8 M characters sent,
+  14.19 M of them by the four writers, ~19% of all tool output tokens), and a line separating what
+  terse can decide (analyzer-owned allocation and blocking calls) from what it cannot (host-conditional
+  `ConfigureAwait`) (I494, I500, I499).
+
+### Fixed
+
+- **`edit_text edits=` compares entry paths by file identity, not by the spelling passed.** Two
+  entries naming `docs/Foo.md` and its absolute path were neither grouped into one write nor
+  collision-checked, so the file was opened, written, then re-opened by the second group - which read
+  the post-write text, making an `occurrence=` address something other than what the caller counted.
+  Both the grouping key and the duplicate-anchor comparison now resolve each path once. Locked by
+  `TwoBatchEntriesNamingOneFileTwoWays_AreOneWriteAndAreCollisionChecked` (I490).
+
+- **`edit_text edits=` duplicate detection covers `section=` entries.** The check returned early when
+  an entry carried no `oldText`, so two `section="### Added"` entries with `occurrence=1` and
+  `occurrence=2` bypassed it entirely. They are now refused when the first entry adds or drops a
+  heading, which is what moves the ordinals; two `place=append` writes into different occurrences of
+  one heading stay legal, because they cannot. Headings are counted by `DocumentOutline.Headings` -
+  the same fence-aware, column-0 parser that resolves `occurrence=` - so a `#` inside a fenced code
+  block neither hides a real renumber nor invents one. Locked by
+  `TwoBatchEntriesAddressingOneSectionHeading_AreRefusedOnlyWhenTheFirstMovesTheOrdinals` and
+  `TwoBatchEntriesAddressingOneSectionHeading_CountHeadingsTheWayTheSectionEngineDoes` (I491).
+
 ## [0.56.0] - 2026-08-30
 
 ### Added
@@ -5294,7 +5426,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.56.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.57.0...HEAD
+[0.57.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.57.0
 [0.56.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.56.0
 [0.55.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.55.0
 [0.54.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.54.0

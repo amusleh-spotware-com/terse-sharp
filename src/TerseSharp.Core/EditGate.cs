@@ -81,6 +81,8 @@ public static class EditGate
         if (report.NewWarnings.Length > MaxNewWarnings)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING introduced {MaxNewWarnings} of {report.NewWarnings.Length} shown - analyze the changed files for the rest"));
 
+        Informed(response, report, verbose);
+
         if (report.Unresolved.Length > 0)
             Unresolved(response, report);
 
@@ -167,7 +169,8 @@ public static class EditGate
             await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
             await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
             [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
-            Collided(regressions, usings));
+            Collided(regressions, usings),
+            [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)]);
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -214,15 +217,17 @@ public static class EditGate
         entry.Value > baseline.GetValueOrDefault(entry.Key);
 
     private static async Task<Tally> TallyAsync(
-            Solution solution,
-            IReadOnlyList<ProjectId> projects,
-            string root,
-            CancellationToken cancellationToken)
+        Solution solution,
+        IReadOnlyList<ProjectId> projects,
+        string root,
+        CancellationToken cancellationToken)
     {
         var tally = new Tally(
             new Dictionary<string, int>(StringComparer.Ordinal),
             new Dictionary<string, int>(StringComparer.Ordinal),
+            new Dictionary<string, int>(StringComparer.Ordinal),
             new Dictionary<string, List<int>>(StringComparer.Ordinal),
+            0,
             0,
             0);
 
@@ -241,17 +246,16 @@ public static class EditGate
     {
         var errors = tally.ErrorCount;
         var warnings = tally.WarningCount;
+        var infos = tally.InfoCount;
 
         foreach (var diagnostic in diagnostics)
         {
-            if (diagnostic.Severity is DiagnosticSeverity.Error)
-                errors += Record(tally.Errors, tally.Lines, diagnostic, root);
-
-            if (diagnostic.Severity is DiagnosticSeverity.Warning)
-                warnings += Record(tally.Warnings, tally.Lines, diagnostic, root);
+            errors += Counted(tally.Errors, tally.Lines, diagnostic, root, DiagnosticSeverity.Error);
+            warnings += Counted(tally.Warnings, tally.Lines, diagnostic, root, DiagnosticSeverity.Warning);
+            infos += Counted(tally.Infos, tally.Lines, diagnostic, root, DiagnosticSeverity.Info);
         }
 
-        return tally with { ErrorCount = errors, WarningCount = warnings };
+        return tally with { ErrorCount = errors, WarningCount = warnings, InfoCount = infos };
     }
 
     private static int Record(Dictionary<string, int> errors, Dictionary<string, List<int>> lines, Diagnostic diagnostic, string root)
@@ -285,14 +289,17 @@ public static class EditGate
         string[]? Imports,
         string[]? Callers,
         string[] NewWarnings,
-        string[]? Collisions);
+        string[]? Collisions,
+        string[] NewInfos);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,
         Dictionary<string, int> Warnings,
+        Dictionary<string, int> Infos,
         Dictionary<string, List<int>> Lines,
         int ErrorCount,
-        int WarningCount);
+        int WarningCount,
+        int InfoCount);
     private static string Compact(ResponseBuilder response, DocumentDiff[] diffs, string root)
     {
         foreach (var diff in diffs)
@@ -607,4 +614,21 @@ public static class EditGate
     private static bool IsAmbiguity(string error) => error.StartsWith("CS0104", StringComparison.Ordinal);
 
     private static bool Names(string error, string space) => error.Contains("'" + space + ".", StringComparison.Ordinal);
+
+    private static int Counted(Dictionary<string, int> bucket, Dictionary<string, List<int>> lines, Diagnostic diagnostic, string root, DiagnosticSeverity severity) =>
+        diagnostic.Severity == severity ? Record(bucket, lines, diagnostic, root) : 0;
+
+    private static void Informed(ResponseBuilder response, GateReport report, bool verbose)
+    {
+        if (report.NewInfos.Length is 0)
+            return;
+
+        var named = string.Join(Separator, report.NewInfos.Take(MaxNewWarnings));
+
+        response.Note(verbose
+            ? string.Create(CultureInfo.InvariantCulture, $"info={report.NewInfos.Length} introduced  {named}")
+            : string.Create(CultureInfo.InvariantCulture, $"info={report.NewInfos.Length} introduced - compiler tier only, analyzers are not run here; verbose=true names them and analyze reports the CA and IDE rules"));
+    }
+
+    private const string Separator = ", ";
 }

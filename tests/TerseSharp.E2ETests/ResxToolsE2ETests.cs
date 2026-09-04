@@ -582,4 +582,55 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
     }
 
     private static string Slashes(string text) => text.Replace(Path.DirectorySeparatorChar, '/');
+
+    [Fact]
+    public async Task ResxSet_WithFiles_WritesAWholeCultureSweepInOneCall()
+    {
+        var swept = await server.CallAsync("resx_set", new()
+        {
+            ["path"] = "src/Fixture.Trading/Strings.resx",
+            ["dryRun"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = "src/Fixture.Trading/Strings.fr.resx", ["entries"] = "Terse_Sweep=Balayage" },
+            new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = "src/Fixture.Trading/Strings.de.resx", ["entries"] = "Terse_Sweep=Durchlauf" },
+            },
+        });
+
+        Assert.Contains("Strings.fr.resx", swept, StringComparison.Ordinal);
+        Assert.Contains("Strings.de.resx", swept, StringComparison.Ordinal);
+        Assert.Contains("Balayage", swept, StringComparison.Ordinal);
+        Assert.Contains("Durchlauf", swept, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", swept, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResxSet_WithFilesBesideATopLevelWriteOrABlankEntry_IsRefusedByIndexInsteadOfDroppingOne()
+    {
+        var mixed = await server.CallAsync("resx_set", new()
+        {
+            ["path"] = "src/Fixture.Trading/Strings.resx",
+            ["entries"] = "Terse_Sweep=Sweep",
+            ["dryRun"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = "src/Fixture.Trading/Strings.fr.resx", ["entries"] = "Terse_Sweep=Balayage" },
+            },
+        });
+
+        var blank = await server.CallAsync("resx_set", new()
+        {
+            ["path"] = "src/Fixture.Trading/Strings.resx",
+            ["dryRun"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = "src/Fixture.Trading/Strings.fr.resx", ["entries"] = "Terse_Sweep=Balayage" },
+            new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = "src/Fixture.Trading/Strings.de.resx" },
+            },
+        });
+
+        Assert.Contains("ERROR InvalidArgument", mixed, StringComparison.Ordinal);
+        Assert.Contains("top-level key, value or entries", mixed, StringComparison.Ordinal);
+        Assert.Contains("files[1] carries no entries", blank, StringComparison.Ordinal);
+    }
 }

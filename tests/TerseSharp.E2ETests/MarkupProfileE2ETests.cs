@@ -73,7 +73,9 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
 
         Assert.Contains("xaml_*, razor_*, resx_* hidden", alone, StringComparison.Ordinal);
         Assert.Contains("still answers when called by name", alone, StringComparison.Ordinal);
-        Assert.DoesNotContain("hidden", beside, StringComparison.Ordinal);
+        Assert.Contains("razor_* hidden", beside, StringComparison.Ordinal);
+        Assert.Contains("cannot answer for the ones it holds", beside, StringComparison.Ordinal);
+        Assert.DoesNotContain("xaml_*", beside, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -129,9 +131,9 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
         Assert.DoesNotContain("ERROR", loaded, StringComparison.Ordinal);
         Assert.DoesNotContain("xaml_outline", before);
         Assert.Contains("xaml_outline", after);
-        Assert.Contains("razor_outline", after);
         Assert.Contains("resx_get", after);
-        Assert.Equal(ToolCoverageE2ETests.ExercisedCount, after.Length);
+        Assert.DoesNotContain("razor_outline", after);
+        Assert.Equal(ToolCoverageE2ETests.ExercisedCount - ToolCoverageE2ETests.RazorCount, after.Length);
         Assert.True(announced > 0, "the server never sent notifications/tools/list_changed");
     }
 

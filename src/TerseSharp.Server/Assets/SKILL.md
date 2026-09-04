@@ -39,7 +39,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Navigate** | `Read` a `.cs` file | `get_file_outline(path)` | every type and member with signatures and line ranges, no bodies; `usings: true` adds the file's own using directives, `parameterNames: false` prints parameter types without their names for about an eighth fewer tokens |
 | **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` | a path inside the workspace root that belongs to no project — a fixture tree kept outside the solution — is **parsed from its own text**, not refused, and the answer ends `HEURISTIC parsed from the file's own text`. Outside the root it is still refused |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` | up to 10 in one response, each under its own path line; an unresolved path is reported inline as `NOT_FOUND`, never a failed call |
-| **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too. An **unfiltered** outline lists at most **40 members per type** and counts the rest as `40 of 104 members - contains= or all=true`, so a wide type costs a steer instead of a payload; `all: true` lists every one, and the omission is always counted, never silent |
+| **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` | keeps only the matching members, under their declaring type, with an `N of M members` line so the omission is never silent; `get_type_outline` takes it too. An **unfiltered** outline of a type with more than **40 members** answers its member COUNT, not its members - `104 members - contains= or all=true`; `contains=` or `all: true` opens it |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline | a `.cs` path with no `startLine`, `endLine`, `tail`, `section` or `verbose` returns `get_file_outline`'s answer plus a steer, because the text is ~3x the tokens; pass `verbose: true` or a line range for the text |
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id | answers `get_type_outline`'s member list plus a steer to one member, not the whole file's text; `verbose: true` opts back into the source. A type with ONE declaring reference whose **rendered source** - the declaration *plus* its doc comment, which is what the response carries - is at most 4 lines and 200 characters answers that source instead, because withholding something shorter than the steer saves nothing |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` | that member only, dedented; `verbose: true` for it verbatim, `comments: false` to drop doc and inline comments when you are orienting rather than editing |
@@ -99,7 +99,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Edit text** | one `edit_text row=` call per row when closing a whole backlog | `edit_text(path, rows: [{row, newText}, ...], toPath: "IMPROVEMENTS-ARCHIVE.md")` | up to 25 rows cut and landed in order as ONE write per file; an identifier matching nothing or several refuses the batch, so a partial move cannot happen |
 | **Edit text** | closing a backlog row: cutting one table row out of one markdown file and appending it to another | `edit_text(path, row: "I286", toPath: "IMPROVEMENTS-ARCHIVE.md", newText: "\| … \|")` | the row is matched by its **first cell**, so its old text never crosses the wire; `newText=` is what lands in the target - omit it to move the row verbatim. An identifier matching no row is refused saying so; one matching several names each candidate's LINE NUMBER and, when one exists, the longer identifier that resolves, so the retry needs no re-read; and `row=` without `toPath=` is refused rather than dropped |
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` | applied in order as one write, at most 10; an entry whose anchor fails is reported with its own code and remedy and the others still land, so one bad anchor never costs the batch. A **partly** refused batch leads with what changed and lists each refusal as `REFUSED <path>: <code> - <message>; remedy: …`, so only a leading `ERROR` means re-send; a malformed entry is named — `edits[1] is the entry that failed to bind` |
-| **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` | an entry may name its own `path`, and the top-level `path` may then be omitted entirely; entries are grouped by file, applied as one write each, and answered one line per changed file. A path-less entry with no top-level `path` is refused by index. At most 10 per file and 25 in total |
+| **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` | an entry may name its own `path` and its own `force`, so one `.cs` attribute edit rides in a markdown batch, and the top-level `path` may then be omitted entirely; entries are grouped by file, applied as one write each, and answered one line per changed file. A path-less entry with no top-level `path` is refused by index. At most 10 per file and 25 in total |
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` | up to 10 in one call, and every `.cs` document among them shares **one** compile gate — so a type and the consumer it breaks land together instead of the first write being rolled back alone |
 | **Edit text** | two entries of one `edits=` batch addressing occurrence 1 and 2 of the SAME anchor | `edit_text` refuses them up front | naming both by the caller's own index, before ANY file of the batch is written - entries apply in order, so once `occurrence=1` lands the anchor matches once. Lengthen each anchor, or send the second on its own, where it is `occurrence=1` |
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` | picks the Nth match instead of forcing you to lengthen the anchor; a multi-match refusal lists the candidate lines with their numbers, so `occurrence=` is picked from the refusal and needs no re-read, and an out-of-range value names the range it could have picked |
@@ -164,7 +164,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Localization** | `Grep` a resource key | `resx_find(query)` | key, value or comment, across every family |
 | **Localization** | "is this key still used" | `resx_usages(key)` | designer property through Roslyn, plus `GetString`, localizer, `x:Uid`, Razor, with `composedLookups=` so an empty answer is never claimed as proof |
 | **Localization** | "which strings are untranslated" | `resx_validate()` | `RESX001` missing · `RESX002` placeholder mismatch · `RESX003` unused (`includeUnused` only) · `RESX004` duplicate · `RESX005` orphan · `RESX006` empty · `RESX007` trimmed whitespace · `RESX008` unsorted · `RESX009` stale designer |
-| **Localization** | one `resx_set` call per key | `resx_set(entries: "Key=Value\nOther=Second")` | every key in one pass; a line with no separator is named and refuses the batch rather than being dropped |
+| **Localization** | one `resx_set` call per key | `resx_set(entries: "Key=Value\nOther=Second")` | every key in one pass, and `files: [{path, entries}, …]` writes up to 10 culture FILES in one, which same-file `entries=` cannot; a bad line, an empty entry, or a top-level `key`/`value`/`entries` beside it is refused, never dropped |
 | **Localization** | `Edit` a `.resx`/`.resw` | `resx_set` · `resx_remove` · `resx_rename` | one `<data>` element rewritten; header, order, indentation, line endings and BOM kept, and `resx_set` creates a missing culture file from the neutral header |
 | **Razor** | `Read` a `.razor` or `.cshtml` file | `razor_outline(path)` | directives, component tree and `@code` members, each component resolved to its type |
 | **Razor** | "how do I use this component" | `razor_component(name)` | every `[Parameter]`, which are `[EditorRequired]`, from source **or** a referenced package |
@@ -189,20 +189,14 @@ concurrently; one call per message pays a **6 136 ms (p50)** model gap before it
 Measured over a fortnight and 647 transcripts, grouping `tool_use` blocks by the API `message.id`
 that carried them: **1.165 calls per assistant message, and only 14.3% of messages carry two or
 more**. That is 8 620 round trips already deleted - 14.7 h of gap not paid - and a large remainder.
-One session in that same corpus reached **1.78 calls per message, 47.1% carrying two or more**; at
-that rate the corpus's 60 912 calls would have needed 34 220 messages instead of 52 292 - **18 072
-fewer round trips, 30.8 h**. Measured directly, A/B, on the same eight files in the same session:
-eight `get_file_outline` calls one-per-message cost **151.4 s wall** (2.9 s of tool time, **148.5 s of
-model gap**); the identical work as one `paths=[...]` call cost **10.2 s** - **14.8x faster**. Read
-the split, because it is the whole argument: **98% of that wall clock was the gap, not the tool**. No
-response-format change can touch it; only issuing fewer, wider calls can. (Count this by `message.id`, never per transcript record: the JSONL
-splits one API message carrying N `tool_use` blocks into N records of one block each, so a per-record
-tally always answers 1.0 and reports a real 14.3% as 0.008%.) What it is worth has been measured
-elsewhere too:
-three tool calls per turn cut wall clock **40.6%** and turns from 45.7 to 23.8 while accuracy *rose*
-66% -> 68% (arXiv:2602.07359), and doing the same work as one batched call rather than 38 separate
-ones measured **104.5 s against 245.1 s - 57% faster and 41% fewer tokens** (arXiv:2511.19477). Two
-concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
+One session in the same corpus reached **1.78 calls per message**. Measured A/B on the same eight
+files: eight `get_file_outline` calls one-per-message cost **151.4 s wall**, of which **148.5 s was
+model gap**; the identical work as one `paths=[...]` call cost **10.2 s** - **14.8x faster**, and
+**98% of the saving was gap, not tool time**. No response-format change can touch that; only issuing
+fewer, wider calls can. What it is worth has been measured elsewhere too:
+three tool calls per turn cut wall clock **40.6%** while accuracy *rose* (arXiv:2602.07359), and one
+batched call rather than 38 separate ones measured **57% faster and 41% fewer tokens**
+(arXiv:2511.19477). Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
 `find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
 message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
@@ -233,11 +227,15 @@ check, so never shell out for them. `dotnet list package` routes to `package_lis
 `publish`, `run` and `tool` are **not** covered: nothing here replaces them.
 
 **A bare `sleep` is denied too, and nothing replaces it.** A segment whose COMMAND WORD is `sleep`,
-outside a `while`/`until`/`for` loop, is refused: 156 such calls burned **7.0 h** of wall clock in one
-measured week. `docker run … sleep 3600` and `python sleep.py` are untouched. Background work
-re-invokes you when it finishes, and when you need its result and have nothing else to do, **end the
+outside a `while`/`until`/`for` loop, is refused. `docker run … sleep 3600` and `python sleep.py` are
+untouched. Background work
+re-invokes you when it finishes, so when you need its result and have nothing else to do, **end the
 turn** — stopping is free, sleeping is billed. The one allowed shape is the pause inside a loop that
 also detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; done`.
+
+**POLLING BY TOOL is the same breach, and the guard cannot see it.** Reading `TaskOutput`/`TaskList`
+for a result the harness delivers by itself cost **14.08 h/week**. A check *after* a notification is
+fine; waiting on one is not.
 
 **One replaced command no longer kills a batch.** The guard strips those commands, rewrites the
 rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
@@ -307,7 +305,8 @@ reloads it. The user can change the limit with `terse serve --max-workspaces N` 
 `TERSE_MAX_WORKSPACES` — worth telling them when a big solution is making the server heavy, because a
 loaded workspace costs roughly 3 GB on a 148-project tree.
 **The advertised surface is derived from what the solution holds** — no `.xaml`/`.axaml` hides the 13
-`xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*`, no `.resx`/`.resw` the 8 `resx_*`: 57 tools
+`xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*` — and so does one whose Razor generator did not
+run — no `.resx`/`.resw` the 8 `resx_*`: 57 tools
 instead of 88 on a plain C# solution, because the full catalogue costs tokens on every request and
 measurably lowers selection accuracy. Loading a second solution that does hold them re-advertises
 those families through `notifications/tools/list_changed`; `--tools all` (or `TERSE_TOOLS=all`)
@@ -660,8 +659,9 @@ that answers nothing, and the clip always names `next: startLine=`.
    `verbose=true` defensively; ask for it when you actually intend to read the diff.
 
 5. **Every edit reports its diagnostics.** Each mutation and each `dryRun` carries
-   `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents — you do not need a
-   separate `analyze` afterwards. A `dryRun` that *would* be rolled back says
+   `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents, and
+   `info=N introduced` for an info-severity **compiler** diagnostic, named under `verbose=true`.
+   Analyzers are NOT run on an edit, so a `CA`/`IDE` rule still needs `analyze`. A `dryRun` that *would* be rolled back says
    `WARNING … would be rolled back` and names the errors; a `(+0)` delta alone is **not** proof the
    edit is safe.
 5. **Edits are compile-gated — but the gate is the semantic model, not an emit.** `errors=0 (+0)`
@@ -802,10 +802,10 @@ that answers nothing, and the clip always names `next: startLine=`.
     **The one exception: when a call needs a value a previous call returns** — a symbol id from an
     outline, a path from `changed_files`, a `retryWith` token from a rollback — call them
     sequentially, and **never guess a parameter to make a call parallel**. A measured fortnight
-    carried 52 292 assistant messages bearing 60 912 calls - **1.165 per message** - while **13 820**
-    calls still sat in runs of three or more consecutive calls of the same tool: `Bash` 4 137,
-    `read_text` 2 719, `edit_text` 1 214, `write_text` 632. Every one of those runs was a
-    `paths=`/`edits=`/`files=` batch that was not used, or a parallel message that was not sent.
+    carried **1.165 calls per message**, while **13 820** calls still sat in runs of three or more of the
+    same tool. Every one of those runs was a `paths=`/`edits=`/`files=` batch that was not used, or a
+    parallel message that was not sent. The argument you SEND costs too - a run of writes re-sends its
+    whole argument frame, and the four writers sent **19% of all tool output** that way.
 15. **A subagent does not inherit this skill — the brief carries it, or the delegate greps.** A spawn
     aimed at this workspace carries, inline: the mandate and ban list above, the workspace name, **the
     `changed_files` output and the `diff_symbols` ids as its scope**, and a call ceiling. A delegate
@@ -931,7 +931,8 @@ not a claim that the binding is wrong.
 `rename_symbol` rewrites XAML too: rename a code-behind handler and the `Click="…"` follows, rename a
 bound property and `{Binding …}` follows — but **only** where an `x:Class` or `x:DataType` proves the
 reference. Anything else is listed `NOT rewritten`; **read that list after every rename.**
-`find_usages` shows the same XAML sites, so check the blast radius before renaming.
+`find_usages` shows the same XAML sites, so check the blast radius before renaming. A C# comment or string literal the old name survives in is
+reported the same way and never rewritten, because no compiler checks that text.
 
 `xaml_set_property`, `xaml_add_element` and `xaml_remove_element` address an element by the path
 `xaml_outline` prints, by `#Name` or by `key=Key`, edit in place so formatting survives, and refuse an
@@ -1070,7 +1071,7 @@ named, one
 under the root, which tells a test host running out of *this* tree's `bin/` from another session's —
 classified as this terse server, an MSBuild or BuildHost (including one an earlier terse load spawned
 out of this tree's `bin/`), a live `testhost` to wait for rather than stop, a bare `dotnet` host, or a
-pid already gone. **A bare `dotnet` holder is classified against the process table**: when a test host
+pid already gone, and when MSBuild names none they are scanned for in-server. **A bare `dotnet` holder is classified against the process table**: when a test host
 of *this* tree is running, the line says so by name and pid and tells you to wait rather than stop it -
 tagged `HEURISTIC`, because the association is by tree and not by parentage - and when none is, it says
 that too, which is what makes "another session's live E2E run" distinguishable from "a stranded fixture

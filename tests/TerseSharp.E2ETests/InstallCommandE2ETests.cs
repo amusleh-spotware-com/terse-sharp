@@ -327,7 +327,10 @@ public sealed class InstallCommandE2ETests : IDisposable
         var verbose = await RunAsync("call", "workspace_status", "--workspace", solution, "--json", "{\"verbose\": true}");
         var reading = Advertised(quiet);
 
-        Assert.Equal(ToolCoverageE2ETests.ExercisedCount, int.Parse(reading.Split(' ')[0], CultureInfo.InvariantCulture));
+        Assert.Equal(
+            ToolCoverageE2ETests.ExercisedCount - ToolCoverageE2ETests.RazorCount,
+            int.Parse(reading.Split(' ')[0], CultureInfo.InvariantCulture));
+
         Assert.EndsWith(" tokens", reading, StringComparison.Ordinal);
         Assert.Contains("toolDescriptions=", verbose, StringComparison.Ordinal);
         Assert.Contains("parameterDescriptions=", verbose, StringComparison.Ordinal);

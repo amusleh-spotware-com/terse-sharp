@@ -123,7 +123,7 @@ CancellationToken cancellationToken = default) =>
         context.WithWorkspaceAsync(
             workspace,
             null,
-            async loaded => AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, context.Surface, context.Served(), cancellationToken).ConfigureAwait(false)),
+            async loaded => AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]

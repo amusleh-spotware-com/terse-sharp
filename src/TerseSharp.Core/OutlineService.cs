@@ -33,7 +33,7 @@ public static class OutlineService
             return Result.Fail<string>(Errors.DocumentNotFound(path));
 
         var declarations = Declarations(root);
-        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, All: all);
+        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, All: all, Collapse: true);
 
         return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
             ? note
@@ -114,7 +114,7 @@ public static class OutlineService
 
         if (omitted is 0 && format.Contains is not { Length: > 0 } && members >= WideOutline)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"{members} members - narrow with contains="));
-        else if (format.Batchable && ArgumentLine.Ids(references) is { } batch)
+        else if (omitted is 0 && format.Batchable && ArgumentLine.Ids(references) is { } batch)
             response.Note(batch);
 
         return response.ToString();
@@ -138,38 +138,14 @@ public static class OutlineService
             CultureInfo.InvariantCulture,
             $"{Reference(symbol, format.Ids, Never)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
 
-        var overloaded = Overloaded(declaration, model);
-        var filtered = format.Contains is { Length: > 0 };
-        var capped = !filtered && !format.All;
-        var total = 0;
-        var shown = 0;
-        var omitted = 0;
+        var total = Countable(declaration);
 
-        foreach (var member in Members(declaration))
-        {
-            var counts = !IsTypeDeclaration(member);
+        if (!format.Collapse || format.All || format.Contains is { Length: > 0 } || total <= MaxListedMembers)
+            return Listed(response, declaration, model, format, references, total);
 
-            total += counts ? 1 : 0;
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"  {total} members - contains= or all=true"));
 
-            if (capped && shown >= MaxListedMembers)
-            {
-                omitted += counts ? 1 : 0;
-                continue;
-            }
-
-            if (AppendMember(response, member, model, format, overloaded) is { } reference)
-            {
-                references.Add(reference);
-                shown++;
-            }
-        }
-
-        if (filtered && shown < total)
-            response.Line(string.Create(CultureInfo.InvariantCulture, $"  {shown} of {total} members"));
-        else if (omitted > 0)
-            response.Line(string.Create(CultureInfo.InvariantCulture, $"  {total - omitted} of {total} members - contains= or all=true"));
-
-        return new MemberTally(total, omitted);
+        return new MemberTally(total, total);
     }
 
     private static readonly IReadOnlySet<string> Never = new HashSet<string>(StringComparer.Ordinal);
@@ -273,7 +249,7 @@ public static class OutlineService
             directive.Alias is { } alias ? alias.Name.Identifier.ValueText + " = " : string.Empty,
             directive.NamespaceOrType?.ToString() ?? string.Empty);
 
-    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true, string? Contains = null, bool Batchable = true, bool All = false);
+    private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true, string? Contains = null, bool Batchable = true, bool All = false, bool Collapse = false);
 
     private const string TextSteer =
         "NOTE this is the outline, not the file text - a whole-file .cs read costs about three times as much and is almost never the question."
@@ -335,7 +311,7 @@ public static class OutlineService
         var root = tree.GetRoot();
         var model = CSharpCompilation.Create("terse-ref", [tree]).GetSemanticModel(tree);
         var declarations = Declarations(root);
-        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, Batchable: false, All: all);
+        var format = new OutlineFormat(signatures, ids, usings ? Usings(root) : null, parameterNames, contains, Batchable: false, All: all, Collapse: true);
 
         return Result.Ok(declarations.Length is 0 && TopLevel(root) is { } note
             ? note
@@ -488,4 +464,56 @@ public static class OutlineService
 
     private static bool Resolved(string outline) =>
         !outline.StartsWith("NOT_RESOLVED", StringComparison.Ordinal) && !outline.StartsWith("ERROR", StringComparison.Ordinal);
+
+    private static int Countable(MemberDeclarationSyntax declaration)
+    {
+        var total = 0;
+
+        foreach (var member in Members(declaration))
+            total += IsTypeDeclaration(member) ? 0 : 1;
+
+        return total;
+    }
+
+    private static MemberTally Listed(
+        ResponseBuilder response,
+        MemberDeclarationSyntax declaration,
+        SemanticModel model,
+        OutlineFormat format,
+        List<string> references,
+        int total)
+    {
+        var overloaded = Overloaded(declaration, model);
+        var capped = format.Contains is not { Length: > 0 } && !format.All;
+        var shown = 0;
+        var omitted = 0;
+
+        foreach (var member in Members(declaration))
+        {
+            if (capped && shown >= MaxListedMembers)
+            {
+                omitted += IsTypeDeclaration(member) ? 0 : 1;
+
+                continue;
+            }
+
+            if (AppendMember(response, member, model, format, overloaded) is { } reference)
+            {
+                references.Add(reference);
+                shown++;
+            }
+        }
+
+        Counted(response, format, shown, total, omitted);
+
+        return new MemberTally(total, omitted);
+    }
+
+    private static void Counted(ResponseBuilder response, OutlineFormat format, int shown, int total, int omitted)
+    {
+        if (format.Contains is { Length: > 0 } && shown < total)
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"  {shown} of {total} members"));
+        else if (omitted > 0)
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"  {total - omitted} of {total} members - contains= or all=true"));
+    }
 }

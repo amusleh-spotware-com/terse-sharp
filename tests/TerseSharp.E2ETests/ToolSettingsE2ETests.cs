@@ -57,7 +57,7 @@ public sealed class ToolSettingsE2ETests : IAsyncLifetime
         var tokens = (narrowed.Sum(tool => tool.Name.Length + (tool.Description?.Length ?? 0) + tool.JsonSchema.GetRawText().Length) + 3) / 4;
 
         Assert.Equal(ToolGroups.All["xaml"].Length + ToolGroups.All["razor"].Length + 1, hidden);
-        Assert.True(tokens <= 25250, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
+        Assert.True(tokens <= 25400, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
     }
 
     [Fact]

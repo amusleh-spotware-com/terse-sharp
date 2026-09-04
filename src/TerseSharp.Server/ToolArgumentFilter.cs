@@ -55,7 +55,7 @@ internal static class ToolArgumentFilter
 
         return Errors.Invalid(
             request.Params?.Name + " rejected the call: " + Reason(exception, missing, unrecognized),
-            Remedy(required, accepted) + ToolExamples.Suffix(request.Params?.Name));
+            Remedy(required, accepted) + Drift(unrecognized) + ToolExamples.Suffix(request.Params?.Name));
     }
     private static string Reason(ArgumentException exception, string[] missing, string[] unrecognized) =>
         Detail(missing, unrecognized) is { Length: > 0 } detail ? detail : exception.Message;
@@ -216,7 +216,7 @@ internal static class ToolArgumentFilter
             ? null
             : Errors.Invalid(
                 tool + " rejected the call: unrecognized " + string.Join(", ", unknown),
-                Remedy(required(), accepted) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + ToolExamples.Suffix(tool));
+                Remedy(required(), accepted) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + Drift(unknown) + ToolExamples.Suffix(tool));
     }
 
     private static readonly System.Collections.Frozen.FrozenSet<string> KnownPlurals =
@@ -264,4 +264,10 @@ internal static class ToolArgumentFilter
             ? "; this tool takes the glob in path=, e.g. path=\"src/**/*.cs\""
             : string.Empty;
     }
+
+    private static string Drift(string[] unrecognized) => unrecognized.Length is 0
+        ? string.Empty
+        : "; running terse=" + Running() + " - a parameter absent from that set is version drift, not a typo";
+
+    private static string Running() => UpdateSettings.Version() is { Length: > 0 } version ? version : "unknown";
 }

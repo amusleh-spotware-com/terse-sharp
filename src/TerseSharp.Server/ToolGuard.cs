@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace TerseSharp.Server;
 
-public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null, string? Replaces = null, string? Rewrite = null);
+public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null, string? Replaces = null, string? Rewrite = null, string? Allowance = null);
 
 public static class ToolGuard
 {
@@ -637,6 +637,7 @@ public static class ToolGuard
             ["standDown"] = !verdict.Denied && verdict.Reason.Length is not 0,
             ["routing"] = verdict.Routing,
             ["reason"] = verdict.Reason is { Length: > 0 } reason ? reason : null,
+            ["allowance"] = verdict.Allowance,
             ["cwd"] = Text(root, "cwd"),
             ["session"] = Text(root, "session_id"),
             ["transcript"] = Text(root, "transcript_path"),
@@ -976,6 +977,7 @@ public static class ToolGuard
         var allowed = new List<string>(segments.Length);
         var calls = new List<string>();
         GuardVerdict? refused = null;
+        string? allowance = null;
 
         foreach (var segment in segments)
         {
@@ -984,6 +986,7 @@ public static class ToolGuard
             if (!verdict.Denied)
             {
                 allowed.Add(segment.Trim());
+                allowance ??= verdict.Allowance;
 
                 continue;
             }
@@ -994,7 +997,9 @@ public static class ToolGuard
                 calls.Add(routing);
         }
 
-        return refused is null ? Allowed : refused with { Routing = Reissue(calls, allowed, OnlyAnded(command)) };
+        return refused is not null
+            ? refused with { Routing = Reissue(calls, allowed, OnlyAnded(command)) }
+            : Unreplaced(allowance);
     }
 
     private static JsonObject Denying(GuardVerdict verdict)
@@ -1309,9 +1314,10 @@ public static class ToolGuard
         if (Replaced(segment, cwd) is { } subcommand)
             return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound, unfenceable), BuildRouting(subcommand, segment), BuildReplacement(subcommand));
 
-        return (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment))) && IsTextRead(segment)
-            ? new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound, unfenceable), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()))
-            : Allowed;
+        if ((Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment))) && IsTextRead(segment))
+            return new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound, unfenceable), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()));
+
+        return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
     }
 
     private static readonly string[] PatternCommands = ["grep", "rg", "egrep", "fgrep", "findstr", "select-string", "sls", "awk", "sed"];
@@ -1334,6 +1340,36 @@ public static class ToolGuard
 
     private static bool Closes(string segment) =>
         Array.Exists(Tokens(segment), token => string.Equals(Bare(token), "done", StringComparison.OrdinalIgnoreCase));
+
+    private static GuardVerdict Unreplaced(string? allowance) => allowance is null ? Allowed : Allowed with { Allowance = allowance };
+
+    private static string? Allowance(string segment, string? cwd) => Replaceable(segment)
+        ? IsDotNetTree(cwd) ? "no-tool " + Head(segment) : "cwd-not-dotnet"
+        : null;
+
+    private static bool Replaceable(string segment) =>
+        IsTextRead(segment)
+        || segment.TrimStart().StartsWith("git ", StringComparison.Ordinal)
+        || segment.TrimStart().StartsWith("dotnet ", StringComparison.Ordinal);
+
+    private static string Head(string segment)
+    {
+        var trimmed = segment.AsSpan().Trim();
+        var first = trimmed.IndexOf(' ');
+
+        if (first < 0)
+            return trimmed.ToString();
+
+        var command = trimmed[..first];
+
+        if (!command.StartsWith("git", StringComparison.Ordinal) && !command.StartsWith("dotnet", StringComparison.Ordinal))
+            return command.ToString();
+
+        var rest = trimmed[(first + 1)..].TrimStart();
+        var second = rest.IndexOf(' ');
+
+        return string.Concat(command, " ", second < 0 ? rest : rest[..second]);
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

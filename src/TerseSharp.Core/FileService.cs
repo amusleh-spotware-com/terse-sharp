@@ -598,7 +598,7 @@ public static class FileService
         return needle.Length is not 0 && Dedented(before).Contains(needle, StringComparison.Ordinal);
     }
 
-    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0, string? Path = null, string? Place = null);
+    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0, string? Path = null, string? Place = null, bool Force = false);
 
     public readonly record struct TextEditGroup(string Path, IReadOnlyList<TextEdit> Edits);
 
@@ -731,7 +731,7 @@ public static class FileService
 
         foreach (var group in groups)
         {
-            var answer = await EditTextBatchAsync(workspace, group.Path, group.Edits, request, cancellationToken).ConfigureAwait(false);
+            var answer = await EditTextBatchAsync(workspace, group.Path, group.Edits, Forced(request, group.Edits), cancellationToken).ConfigureAwait(false);
 
             Sort(answer, group.Path, applied, refused, failures);
         }
@@ -1708,30 +1708,30 @@ public static class FileService
     private static TerseError Collision(int earlier, int later, TextEdit first, TextEdit second) => Errors.Invalid(
         string.Create(
             CultureInfo.InvariantCulture,
-            $"edits[{earlier}] and edits[{later}] anchor on the same oldText in the same file with occurrence={first.Occurrence} and occurrence={second.Occurrence}, and entries are applied in order against the text the previous one produced, so the second cannot address the occurrence you counted"),
-        "lengthen each anchor so it is unique, or send the second in its own call - once the first has landed it is occurrence=1");
+            $"edits[{earlier}] and edits[{later}] address the same {Addressed(first)} in the same file with occurrence={first.Occurrence} and occurrence={second.Occurrence}, and entries are applied in order against the text the previous one produced, so the second cannot address the occurrence you counted"),
+        CollisionRemedy(first));
 
-    private static int Shadowed(IReadOnlyList<TextEdit> edits, int index, string defaultPath)
+    private static int Shadowed(IReadOnlyList<TextEdit> edits, int index, string defaultPath, string root)
     {
-        var anchor = edits[index].OldText;
+        var anchor = Anchored(edits[index]);
 
         if (anchor is not { Length: > 0 })
             return -1;
 
         for (var earlier = 0; earlier < index; earlier++)
         {
-            if (Same(edits[earlier], edits[index], anchor, defaultPath))
+            if (Same(edits[earlier], edits[index], anchor, defaultPath, root))
                 return earlier;
         }
 
         return -1;
     }
 
-    public static TerseError? Colliding(IReadOnlyList<TextEdit> edits, string defaultPath)
+    public static TerseError? Colliding(IReadOnlyList<TextEdit> edits, string defaultPath, string root)
     {
         for (var index = 1; index < edits.Count; index++)
         {
-            var earlier = Shadowed(edits, index, defaultPath);
+            var earlier = Shadowed(edits, index, defaultPath, root);
 
             if (earlier >= 0)
                 return Collision(earlier, index, edits[earlier], edits[index]);
@@ -1788,8 +1788,39 @@ public static class FileService
         string.Create(CultureInfo.InvariantCulture, $"ifUnchangedSince carries ONE file's stamp and this call writes {paths.Count}: {string.Join(", ", paths)}"),
         "pass it on a call that writes a single file - a stamp cannot be checked against a file it was not taken from, and read_text stamp=true returns one per paths= entry");
 
-    private static bool Same(TextEdit earlier, TextEdit later, string anchor, string defaultPath) =>
-        string.Equals(earlier.OldText, anchor, StringComparison.Ordinal)
-        && string.Equals(earlier.Path ?? defaultPath, later.Path ?? defaultPath, StringComparison.OrdinalIgnoreCase)
+    private static bool Same(TextEdit earlier, TextEdit later, string anchor, string defaultPath, string root) =>
+        string.Equals(Anchored(earlier), anchor, StringComparison.Ordinal)
+        && ByText(earlier) == ByText(later)
+        && (ByText(later) || Renumbers(earlier))
+        && string.Equals(PathGuard.Full(root, earlier.Path ?? defaultPath), PathGuard.Full(root, later.Path ?? defaultPath), StringComparison.OrdinalIgnoreCase)
         && (earlier.Occurrence > 0 || later.Occurrence > 0);
+
+    private static EditRequest Forced(EditRequest request, IReadOnlyList<TextEdit> edits)
+    {
+        if (request.Force)
+            return request;
+
+        foreach (var edit in edits)
+        {
+            if (edit.Force)
+                return request with { Force = true };
+        }
+
+        return request;
+    }
+
+    private static bool ByText(TextEdit edit) => edit.OldText is { Length: > 0 };
+
+    private static string? Anchored(TextEdit edit) => ByText(edit) ? edit.OldText : edit.Section;
+
+    private static string Addressed(TextEdit edit) => ByText(edit) ? "oldText" : "section heading";
+
+    private static string CollisionRemedy(TextEdit edit) => ByText(edit)
+        ? "lengthen each anchor so it is unique, or send the second in its own call - once the first has landed it is occurrence=1"
+        : "send the second in its own call - the first entry adds or drops a heading, so the ordinals move under it";
+
+    private static bool Renumbers(TextEdit edit) => Headings(edit.NewText) != (edit.Place is { Length: > 0 } ? 0 : 1);
+
+    private static int Headings(string? text) =>
+        text is { Length: > 0 } ? DocumentOutline.Headings(text.AsSpan()) : 0;
 }

@@ -1046,7 +1046,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/ProbeSaturation.cs" });
 
-        Assert.Contains(" members - narrow with contains=", text, StringComparison.Ordinal);
+        Assert.Contains(" members - contains= or all=true", text, StringComparison.Ordinal);
         Assert.DoesNotContain("symbolIds=[", text, StringComparison.Ordinal);
     }
 
@@ -2130,5 +2130,95 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("unrecognized severity", aliased, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR InvalidArgument", aliased, StringComparison.Ordinal);
         Assert.Equal(canonical, aliased);
+    }
+
+    [Fact]
+    public async Task ATool_RefusingAnUnrecognizedParameter_NamesTheRunningVersionSoSkillDriftIsLegible()
+    {
+        var unrecognized = await server.CallAsync("find_files", new() { ["globz"] = "**/*.cs" });
+        var missing = await server.CallAsync("get_symbol", []);
+
+        Assert.Contains("unrecognized globz", unrecognized, StringComparison.Ordinal);
+        Assert.Contains("running terse=", unrecognized, StringComparison.Ordinal);
+        Assert.Contains("version drift", unrecognized, StringComparison.Ordinal);
+        Assert.DoesNotContain("running terse=", missing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WhenTheListingIsWide_EndsWithTheDepthThatWouldFoldIt()
+    {
+        var listing = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["maxResults"] = 200 });
+        var folded = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["depth"] = 1, ["maxResults"] = 200 });
+
+        Assert.Contains("next: depth=1 folds this to 2 rows", listing, StringComparison.Ordinal);
+        Assert.Contains("src/**", folded, StringComparison.Ordinal);
+        Assert.Contains("x26 files", folded, StringComparison.Ordinal);
+        Assert.DoesNotContain("next: depth=", folded, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnEditIntroducingAnInfoDiagnostic_CountsItInsteadOfAnsweringAsIfTheTierDidNotExist()
+    {
+        const string Probe = "src/Fixture.Trading/TerseInfoProbe.cs";
+
+        var written = await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseInfoProbe\n{\n    public int Probe()\n    {\n        var unused = 1;\n\n        return 2;\n    }\n}\n",
+        });
+
+        try
+        {
+            Assert.Contains("info=1 introduced", written, StringComparison.Ordinal);
+            Assert.Contains("compiler tier only", written, StringComparison.Ordinal);
+            Assert.DoesNotContain("CS0219", written, StringComparison.Ordinal);
+
+            var verbose = await server.CallAsync("write_text", new()
+            {
+                ["path"] = Probe,
+                ["force"] = true,
+                ["verbose"] = true,
+                ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseInfoProbe\n{\n    public int Probe()\n    {\n        var spare = 1;\n\n        return 2;\n    }\n}\n",
+            });
+
+            Assert.Contains("CS0219", verbose, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task RenameSymbol_WithTheOldNameLeftInACommentOrString_ReportsThemAsNotRewritten()
+    {
+        const string Probe = "src/Fixture.Trading/RenameEcho.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\n// RenameEcho is named here on purpose.\npublic sealed class RenameEcho\n{\n    public string Label => \"RenameEcho lives here\";\n}\n",
+        });
+
+        try
+        {
+            var renamed = await server.CallAsync("rename_symbol", new()
+            {
+                ["symbolId"] = "T:Fixture.Trading.RenameEcho",
+                ["newName"] = "RenameSignal",
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("NOT rewritten, a match inside a comment is not decidable", renamed, StringComparison.Ordinal);
+            Assert.Contains("NOT rewritten, a match inside a string is not decidable", renamed, StringComparison.Ordinal);
+            Assert.Contains("RenameEcho.cs:3", renamed, StringComparison.Ordinal);
+            Assert.Contains("HEURISTIC", renamed, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
     }
 }

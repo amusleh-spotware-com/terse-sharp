@@ -173,7 +173,7 @@ bool verbose) =>
         [Description("With section=, lowercase: append writes after its last non-blank line, prepend directly under its heading. With toPath=, prepend puts the moved section at the top of the target, anything else appends it. Empty replaces the section.")] string? place = null,
         [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE that section or those rows into. Cut from path, written into toPath as one write, one line per changed file. Naming the same file twice is refused. Not with oldText or edits.")] string? toPath = null,
         [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched against the first cell of each row - e.g. row=\"I286\". It must match exactly one, and the refusal says how many it matched. Not with section=, oldText or edits.")] string? row = null,
-        [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place and path. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total. Two entries of one file anchoring on the SAME oldText with occurrence= are refused before anything is written, naming both by index.")] FileService.TextEdit[]? edits = null,
+        [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place, path and force, so a .cs entry rides in a markdown batch. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total. Two entries of one file anchoring on the SAME oldText with occurrence= are refused before anything is written, naming both by index.")] FileService.TextEdit[]? edits = null,
         [Description("Markdown only, with toPath=: several table rows moved in ONE call, at most 25, each taking row and optionally newText. Replaces one call per row: cut and landed in order, written once per file. Not with row=, section=, oldText or edits.")] FileService.TextRow[]? rows = null,
         [Description("Return the N lines around each applied change in their POST-edit state, numbered, instead of only changedLines - the confirm-read a successful edit otherwise costs. 1-10, refused outside that range; 0 (default) adds nothing. Not a diff - verbose=true returns the diff instead.")] int context = 0,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
@@ -188,9 +188,6 @@ bool verbose) =>
             return Task.FromResult(refusal.Render());
 
         var target = anchor.Value!;
-
-        if (FileService.Colliding(edits ?? [], path ?? target) is { } collision)
-            return Task.FromResult(collision.Render());
 
         var targets = Targets(path ?? target, edits, toPath);
 
@@ -525,6 +522,9 @@ context.RejectWrite() is { } rejection
         FileService.TextRow[]? rows,
         CancellationToken cancellationToken)
     {
+        if (FileService.Colliding(edits ?? [], path, loaded.Root) is { } collision)
+            return collision.Render();
+
         if ((request.Row is { Length: > 0 } || rows is { Length: > 0 }) && request.ToPath is not { Length: > 0 })
         {
             return Errors.Invalid(
@@ -556,7 +556,7 @@ context.RejectWrite() is { } rejection
                 string.Create(CultureInfo.InvariantCulture, $"split it into smaller calls - at most {MaxBatchedEdits} per file and {MaxBatchedFiles} in total")).Render();
         }
 
-        var grouped = Grouped(path, batch);
+        var grouped = Grouped(loaded.Root, path, batch);
 
         return grouped.IsOk
             ? NavigationTools.Unwrap(await FileService.EditTextGroupedAsync(loaded, grouped.Value!, request, cancellationToken).ConfigureAwait(false))
@@ -664,39 +664,40 @@ context.RejectWrite() is { } rejection
 
     private const int MaxBatchedFiles = 25;
 
-    private static Result<List<FileService.TextEditGroup>> Grouped(string path, FileService.TextEdit[] edits)
+    private static Result<List<FileService.TextEditGroup>> Grouped(string root, string path, FileService.TextEdit[] edits)
     {
-        var order = new List<string>();
-        var byPath = new Dictionary<string, List<FileService.TextEdit>>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<FileService.TextEditGroup>(edits.Length);
+        var byKey = new Dictionary<string, List<FileService.TextEdit>>(edits.Length, StringComparer.OrdinalIgnoreCase);
 
         foreach (var edit in edits)
-            Collect(byPath, order, edit.Path is { Length: > 0 } target ? target : path, edit);
+            Collect(byKey, order, root, edit.Path is { Length: > 0 } target ? target : path, edit);
 
-        var oversized = order.Find(entry => byPath[entry].Count > MaxBatchedEdits);
+        var oversized = order.Find(group => group.Edits.Count > MaxBatchedEdits);
 
-        if (oversized is { Length: > 0 })
+        if (oversized.Path is { Length: > 0 })
         {
             return Result.Fail<List<FileService.TextEditGroup>>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"edits carried {byPath[oversized].Count} entries for {oversized}, at most {MaxBatchedEdits} per file are applied as one write"),
+                string.Create(CultureInfo.InvariantCulture, $"edits carried {oversized.Edits.Count} entries for {oversized.Path}, at most {MaxBatchedEdits} per file are applied as one write"),
                 "split it into smaller calls - batched-item accuracy falls off past about six edits per file"));
         }
 
-        List<FileService.TextEditGroup> groups = [.. order.Select(entry => new FileService.TextEditGroup(entry, byPath[entry]))];
-
-        return Result.Ok(groups);
+        return Result.Ok(order);
     }
 
     private static void Collect(
-        Dictionary<string, List<FileService.TextEdit>> byPath,
-        List<string> order,
+        Dictionary<string, List<FileService.TextEdit>> byKey,
+        List<FileService.TextEditGroup> order,
+        string root,
         string target,
         FileService.TextEdit edit)
     {
-        if (!byPath.TryGetValue(target, out var list))
+        var key = PathGuard.Full(root, target);
+
+        if (!byKey.TryGetValue(key, out var list))
         {
             list = [];
-            byPath[target] = list;
-            order.Add(target);
+            byKey[key] = list;
+            order.Add(new FileService.TextEditGroup(target, list));
         }
 
         list.Add(edit);

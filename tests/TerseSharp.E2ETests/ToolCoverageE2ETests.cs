@@ -50,4 +50,6 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
     }
 
     internal static int ExercisedCount => Exercised.Count;
+
+    internal static int RazorCount => Exercised.Count(name => name.StartsWith("razor_", StringComparison.Ordinal));
 }

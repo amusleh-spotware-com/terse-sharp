@@ -696,4 +696,69 @@ public static class ResxEditService
 
         return written;
     }
+
+    private const int MaxBatchedResxFiles = 10;
+
+    public static async Task<Result<string>> SetManyAsync(
+        LoadedWorkspace workspace,
+        string path,
+        IReadOnlyList<ResxWrite> files,
+        string? culture,
+        string? comment,
+        bool dryRun,
+        bool verbose)
+    {
+        if (Bounded(files) is { } refusal)
+            return Result.Fail<string>(refusal);
+
+        var applied = new List<string>(files.Count);
+        var refused = new List<string>();
+
+        for (var index = 0; index < files.Count; index++)
+        {
+            var target = files[index].Path is { Length: > 0 } named ? named : path;
+
+            Sorted(await Set(workspace, target, null, null, files[index].Entries, culture, comment, dryRun, verbose).ConfigureAwait(false), index, target, applied, refused);
+        }
+
+        return Result.Ok(applied.Count is 0 ? string.Join('\n', refused) : string.Join('\n', applied.Concat(refused)));
+    }
+
+    private static TerseError? Bounded(IReadOnlyList<ResxWrite> files)
+    {
+        if (files.Count > MaxBatchedResxFiles)
+        {
+            return Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"files carried {files.Count} entries, at most {MaxBatchedResxFiles} are written in one call"),
+                string.Create(CultureInfo.InvariantCulture, $"split it into calls of at most {MaxBatchedResxFiles} files"));
+        }
+
+        for (var index = 0; index < files.Count; index++)
+        {
+            if (files[index].Entries is not { Length: > 0 })
+            {
+                return Errors.Invalid(
+                    string.Create(CultureInfo.InvariantCulture, $"files[{index}] carries no entries"),
+                    "give every entry its own Key=Value lines, one per line");
+            }
+        }
+
+        return null;
+    }
+
+    private static void Sorted(Result<string> answer, int index, string path, List<string> applied, List<string> refused)
+    {
+        if (answer.IsOk)
+        {
+            applied.Add(answer.Value!);
+
+            return;
+        }
+
+        var error = answer.Error!;
+
+        refused.Add(string.Create(CultureInfo.InvariantCulture, $"REFUSED files[{index}] {path}: {error.Code} - {error.Message}; remedy: {error.Remedy}"));
+    }
 }
+
+public readonly record struct ResxWrite(string? Path = null, string? Entries = null);

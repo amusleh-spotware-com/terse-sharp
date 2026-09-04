@@ -22,11 +22,9 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
     public void BeginPreload(string target, CancellationToken cancellationToken)
     {
-        var before = Served();
-
         Preload(Task.Run(() => Registry.LoadAsync(target, cancellationToken), cancellationToken));
 
-        _ = AnnouncedAsync(before, cancellationToken);
+        _ = AnnouncedAsync(WorkspaceMarkup.Every, cancellationToken);
     }
 
     public Task ReadyAsync() => ready;
@@ -330,7 +328,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
     public async Task AnnounceAsync(WorkspaceMarkup before, CancellationToken cancellationToken)
     {
-        if (!Surface.MarkupDerived || ToolsChanged is not { } notify || Served() == before)
+        if (!Surface.MarkupDerived || ToolsChanged is not { } notify)
+            return;
+
+        if (await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false) == before)
             return;
 
         await notify(cancellationToken).ConfigureAwait(false);
@@ -340,7 +341,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     {
         await ready.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-        return Served();
+        return await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task AnnouncedAsync(WorkspaceMarkup before, CancellationToken cancellationToken)

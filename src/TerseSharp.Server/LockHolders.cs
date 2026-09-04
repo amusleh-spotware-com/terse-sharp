@@ -138,4 +138,60 @@ internal static partial class LockHolders
             return null;
         }
     }
+
+    public static string Scanned(string root)
+    {
+        if (root.Length is 0)
+            return string.Empty;
+
+        var builder = new StringBuilder();
+        var found = 0;
+
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                if (found >= MaxHolders || Mapped(process, root) is not { } module)
+                    continue;
+
+                found++;
+                builder.Append("\nholder pid=").Append(process.Id.ToString(CultureInfo.InvariantCulture)).Append(' ')
+                    .Append(process.ProcessName).Append(" startedUtc=").Append(Started(process)).Append(Executable(process, root))
+                    .Append(" maps=").Append(module).Append(" - ").Append(Kind(process.Id, process.ProcessName, root));
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static string? Mapped(Process process, string root)
+    {
+        if (!IsRunner(process.ProcessName))
+            return null;
+
+        try
+        {
+            foreach (ProcessModule module in process.Modules)
+            {
+                using (module)
+                {
+                    if (module.FileName is { Length: > 0 } path && PathBoundary.Contains(root, path))
+                        return Relative(path, root);
+                }
+            }
+        }
+        catch (Exception failure) when (failure is InvalidOperationException or Win32Exception or NotSupportedException)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static bool IsRunner(string name) =>
+        name.Contains("dotnet", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("test", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("MSBuild", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("BuildHost", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("terse", StringComparison.OrdinalIgnoreCase);
 }

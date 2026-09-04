@@ -834,14 +834,14 @@ public static class TextSearchService
     private const int MaxPrefix = 512;
 
     private static string Rendered(
-            List<WorkspacePath> matched,
-            string glob,
-            int maxResults,
-            bool stamps,
-            string? name,
-            int depth,
-            string? root,
-            bool chosen = false)
+        List<WorkspacePath> matched,
+        string glob,
+        int maxResults,
+        bool stamps,
+        string? name,
+        int depth,
+        string? root,
+        bool chosen = false)
     {
         var files = Named(matched, name);
         var rows = depth > 0 ? Rolled(files, depth, stamps) : Listed(files, stamps);
@@ -859,6 +859,7 @@ public static class TextSearchService
         if (files.Count is 0 && name is not { Length: > 0 })
             response.Note("no file matched - pass name=<text> to match a file name substring instead of a glob");
 
+        Folding(response, files, depth, Covered(shown));
         Batch(response, shown, root);
 
         return response.ToString();
@@ -1007,4 +1008,61 @@ public static class TextSearchService
         && !request.CountOnly
         && request.Root is not { Length: > 0 }
         && request.Glob.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+
+    private const int FoldSteer = 25;
+    private const int MaxFoldDepth = 4;
+
+    private static void Folding(ResponseBuilder response, List<WorkspacePath> files, int depth, int covered)
+    {
+        if (depth > 0 || covered < files.Count || files.Count < FoldSteer)
+            return;
+
+        for (var candidate = 1; candidate <= MaxFoldDepth; candidate++)
+        {
+            var rows = Folds(files, candidate);
+
+            if (rows >= 2 && rows * 2 <= files.Count)
+            {
+                response.Note(string.Create(CultureInfo.InvariantCulture, $"next: depth={candidate} folds this to {rows} rows"));
+
+                return;
+            }
+        }
+    }
+
+    private static int Folds(List<WorkspacePath> files, int depth)
+    {
+        var counts = Counted(files, depth);
+
+        return Singles(files, counts, depth) + Multiples(counts);
+    }
+
+    private static int Singles(List<WorkspacePath> files, Dictionary<string, int> counts, int depth)
+    {
+        var byPrefix = counts.GetAlternateLookup<ReadOnlySpan<char>>();
+        var rows = 0;
+
+        foreach (var file in files)
+        {
+            var prefix = Prefix(file.RelativePath, depth);
+
+            if (prefix.IsEmpty || byPrefix[prefix] is 1)
+                rows++;
+        }
+
+        return rows;
+    }
+
+    private static int Multiples(Dictionary<string, int> counts)
+    {
+        var rows = 0;
+
+        foreach (var count in counts.Values)
+        {
+            if (count > 1)
+                rows++;
+        }
+
+        return rows;
+    }
 }

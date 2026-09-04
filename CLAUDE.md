@@ -845,6 +845,12 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
 - **Changing a guard means changing the tests that assert the old answer.** A push failed on all three
   runners because a test still asserted `dotnet build` was *allowed* against a guard just taught to deny
   it, while E2E was 330/330 green locally on the stale expectation.
+- **Waiting moved from `sleep` to `TaskOutput`, and the guard cannot see it.** The bare-`sleep` row
+  worked - 15 sleeps totalling 175 s in a measured week, down from 156 calls and 25 307 s - while
+  `TaskOutput` cost **14.08 h, 13.0% of all tool wall time over 193 calls**, p50 182 s, p90 and p99
+  both at the 600 s ceiling, 24 of them byte-identical repeats. Background work re-invokes you when it
+  finishes, so polling for it buys nothing the notification did not already deliver. A status check
+  *after* a completion notification is legitimate; waiting on one is not - end the turn instead.
 
 ## Definition of done
 

@@ -348,7 +348,8 @@ compiles clean and throws the first time the component renders, reported as `RZR
 UNKNOWN_PARAMETER` at the `.razor` line. `resx_validate` reports missing values and placeholder
 mismatches across a whole `.resx` family, instead of the ~36,000 tokens it costs to read one. And
 `rename_symbol` carries into markup — rewriting `Click="…"` and `{Binding …}` only where an `x:Class`
-or `x:DataType` *proves* the reference; anything else is listed `NOT rewritten` rather than guessed.
+or `x:DataType` *proves* the reference; anything else is listed `NOT rewritten` rather than guessed —
+and so is every C# comment and string literal the old name survives in, which no rename can decide.
 
 ## ❓ FAQ
 

@@ -1440,4 +1440,66 @@ public sealed class ToolGuardTests
     [InlineData("for i in 1 2 3; do sleep 1; done")]
     public void Bash_WithASleepBeforeTheLoopCloses_StaysAllowed(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void LockHolders_Scanned_FindsTheProcessesMappingThisTreeAndAnswersNothingOutsideIt()
+    {
+        var scanned = LockHolders.Scanned(AppContext.BaseDirectory);
+
+        Assert.Contains("holder pid=" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture), scanned, StringComparison.Ordinal);
+        Assert.Contains("maps=", scanned, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, LockHolders.Scanned(string.Empty));
+        Assert.Equal(string.Empty, LockHolders.Scanned(Path.Combine(Path.GetTempPath(), "terse-no-such-tree")));
+    }
+
+    [Fact]
+    public void StillLocked_WithNoNamedHolder_ScansForThemInServerInsteadOfDelegatingToAShell()
+    {
+        var note = TerseSharp.Server.Tools.BuildTools.StillLocked("build", "MSB3021: Unable to copy file, access is denied.", AppContext.BaseDirectory);
+
+        Assert.DoesNotContain("list the holders yourself", note, StringComparison.Ordinal);
+        Assert.Contains("HEURISTIC", note, StringComparison.Ordinal);
+        Assert.Contains("holder pid=", note, StringComparison.Ordinal);
+        Assert.Contains("do not list them again in a shell", note, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git blame src/App/OrderService.cs", "no-tool git blame")]
+    [InlineData("git commit -m x", "no-tool git commit")]
+    [InlineData("dotnet restore", "no-tool dotnet restore")]
+    public void Inspect_WhenItAllowsACommandItCouldHaveReplacedInADotNetTree_RecordsThatNoToolServesIt(string command, string allowance)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.False(verdict.Denied);
+        Assert.Equal(allowance, verdict.Allowance);
+    }
+
+    [Fact]
+    public void Inspect_WhenItAllowsAReplaceableCommandOutsideADotNetTree_RecordsThatTheCwdWasNotRecognised()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "terse-not-a-dotnet-tree");
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "grep -rn TODO notes.txt" }, outside);
+
+        Assert.False(verdict.Denied);
+        Assert.Equal("cwd-not-dotnet", verdict.Allowance);
+    }
+
+    [Fact]
+    public void Inspect_ForACommandNothingCouldReplace_RecordsNoAllowanceAtAll()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "npm install" });
+
+        Assert.False(verdict.Denied);
+        Assert.Null(verdict.Allowance);
+    }
+
+    [Fact]
+    public void GuardLogEntry_ForAnAllowedReplaceableCommand_CarriesTheAllowanceSoAScanCanSeparateTheCases()
+    {
+        var payload = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git blame src/App/OrderService.cs\"}}";
+        var entry = ToolGuard.Entry(payload, ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git blame src/App/OrderService.cs" }));
+
+        Assert.Contains("\"allowance\":\"no-tool git blame\"", entry, StringComparison.Ordinal);
+    }
 }
