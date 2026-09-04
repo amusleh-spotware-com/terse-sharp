@@ -145,19 +145,18 @@ internal static partial class LockHolders
             return string.Empty;
 
         var builder = new StringBuilder();
-        var found = 0;
+        var current = Environment.ProcessId;
+        var found = Self(builder, root);
 
         foreach (var process in Process.GetProcesses())
         {
             using (process)
             {
-                if (found >= MaxHolders || Mapped(process, root) is not { } module)
+                if (found >= MaxHolders || process.Id == current || Mapped(process, root) is not { } module)
                     continue;
 
                 found++;
-                builder.Append("\nholder pid=").Append(process.Id.ToString(CultureInfo.InvariantCulture)).Append(' ')
-                    .Append(process.ProcessName).Append(" startedUtc=").Append(Started(process)).Append(Executable(process, root))
-                    .Append(" maps=").Append(module).Append(" - ").Append(Kind(process.Id, process.ProcessName, root));
+                Append(builder, process, root, module);
             }
         }
 
@@ -194,4 +193,21 @@ internal static partial class LockHolders
         || name.Contains("MSBuild", StringComparison.OrdinalIgnoreCase)
         || name.Contains("BuildHost", StringComparison.OrdinalIgnoreCase)
         || name.Contains("terse", StringComparison.OrdinalIgnoreCase);
+
+    private static int Self(StringBuilder builder, string root)
+    {
+        using var current = Process.GetCurrentProcess();
+
+        if (Mapped(current, root) is not { } module)
+            return 0;
+
+        Append(builder, current, root, module);
+
+        return 1;
+    }
+
+    private static void Append(StringBuilder builder, Process process, string root, string module) =>
+        builder.Append("\nholder pid=").Append(process.Id.ToString(CultureInfo.InvariantCulture)).Append(' ')
+            .Append(process.ProcessName).Append(" startedUtc=").Append(Started(process)).Append(Executable(process, root))
+            .Append(" maps=").Append(module).Append(" - ").Append(Kind(process.Id, process.ProcessName, root));
 }
