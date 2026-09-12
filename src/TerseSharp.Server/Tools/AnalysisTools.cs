@@ -64,7 +64,7 @@ public sealed class AnalysisTools(ToolContext context)
         });
 
     [McpServerTool(Name = "cleanup")]
-    [Description("Replaces Bash dotnet format style and dotnet format analyzers. fix=usings and fix=all remove unused usings, sort them System-first and reformat; fix=style and fix=analyzers apply code fixes ONLY and never reformat, so each matches its CI command byte for byte. Those three fix modes apply the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
+    [Description("Replaces Bash dotnet format style and dotnet format analyzers. fix=usings and fix=all remove unused usings, sort them System-first and reformat; fix=style and fix=analyzers apply code fixes ONLY and never reformat, so each matches its CI command byte for byte. Those three fix modes apply the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, paths=[...] up to 10 in ONE pass as analyze and format do - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
     public Task<string> Cleanup(
         [Description("File, directory or glob such as src/**/*.cs; empty cleans every document.")] string? path = null,
         [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, or all.")] string? fix = null,
@@ -75,18 +75,27 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing. fix=style verifies exactly what dotnet format style checks and fix=analyzers exactly what dotnet format analyzers checks, so those two are the CI pre-empt; fix=all and the default fix=usings are supersets and can name files CI accepts.")] bool verify = false,
         [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Several files, directories or globs in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
         CancellationToken cancellationToken = default)
     {
         var mode = Mode(fix);
 
-        return mode.IsOk
-            ? Guarded(workspace, path, loaded => FormatService.RunAsync(
-                loaded,
-                new FixScope(path, changed),
-                new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
-                new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
-                cancellationToken))
-            : Task.FromResult(mode.Error!.Render());
+        if (!mode.IsOk)
+            return Task.FromResult(mode.Error!.Render());
+
+        return Guarded(workspace, path ?? First(paths), loaded =>
+        {
+            var scope = Scoped(loaded, path, paths);
+
+            return scope.IsOk
+                ? FormatService.RunAsync(
+                    loaded,
+                    new FixScope(scope.Value, changed),
+                    new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
+                    new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
+                    cancellationToken)
+                : Task.FromResult(Result.Fail<string>(scope.Error!));
+        });
     }
 
     private static Result<FixMode> Mode(string? fix) => fix?.ToLowerInvariant() switch

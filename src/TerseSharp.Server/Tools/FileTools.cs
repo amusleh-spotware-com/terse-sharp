@@ -7,12 +7,13 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. A markdown file over 8000 characters asked for whole answers its SECTION MAP plus the same steer; verbose=true, a line range, tail=, section= or columns= opt back into the text. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. tokens=true ends it with the whole file's tokens=N, the count the doc budgets assert. On markdown, headings=true returns the heading map with line ranges and GitHub anchor slugs - bounded by maxLines, and narrowed to the top of the tree by maxLevel=2, which lists the ## sections without their ### children - and section=\"## Commands\" returns just that section, and columns=\"Finding,Tool\" projects a markdown table down to the named columns, so a checked-in table answers which rows exist without paying for the whole file - it composes with section=, is bounded by maxLines, and a column no table under the read declares is refused by name rather than dropped, as are headings=true, startLine=, endLine= and tail= beside it. cellChars=60 caps each projected CELL, clipping the rest and counting what it clipped. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
+    [Description("Read any file, line-ranged. Pass paths to read up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line with its own count and continuation note, a path that does not resolve is reported inline as NOT_FOUND instead of failing the call, and maxChars is a budget shared across the batch that names the entry it clipped. ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges in ONE call, so four scattered anchors cost one. ref= reads the file as it was at a git ref instead of shelling out for it, and a whole .cs file there answers its outline the same way the working-tree read does. A .cs path asked for whole - no startLine, endLine, ranges or tail - answers with that file's outline plus a steer instead of its text, because the text is about three times the tokens and is almost never the question; pass verbose=true, or any line range, to get the text itself. A markdown file over 8000 characters asked for whole answers its SECTION MAP plus the same steer; verbose=true, a line range, tail=, section= or columns= opt back into the text. The text is returned compressed: trailing whitespace is stripped and a line number is printed only where the numbering jumps, so a contiguous read carries one number. tail=N returns the last N lines, which is how a long log is read, and maxChars caps the file text on a file whose lines are very long. A clipped read names the line to continue from, and says so separately when a line had to be cut mid-way. tokens=true ends it with the whole file's tokens=N, the count the doc budgets assert. On markdown, headings=true returns the heading map with line ranges and GitHub anchor slugs - bounded by maxLines, and narrowed to the top of the tree by maxLevel=2, which lists the ## sections without their ### children - and section=\"## Commands\" returns just that section, and columns=\"Finding,Tool\" projects a markdown table down to the named columns, so a checked-in table answers which rows exist without paying for the whole file - it composes with section=, is bounded by maxLines, and a column no table under the read declares is refused by name rather than dropped, as are headings=true, startLine=, endLine= and tail= beside it. cellChars=60 caps each projected CELL, clipping the rest and counting what it clipped. An absolute path outside every workspace root is read and tagged outside-workspace, so a cross-repo comparison needs no second load_workspace and no workspace= even when several are loaded.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
                 [Description("Several files answered in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
                 [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
                 [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
+                [Description("Discontinuous line ranges of one file, at most 20, each a line (\"42\") or a range (\"101-102\"), 1-based. Refused beside startLine, endLine, tail, headings, section, columns.")] string?[]? ranges = null,
                 [Description("Maximum lines returned, default 2000. The response is truncated, never refused. With headings=true it bounds the SECTIONS listed, and the summary says how many of the total were shown.")] int maxLines = 0,
                 [Description("Maximum characters of file text returned, default 40960 at most 131072. It bounds the file text only, is one budget shared across a paths= batch, and does not apply to headings=true; a clipped read names the line to continue from.")] int maxChars = 0,
                 [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
@@ -38,8 +39,18 @@ public sealed class FileTools(ToolContext context)
         if (Refused(section, occurrence, headings, maxLevel, columns, cellChars) is { } refusal)
             return Task.FromResult(refusal.Render());
 
+        if (RefusedRanges(ranges, startLine, endLine, tail, headings, columns, section) is { } ranged)
+            return Task.FromResult(ranged.Render());
+
+        var spans = ranges is { Length: > 0 } requested
+            ? FileService.ParseSpans(requested)
+            : default;
+
+        if (spans.Error is { } malformed)
+            return Task.FromResult(malformed.Render());
+
         var request = new FileService.ReadRequest(
-            new FileService.LineRange(startLine, endLine, Lines(maxLines), Characters(maxChars)),
+            new FileService.LineRange(startLine, endLine, Lines(maxLines), Characters(maxChars), spans.Value),
             headings,
             section,
             verbose,
@@ -52,7 +63,9 @@ public sealed class FileTools(ToolContext context)
             CellChars: Math.Max(0, cellChars),
             Stamp: stamp);
 
-        var whole = WholeRead(startLine, endLine, tail, maxLines, maxChars, section, headings, verbose) && columns is null;
+        var whole = WholeRead(startLine, endLine, tail, maxLines, maxChars, section, headings, verbose)
+            && columns is null
+            && ranges is not { Length: > 0 };
 
         if (@ref is { Length: > 0 } reference)
         {
@@ -461,7 +474,7 @@ context.RejectWrite() is { } rejection
         if (!listed.IsOk)
             return Result.Fail<HashSet<string>>(listed.Error!);
 
-        var tracked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tracked = new HashSet<string>(PathBoundary.Comparer);
 
         foreach (var line in listed.Value!.AsSpan().EnumerateLines())
         {
@@ -667,7 +680,7 @@ context.RejectWrite() is { } rejection
     private static Result<List<FileService.TextEditGroup>> Grouped(string root, string path, FileService.TextEdit[] edits)
     {
         var order = new List<FileService.TextEditGroup>(edits.Length);
-        var byKey = new Dictionary<string, List<FileService.TextEdit>>(edits.Length, StringComparer.OrdinalIgnoreCase);
+        var byKey = new Dictionary<string, List<FileService.TextEdit>>(edits.Length, PathBoundary.Comparer);
 
         foreach (var edit in edits)
             Collect(byKey, order, root, edit.Path is { Length: > 0 } target ? target : path, edit);
@@ -1035,5 +1048,27 @@ context.RejectWrite() is { } rejection
     {
         if (candidate is { Length: > 0 } own && !targets.Exists(existing => string.Equals(existing, own, StringComparison.OrdinalIgnoreCase)))
             targets.Add(own);
+    }
+
+    private static TerseError? RefusedRanges(string?[]? ranges, int startLine, int endLine, int tail, bool headings, string? columns, string? section)
+    {
+        if (ranges is not { Length: > 0 })
+            return null;
+
+        if ((startLine, endLine, tail) is not ( <= 0, <= 0, <= 0))
+        {
+            return Errors.Invalid(
+                "'ranges' already names every line to read, and startLine=, endLine= or tail= was passed beside it",
+                "pass ranges=[\"42\", \"101-102\"] on its own, or drop it and read the one range");
+        }
+
+        if (headings || columns is { Length: > 0 } || section is { Length: > 0 })
+        {
+            return Errors.Invalid(
+                "'ranges' reads line ranges, and headings=, section= and columns= answer about structure instead",
+                "pass ranges= on its own, or drop it and keep the markdown view you asked for");
+        }
+
+        return null;
     }
 }

@@ -247,11 +247,15 @@ names a path operand at all, while a piped `head -40` reading stdin still runs. 
 replacing call with the command's own arguments translated (`git log --oneline -1` → `history
 maxResults=1`), a `2>&1` no longer forces a whole-command refusal, and a `$( )` no longer shadows the
 real command. It also covers `dotnet build`/`test`/`format`/`clean`, `dotnet watch build`/`test`,
-`msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose command word is `sleep`, outside a
+`msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose command word is `sleep`, or a
+`powershell -Command "Start-Sleep …"` hosting one, outside a
 `while`/`until`/`for` loop — because waiting is not work and nothing replaces it; and the working-tree
 half of git — `git status` and `git diff` in every flag and `-C` form, answered by `changed_files` and
 `diff_symbols`, with `git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files` to
-`find_files tracked=true`, and a `git tag` **listing** to `history tags=true`.
+`find_files tracked=true`, and a `git tag` **listing** to `history tags=true`. `TaskOutput` and
+`TaskList` are not denied — they are **allowed with a stand-down**, because polling for a result the
+harness already delivers cost 22.5 h and 29.7% of all tool wall time in a measured week, while 207 of
+those 272 calls followed a real completion notification and were legitimate.
 
 The compound-command rewrite is only attempted where it is provably sound: every top-level separator is
 `&&`, `;` or a newline, and a pipeline containing a covered stage is dropped whole. A command carrying

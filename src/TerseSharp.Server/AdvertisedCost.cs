@@ -24,8 +24,9 @@ public static class AdvertisedCost
             : null;
 
     private static string Breakdown(Reading reading) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"  toolDescriptions={Tokens(reading.Descriptions)} parameterDescriptions={Tokens(reading.Parameters)} schemaFrame={Tokens(reading.Frame)} names={Tokens(reading.Names)}");
+            CultureInfo.InvariantCulture,
+            $"  toolDescriptions={Tokens(reading.Descriptions)} parameterDescriptions={Tokens(reading.Parameters)} schemaFrame={Tokens(reading.Frame)} names={Tokens(reading.Names)}")
+        + Ranked(reading.Worst);
 
     private static int Tokens(int characters) => (characters + 3) / 4;
 
@@ -35,6 +36,7 @@ public static class AdvertisedCost
         var descriptions = 0;
         var parameters = 0;
         var frame = 0;
+        var costs = new List<ToolCost>(tools.Count);
 
         foreach (var tool in tools)
         {
@@ -45,9 +47,10 @@ public static class AdvertisedCost
             descriptions += tool.Description?.Length ?? 0;
             parameters += described;
             frame += schema.Length - described;
+            costs.Add(new ToolCost(tool.Name, described));
         }
 
-        return new Reading(tools.Count, Tokens(names + descriptions + parameters + frame), names, descriptions, parameters, frame);
+        return new Reading(tools.Count, Tokens(names + descriptions + parameters + frame), names, descriptions, parameters, frame, Costliest(costs));
     }
 
     private static int Described(JsonElement schema)
@@ -79,7 +82,7 @@ public static class AdvertisedCost
         }
     }
 
-    private sealed record Reading(int Tools, int Tokens, int Names, int Descriptions, int Parameters, int Frame);
+    private sealed record Reading(int Tools, int Tokens, int Names, int Descriptions, int Parameters, int Frame, IReadOnlyList<ToolCost> Worst);
 
     private static Reading? unnarrowed;
 
@@ -101,5 +104,29 @@ public static class AdvertisedCost
     {
         Volatile.Write(ref unnarrowed, Measure(whole));
         Volatile.Write(ref last, Measure(advertised));
+    }
+
+    private const int MaxCostliest = 10;
+
+    public readonly record struct ToolCost(string Name, int Parameters);
+
+    private static List<ToolCost> Costliest(List<ToolCost> costs)
+    {
+        costs.Sort(static (left, right) => right.Parameters.CompareTo(left.Parameters));
+
+        return costs.Count > MaxCostliest ? costs.GetRange(0, MaxCostliest) : costs;
+    }
+
+    private static string Ranked(IReadOnlyList<ToolCost> worst)
+    {
+        if (worst.Count is 0)
+            return string.Empty;
+
+        var parts = new string[worst.Count];
+
+        for (var index = 0; index < worst.Count; index++)
+            parts[index] = string.Create(CultureInfo.InvariantCulture, $"{worst[index].Name}={Tokens(worst[index].Parameters)}");
+
+        return "\n  parameterDescriptions, costliest first: " + string.Join(' ', parts);
     }
 }

@@ -94,6 +94,9 @@ public static class RenameService
 
         foreach (var id in changed)
         {
+            if (lingering.Count >= MaxLingering)
+                break;
+
             if (updated.GetDocument(id) is { } document)
                 await ScanAsync(document, oldName, root, lingering, cancellationToken).ConfigureAwait(false);
         }

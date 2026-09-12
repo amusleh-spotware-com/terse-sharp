@@ -693,4 +693,110 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("private int Helper() => 2;", applied, StringComparison.Ordinal);
         Assert.Contains("Second,", applied, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAHeldAddEntry_CorrectsItWithAnAddPrefixedFix()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => Doubled(2);",
+            ["add"] = new[] { "private string Doubled(int value) => value * 2;" },
+        });
+
+        var retried = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["fix"] = new[] { "add:0=private int Doubled(int value) => value * 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains("private int Doubled", retried, StringComparison.Ordinal);
+        Assert.DoesNotContain("private string Doubled", retried, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAnAddFixIndexTheTokenDoesNotCarry_IsRefusedNamingTheRange()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => MissingHelperThatDoesNotExist();",
+        });
+
+        var refused = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["fix"] = new[] { "add:0=private int Helper() => 1;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR ", refused, StringComparison.Ordinal);
+        Assert.Contains("add:0", refused, StringComparison.Ordinal);
+        Assert.Contains("add=", refused, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAppendBesideAToken_LandsTheHeldBatchAndTheAddedPair()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => MissingHelperThatDoesNotExist();",
+        });
+
+        var appended = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["append"] = true,
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.PreExistingError" },
+            ["declarations"] = new[] { "public int PreExistingError() => 7;" },
+            ["allowErrors"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains("MissingHelperThatDoesNotExist", appended, StringComparison.Ordinal);
+        Assert.Contains("PreExistingError() => 7", appended, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAppendAndNoToken_IsRefusedNamingTheToken()
+    {
+        var refused = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy" },
+            ["declarations"] = new[] { "public int Healthy() => 1;" },
+            ["append"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR ", refused, StringComparison.Ordinal);
+        Assert.Contains("append", refused, StringComparison.Ordinal);
+        Assert.Contains("retryWith", refused, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAppendAndASingularDeclaration_IsRefusedInsteadOfDroppingIt()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => MissingHelperThatDoesNotExist();",
+        });
+
+        var refused = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["append"] = true,
+            ["symbolId"] = "M:Fixture.Broken.Calculator.PreExistingError",
+            ["declaration"] = "public int PreExistingError() => 7;",
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR ", refused, StringComparison.Ordinal);
+        Assert.Contains("append", refused, StringComparison.Ordinal);
+        Assert.Contains("silently dropped", refused, StringComparison.Ordinal);
+    }
 }

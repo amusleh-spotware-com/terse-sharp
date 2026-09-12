@@ -627,7 +627,7 @@ public static class EditGate
 
         response.Note(verbose
             ? string.Create(CultureInfo.InvariantCulture, $"info={report.NewInfos.Length} introduced  {named}")
-            : string.Create(CultureInfo.InvariantCulture, $"info={report.NewInfos.Length} introduced - compiler tier only, analyzers are not run here; verbose=true names them and analyze reports the CA and IDE rules"));
+            : string.Create(CultureInfo.InvariantCulture, $"info={report.NewInfos.Length} introduced - compiler tier only, analyzers are NOT run here; verbose=true names them, and analyze changed=true severity=info reports the CA and IDE rules over exactly the files this task changed, in ONE call"));
     }
 
     private const string Separator = ", ";

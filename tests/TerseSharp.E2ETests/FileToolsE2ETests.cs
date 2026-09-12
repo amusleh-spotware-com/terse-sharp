@@ -1523,4 +1523,81 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         return new string(end < 0 ? tail : tail[..end]);
     }
+
+    [Fact]
+    public async Task ReadText_WithSeveralRanges_ReturnsOnlyThoseLinesAndNumbersOnlyTheJumps()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["ranges"] = new[] { "1", "3-4" },
+        });
+
+        var lines = text.Split('\n');
+
+        Assert.Equal("3 lines", lines[0]);
+        Assert.Equal("1: {", lines[1]);
+        Assert.StartsWith("3: ", lines[2], StringComparison.Ordinal);
+        Assert.Contains("MaxVolume", lines[2], StringComparison.Ordinal);
+        Assert.DoesNotContain("4: ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("2: ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("5: ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithRangesBesideAStartLine_IsRefusedNamingBoth()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["ranges"] = new[] { "1" },
+            ["startLine"] = 2,
+        });
+
+        Assert.StartsWith("ERROR ", text, StringComparison.Ordinal);
+        Assert.Contains("ranges", text, StringComparison.Ordinal);
+        Assert.Contains("startLine", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithAMalformedRange_IsRefusedNamingTheEntry()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["ranges"] = new[] { "7-3" },
+        });
+
+        Assert.StartsWith("ERROR ", text, StringComparison.Ordinal);
+        Assert.Contains("7-3", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithEveryRangePastTheEnd_SaysSoInsteadOfAnsweringEmpty()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "appsettings.json",
+            ["ranges"] = new[] { "90-99" },
+        });
+
+        Assert.Contains("past the last line", text, StringComparison.Ordinal);
+        Assert.Contains("total=5", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithAnEmptyRangesArray_AnswersExactlyWhatNoRangesWouldAnswer()
+    {
+        var plain = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs" });
+        var empty = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderBook.cs",
+            ["ranges"] = Array.Empty<string>(),
+        });
+
+        Assert.Equal(plain, empty);
+        Assert.DoesNotContain("namespace Fixture.Trading;", empty, StringComparison.Ordinal);
+    }
 }

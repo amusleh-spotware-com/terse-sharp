@@ -444,4 +444,18 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.DoesNotContain("symbolIds is an array parameter", text, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("search_text", "globs", "glob")]
+    [InlineData("find_registrations", "symbolId", "symbol")]
+    [InlineData("edit_text", "find", "oldText")]
+    [InlineData("list_tests", "filter", "contains")]
+    public async Task ARejectedParameterName_NamesTheAcceptedOneItMeant(string tool, string passed, string expected)
+    {
+        var text = await server.CallAsync(tool, new() { [passed] = "x" });
+
+        Assert.Contains("unrecognized " + passed, text, StringComparison.Ordinal);
+        Assert.Contains("did you mean", text, StringComparison.Ordinal);
+        Assert.Contains(passed + " -> " + expected, text, StringComparison.Ordinal);
+    }
 }

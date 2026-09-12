@@ -402,11 +402,23 @@ public static class FileService
 
     public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0);
 
-    public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters)
+    public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters, IReadOnlyList<LineSpan>? Spans = null)
     {
         public int Budget => MaxChars > 0 ? MaxChars : DefaultResponseCharacters;
 
-        public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
+        public bool Covers(int line)
+        {
+            if (Spans is not { Count: > 0 } spans)
+                return line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
+
+            for (var index = 0; index < spans.Count; index++)
+            {
+                if (spans[index].Covers(line))
+                    return true;
+            }
+
+            return false;
+        }
     }
 
     private readonly record struct LineSelection(
@@ -570,12 +582,17 @@ public static class FileService
 
     private static void AppendPastEnd(ResponseBuilder response, LineRange range, LineSelection selection)
     {
-        if (selection.CoveredLines is not 0 || range.Start <= selection.TotalLines)
+        if (selection.CoveredLines is not 0)
             return;
 
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"startLine={range.Start} is past the last line (total={selection.TotalLines})"));
+        var note = range.Spans is { Count: > 0 }
+            ? string.Create(CultureInfo.InvariantCulture, $"every ranges= entry is past the last line (total={selection.TotalLines})")
+            : range.Start > selection.TotalLines
+                ? string.Create(CultureInfo.InvariantCulture, $"startLine={range.Start} is past the last line (total={selection.TotalLines})")
+                : null;
+
+        if (note is not null)
+            response.Note(note);
     }
 
     private static string Dedented(string text)
@@ -1823,4 +1840,63 @@ public static class FileService
 
     private static int Headings(string? text) =>
         text is { Length: > 0 } ? DocumentOutline.Headings(text.AsSpan()) : 0;
+
+    public const int MaxLineSpans = 20;
+
+    public readonly record struct LineSpan(int Start, int End)
+    {
+        public bool Covers(int line) => line >= Math.Max(1, Start) && line <= (End <= 0 ? int.MaxValue : End);
+    }
+
+    private static LineSpan? ParseSpan(ReadOnlySpan<char> entry)
+    {
+        if (entry.IsEmpty)
+            return null;
+
+        var dash = entry.IndexOf('-');
+
+        if (dash < 0)
+        {
+            return int.TryParse(entry, NumberStyles.None, CultureInfo.InvariantCulture, out var single) && single > 0
+                ? new LineSpan(single, single)
+                : null;
+        }
+
+        return int.TryParse(entry[..dash].Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var start)
+            && int.TryParse(entry[(dash + 1)..].Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var end)
+            && start > 0
+            && end >= start
+                ? new LineSpan(start, end)
+                : null;
+    }
+
+    public static Result<IReadOnlyList<LineSpan>> ParseSpans(IReadOnlyList<string?> ranges)
+    {
+        if (ranges.Count > MaxLineSpans)
+        {
+            return new Result<IReadOnlyList<LineSpan>>(
+                null,
+                Errors.Invalid(
+                    string.Create(CultureInfo.InvariantCulture, $"'ranges' takes at most {MaxLineSpans} entries, and {ranges.Count} were passed"),
+                    string.Create(CultureInfo.InvariantCulture, $"send at most {MaxLineSpans} entries, or read the file whole")));
+        }
+
+        var spans = new List<LineSpan>(ranges.Count);
+
+        foreach (var entry in ranges)
+        {
+            if (ParseSpan(entry.AsSpan().Trim()) is not { } span)
+            {
+                return new Result<IReadOnlyList<LineSpan>>(
+                    null,
+                    Errors.Invalid(
+                        string.Create(CultureInfo.InvariantCulture, $"'ranges' entry '{entry}' is not a line or a line range"),
+                        "each entry is a line like 42 or a range like 101-102, 1-based, with the end not before the start"));
+            }
+
+            spans.Add(span);
+        }
+
+        return new Result<IReadOnlyList<LineSpan>>(spans, null);
+    }
 }

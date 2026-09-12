@@ -813,4 +813,26 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Kept", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task DeleteSymbol_WithAllowErrors_AppliesADeleteTheGateWouldOtherwiseRollBack()
+    {
+        var gated = await server.CallAsync("delete_symbol", new()
+        {
+            ["symbolId"] = "Fixture.Trading.OrderService.Submit",
+            ["force"] = true,
+            ["dryRun"] = true,
+        });
+
+        var allowed = await server.CallAsync("delete_symbol", new()
+        {
+            ["symbolId"] = "Fixture.Trading.OrderService.Submit",
+            ["force"] = true,
+            ["allowErrors"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("rolled back", gated, StringComparison.Ordinal);
+        Assert.DoesNotContain("rolled back", allowed, StringComparison.Ordinal);
+    }
 }

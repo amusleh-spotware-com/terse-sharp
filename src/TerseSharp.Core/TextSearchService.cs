@@ -1017,52 +1017,41 @@ public static class TextSearchService
         if (depth > 0 || covered < files.Count || files.Count < FoldSteer)
             return;
 
+        if (Chosen(files) is not { } fold)
+            return;
+
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"next: depth={fold.Depth} folds this to {fold.Rows} rows"));
+    }
+
+    private static (int Depth, int Rows)? Chosen(List<WorkspacePath> files)
+    {
         for (var candidate = 1; candidate <= MaxFoldDepth; candidate++)
         {
-            var rows = Folds(files, candidate);
+            var rows = Rows(files, candidate);
 
             if (rows >= 2 && rows * 2 <= files.Count)
-            {
-                response.Note(string.Create(CultureInfo.InvariantCulture, $"next: depth={candidate} folds this to {rows} rows"));
-
-                return;
-            }
+                return (candidate, rows);
         }
+
+        return null;
     }
 
-    private static int Folds(List<WorkspacePath> files, int depth)
+    private static int Rows(List<WorkspacePath> files, int depth)
     {
-        var counts = Counted(files, depth);
-
-        return Singles(files, counts, depth) + Multiples(counts);
-    }
-
-    private static int Singles(List<WorkspacePath> files, Dictionary<string, int> counts, int depth)
-    {
+        var counts = new Dictionary<string, int>(files.Count, StringComparer.Ordinal);
         var byPrefix = counts.GetAlternateLookup<ReadOnlySpan<char>>();
-        var rows = 0;
+        var empties = 0;
 
         foreach (var file in files)
         {
             var prefix = Prefix(file.RelativePath, depth);
 
-            if (prefix.IsEmpty || byPrefix[prefix] is 1)
-                rows++;
+            if (prefix.IsEmpty)
+                empties++;
+            else if (!byPrefix.TryAdd(prefix, 1))
+                byPrefix[prefix] += 1;
         }
 
-        return rows;
-    }
-
-    private static int Multiples(Dictionary<string, int> counts)
-    {
-        var rows = 0;
-
-        foreach (var count in counts.Values)
-        {
-            if (count > 1)
-                rows++;
-        }
-
-        return rows;
+        return empties + counts.Count;
     }
 }

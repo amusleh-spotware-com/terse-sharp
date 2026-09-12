@@ -43,4 +43,14 @@ public sealed class PathBoundaryTests
     }
 
     private static string Under(params string[] segments) => Path.Combine([Anchor, .. segments]);
+
+    [Fact]
+    public void Comparer_IsCaseSensitiveExactlyWhereTheFilesystemIs()
+    {
+        var expected = OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+
+        Assert.Same(expected, PathBoundary.Comparer);
+        Assert.Equal(OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase, PathBoundary.Comparison);
+        Assert.Equal(!OperatingSystem.IsLinux(), PathBoundary.Comparer.Equals("src/A.md", "src/a.md"));
+    }
 }

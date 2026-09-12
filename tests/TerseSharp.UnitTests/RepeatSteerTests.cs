@@ -175,6 +175,23 @@ public sealed class RepeatSteerTests
         Assert.Equal("2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call", steer);
         Assert.DoesNotContain("\"src/A.cs\", \"src/A.cs\"", steer, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("edit_text", "edits=[...]", "{path, oldText, newText}")]
+    [InlineData("write_text", "files=[...]", "{path, content}")]
+    public void Steer_ForAToolWhoseEntriesAreObjects_NamesThePerEntryShapeAndItsOwnPath(string tool, string plural, string shape)
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer(tool));
+
+        var note = RepeatSteer.Steer(tool);
+
+        Assert.NotNull(note);
+        Assert.Contains(plural, note, StringComparison.Ordinal);
+        Assert.Contains(shape, note, StringComparison.Ordinal);
+        Assert.Contains("OWN path", note, StringComparison.Ordinal);
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

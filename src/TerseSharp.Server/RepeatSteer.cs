@@ -29,6 +29,7 @@ public static class RepeatSteer
         ["resx_set"] = "entries",
         ["analyze"] = "paths",
         ["format"] = "paths",
+        ["cleanup"] = "paths",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();
@@ -82,6 +83,9 @@ public static class RepeatSteer
     {
         if (batched || count < Threshold || !Plural.TryGetValue(tool, out var plural))
             return null;
+
+        if (Shape.TryGetValue(tool, out var shape))
+            return string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - pass {plural}=[...] with the next {Math.Min(count, MaxBatch)}+ in ONE call: {shape}");
 
         return Concrete(seen, count, captured) is { } filled
             ? string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - these are ONE call: {plural}=[{filled}]")
@@ -183,4 +187,9 @@ public static class RepeatSteer
 
     private const int MaxSteerLength = 120;
     private static int captured;
+    private static readonly FrozenDictionary<string, string> Shape = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["edit_text"] = "each entry is {path, oldText, newText} and may carry its OWN path, so a run across DIFFERENT files is one call",
+        ["write_text"] = "each entry is {path, content} and carries its OWN path, and every .cs among them shares ONE compile gate",
+    }.ToFrozenDictionary(StringComparer.Ordinal);
 }

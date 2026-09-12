@@ -192,4 +192,46 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["force"] = true, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task Cleanup_WithAPathsEntryThatMatchesNothing_IsScopedToItRatherThanTheWholeSolution()
+    {
+        var text = await server.CallAsync("cleanup", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/*.nothing" },
+            ["fix"] = "style",
+            ["verify"] = true,
+        });
+
+        Assert.StartsWith("ERROR DocumentNotFound", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("unrecognized", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cleanup_WithAPathsEntryCarryingAComma_IsRefusedByName()
+    {
+        var text = await server.CallAsync("cleanup", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/Order.cs,src/Fixture.Trading/OrderBook.cs" },
+            ["fix"] = "style",
+            ["verify"] = true,
+        });
+
+        Assert.StartsWith("ERROR ", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cleanup_WithTwoRealPaths_IsAcceptedInOnePass()
+    {
+        var text = await server.CallAsync("cleanup", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/Order.cs", "src/Fixture.Trading/OrderBook.cs" },
+            ["fix"] = "style",
+            ["verify"] = true,
+        });
+
+        Assert.DoesNotContain("unrecognized", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR ", text, StringComparison.Ordinal);
+    }
 }

@@ -268,4 +268,34 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     }
 
     private static bool IsFraming(string line) => ToolCensus.IsFraming(line);
+
+    [Fact]
+    public async Task WorkspaceStatus_Verbose_RanksTheToolsWhoseParameterDescriptionsCostMost()
+    {
+        var text = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
+        const string Marker = "parameterDescriptions, costliest first: ";
+        var at = text.IndexOf(Marker, StringComparison.Ordinal);
+
+        Assert.True(at >= 0, text);
+
+        var entries = text[(at + Marker.Length)..].Split('\n')[0].Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        Assert.InRange(entries.Length, 1, 10);
+
+        var costs = new List<int>(entries.Length);
+
+        foreach (var entry in entries)
+        {
+            var parts = entry.Split('=');
+
+            Assert.Equal(2, parts.Length);
+            Assert.NotEmpty(parts[0]);
+            costs.Add(int.Parse(parts[1], CultureInfo.InvariantCulture));
+        }
+
+        Assert.True(costs[0] > 0, text);
+
+        for (var index = 1; index < costs.Count; index++)
+            Assert.True(costs[index - 1] >= costs[index], text);
+    }
 }

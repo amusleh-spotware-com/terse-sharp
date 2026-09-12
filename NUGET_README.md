@@ -198,10 +198,14 @@ It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and fri
 (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that names a
 path operand at all, while a piped `head -40` reading stdin still runs; `dotnet build`/`test`/`format`/`clean`,
 `dotnet watch build`/`test`, `msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose command
-word is `sleep`, outside a `while`/`until`/`for` loop — because waiting is not work and nothing replaces
+word is `sleep`, or a `powershell -Command "Start-Sleep …"` hosting one, outside a `while`/`until`/`for`
+loop — because waiting is not work and nothing replaces
 it; and the working-tree half of git — `git status` and `git diff` in every flag and `-C` form,
 `git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files` to
-`find_files tracked=true`, and a `git tag` **listing** to `history tags=true`. A denial names the replacing
+`find_files tracked=true`, and a `git tag` **listing** to `history tags=true`. `TaskOutput` and
+`TaskList` are not denied — they are **allowed with a stand-down**, because polling for a result the
+harness already delivers cost 22.5 h and 29.7% of all tool wall time in a measured week, while 207 of
+those 272 calls followed a real completion notification and were legitimate. A denial names the replacing
 call with the command's own arguments translated — `git log --oneline -1` answers `history maxResults=1`.
 
 Git rows fire only when the directory the command addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`,

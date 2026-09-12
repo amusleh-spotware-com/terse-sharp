@@ -8,7 +8,90 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-09-12
+
+### Added
+
+- `read_text ranges=["42", "101-102"]` reads several **discontinuous** line ranges of one file in a
+  single call, at most 20 entries, each either a line or a range, 1-based. The existing gutter already
+  prints a number only where the numbering jumps, so the answer reads as one file rather than as a
+  concatenation. It is refused beside `startLine`, `endLine`, `tail`, `headings`, `section` and
+  `columns`, a malformed entry is named back, and a read whose every entry sits past the end of the
+  file says so instead of answering empty. Locked by
+  `ReadText_WithSeveralRanges_ReturnsOnlyThoseLinesAndNumbersOnlyTheJumps` and
+  `ReadText_WithAnEmptyRangesArray_AnswersExactlyWhatNoRangesWouldAnswer`. Closes `I501`.
+
+- `replace_symbol append=true` beside a `retryWith` token ADDS the `symbolIds=`/`declarations=` pairs
+  you pass to the batch the token holds, instead of correcting it - the way the callers a `CS7036`
+  rollback names land beside the member that broke them without re-sending the held declarations. A
+  bare `symbolIds=` beside a token still overrides, which is how a mis-typed id is corrected, and
+  `append` without a token is refused naming it. Closes `I502`.
+- `replace_symbol fix=["add:1=<corrected>"]` corrects a held `add=` helper on a `retryWith` replay,
+  in the same 0-based scheme `fix=["1=<corrected>"]` already uses for held declarations, so one
+  malformed helper no longer costs the whole `add=` array. An index the token does not carry is
+  refused naming the range and saying which of the two arrays it counted. Closes `I503`.
+
+- `workspace_status verbose=true` now ranks the ten tools whose **parameter** descriptions cost most,
+  as `parameterDescriptions, costliest first: replace_symbol=958 edit_text=839 ...`, so the largest
+  single component of the advertised surface is attributable per tool instead of only in total.
+  Measured at this commit: the ten worst hold **5 671 of 11 318** parameter-description tokens - half
+  the cost in ten of 78 advertised tools. Closes `I504`.
+
+- `cleanup paths=[...]` takes up to 10 files, directories or globs in one pass, exactly as `analyze`
+  and `format` already did. It was the single most-refused parameter of any tool in the measured week
+  - 30 `InvalidArgument` rejections - and its absence also meant no `cleanup` response could carry the
+  consecutive-call batching steer, because the tool declared no plural parameter to name. Locked by
+  `Cleanup_WithAPathsEntryThatMatchesNothing_IsScopedToItRatherThanTheWholeSolution`. Closes `I509`.
+
+- The guard's sleep row now covers a PowerShell-hosted wait - `powershell -Command "Start-Sleep
+  -Seconds 900"` - which the bash-only row could not see because the command word is the host, not the
+  sleep. The loop carve-out is applied to the hosted text too, so a `while` loop that pauses inside it
+  is still allowed. Measured: 126 `Start-Sleep`-bearing calls, 117 of them unguarded, 0.90 h of wall
+  clock in one week, against 6 bare bash sleeps. Closes `I510`.
+- The guard stands down on `TaskOutput` and `TaskList` - it ALLOWS the call and attaches the measured
+  cost of polling for a result the harness already delivers: 272 calls, 22.5 h and 29.7% of all tool
+  wall time in one week, p90 and p99 both at the 600 s ceiling. It is deliberately not a denial: 207
+  of those 272 followed a real completion notification and are legitimate status reads. The hook emits
+  it as `hookSpecificOutput.additionalContext` with no `permissionDecision`, so the call is never
+  auto-approved and the normal permission flow is untouched. Locked by
+  `Render_ForABackgroundPoll_CarriesTheStandDownReasonTheAgentActuallyReceives`, which asserts on the
+  rendered hook output rather than the in-memory verdict. Closes `I511`.
+
+- `delete_symbol allowErrors=true` applies a delete the compile gate would roll back, the way every
+  other edit tool already took it. It was the most-guessed missing parameter of any edit tool: 19 of
+  101 `delete_symbol` calls were rejected in the measured week - the highest rate of any writer - and
+  11 of those 19 named `allowErrors`. Part of `I512`.
+- A rejected parameter name now names the accepted one it meant - `; did you mean find -> oldText?` -
+  from a curated synonym table plus a both-ways prefix match. It costs **zero** schema tokens, which
+  is why it was chosen over adding alias parameters: `I504` measured parameter descriptions as the
+  largest single component of the advertised surface, and six aliases would have been paid on every
+  request forever to fix half as many calls. Closes `I516`.
+
+
 ### Changed
+
+- The consecutive-call batching steer now names the PER-ENTRY shape for the two tools whose entries
+  are objects rather than identifiers: `edit_text` gets `each entry is {path, oldText, newText} and
+  may carry its OWN path, so a run across DIFFERENT files is one call`, and `write_text` the same for
+  `{path, content}`. 439 of the 496 `edit_text` calls that sat in runs crossed different paths, which
+  `edits=` has always served - the steer just never said so. Closes `I513`.
+- An edit that introduces an info-severity compiler diagnostic now names the exact next call -
+  `analyze changed=true severity=info` - instead of only saying analyzers are not run at the write.
+  254 of 271 `analyze` calls in the measured week were whole-solution. Part of `I514`.
+- `CLAUDE.md` and `SKILL.md` no longer state that 48% of `run_tests` calls and 75% of `build` calls
+  are byte-identical repeats. Re-measured with an instrument that also asks whether anything was
+  WRITTEN between the two identical calls, the provably-redundant share is 6.1% and 10.0%. Closes
+  `I515`.
+
+- `find_files`' depth-fold steer now costs **one** pass over the listing per candidate depth instead
+  of two. The row count is derived from the prefix map itself - files with no prefix, plus the number
+  of distinct prefixes - which is exactly what the old `Singles` plus `Multiples` pair computed by
+  walking the file list a second time. The per-depth early exit is unchanged, so the common case
+  halves from two walks to one and the worst case from eight to four. Closes `I506`.
+- `rename_symbol` stops scanning changed documents once it has collected the unrewritten occurrences
+  it will list, instead of materializing every remaining document's whole text to discard it. Part of
+  `I505`.
+
 
 - `README.md` and `NUGET_README.md` rewritten from scratch around the five reasons the server is
   installed - token saving, speed, code quality, control over what the agent may emit, and the stack
@@ -22,6 +105,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   them: the markup-narrowed ceiling is 24 600 (`MarkupProfileE2ETests`), the settings-narrowed one
   25 400 (`ToolSettingsE2ETests`) and the whole-surface one 29 800
   (`TokenBudgetE2ETests.AdvertisedPayloadBudget`).
+
+### Fixed
+
+- `edit_text edits=` keyed its per-file groups with `StringComparer.OrdinalIgnoreCase`, so on a
+  case-sensitive filesystem two entries naming `a.md` and `A.md` collapsed into one group, both edits
+  landed on whichever spelling arrived first, and the answer reported one changed file. It now keys
+  with `PathBoundary.Comparer`, which is `Ordinal` on Linux and `OrdinalIgnoreCase` elsewhere. The
+  same one-line defect in the `find_files tracked=true` path set is fixed with it. Closes `I507`.
+- The guard's shell-text denial no longer claims a path OUTSIDE every workspace root is C#/.NET
+  source. Reading a background task's output out of the OS temp directory from a repository working
+  directory was denied with `is C#/.NET source`, which is false - the denial is the cwd rule. It now
+  says so and names `read_text`, which takes an absolute path outside the workspace and tags it
+  `outside-workspace`. A path inside the tree keeps the original reason. Closes `I508`.
+
 
 
 ## [0.57.0] - 2026-09-04
@@ -5442,7 +5539,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.57.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.58.0...HEAD
+[0.58.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.58.0
 [0.57.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.57.0
 [0.56.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.56.0
 [0.55.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.55.0

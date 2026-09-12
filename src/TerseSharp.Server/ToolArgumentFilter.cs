@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Collections.Frozen;
+using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -55,7 +56,7 @@ internal static class ToolArgumentFilter
 
         return Errors.Invalid(
             request.Params?.Name + " rejected the call: " + Reason(exception, missing, unrecognized),
-            Remedy(required, accepted) + Drift(unrecognized) + ToolExamples.Suffix(request.Params?.Name));
+            Remedy(required, accepted) + NearestHint(unrecognized, accepted) + Drift(unrecognized) + ToolExamples.Suffix(request.Params?.Name));
     }
     private static string Reason(ArgumentException exception, string[] missing, string[] unrecognized) =>
         Detail(missing, unrecognized) is { Length: > 0 } detail ? detail : exception.Message;
@@ -216,11 +217,11 @@ internal static class ToolArgumentFilter
             ? null
             : Errors.Invalid(
                 tool + " rejected the call: unrecognized " + string.Join(", ", unknown),
-                Remedy(required(), accepted) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + Drift(unknown) + ToolExamples.Suffix(tool));
+                Remedy(required(), accepted) + NearestHint(unknown, accepted) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + Drift(unknown) + ToolExamples.Suffix(tool));
     }
 
-    private static readonly System.Collections.Frozen.FrozenSet<string> KnownPlurals =
-        System.Collections.Frozen.FrozenSet.ToFrozenSet(RepeatSteer.Plural.Values.Append("cultures"), StringComparer.Ordinal);
+    private static readonly FrozenSet<string> KnownPlurals =
+        FrozenSet.ToFrozenSet(RepeatSteer.Plural.Values.Append("cultures"), StringComparer.Ordinal);
 
     private static string PluralHint(string[] unknown, string[]? arrays) =>
         arrays is { Length: > 0 } declared && Array.Exists(unknown, KnownPlurals.Contains)
@@ -270,4 +271,47 @@ internal static class ToolArgumentFilter
         : "; running terse=" + Running() + " - a parameter absent from that set is version drift, not a typo";
 
     private static string Running() => UpdateSettings.Version() is { Length: > 0 } version ? version : "unknown";
+
+    private static readonly FrozenDictionary<string, string[]> Synonyms =
+        new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["content"] = ["declaration", "declarations", "newText"],
+            ["code"] = ["declaration", "declarations"],
+            ["body"] = ["declaration", "declarations"],
+            ["find"] = ["oldText", "query"],
+            ["replace"] = ["newText"],
+            ["filter"] = ["contains", "test"],
+            ["text"] = ["content", "newText", "query"],
+            ["file"] = ["path"],
+            ["dir"] = ["path", "root"],
+            ["regex"] = ["query", "pattern"],
+            ["limit"] = ["maxResults", "maxLines"],
+            ["head_limit"] = ["maxResults", "maxLines"],
+            ["max_results"] = ["maxResults"],
+            ["maxBytes"] = ["maxChars"],
+            ["maxResults"] = ["maxLines", "maxChars"],
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
+    private static string? Prefixed(string name, string[] accepted) => name.Length < 3
+        ? null
+        : Array.Find(accepted, entry => !string.Equals(name, entry, StringComparison.Ordinal)
+            && (name.StartsWith(entry, StringComparison.OrdinalIgnoreCase) || entry.StartsWith(name, StringComparison.OrdinalIgnoreCase)));
+
+    private static string? Nearest(string name, string[] accepted) =>
+        Synonyms.TryGetValue(name, out var candidates)
+            ? Array.Find(candidates, candidate => accepted.Contains(candidate, StringComparer.Ordinal)) ?? Prefixed(name, accepted)
+            : Prefixed(name, accepted);
+
+    private static string NearestHint(string[] unknown, string[] accepted)
+    {
+        var hints = new List<string>(unknown.Length);
+
+        foreach (var name in unknown)
+        {
+            if (Nearest(name, accepted) is { } match)
+                hints.Add(string.Create(CultureInfo.InvariantCulture, $"{name} -> {match}"));
+        }
+
+        return hints.Count is 0 ? string.Empty : "; did you mean " + string.Join(", ", hints) + "?";
+    }
 }

@@ -1502,4 +1502,104 @@ public sealed class ToolGuardTests
 
         Assert.Contains("\"allowance\":\"no-tool git blame\"", entry, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Inspect_ForATextReadOfAPathOutsideTheTree_DeniesWithoutClaimingItIsDotNetSource()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var outside = Path.Combine(Path.GetTempPath(), "terse-guard-probe.output");
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat " + outside }, root);
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("OUTSIDE that tree", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("read_text", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForATextReadOfAPathInsideTheTree_StillNamesItAsDotNetSource()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var inside = Path.Combine(root, "notes.txt");
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat " + inside }, root);
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("OUTSIDE that tree", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("powershell -NoProfile -Command \"Start-Sleep -Seconds 900\"")]
+    [InlineData("pwsh -Command \"Start-Sleep -s 30; Write-Output done\"")]
+    public void Inspect_ForAPowerShellHostedSleep_Denies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("powershell -NoProfile -Command \"while ($true) { Start-Sleep -Milliseconds 200 }\"")]
+    [InlineData("powershell -NoProfile -Command \"Get-Process | Format-Table\"")]
+    public void Inspect_ForAPowerShellCallNothingReplaces_Allows(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("TaskOutput")]
+    [InlineData("TaskList")]
+    public void Inspect_ForABackgroundPoll_AllowsTheCallButStandsDownWithTheMeasuredCost(string tool)
+    {
+        var verdict = ToolGuard.Inspect(tool, new JsonObject { ["task_id"] = "t-1" });
+
+        Assert.False(verdict.Denied, tool);
+        Assert.NotEmpty(verdict.Reason);
+        Assert.Contains("re-invokes you", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("end the turn", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAToolNothingReplaces_StaysSilent()
+    {
+        var verdict = ToolGuard.Inspect("WebFetch", new JsonObject { ["url"] = "https://example.com" });
+
+        Assert.False(verdict.Denied);
+        Assert.Empty(verdict.Reason);
+    }
+
+    [Fact]
+    public void Render_ForABackgroundPoll_CarriesTheStandDownReasonTheAgentActuallyReceives()
+    {
+        var rendered = ToolGuard.Render(ToolGuard.Inspect("TaskOutput", new JsonObject { ["task_id"] = "t-1" }));
+
+        Assert.NotEqual("{}", rendered);
+        Assert.Contains("hookSpecificOutput", rendered, StringComparison.Ordinal);
+        Assert.Contains("additionalContext", rendered, StringComparison.Ordinal);
+        Assert.Contains("end the turn", rendered, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"permissionDecision\"", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForAnAllowedCallWithNothingToSay_StaysAnEmptyObject()
+    {
+        var rendered = ToolGuard.Render(ToolGuard.Inspect("WebFetch", new JsonObject { ["url"] = "https://example.com" }));
+
+        Assert.Equal("{}", rendered);
+    }
+
+    [Fact]
+    public void Inspect_ForATextReadMixingAnOutsidePathWithARelativeRepoFile_DoesNotClaimEverythingIsOutside()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var outside = Path.Combine(Path.GetTempPath(), "terse-guard-probe.output");
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat " + outside + " README.md" }, root);
+
+        Assert.True(verdict.Denied);
+        Assert.DoesNotContain("OUTSIDE that tree", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("powershell -NoProfile -Command \"Get-Content C:\\logs\\sleep.txt\"")]
+    [InlineData("powershell -NoProfile -Command \"Get-Content sleep.log\"")]
+    public void Inspect_ForAPowerShellReadOfAPathWhoseStemIsSleep_IsNotTreatedAsAWait(string command) =>
+        Assert.DoesNotContain(
+            "waiting is not work",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Reason,
+            StringComparison.Ordinal);
 }

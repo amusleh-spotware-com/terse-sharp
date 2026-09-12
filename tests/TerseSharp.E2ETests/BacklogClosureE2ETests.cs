@@ -2172,6 +2172,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         {
             Assert.Contains("info=1 introduced", written, StringComparison.Ordinal);
             Assert.Contains("compiler tier only", written, StringComparison.Ordinal);
+            Assert.Contains("analyze changed=true severity=info", written, StringComparison.Ordinal);
             Assert.DoesNotContain("CS0219", written, StringComparison.Ordinal);
 
             var verbose = await server.CallAsync("write_text", new()

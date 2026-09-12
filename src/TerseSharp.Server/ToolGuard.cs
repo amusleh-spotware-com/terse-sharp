@@ -30,6 +30,7 @@ public static class ToolGuard
         "Glob" => OnPath(tool, Text(input, "pattern")),
         "Grep" => OnGrep(input),
         "Bash" => OnBash(Text(input, "command"), cwd),
+        "TaskOutput" or "TaskList" => Polling(),
         _ => Allowed,
     };
 
@@ -83,7 +84,11 @@ public static class ToolGuard
     public static string Render(GuardVerdict verdict)
     {
         if (!verdict.Denied)
-            return "{}";
+        {
+            return verdict.Reason is { Length: > 0 }
+                ? new JsonObject { ["hookSpecificOutput"] = StandingDown(verdict) }.ToJsonString()
+                : "{}";
+        }
 
         var hook = verdict.Rewrite is { Length: > 0 } rewrite ? Rewriting(verdict, rewrite) : Denying(verdict);
 
@@ -815,7 +820,7 @@ public static class ToolGuard
 
         return Array.Exists(Tokens(masked), token => LoopKeywords.Contains(Bare(token), StringComparer.OrdinalIgnoreCase))
             ? Unlooped(segments)
-            : Array.Exists(segments, IsSleepCall);
+            : Array.Exists(segments, IsSleepCall) || HostedSleep(command);
     }
 
     private static GuardVerdict Napping() => new(true, SleepReason);
@@ -1314,8 +1319,15 @@ public static class ToolGuard
         if (Replaced(segment, cwd) is { } subcommand)
             return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound, unfenceable), BuildRouting(subcommand, segment), BuildReplacement(subcommand));
 
-        if ((Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment))) && IsTextRead(segment))
-            return new GuardVerdict(true, Reason("Bash", segment.Trim()) + Priced + Nothing(compound, unfenceable), BashRouting(segment.Trim()), Replacement(TextKind(segment), segment.Trim()));
+        var covered = Covered(segment);
+
+        if ((covered || (IsDotNetTree(cwd) && Operanded(segment))) && IsTextRead(segment))
+        {
+            var trimmed = segment.Trim();
+            var reason = !covered && OutsideTree(segment, cwd) ? OutsideReason(trimmed) : Reason("Bash", trimmed);
+
+            return new GuardVerdict(true, reason + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
+        }
 
         return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
     }
@@ -1370,6 +1382,65 @@ public static class ToolGuard
 
         return string.Concat(command, " ", second < 0 ? rest : rest[..second]);
     }
+
+    private static List<string> PathOperands(string segment)
+    {
+        var command = Command(segment);
+        var operands = new List<string>(command.Length);
+
+        for (var index = 1; index < command.Length; index++)
+        {
+            if (!command[index].StartsWith('-') && IsPathLike(command[index]))
+                operands.Add(command[index]);
+        }
+
+        return operands;
+    }
+
+    private static bool OutsideTree(string segment, string? cwd)
+    {
+        if (Marker(cwd) is not { } marker || Path.GetDirectoryName(marker) is not { Length: > 0 } root)
+            return false;
+
+        var operands = PathOperands(segment);
+
+        return operands.Count > 0 && !operands.Exists(operand => Inside(root, operand));
+    }
+
+    private static string OutsideReason(string target) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"TerseSharp guard: the working directory is a .NET tree, so shell text tools are denied here - and '{Trim(target)}' is OUTSIDE that tree, so the denial is the cwd rule, not the file: it is not C#/.NET source. Use the terse-sharp MCP instead - read_text takes an absolute path outside the workspace and tags it outside-workspace. Read the tool's remedy: line rather than falling back to a built-in.");
+
+    private static readonly string[] PowerShellHosts = ["powershell", "pwsh"];
+
+    private static bool IsPowerShellHost(string token) =>
+        PowerShellHosts.Contains(Path.GetFileNameWithoutExtension(Bare(token)), StringComparer.OrdinalIgnoreCase);
+
+    private static bool HostedSleep(string command)
+    {
+        var tokens = Tokens(command);
+
+        return Array.Exists(tokens, IsPowerShellHost)
+            && Array.Exists(tokens, SleepToken)
+            && !Array.Exists(tokens, token => LoopKeywords.Contains(Bare(token), StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static GuardVerdict Polling() => Allowed with
+    {
+        Reason = "TerseSharp guard: background work re-invokes you when it finishes, so reading its output to WAIT buys nothing the notification does not already deliver. Measured over one week: 272 calls, 22.5 h of wall clock - 29.7% of ALL tool time - p50 230 s, p90 and p99 both pinned at the 600 s ceiling. A status check AFTER a completion notification is legitimate and this call is allowed; waiting on one is not - end the turn instead, because stopping is free and waiting is billed.",
+    };
+
+    private static JsonObject StandingDown(GuardVerdict verdict) => new()
+    {
+        ["hookEventName"] = "PreToolUse",
+        ["additionalContext"] = verdict.Reason,
+    };
+
+    private static bool Inside(string root, string operand) =>
+        !Path.IsPathFullyQualified(operand) || PathBoundary.Contains(root, operand);
+
+    private static bool SleepToken(string token) =>
+        IsSleep(token) && Bare(token).AsSpan().IndexOfAny('/', '\\', '.') < 0;
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

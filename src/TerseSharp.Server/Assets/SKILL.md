@@ -27,7 +27,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 
 | Job | Instead of | Use | Why |
 |---|---|---|---|
-| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs - `verbose=true` splits that total into `toolDescriptions`, `parameterDescriptions`, `schemaFrame` and `names`; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do. `verbose=true` adds the whole surface beside the narrowed one, `advertised=20 tools 6000 tokens of 88 tools 25857` |
+| **Workspace** | — | `workspace_status` | solution, worktree, branch, project and document counts, plus `advertised=<n> tools <t> tokens` for what this session's `tools/list` really costs - `verbose=true` splits that total into `toolDescriptions`, `parameterDescriptions`, `schemaFrame` and `names`, then ranks the ten tools whose PARAMETER prose costs most; its last line is `terse=<version>`, the one place the running binary names itself — read it before claiming what a tool does or does not do. `verbose=true` adds the whole surface beside the narrowed one, `advertised=20 tools 6000 tokens of 88 tools 25857` |
 | **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` | the six self-check lines an agent acts on, in-server and without the ~40 s shell-out: `roslyn` (the SDK's Roslyn against the one terse carries — the check that explains a dead Razor generator), `assets`, `guard coverage`, `memory` (what every live terse server holds), `shadow` (whether an analyzer was mapped IN PLACE rather than from the shadow cache) and `phases` |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` | lists every solution and project under a directory without loading one; auto-discovery only walks *up* from the working directory |
 | **Workspace** | — | `load_workspace` | one call per solution; `targetFramework:` picks the framework every semantic tool answers from, `reload: true` forces a re-read you should almost never need |
@@ -82,6 +82,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Files** | `Read` a non-`.cs` file | `read_text(path)` | line ranges, bounded response; a line number is printed only where the numbering jumps, so a contiguous read carries one — `verbose: true` numbers every line; a clipped read ends with `next: startLine=…` |
 | **Files** | `Read` **several** files | `read_text(paths: [...])` | up to 10 in one response, each under its own path line with its own count and `next:` note; an unresolved path is `NOT_FOUND` inline, and `maxChars` is one budget shared across the batch that names the entry it clipped |
 | **Files** | `tail -n 200 log.txt` | `read_text(path, tail: 200)` | the last N lines, so the end of a huge log is addressable |
+| **Files** | four ranged reads for four anchors in ONE file | `read_text(path, ranges: ["42", "101-102"])` | up to 20 DISCONTINUOUS ranges in one call, numbered only where the reading jumps; refused beside `startLine`, `endLine`, `tail`, `headings`, `section` and `columns` |
 | **Edit text** | a read-modify-write on a tree another session is also editing | `read_text(path, stamp: true)` then `edit_text(path, …, ifUnchangedSince: "<that stamp>")` | refused `ERROR EditConflict` when the file's last-write time moved after the stamp, naming both times, before anything is written, `write_text ref=` included - the one race no other read can detect. It carries ONE file's stamp, so a call writing more than one file is refused rather than checked against a file the stamp did not come from |
 | **Files** | `wc -c file` for a size you want *while* reading | `read_text(path, bytes: true)` | ends the answer with `bytes=N`, on every shape it returns and once per `paths=` entry |
 | **Files** | guessing what a budgeted document costs before its test runs | `read_text(path, tokens: true)` | ends the answer with `tokens=N` for the **whole** file whatever range was read - the count the shipped-doc budgets assert - on every shape it returns and once per `paths=` entry |
@@ -107,7 +108,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` already handles it | that payload is **dedented**, and it still matches: the anchor is compared line by line allowing one uniform whitespace prefix, `newText` is re-indented by it, and a `NOTE` says so. A multi-line anchor matching nothing gets the closest REGION and its range, so the retry is a corrected anchor, not a re-read |
 | **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` | no symbol tool creates a file; the write is compile-gated whenever a project globs it, the new type is resolvable on the very next call, and two interdependent new files land in either order |
 | **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` | compile-gated like `replace_symbol` when the file is already a document: rolled back on a new error unless `allowErrors: true` |
-| **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit |
+| **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` | addressed by symbol, immune to line drift, compile-gated; `add_member` and `replace_symbol` take several declarations in one edit, and all four take `allowErrors: true` to apply an edit the gate would roll back |
 | **Edit code** | a new body that calls a private helper you have not written yet | `replace_symbol(symbolId, declaration, add: [...])` | the new members land in the **containing type** inside the same compile-gated edit, so the callee-after-caller `CompileRegression` never happens; targets must share one containing type, and an enum container is refused, never walked past |
 | **Edit code** | a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` | one declaration per symbol, paired positionally, applied as **one** compile-gated edit across every file they live in — the way to land a signature change together with the callers it breaks instead of paying a `CompileRegression` and a retry |
 | **Edit code** | renaming a member and rewriting its body in one edit | `replace_symbol(symbolIds: [...], declarations: [...], rename: true)` | accepts a declaration whose **name** differs from the symbol it is paired with instead of refusing the batch; references are not rewritten, so the gate rolls it back when a caller breaks - `rename_symbol` is what makes them follow; every rename it applies is reported as `NOTE renamed: Add -> Append` |
@@ -147,6 +148,7 @@ call what is in **Use**. Every tool the server advertises is in this table exact
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` | the same four calls in the mandated order, answering one verdict line - `clean  analyzed=N fixed=M remaining=0`, where `analyzed` counts the **documents** in scope - and keeping only the diagnostics still unfixed, each carrying the declaration it sits in exactly as `analyze` does |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` | applies the referenced analyzers' code fixes, compile-gated, `UNFIXED <id>` for what no fixer covers |
 | **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` | one verdict line (`clean` or `VERIFY_FAILED n`), no diff; each named file carries the step that would change it - `whitespace`, `fixers` or `fixers+whitespace` - and a mode that also reformats names the byte-equivalent CI pair, so the verdict says whether CI would really be red |
+| **Analyse** | one `cleanup` call per touched file | `cleanup(paths: [...])` | up to 10 in ONE pass, as `analyze` and `format` take them |
 | **Analyse** | one `format` call per touched file | `format(paths: [...])` | up to 10 files, directories or globs in ONE pass, exactly as `analyze` takes them; an entry carrying a comma or a brace is refused by name rather than mis-scoped |
 | **Analyse** | formatting only what you touched | `format changed=true` · `cleanup changed=true` | files modified since the workspace loaded, so a sweep stops rewriting files the task never opened; the change set survives the unload-and-reload a locked `build` performs |
 | **Analyse** | reading build output for a consumer you broke | `get_diagnostics` | the solution-wide warning and error sweep a per-file pass cannot see; it takes `severity=` as an alias for `minSeverity=`, exactly as `analyze` does |
@@ -226,14 +228,14 @@ check, so never shell out for them. `dotnet list package` routes to `package_lis
 (`vulnerable=true`, `outdated=true`, same restored graph). `dotnet restore`, `pack`,
 `publish`, `run` and `tool` are **not** covered: nothing here replaces them.
 
-**A bare `sleep` is denied too, and nothing replaces it.** A segment whose COMMAND WORD is `sleep`,
+**A bare `sleep` is denied too, `powershell -Command "Start-Sleep ..."` included, and nothing replaces it.** A segment whose COMMAND WORD is `sleep`,
 outside a `while`/`until`/`for` loop, is refused. `docker run … sleep 3600` and `python sleep.py` are
 untouched. Background work
 re-invokes you when it finishes, so when you need its result and have nothing else to do, **end the
 turn** — stopping is free, sleeping is billed. The one allowed shape is the pause inside a loop that
 also detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; done`.
 
-**POLLING BY TOOL is the same breach, and the guard cannot see it.** Reading `TaskOutput`/`TaskList`
+**POLLING BY TOOL is the same breach, and the guard now says so at the call.** Reading `TaskOutput`/`TaskList`
 for a result the harness delivers by itself cost **14.08 h/week**. A check *after* a notification is
 fine; waiting on one is not.
 
@@ -405,7 +407,8 @@ host says why. That tail is appended whenever no **error** was found, in either 
 `list_tests` that succeeded is untouched, whether or not it matched a name.
 
 **The verification ladder — climb it, never start at the top.** `run_tests` is **37% of all tool wall
-time**, and **48% of its calls were byte-identical repeats inside one session** (`build`: 75%). Per
+time**, and **6.1% of its identical repeats were provably redundant - nothing was written between
+them** (`build`: 10.0%). Per
 edit, climb only as high as the edit reaches:
 
 | Rung | Call | Measured mean | When |
@@ -676,7 +679,10 @@ that answers nothing, and the clip always names `next: startLine=`.
    **When only ONE declaration of a batch was wrong, correct that one and replay the rest**:
    `replace_symbol retryWith="r3" fix=["2=<corrected>"]` replaces the held entry at the 0-based index
    the rejection printed and replays the others unchanged — measured at ~4 700 characters saved per
-   retry on a 5-entry batch.
+   retry on a 5-entry batch. `fix=["add:1=..."]` corrects a held `add=` helper the same way.
+   **`append: true` beside a token ADDS the `symbolIds=`/`declarations=` pairs you pass to the held
+   batch** - how a `CS7036` rollback's callers land with the member; a bare `symbolIds=` still
+   OVERRIDES, which is how a mis-typed id is corrected.
    Better still, do not earn the rollback: `replace_symbol add=[…]` appends the helper in the same
    edit. **`add=`, `addTo=` and `usings=` are held with the token too**, so a retry names the token
    and nothing else; pass any of them again only to override what is held, and **pass `usings: []` to

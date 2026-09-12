@@ -43,7 +43,7 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. rename=true accepts a declaration whose NAME differs from the symbol it is paired with, so a member is renamed and rewritten in one edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload, as is a batch refused for ONE unresolvable id; fix=[\"2=<corrected>\"] replaces only the held entries that were wrong. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. rename=true accepts a declaration whose NAME differs from the symbol it is paired with, so a member is renamed and rewritten in one edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload, as is a batch refused for ONE unresolvable id; fix=[\"2=<corrected>\"] replaces only the held declarations that were wrong and fix=[\"add:1=...\"] the held add= helpers, while append=true ADDS the symbolIds= and declarations= you pass to the held batch - how a CS7036 rollback's callers land with the member. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ReplaceSymbol(
                     [Description("Symbol id of the member.")] string? symbolId = null,
                     [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
@@ -59,8 +59,9 @@ public sealed class EditTools(ToolContext context)
                     [Description("One complete declaration per entry of symbolIds, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
                     [Description(UsingsHelp)] string[]? usings = null,
                     [Description("Apply a declaration whose name differs from the symbol it is paired with instead of refusing the batch. References are not rewritten, so the gate rolls it back when a caller breaks; rename_symbol makes them follow. Not held by a retryWith token. Default false.")] bool rename = false,
-                    [Description(FixHelp)] string[]? fix = null,
-                    [Description(RetryHelp)] string? retryWith = null,
+                [Description(FixHelp)] string[]? fix = null,
+                [Description("Beside retryWith=, ADD the pairs you pass to the held batch instead of correcting it. Refused without a token. Default false.")] bool append = false,
+                [Description(RetryHelp)] string? retryWith = null,
                     CancellationToken cancellationToken = default)
     {
         if (RejectedUsings(usings) is { } rejected)
@@ -74,13 +75,41 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "replace_symbol"));
 
-        if (RejectedFix(fix, retryWith, held?.Payloads.Count ?? 0) is { } misfit)
+        if (RejectedFix(fix, retryWith, held?.Payloads.Count ?? 0, held?.Add.Count ?? 0) is { } misfit)
             return Task.FromResult(misfit);
 
+        if (append && held is null)
+        {
+            return Task.FromResult(Errors.Invalid(
+                "'append' adds to the batch a retryWith token holds, and no token was passed",
+                "pass the retryWith token the rejection printed beside it, or send the whole batch as symbolIds= and declarations=").Render());
+        }
+
+        if (append && (declaration is { Length: > 0 } || symbolId is { Length: > 0 } || symbol is { Length: > 0 }))
+        {
+            return Task.FromResult(Errors.Invalid(
+                "'append' adds symbolIds= and declarations= pairs to the held batch, and a singular symbolId= or declaration= was passed beside it - it would be silently dropped",
+                "send the pair you are adding as symbolIds=[...] and declarations=[...], or drop append= to correct the held batch instead").Render());
+        }
+
         var imports = Kept(usings, held?.Usings);
-        var helpers = Kept(add, held?.Add);
+        var helpers = Kept(add, held is null ? null : Patched(held.Add, fix, add: true));
         var container = addTo ?? held?.AddTo;
         var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename, allowPolicy);
+
+        if (held is not null && append)
+        {
+            return Batched(
+                workspace,
+                [.. held.Targets, .. symbolIds ?? []],
+                [.. Patched(held.Payloads, fix), .. declarations ?? []],
+                options,
+                cancellationToken,
+                held.Root,
+                helpers,
+                container,
+                imports);
+        }
 
         if (held is { Targets.Count: > 1 })
             return Batched(workspace, Corrected(symbolIds, held.Targets), Patched(held.Payloads, fix), options, cancellationToken, held.Root, helpers, container, imports);
@@ -179,18 +208,19 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "delete_symbol", Destructive = true)]
-    [Description("Safe-delete a member, an enum member or a type. Refuses while references exist unless force is set, and lists them. A successful delete answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Safe-delete a member, an enum member or a type. Refuses while references exist unless force is set, and lists them; allowErrors=true applies it anyway. A successful delete answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> DeleteSymbol(
             [Description("Symbol id to delete.")] string? symbolId = null,
             [Description("Delete even when references exist. Default false.")] bool force = false,
             [Description("Diff only, write nothing.")] bool dryRun = false,
+            [Description("Apply even if it introduces compile errors. Default false.")] bool allowErrors = false,
             [Description(PolicyHelp)] bool allowPolicy = false,
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for symbolId.")] string? symbol = null,
             CancellationToken cancellationToken = default) =>
             Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => SymbolEditService.DeleteAsync(
-                loaded, resolved, force, Options("delete_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
+                loaded, resolved, force, Options("delete_symbol", dryRun, allowErrors, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "rename_symbol")]
     [Description("Rename a symbol across the whole solution, including interface implementations, overrides and XML doc crefs. Use instead of a find-and-replace sweep. A successful rename answers in one line per changed file - plus every XAML or Razor site it could NOT rewrite; pass verbose=true for the diff.")]
@@ -418,41 +448,42 @@ public sealed class EditTools(ToolContext context)
         return null;
     }
 
-    private const string FixHelp = "Correct held declarations on a retryWith replay instead of re-sending the batch. Each entry is '<index>=<declaration>', index being the 0-based position the rejection printed; every held entry fix does not name replays unchanged. Only with retryWith, and an index the batch does not carry is refused naming the range.";
+    private const string FixHelp = "Correct held entries on a retryWith replay instead of re-sending the batch. Each entry is '<index>=<declaration>' for a held declaration, or 'add:<index>=<declaration>' for a held add= helper, index being the 0-based position the rejection printed; every held entry fix does not name replays unchanged. Only with retryWith, and an index the batch does not carry is refused naming the range.";
 
-    private static (int Index, string Text)? Correction(string entry)
+    private static (int Index, string Text, bool Add)? Correction(string entry)
     {
-        var separator = entry.AsSpan().IndexOf('=');
+        var span = entry.AsSpan();
+        var add = span.StartsWith("add:", StringComparison.Ordinal);
 
-        if (separator <= 0 || !int.TryParse(entry.AsSpan(0, separator), NumberStyles.None, CultureInfo.InvariantCulture, out var index))
+        if (add)
+            span = span[4..];
+
+        var separator = span.IndexOf('=');
+
+        if (separator <= 0 || !int.TryParse(span[..separator], NumberStyles.None, CultureInfo.InvariantCulture, out var index))
             return null;
 
-        var text = entry.AsSpan(separator + 1).Trim();
+        var text = span[(separator + 1)..].Trim();
 
-        return text.IsEmpty ? null : (index, new string(text));
+        return text.IsEmpty ? null : (index, new string(text), add);
     }
 
     private static string Detached() => Errors.Invalid(
         "fix was passed without retryWith, so there is no held batch to correct",
         "pass the retryWith token the rejection printed, or send the corrected batch as declarations=").Render();
 
-    private static string? Misfit(string entry, int position, int held, List<int> named) => Correction(entry) switch
+    private static string? Misfit(string entry, int position, int held, List<int> named, int addHeld, List<int> addNamed) => Correction(entry) switch
     {
         null => Errors.Invalid(
-            string.Create(CultureInfo.InvariantCulture, $"fix[{position}] is not '<index>=<declaration>'"),
-            "each fix entry names the 0-based index the rejection printed and the corrected declaration, e.g. 2=public int Count() => 1;").Render(),
-        { Index: var index } when index >= held => Errors.Invalid(
-            string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names index {index}, and the held batch carries {held} declaration(s)"),
-            held is 0
-                ? "the token holds no declaration to correct - re-send the batch as declarations="
-                : string.Create(CultureInfo.InvariantCulture, $"name an index between 0 and {held - 1}")).Render(),
-        { Index: var index } when named.Contains(index) => Errors.Invalid(
-            string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names index {index}, which an earlier entry already corrected"),
-            "name each held declaration at most once - two corrections of one entry cannot both land").Render(),
-        { Index: var index } => Remembered(named, index),
+            string.Create(CultureInfo.InvariantCulture, $"fix[{position}] is not '<index>=<declaration>' or 'add:<index>=<declaration>'"),
+            "each fix entry names the 0-based index the rejection printed and the corrected declaration, e.g. 2=public int Count() => 1; or add:1=private int Helper() => 2;").Render(),
+        { Add: var add, Index: var index } when index >= (add ? addHeld : held) => OutOfRange(position, index, add, add ? addHeld : held),
+        { Add: true, Index: var index } when addNamed.Contains(index) => Repeat(position, string.Create(CultureInfo.InvariantCulture, $"add:{index}")),
+        { Add: false, Index: var index } when named.Contains(index) => Repeat(position, string.Create(CultureInfo.InvariantCulture, $"index {index}")),
+        { Add: var add, Index: var index } => Remembered(add ? addNamed : named, index),
     };
 
-    private static string? RejectedFix(string[]? fix, string? retryWith, int held)
+    private static string? RejectedFix(string[]? fix, string? retryWith, int held, int addHeld = 0)
     {
         if (fix is null || fix.Length is 0)
             return null;
@@ -461,23 +492,24 @@ public sealed class EditTools(ToolContext context)
             return Detached();
 
         var named = new List<int>(fix.Length);
+        var addNamed = new List<int>(fix.Length);
 
         for (var entry = 0; entry < fix.Length; entry++)
         {
-            if (Misfit(fix[entry], entry, held, named) is { } refusal)
+            if (Misfit(fix[entry], entry, held, named, addHeld, addNamed) is { } refusal)
                 return refusal;
         }
 
         return null;
     }
 
-    private static string[] Patched(IReadOnlyList<string> held, string[]? fix)
+    private static string[] Patched(IReadOnlyList<string> held, string[]? fix, bool add = false)
     {
         string[] payloads = [.. held];
 
         foreach (var entry in fix ?? [])
         {
-            if (Correction(entry) is { } slot)
+            if (Correction(entry) is { } slot && slot.Add == add)
                 payloads[slot.Index] = slot.Text;
         }
 
@@ -490,4 +522,16 @@ public sealed class EditTools(ToolContext context)
 
         return null;
     }
+
+    private static string OutOfRange(int position, int index, bool add, int held) => Errors.Invalid(
+        add
+            ? string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names add:{index}, and the held batch carries {held} add= entries")
+            : string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names index {index}, and the held batch carries {held} declaration(s)"),
+        held is 0
+            ? (add ? "the token holds no add= entry to correct - re-send them as add=" : "the token holds no declaration to correct - re-send the batch as declarations=")
+            : string.Create(CultureInfo.InvariantCulture, $"name an index between 0 and {held - 1}")).Render();
+
+    private static string Repeat(int position, string named) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names {named}, which an earlier entry already corrected"),
+        "name each held entry at most once - two corrections of one entry cannot both land").Render();
 }
