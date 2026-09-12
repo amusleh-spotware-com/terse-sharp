@@ -8,6 +8,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- `README.md` and `NUGET_README.md` rewritten from scratch around the five reasons the server is
+  installed - token saving, speed, code quality, control over what the agent may emit, and the stack
+  it reaches (Blazor/Razor, XAML for MAUI/WPF/WinUI/Avalonia, ASP.NET Core Minimal APIs and DI, `.resx`
+  localization). Every measured number is carried over unchanged; what changed is the structure: a
+  five-row pitch table at the top, one section per reason with the sample output that proves it, an
+  anchor nav, and the install and 88-tool sections moved below the pitch. `list_endpoints` now documents
+  the Blazor `@page` routes it has always returned, and `gate` is shown with the four steps it really
+  runs - analyze at info severity, format, cleanup fix=all, analyze again - and its `dryRun=true` verify
+  mode. Three token-budget figures the old files carried are corrected against the assertions that back
+  them: the markup-narrowed ceiling is 24 600 (`MarkupProfileE2ETests`), the settings-narrowed one
+  25 400 (`ToolSettingsE2ETests`) and the whole-surface one 29 800
+  (`TokenBudgetE2ETests.AdvertisedPayloadBudget`).
+
+
 ## [0.57.0] - 2026-09-04
 
 ### Added
