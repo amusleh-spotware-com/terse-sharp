@@ -1193,8 +1193,24 @@ public static class ToolGuard
         var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var start = 0;
 
-        while (start < tokens.Length && (Bare(tokens[start]).Length is 0 || IsAssignment(Bare(tokens[start]))))
-            start++;
+        while (start < tokens.Length)
+        {
+            var bare = Bare(tokens[start]);
+
+            if (bare.Length is 0 || IsAssignment(bare))
+            {
+                start++;
+
+                continue;
+            }
+
+            var redirect = RedirectSpan(tokens, start, bare);
+
+            if (redirect is 0)
+                break;
+
+            start += redirect;
+        }
 
         if (start >= tokens.Length)
             return [];
@@ -1485,6 +1501,52 @@ public static class ToolGuard
 
         for (var index = 0; index < masked.Length; index++)
             MaskRedirect(masked, index);
+    }
+
+    private static int RedirectSpan(string[] tokens, int start, string bare)
+    {
+        var operatorLength = RedirectOperatorLength(bare);
+
+        return operatorLength is 0 ? 0
+            : bare.Length > operatorLength ? 1
+            : start + 1 < tokens.Length ? 2
+            : 1;
+    }
+
+    private static int RedirectOperatorLength(ReadOnlySpan<char> token)
+    {
+        var offset = 0;
+
+        if (token.Length > 0 && token[0] is '&')
+        {
+            offset = 1;
+        }
+        else
+        {
+            while (offset < token.Length && char.IsAsciiDigit(token[offset]))
+                offset++;
+        }
+
+        if (offset >= token.Length)
+            return 0;
+
+        return token[offset] switch
+        {
+            '<' => offset + Repeated(token[offset..], '<', 3),
+            '>' when offset + 1 < token.Length && token[offset + 1] is '>' or '|' => offset + 2,
+            '>' => offset + 1,
+            _ => 0,
+        };
+    }
+
+    private static int Repeated(ReadOnlySpan<char> token, char symbol, int most)
+    {
+        var length = 0;
+
+        while (length < token.Length && length < most && token[length] == symbol)
+            length++;
+
+        return length;
     }
 }
 

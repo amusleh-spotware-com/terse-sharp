@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
@@ -190,5 +191,68 @@ public sealed class ProjectFileTests : IDisposable
         File.WriteAllText(path, "<Project Sdk=\"Microsoft.NET.Sdk\">\n</Project>\n");
 
         return path;
+    }
+
+    [Fact]
+    public async Task AddPackage_WithCentralManagement_WritesThePackageVersionIntoAnItemGroup()
+    {
+        var project = Project("src");
+
+        File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), Central);
+
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+
+        Assert.True(result.IsOk, result.Error?.Message);
+        Assert.Equal("ItemGroup", CentralPackageParent("Serilog"));
+    }
+
+    [Fact]
+    public async Task AddPackage_WhenThePropsFileHasNoItemGroup_CreatesOneForThePackageVersion()
+    {
+        var project = Project("src");
+
+        File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), Enabled);
+
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+
+        Assert.True(result.IsOk, result.Error?.Message);
+        Assert.Equal("ItemGroup", CentralPackageParent("Serilog"));
+    }
+
+    private string CentralPackageParent(string package) =>
+        XDocument.Parse(Props())
+            .Descendants("PackageVersion")
+            .Single(element => element.Attribute("Include")?.Value == package)
+            .Parent!.Name.LocalName;
+
+    private const string ConditionedCentral = """
+    <Project>
+      <PropertyGroup>
+        <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+      </PropertyGroup>
+      <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+        <PackageVersion Include="Pinned" Version="1.0.0" />
+      </ItemGroup>
+    </Project>
+    """;
+
+    [Fact]
+    public async Task AddPackage_WhenTheOnlyGroupHoldingVersionsIsConditioned_CreatesAnUnconditionalItemGroup()
+    {
+        var project = Project("src");
+
+        File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), ConditionedCentral);
+
+        var result = await ProjectFile.AddPackage(root, project, "Serilog", "4.0.0", dryRun: false);
+
+        Assert.True(result.IsOk, result.Error?.Message);
+
+        var parent = XDocument.Parse(Props())
+            .Descendants("PackageVersion")
+            .Single(element => element.Attribute("Include")?.Value == "Serilog")
+            .Parent!;
+
+        Assert.Equal("ItemGroup", parent.Name.LocalName);
+        Assert.Null(parent.Attribute("Condition"));
     }
 }

@@ -146,7 +146,7 @@ public static class ProjectFile
         var before = central.ToString();
 
         if (central.Descendants("PackageVersion").All(element => !Named(element, package)))
-            Group(central).Add(new XElement("PackageVersion", new XAttribute("Include", package), new XAttribute("Version", version)));
+            ItemGroup(central, "PackageVersion").Add(new XElement("PackageVersion", new XAttribute("Include", package), new XAttribute("Version", version)));
 
         if (!dryRun)
             await AtomicWrite.TextAsync(centralPath, central.ToString() + Environment.NewLine).ConfigureAwait(false);
@@ -225,7 +225,9 @@ public static class ProjectFile
 
     private static XElement ItemGroup(XDocument document, string itemName)
     {
-        var existing = document.Descendants(itemName).FirstOrDefault()?.Parent;
+        var existing = document.Descendants(itemName)
+            .Select(element => element.Parent)
+            .FirstOrDefault(parent => parent is not null && parent.Attribute("Condition") is null);
 
         if (existing is not null)
             return existing;

@@ -99,7 +99,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit text** | re-reading a file to see what an edit landed | `edit_text(path, oldText, newText, context: 2)` — POST-edit lines, not a diff |
 | **Edit text** | reading a section out of one file and writing it into another | `edit_text(path, section: "## Open", toPath: "other.md")` |
 | **Edit text** | anchoring on `### Added` to add a changelog entry | `edit_text(path, section: "### Added", occurrence: 1, place: "prepend", newText: …)` — `read_text` takes `occurrence=` too |
-| **Edit text** | one `edit_text row=` call per row when closing a whole backlog | `edit_text(path, rows: [{row, newText}, ...], toPath: "IMPROVEMENTS-ARCHIVE.md")` |
+| **Edit text** | one `edit_text row=` call per row when closing a whole backlog, plus one more for its changelog line | `edit_text(path, rows: [{row, newText}, ...], toPath: "IMPROVEMENTS-ARCHIVE.md", edits: [{path: "CHANGELOG.md", oldText, newText}])` — `edits=` entries name OTHER files |
 | **Edit text** | cutting one table row out of one markdown file and appending it to another | `edit_text(path, row: "I286", toPath: "IMPROVEMENTS-ARCHIVE.md", newText: "\| … \|")` — matched by its first cell |
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` — an entry carries its own `path` and `force` |

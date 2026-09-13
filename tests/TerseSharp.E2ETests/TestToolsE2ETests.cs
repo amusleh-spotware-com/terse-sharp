@@ -524,4 +524,49 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("force=true re-runs it", second, StringComparison.Ordinal);
         Assert.StartsWith("build ok", forced, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task RunTests_RepeatedAfterAnExternalEditTheWatcherHasNotDrained_RunsAgainInsteadOfReplayingStale()
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["project"] = TestProject,
+            ["test"] = PassingTest,
+            ["timeoutSeconds"] = 420,
+        };
+
+        var source = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
+        var bytes = await File.ReadAllBytesAsync(source, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(source);
+
+        var first = await server.CallAsync("run_tests", new(arguments));
+        var primed = await server.CallAsync("run_tests", new(arguments));
+
+        Assert.StartsWith("run_tests PASSED", first, StringComparison.Ordinal);
+        Assert.StartsWith("run_tests UNCHANGED", primed, StringComparison.Ordinal);
+
+        try
+        {
+            await File.WriteAllBytesAsync(source, [.. bytes, (byte)'\n'], TestContext.Current.CancellationToken);
+
+            var repeat = primed;
+
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            repeat = await server.CallAsync("run_tests", new(arguments));
+
+            if (!repeat.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
+                break;
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+
+            Assert.StartsWith("run_tests PASSED", repeat, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(source, bytes, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(source, stamp);
+        }
+    }
 }

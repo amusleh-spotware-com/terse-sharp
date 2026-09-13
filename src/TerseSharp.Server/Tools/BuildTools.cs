@@ -38,7 +38,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     target, resolved, scope.Value, verbose, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
         },
-        cancellationToken: cancellationToken));
+        cancellationToken: cancellationToken),
+        cancellationToken);
 
     [McpServerTool(Name = "clean", Destructive = true)]
     [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. path= cleans a solution or project that is NOT loaded - a fixture, a sibling repository - so reproducing a cold build needs no load and no shell. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
@@ -143,7 +144,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             },
             changed && WholeSolution(project, projects),
             WholeSolution(project, projects),
-            cancellationToken));
+            cancellationToken),
+        cancellationToken);
 
     [McpServerTool(Name = "rerun_failed")]
     [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. tests=[...] and exclude=[...] filter that remembered list instead of replaying it whole, which is how a red round whose expectations the same edit already re-pointed is re-verified selectively; a filtered re-run always ends by naming how many remembered failures it did NOT run. It always runs: it is never answered from the unchanged-run memo, because no argument of the call names the failure list it replays. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
@@ -647,30 +649,44 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     private const string GreenVerdict = "run_tests PASSED";
 
-    private Task<string> Replayable(string tool, string green, string key, bool force, Func<Task<string>> run)
+    private async Task<string> Replayable(string tool, string green, string key, bool force, Func<Task<string>> run, CancellationToken cancellationToken)
     {
-        var stamp = Stamp();
+        await context.ReadyAsync().ConfigureAwait(false);
+
+        try
+        {
+            foreach (var workspace in context.Registry.All())
+                await workspace.Sync.SyncAsync(workspace, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return await run().ConfigureAwait(false);
+        }
+
+        var stamp = Stamp(out var unavailable);
         var now = Stopwatch.GetTimestamp();
 
         if (stamp is null)
-            return run();
+            return await Traced(run(), unavailable!).ConfigureAwait(false);
 
-        return !force && unchanged.Replay(tool, key, stamp, now) is { } previous
-            ? Task.FromResult(previous)
-            : Memoized(green, key, stamp, run());
+        if (!force && unchanged.Replay(tool, key, stamp, now) is { } previous)
+            return previous;
+
+        return await Memoized(green, key, stamp, run, Miss(force, key, stamp)).ConfigureAwait(false);
     }
 
-    private async Task<string> Memoized(string green, string key, string stamp, Task<string> run)
+    private async Task<string> Memoized(string green, string key, string stamp, Func<Task<string>> run, string miss)
     {
-        var text = await run.ConfigureAwait(false);
+        var text = await run().ConfigureAwait(false);
+        var refusal = UnchangedRun.MemoRefusal(green, text);
 
-        if (text.StartsWith(green, StringComparison.Ordinal) && !text.Contains('\n', StringComparison.Ordinal))
+        if (refusal is null)
             unchanged.Remember(key, stamp, text, Stopwatch.GetTimestamp());
 
-        return text;
+        return Traced(text, miss, refusal);
     }
 
-    private string? Stamp()
+    private string? Stamp(out string? unavailable)
     {
         var loaded = context.Registry.All();
         var stamp = new StringBuilder(128);
@@ -682,7 +698,11 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             var sync = workspace.Sync;
 
             if (sync.State is not WatchState.Active || sync.Gaps > 0)
+            {
+                unavailable = string.Create(CultureInfo.InvariantCulture, $"{workspace.Root} watch={sync.State} gaps={sync.Gaps}");
+
                 return null;
+            }
 
             stamp.Append(' ')
                 .Append(workspace.Root)
@@ -691,6 +711,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 .Append('=')
                 .Append(sync.Generations.ToString());
         }
+
+        unavailable = null;
 
         return stamp.ToString();
     }
@@ -723,4 +745,24 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     };
 
     private const string BuildGreen = "build ok";
+    private static readonly bool TraceMemo = Environment.GetEnvironmentVariable("TERSE_UNCHANGED_TRACE") is "1";
+
+    private static async Task<string> Traced(Task<string> run, string unavailable)
+    {
+        var text = await run.ConfigureAwait(false);
+
+        return TraceMemo
+            ? string.Create(CultureInfo.InvariantCulture, $"{text}\nmemo: miss - stamp unavailable: {unavailable}; not remembered - the stamp was unavailable")
+            : text;
+    }
+
+    private static string Traced(string text, string miss, string? refusal) =>
+        TraceMemo
+            ? string.Create(CultureInfo.InvariantCulture, $"{text}\nmemo: miss - {miss}; {(refusal is null ? "remembered" : "not remembered - " + refusal)}")
+            : text;
+
+    private string Miss(bool force, string key, string stamp) =>
+        !TraceMemo ? string.Empty
+            : force ? "force=true"
+            : unchanged.MissReason(key, stamp);
 }

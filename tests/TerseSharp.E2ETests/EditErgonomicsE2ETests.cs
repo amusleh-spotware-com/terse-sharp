@@ -1167,4 +1167,170 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_WithRowsToPathAndEditsForOtherFiles_LandsTheMoveAndTheEditsInOneCall()
+    {
+        const string Source = "terse-i533-open.md";
+        const string Target = "terse-i533-archive.md";
+        const string Beside = "terse-i533-changelog.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding | Tool |\n|---|---|\n| **I930** first | build |\n| **I931** second | format |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding | Tool |\n|---|---|\n| **I929** older | clean |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Beside,
+                ["content"] = "# Changelog\n\n## Unreleased\n\n- nothing yet\n",
+            },
+        },
+        });
+
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Source,
+                ["toPath"] = Target,
+                ["rows"] = new[]
+                {
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["row"] = "I930" },
+            },
+                ["edits"] = new[]
+                {
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["path"] = Beside,
+                    ["oldText"] = "- nothing yet",
+                    ["newText"] = "- closed I930",
+                },
+            },
+            });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+
+            var source = await server.CallAsync("read_text", new() { ["path"] = Source, ["verbose"] = true });
+            var target = await server.CallAsync("read_text", new() { ["path"] = Target, ["verbose"] = true });
+            var beside = await server.CallAsync("read_text", new() { ["path"] = Beside, ["verbose"] = true });
+
+            Assert.DoesNotContain("I930", source, StringComparison.Ordinal);
+            Assert.Contains("| **I930** first | build |", target, StringComparison.Ordinal);
+            Assert.Contains("- closed I930", beside, StringComparison.Ordinal);
+            Assert.DoesNotContain("- nothing yet", beside, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Beside, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithRowsAndAnEditsEntryTargetingAMovedFile_IsRefusedBeforeAnythingIsWritten()
+    {
+        const string Source = "terse-i533b-open.md";
+        const string Target = "terse-i533b-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding | Tool |\n|---|---|\n| **I940** first | build |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding | Tool |\n|---|---|\n| **I939** older | clean |\n",
+            },
+        },
+        });
+
+        try
+        {
+            var inside = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Source,
+                ["toPath"] = Target,
+                ["rows"] = new[] { new Dictionary<string, object?>(StringComparer.Ordinal) { ["row"] = "I940" } },
+                ["edits"] = new[]
+                {
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["path"] = Target,
+                    ["oldText"] = "# Archive",
+                    ["newText"] = "# The Archive",
+                },
+            },
+            });
+
+            var pathless = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Source,
+                ["toPath"] = Target,
+                ["rows"] = new[] { new Dictionary<string, object?>(StringComparer.Ordinal) { ["row"] = "I940" } },
+                ["edits"] = new[]
+                {
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["oldText"] = "# Archive",
+                    ["newText"] = "# The Archive",
+                },
+            },
+            });
+
+            Assert.StartsWith("ERROR", inside, StringComparison.Ordinal);
+            Assert.Contains("remedy:", inside, StringComparison.Ordinal);
+            Assert.StartsWith("ERROR", pathless, StringComparison.Ordinal);
+            Assert.Contains("remedy:", pathless, StringComparison.Ordinal);
+
+            var source = await server.CallAsync("read_text", new() { ["path"] = Source, ["verbose"] = true });
+            var target = await server.CallAsync("read_text", new() { ["path"] = Target, ["verbose"] = true });
+
+            Assert.Contains("| **I940** first | build |", source, StringComparison.Ordinal);
+            Assert.Contains("# Archive", target, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithRowsAndMoreSideEditsThanTheCap_IsRefusedNamingTheCap()
+    {
+        var refused = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "terse-i533c-open.md",
+            ["toPath"] = "terse-i533c-archive.md",
+            ["rows"] = new[] { new Dictionary<string, object?>(StringComparer.Ordinal) { ["row"] = "I950" } },
+            ["edits"] = Enumerable.Range(0, 26)
+                .Select(index => new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["path"] = string.Create(CultureInfo.InvariantCulture, $"terse-i533c-{index}.md"),
+                    ["oldText"] = "x",
+                    ["newText"] = "y",
+                })
+                .ToArray(),
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.Contains("at most 25", refused, StringComparison.Ordinal);
+        Assert.Contains("remedy:", refused, StringComparison.Ordinal);
+    }
 }

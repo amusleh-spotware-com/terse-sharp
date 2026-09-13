@@ -43,4 +43,35 @@ public sealed class UnchangedRun
     private static long Seconds(long ticks) => Math.Max(0, ticks) / Stopwatch.Frequency;
 
     private readonly record struct Seen(string Stamp, string Verdict, long Timestamp);
+
+    public string MissReason(string key, string stamp)
+    {
+        lock (gate)
+        {
+            return runs.TryGetValue(key, out var seen)
+                ? "stamp moved: " + FirstDifference(seen.Stamp, stamp)
+                : "first run of this key";
+        }
+    }
+
+    public static string? MemoRefusal(string green, string verdict) =>
+        !verdict.StartsWith(green, StringComparison.Ordinal)
+            ? string.Create(CultureInfo.InvariantCulture, $"the verdict does not open with '{green}'")
+            : verdict.Contains('\n', StringComparison.Ordinal)
+                ? "the verdict is not a single line"
+                : null;
+
+    private static string FirstDifference(string remembered, string current)
+    {
+        var before = remembered.Split(' ');
+        var after = current.Split(' ');
+
+        for (var index = 0; index < Math.Min(before.Length, after.Length); index++)
+        {
+            if (!string.Equals(before[index], after[index], StringComparison.Ordinal))
+                return string.Create(CultureInfo.InvariantCulture, $"remembered '{before[index]}' current '{after[index]}'");
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"remembered '{remembered}' current '{current}'");
+    }
 }

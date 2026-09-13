@@ -1633,4 +1633,21 @@ public sealed class ToolGuardTests
         Assert.Equal(rewrite, verdict.Rewrite);
         Assert.DoesNotContain("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("> build.log dotnet build TerseSharp.slnx")]
+    [InlineData(">build.log dotnet build TerseSharp.slnx")]
+    [InlineData("2> err.log dotnet test")]
+    [InlineData(">> build.log dotnet format")]
+    [InlineData("10> f dotnet test")]
+    [InlineData("<<< word dotnet clean")]
+    [InlineData("<< EOF dotnet build")]
+    public void Inspect_ForAReplacedCommandBehindALeadingRedirect_Denies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+
+    [Theory]
+    [InlineData("> out.log npm run build")]
+    [InlineData("2> err.log git commit -m fix")]
+    public void Inspect_ForAnUnreplacedCommandBehindALeadingRedirect_StillAllows(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
 }

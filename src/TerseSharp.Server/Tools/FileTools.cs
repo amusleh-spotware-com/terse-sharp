@@ -172,7 +172,7 @@ bool verbose) =>
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. With toPath=, section= MOVES the section into another markdown file in one write, and row=\"I286\" moves ONE table row, matched by its first cell, so the row costs its identifier instead of its text; rows=[{row,newText}, ...] moves up to 25 of them as ONE write per file. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. The top-level path may be omitted entirely when every entry declares its own. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. On a .cs file, force=true is the sanctioned way to amend a declaration's ATTRIBUTES - a tool [Description], an [Obsolete] - since a short anchor costs ~30 tokens where replace_symbol re-sends the whole declaration; it is NOT compile-gated, so analyze the file after. A successful edit answers in one line per changed file - the file name and changedLines; pass context=N for the N lines around each change in their POST-edit state, which is the confirm-read the one-line answer otherwise costs, and verbose=true for the diff.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - and with place=append or place=prepend, write INSIDE that section instead of replacing it, so a new changelog entry needs no oldText. With toPath=, section= MOVES the section into another markdown file in one write, and row=\"I286\" moves ONE table row, matched by its first cell, so the row costs its identifier instead of its text; rows=[{row,newText}, ...] moves up to 25 of them as ONE write per file, and edits= entries naming OTHER files ride in the same call. Pass edits=[{oldText,newText}, ...] to apply several edits in one call. Replaces one call per edit: entries without a path go to the top-level path and are applied in order as a single write, an entry may carry its own path to edit ANOTHER file in the same call - grouped by file, one write and one answer line per file - and an edit whose anchor fails is reported on its own line with its error code and remedy while the rest still land. The top-level path may be omitted entirely when every entry declares its own. At most 10 entries per file and 25 in total. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. Refuses when the match is not unique and names the file's closest lines with their line numbers; on a file of near-identical rows pass occurrence=N to pick the Nth match instead of lengthening the anchor. On a .cs file, force=true is the sanctioned way to amend a declaration's ATTRIBUTES - a tool [Description], an [Obsolete] - since a short anchor costs ~30 tokens where replace_symbol re-sends the whole declaration; it is NOT compile-gated, so analyze the file after. A successful edit answers in one line per changed file - the file name and changedLines; pass context=N for the N lines around each change in their POST-edit state, which is the confirm-read the one-line answer otherwise costs, and verbose=true for the diff.")]
     public Task<string> EditText(
         [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry that carries no path of its own - and it may be omitted entirely when every entry declares one.")] string? path = null,
         [Description("Replacement text. With section=, the whole new section including its heading line, unless place= writes inside it. With row=, the row as it should read in the target; empty moves it verbatim. Omit it when edits= carries the edits.")] string? newText = null,
@@ -184,10 +184,10 @@ bool verbose) =>
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("1-based index of the match to replace when it deliberately repeats - the oldText match, or beside section= that heading. Default 0 requires exactly one; a multi-match refusal lists the candidates.")] int occurrence = 0,
         [Description("With section=, lowercase: append writes after its last non-blank line, prepend directly under its heading. With toPath=, prepend puts the moved section at the top of the target, anything else appends it. Empty replaces the section.")] string? place = null,
-        [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE that section or those rows into. Cut from path, written into toPath as one write, one line per changed file. Naming the same file twice is refused. Not with oldText or edits.")] string? toPath = null,
-        [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched against the first cell of each row - e.g. row=\"I286\". It must match exactly one, and the refusal says how many it matched. Not with section=, oldText or edits.")] string? row = null,
+        [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE that section or those rows into. Cut from path, written into toPath as one write, one line per changed file. Naming the same file twice is refused. Not with oldText; edits= entries ride beside row= or rows=, not beside section=.")] string? toPath = null,
+        [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched against the first cell of each row - e.g. row=\"I286\". It must match exactly one, and the refusal says how many it matched. Not with section= or a top-level oldText.")] string? row = null,
         [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place, path and force, so a .cs entry rides in a markdown batch. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total. Two entries of one file anchoring on the SAME oldText with occurrence= are refused before anything is written, naming both by index.")] FileService.TextEdit[]? edits = null,
-        [Description("Markdown only, with toPath=: several table rows moved in ONE call, at most 25, each taking row and optionally newText. Replaces one call per row: cut and landed in order, written once per file. Not with row=, section=, oldText or edits.")] FileService.TextRow[]? rows = null,
+        [Description("Markdown only, with toPath=: several table rows moved in ONE call, at most 25, each taking row and optionally newText. Replaces one call per row: cut and landed in order, written once per file. Not with row=, section= or a top-level oldText.")] FileService.TextRow[]? rows = null,
         [Description("Return the N lines around each applied change in their POST-edit state, numbered, instead of only changedLines - the confirm-read a successful edit otherwise costs. 1-10, refused outside that range; 0 (default) adds nothing. Not a diff - verbose=true returns the diff instead.")] int context = 0,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
         CancellationToken cancellationToken = default)
@@ -854,19 +854,31 @@ context.RejectWrite() is { } rejection
         FileService.TextRow[]? rows,
         CancellationToken cancellationToken)
     {
-        if (request.OldText is { Length: > 0 } || request.Section is { Length: > 0 } || edits is { Length: > 0 })
+        if (request.OldText is { Length: > 0 } || request.Section is { Length: > 0 })
         {
             return Errors.Invalid(
-                "row= and rows= move markdown table rows and cannot be combined with oldText, section or edits",
-                "send the move as path=, row= or rows=, toPath= and optionally newText= alone").Render();
+                "row= and rows= move markdown table rows and cannot be combined with a top-level oldText or section",
+                "send the move as path=, row= or rows=, toPath= and optionally newText= - edits= entries naming OTHER files may ride along").Render();
         }
 
         if (Batched(request, rows) is { IsOk: false } refused)
             return refused.Error!.Render();
 
-        return NavigationTools.Unwrap(rows is { Length: > 0 } batch
+        var side = SideEdits(loaded.Root, path, toPath, edits);
+
+        if (!side.IsOk)
+            return side.Error!.Render();
+
+        var moved = NavigationTools.Unwrap(rows is { Length: > 0 } batch
             ? await FileService.MoveRowsAsync(loaded, path, toPath, batch, request, cancellationToken).ConfigureAwait(false)
             : await FileService.MoveRowAsync(loaded, path, toPath, request, cancellationToken).ConfigureAwait(false));
+
+        if (side.Value is not { Count: > 0 } groups || moved.StartsWith("ERROR", StringComparison.Ordinal))
+            return moved;
+
+        var edited = await FileService.EditTextGroupedAsync(loaded, groups, WithoutMove(request), cancellationToken).ConfigureAwait(false);
+
+        return moved + "\n" + NavigationTools.Unwrap(edited);
     }
 
     private static Result<bool> Batched(FileService.EditRequest request, FileService.TextRow[]? rows)
@@ -1071,4 +1083,46 @@ context.RejectWrite() is { } rejection
 
         return null;
     }
+
+    private static Result<List<FileService.TextEditGroup>> SideEdits(string root, string path, string toPath, FileService.TextEdit[]? edits)
+    {
+        if (edits is not { Length: > 0 })
+            return Result.Ok(new List<FileService.TextEditGroup>());
+
+        if (edits.Length > MaxBatchedFiles)
+        {
+            return Result.Fail<List<FileService.TextEditGroup>>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"edits carried {edits.Length} entries, at most {MaxBatchedFiles} are applied in one call"),
+                string.Create(CultureInfo.InvariantCulture, $"split it into smaller calls - at most {MaxBatchedEdits} per file and {MaxBatchedFiles} in total")));
+        }
+
+        var pathless = Array.FindIndex(edits, entry => entry.Path is not { Length: > 0 });
+
+        if (pathless >= 0)
+        {
+            return Result.Fail<List<FileService.TextEditGroup>>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"edits[{pathless}] carries no path, and beside row= or rows= every edits entry must name ANOTHER file"),
+                "give the entry its own path=, or send it as a separate edit_text call"));
+        }
+
+        var moved = Array.FindIndex(edits, entry => SamePath(root, entry.Path!, path) || SamePath(root, entry.Path!, toPath));
+
+        if (moved >= 0)
+        {
+            return Result.Fail<List<FileService.TextEditGroup>>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"edits[{moved}] targets '{edits[moved].Path}', which the row move itself rewrites"),
+                "fold the change into that row's newText=, or send the edit as a separate edit_text call"));
+        }
+
+        return Grouped(root, path, edits);
+    }
+
+    private static bool SamePath(string root, string first, string second) =>
+        PathBoundary.Comparer.Equals(Full(root, first), Full(root, second));
+
+    private static string Full(string root, string path) =>
+        Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(root, path));
+
+    private static FileService.EditRequest WithoutMove(FileService.EditRequest request) =>
+        request with { OldText = string.Empty, NewText = string.Empty, Row = null, ToPath = null };
 }
