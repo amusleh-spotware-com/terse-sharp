@@ -569,10 +569,13 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             {
                 text = await server.CallAsync("write_text", new(arguments));
 
-                if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
-                    break;
+            if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
+                break;
 
-                await Task.Delay(500, TestContext.Current.CancellationToken);
+            File.Delete(callee);
+            File.Delete(caller);
+
+            await Task.Delay(500, TestContext.Current.CancellationToken);
             }
 
             Assert.False(text.Contains("ERROR", StringComparison.Ordinal), "write_text answered an error, in full: " + text);

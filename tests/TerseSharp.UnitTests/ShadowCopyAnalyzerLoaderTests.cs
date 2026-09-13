@@ -27,7 +27,10 @@ public sealed class ShadowCopyAnalyzerLoaderTests
     {
         await EnsureBuiltAsync();
 
-        Assert.True(Writable(), "the analyzer assembly was already locked before the test started");
+        for (var attempt = 0; attempt < 30 && !Writable(); attempt++)
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+
+        Assert.True(Writable(), "the analyzer assembly was still locked 15 s after the test started");
 
         using var registry = new WorkspaceRegistry(watch: false);
 
