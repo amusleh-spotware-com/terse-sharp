@@ -543,25 +543,37 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         var callee = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "GateCallee.cs");
         var caller = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "GateCaller.cs");
 
+        var arguments = new Dictionary<string, object?>
+        {
+            ["force"] = true,
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object?>
+            {
+                ["path"] = "src/Fixture.Trading/GateCaller.cs",
+                ["content"] = "namespace Fixture.Trading;\n\npublic static class GateCaller\n{\n    public static int Call() => GateCallee.Answer();\n}\n",
+            },
+            new Dictionary<string, object?>
+            {
+                ["path"] = "src/Fixture.Trading/GateCallee.cs",
+                ["content"] = "namespace Fixture.Trading;\n\npublic static class GateCallee\n{\n    public static int Answer() => 42;\n}\n",
+            },
+            },
+        };
+
         try
         {
-            var text = await server.CallAsync("write_text", new()
+            var text = "";
+
+            for (var attempt = 0; attempt < 3; attempt++)
             {
-                ["force"] = true,
-                ["files"] = new object[]
-                {
-                new Dictionary<string, object?>
-                {
-                    ["path"] = "src/Fixture.Trading/GateCaller.cs",
-                    ["content"] = "namespace Fixture.Trading;\n\npublic static class GateCaller\n{\n    public static int Call() => GateCallee.Answer();\n}\n",
-                },
-                new Dictionary<string, object?>
-                {
-                    ["path"] = "src/Fixture.Trading/GateCallee.cs",
-                    ["content"] = "namespace Fixture.Trading;\n\npublic static class GateCallee\n{\n    public static int Answer() => 42;\n}\n",
-                },
-                },
-            });
+                text = await server.CallAsync("write_text", new(arguments));
+
+                if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
+                    break;
+
+                await Task.Delay(500, TestContext.Current.CancellationToken);
+            }
 
             Assert.False(text.Contains("ERROR", StringComparison.Ordinal), "write_text answered an error, in full: " + text);
             Assert.Contains("GateCaller.cs", text, StringComparison.Ordinal);

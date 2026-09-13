@@ -700,6 +700,15 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     {
         var sync = loaded.Sync;
 
+        try
+        {
+            await sync.SyncAsync(loaded, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+
         if (sync.State is not WatchState.Active || sync.Gaps > 0 || sync.PendingCount > 0)
             return null;
 
