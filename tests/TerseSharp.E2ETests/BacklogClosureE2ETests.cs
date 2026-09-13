@@ -1998,16 +1998,25 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task Build_CalledTwiceWithIdenticalArguments_SaysItIsARepeatAndThatNothingWasWrittenInBetween()
+    public async Task Build_CalledTwiceWithIdenticalArguments_ReplaysTheVerdictAsUnchanged()
     {
-        await server.CallAsync("build", new() { ["project"] = "Fixture.Trading" });
+        var arguments = new Dictionary<string, object?>
+        {
+            ["project"] = "Fixture.Trading",
+            ["properties"] = new[] { "TerseBacklogProbe=1" },
+        };
 
-        var second = await server.CallAsync("build", new() { ["project"] = "Fixture.Trading" });
+        await server.CallAsync("build", new(arguments));
 
-        Assert.StartsWith("build ok", second, StringComparison.Ordinal);
-        Assert.Contains("of this exact build call", second, StringComparison.Ordinal);
-        Assert.Contains("previous verdict: build ok", second, StringComparison.Ordinal);
-        Assert.Contains("nothing was written in between", second, StringComparison.Ordinal);
+        var second = await server.CallAsync("build", new(arguments));
+
+        Assert.StartsWith("build UNCHANGED", second, StringComparison.Ordinal);
+        Assert.Contains("nothing was written since this exact call", second, StringComparison.Ordinal);
+        Assert.Contains("previous: build ok", second, StringComparison.Ordinal);
+        Assert.Contains("force=true re-runs it", second, StringComparison.Ordinal);
+        Assert.Contains("nothing was written since this exact call", second, StringComparison.Ordinal);
+        Assert.Contains("previous: build ok", second, StringComparison.Ordinal);
+        Assert.Contains("force=true re-runs it", second, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2221,5 +2230,19 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
+    }
+
+    [Fact]
+    public async Task AnalyzeFormatCleanup_Unscoped_EndBySteeringToGate()
+    {
+        var analyze = await server.CallAsync("analyze", new() { ["maxResults"] = 3, ["includeDeadCode"] = false });
+        var format = await server.CallAsync("format", new() { ["verify"] = true });
+        var cleanup = await server.CallAsync("cleanup", new() { ["verify"] = true, ["fix"] = "style" });
+        var scoped = await server.CallAsync("format", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["verify"] = true });
+
+        Assert.Contains("next: gate - the unscoped end-of-task sweep", analyze, StringComparison.Ordinal);
+        Assert.Contains("next: gate dryRun=true", format, StringComparison.Ordinal);
+        Assert.Contains("next: gate dryRun=true", cleanup, StringComparison.Ordinal);
+        Assert.DoesNotContain("next: gate", scoped, StringComparison.Ordinal);
     }
 }

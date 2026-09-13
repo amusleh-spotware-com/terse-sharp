@@ -28,13 +28,18 @@ public sealed class AnalysisTools(ToolContext context)
                 var scope = Scoped(loaded, path, paths);
 
                 return scope.IsOk
-                    ? Steered(
-                        AnalysisService.AnalyzeAsync(
-                            loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
-                        path,
-                        paths,
-                        changed)
-                    : Task.FromResult(scope.Error!.Render());
+                    ? GateSteered(
+                        Steered(
+                            AnalysisService.AnalyzeAsync(
+                                loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
+                            path,
+                            paths,
+                            changed),
+                    path,
+                    paths,
+                    changed || sinceLast || ids is { Length: > 0 },
+                    check: false)
+                : Task.FromResult(scope.Error!.Render());
             },
             cancellationToken: cancellationToken);
 
@@ -49,19 +54,24 @@ public sealed class AnalysisTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Several files, directories or globs formatted in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
         CancellationToken cancellationToken = default) =>
-        Guarded(workspace, path ?? First(paths), loaded =>
-        {
-            var scope = Scoped(loaded, path, paths);
+        GateSteered(
+            Guarded(workspace, path ?? First(paths), loaded =>
+            {
+                var scope = Scoped(loaded, path, paths);
 
-            return scope.IsOk
-                ? FormatService.RunAsync(
-                    loaded,
-                    new FixScope(scope.Value, changed),
-                    new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
-                    new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
-                    cancellationToken)
-                : Task.FromResult(Result.Fail<string>(scope.Error!));
-        });
+                return scope.IsOk
+                    ? FormatService.RunAsync(
+                        loaded,
+                        new FixScope(scope.Value, changed),
+                        new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
+                        new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
+                        cancellationToken)
+                    : Task.FromResult(Result.Fail<string>(scope.Error!));
+            }),
+            path,
+            paths,
+            changed,
+            verify || dryRun);
 
     [McpServerTool(Name = "cleanup")]
     [Description("Replaces Bash dotnet format style and dotnet format analyzers. fix=usings and fix=all remove unused usings, sort them System-first and reformat; fix=style and fix=analyzers apply code fixes ONLY and never reformat, so each matches its CI command byte for byte. Those three fix modes apply the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, paths=[...] up to 10 in ONE pass as analyze and format do - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
@@ -83,19 +93,24 @@ public sealed class AnalysisTools(ToolContext context)
         if (!mode.IsOk)
             return Task.FromResult(mode.Error!.Render());
 
-        return Guarded(workspace, path ?? First(paths), loaded =>
-        {
-            var scope = Scoped(loaded, path, paths);
+        return GateSteered(
+            Guarded(workspace, path ?? First(paths), loaded =>
+            {
+                var scope = Scoped(loaded, path, paths);
 
-            return scope.IsOk
-                ? FormatService.RunAsync(
-                    loaded,
-                    new FixScope(scope.Value, changed),
-                    new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
-                    new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
-                    cancellationToken)
-                : Task.FromResult(Result.Fail<string>(scope.Error!));
-        });
+                return scope.IsOk
+                    ? FormatService.RunAsync(
+                        loaded,
+                        new FixScope(scope.Value, changed),
+                        new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
+                        new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
+                        cancellationToken)
+                    : Task.FromResult(Result.Fail<string>(scope.Error!));
+            }),
+            path,
+            paths,
+            changed,
+            verify || dryRun);
     }
 
     private static Result<FixMode> Mode(string? fix) => fix?.ToLowerInvariant() switch
@@ -243,4 +258,19 @@ public sealed class AnalysisTools(ToolContext context)
                 "gate is always scoped to the files modified since the workspace loaded, so changed=false has no meaning",
                 "drop changed=, or pass solution=true to gate every document instead").Render()
             : null;
+
+    private static bool Unscoped(string? path, string?[]? paths, bool changed) =>
+        !changed && path is not { Length: > 0 } && First(paths) is null;
+
+    private static async Task<string> GateSteered(Task<string> answer, string? path, string?[]? paths, bool changed, bool check)
+    {
+        var text = await answer.ConfigureAwait(false);
+
+        if (!Unscoped(path, paths, changed) || text.StartsWith("ERROR", StringComparison.Ordinal))
+            return text;
+
+        return text + (check
+            ? "\nnext: gate dryRun=true - the unscoped end-of-task sweep (analyze at info, format, cleanup fix=all, re-analyze), verified in ONE call"
+            : "\nnext: gate - the unscoped end-of-task sweep (analyze at info, format, cleanup fix=all, re-analyze) in ONE call");
+    }
 }

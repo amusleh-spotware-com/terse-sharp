@@ -269,14 +269,19 @@ public static class FileService
                 path,
                 text,
                 request.Range with { Start = located.Value!.StartLine, End = located.Value!.EndLine },
-                request))
+                request,
+                sectionScoped: true))
             : Result.Fail<string>(located.Error!);
     }
 
-    private static string Render(string path, string text, LineRange range, ReadRequest request)
+    private static string Render(string path, string text, LineRange range, ReadRequest request, bool sectionScoped = false)
     {
         var keepsBlanks = TextCompressor.KeepsBlankLines(Located(path)) || TextCompressor.HasMultilineLiteral(text);
         var selection = Collect(text, range, new ReadFormat(request.Verbose, keepsBlanks));
+
+        if (sectionScoped)
+            selection = selection with { TotalLines = SectionLines(range, selection.TotalLines) };
+
         var response = new ResponseBuilder("read_text", path).Verbose(request.Verbose);
 
         response.Summary(selection.CoveredLines, ReachableLines(selection), "lines");
@@ -1351,13 +1356,13 @@ public static class FileService
             $"sections={sections.Count} - address one with read_text or edit_text section=\"{sections[0].Title}\" instead of an oldText anchor{Named(sections)}"));
     }
 
-    private static bool Whole(ReadRequest request) =>
-            !request.Headings
-            && request.Section is not { Length: > 0 }
-            && request.Columns is not { Count: > 0 }
-            && request.Tail is 0
-            && request.Range.Start <= 0
-            && request.Range.End <= 0;
+    private static bool Whole(ReadRequest request) => !request.Headings
+    && request.Section is not { Length: > 0 }
+    && request.Columns is not { Count: > 0 }
+    && request.Tail is 0
+    && request.Range.Start <= 0
+    && request.Range.End <= 0
+    && request.Range.Spans is not { Count: > 0 };
 
     private static string Named(IReadOnlyList<DocumentSection> sections)
     {
@@ -1673,7 +1678,7 @@ public static class FileService
 
     private static Result<string>? Mapped(string path, string label, string text, ReadRequest request)
     {
-        if (request.Verbose || request.Tail > 0 || request.Range.Start > 0 || request.Range.End > 0)
+        if (request.Verbose || request.Tail > 0 || request.Range.Start > 0 || request.Range.End > 0 || request.Range.Spans is { Count: > 0 })
             return null;
 
         if (text.Length < MarkdownMapCharacters || !DocumentOutline.IsMarkdown(Located(label)))
@@ -1899,4 +1904,7 @@ public static class FileService
 
         return new Result<IReadOnlyList<LineSpan>>(spans, null);
     }
+
+    private static int SectionLines(LineRange range, int fileTotal) =>
+        Math.Min(range.End <= 0 ? fileTotal : range.End, fileTotal) - Math.Max(1, range.Start) + 1;
 }

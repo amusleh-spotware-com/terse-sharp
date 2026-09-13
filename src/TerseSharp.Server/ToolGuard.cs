@@ -724,7 +724,7 @@ public static class ToolGuard
     private static string Masked(string command)
     {
         if (command.AsSpan().IndexOfAny('"', '\'') < 0)
-            return Duplications(command);
+            return Redirections(command);
 
         var masked = command.ToCharArray();
         var quote = '\0';
@@ -739,7 +739,9 @@ public static class ToolGuard
                 masked[index] = 'x';
         }
 
-        return Duplications(new string(masked));
+        MaskRedirections(masked);
+
+        return new string(masked);
     }
 
     private static char Quote(char quote, char current) => (quote, current) switch
@@ -1242,15 +1244,14 @@ public static class ToolGuard
         return 1;
     }
 
-    private static string Duplications(string command)
+    private static string Redirections(string command)
     {
-        if (!command.Contains(">&", StringComparison.Ordinal))
+        if (command.AsSpan().IndexOfAny('>', '<') < 0)
             return command;
 
         var masked = command.ToCharArray();
 
-        for (var index = 0; index + 2 < masked.Length; index++)
-            MaskDuplication(masked, index);
+        MaskRedirections(masked);
 
         return new string(masked);
     }
@@ -1441,6 +1442,50 @@ public static class ToolGuard
 
     private static bool SleepToken(string token) =>
         IsSleep(token) && Bare(token).AsSpan().IndexOfAny('/', '\\', '.') < 0;
+
+    private static void MaskRedirect(char[] masked, int index)
+    {
+        if (masked[index] is not ('>' or '<'))
+            return;
+
+        var end = index;
+
+        if (masked[index] is '>' && end + 1 < masked.Length && masked[end + 1] is '>')
+            end++;
+
+        if (masked[index] is '<' && end + 1 < masked.Length && masked[end + 1] is '<' or '>')
+            return;
+
+        if (!TargetFollows(masked, end + 1))
+            return;
+
+        if (index > 0 && char.IsAsciiDigit(masked[index - 1]) && (index is 1 || char.IsWhiteSpace(masked[index - 2])))
+            masked[index - 1] = 'x';
+
+        for (var position = index; position <= end; position++)
+            masked[position] = 'x';
+    }
+
+    private static bool TargetFollows(char[] masked, int start)
+    {
+        var position = start;
+
+        while (position < masked.Length && masked[position] is ' ' or '\t')
+            position++;
+
+        return position < masked.Length
+            && !char.IsWhiteSpace(masked[position])
+            && masked[position] is not ('&' or '|' or ';' or '(' or ')' or '{' or '}' or '`' or '<' or '>' or '$' or '#' or '\\');
+    }
+
+    private static void MaskRedirections(char[] masked)
+    {
+        for (var index = 0; index + 2 < masked.Length; index++)
+            MaskDuplication(masked, index);
+
+        for (var index = 0; index < masked.Length; index++)
+            MaskRedirect(masked, index);
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

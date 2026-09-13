@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>terse</AssemblyName>
@@ -17,25 +16,21 @@
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
-
   <ItemGroup>
     <EmbeddedResource Include="Assets/SKILL.md" LogicalName="TerseSharp.Server.Assets.SKILL.md" />
     <None Include="../../NUGET_README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
-
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="System.Management" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="../TerseSharp.Core/TerseSharp.Core.csproj" />
   </ItemGroup>
-
   <ItemGroup>
     <InternalsVisibleTo Include="TerseSharp.UnitTests" />
     <InternalsVisibleTo Include="TerseSharp.E2ETests" />
   </ItemGroup>
-
 </Project>

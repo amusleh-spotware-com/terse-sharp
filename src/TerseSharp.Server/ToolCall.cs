@@ -56,8 +56,7 @@ internal static class ToolCall
             readOnly: false,
             ToolProfile.Resolve(null) with { Overrides = overrides }));
 
-        services.AddSingleton<LastTestRun>();
-        services.AddSingleton<UnchangedRun>();
+        services.AddToolSingletons();
         services.AddMcpServer().WithToolsFromAssembly();
 
         await using var provider = services.BuildServiceProvider();

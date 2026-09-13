@@ -1600,4 +1600,72 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Equal(plain, empty);
         Assert.DoesNotContain("namespace Fixture.Trading;", empty, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindFiles_Tracked_IsCaseSensitiveExactlyWhereTheFilesystemIs()
+    {
+        var root = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "FixtureSolution");
+        var twin = Path.Combine(root, "NOTES.md");
+        var created = !File.Exists(twin);
+
+        if (created)
+            await File.WriteAllTextAsync(twin, "twin\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var tracked = await server.CallAsync("find_files", new() { ["glob"] = "*.md", ["tracked"] = true });
+
+            Assert.Contains("notes.md", tracked, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOTES.md", tracked, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (created)
+                File.Delete(twin);
+        }
+    }
+
+    [Fact]
+    public async Task EditText_BatchGroupsPathsExactlyAsTheFilesystemDoes()
+    {
+        var root = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "FixtureSolution");
+        var lower = Path.Combine(root, "terse-case-probe.md");
+        var upper = Path.Combine(root, "TERSE-CASE-PROBE.md");
+
+        await File.WriteAllTextAsync(lower, "alpha\n", TestContext.Current.CancellationToken);
+
+        var twin = !File.Exists(upper);
+
+        if (twin)
+            await File.WriteAllTextAsync(upper, "beta\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                new Dictionary<string, object> { ["path"] = "terse-case-probe.md", ["oldText"] = "alpha", ["newText"] = "one" },
+                new Dictionary<string, object> { ["path"] = "TERSE-CASE-PROBE.md", ["oldText"] = twin ? "beta" : "one", ["newText"] = "two" },
+                },
+            });
+
+            if (twin)
+            {
+                Assert.Equal("one\n", await File.ReadAllTextAsync(lower, TestContext.Current.CancellationToken));
+                Assert.Equal("two\n", await File.ReadAllTextAsync(upper, TestContext.Current.CancellationToken));
+            }
+            else
+            {
+                Assert.Equal("two\n", await File.ReadAllTextAsync(lower, TestContext.Current.CancellationToken));
+            }
+        }
+        finally
+        {
+            File.Delete(lower);
+
+            if (twin)
+                File.Delete(upper);
+        }
+    }
 }

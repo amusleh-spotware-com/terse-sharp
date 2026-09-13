@@ -167,4 +167,6 @@ public static class ToolProfile
             return families;
         }
     }
+
+    public const string ToolsOptionDescription = "Which tools to advertise: core, a ~20-tool subset, or all, the whole surface. Unset, it advertises the families the loaded solution holds - the default - and an unrecognised value falls back to that. Every other tool still answers when called by name; only the advertised list shrinks, which is the measured lever on tool-selection accuracy. TERSE_TOOLS does the same.";
 }

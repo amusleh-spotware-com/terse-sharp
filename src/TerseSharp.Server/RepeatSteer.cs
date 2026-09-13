@@ -47,6 +47,9 @@ public static class RepeatSteer
     if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
         result.Content.Add(new TextContentBlock { Text = repeat });
 
+    if (result.IsError is not true && ExploreSteer.Note(parameters.Name, ExploreSteer.Argument(parameters)) is { } explore)
+        result.Content.Add(new TextContentBlock { Text = explore });
+
     if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name)) is { } note)
         result.Content.Add(new TextContentBlock { Text = note });
 

@@ -505,4 +505,23 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("failed=1", second, StringComparison.Ordinal);
         Assert.DoesNotContain("UNCHANGED", second, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Build_RepeatedWithNothingWrittenInBetween_AnswersUnchangedInsteadOfBuildingAgain()
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["project"] = TestProject,
+            ["properties"] = new[] { "TerseUnchangedProbe=1" },
+        };
+
+        var first = await server.CallAsync("build", new(arguments));
+        var second = await server.CallAsync("build", new(arguments));
+        var forced = await server.CallAsync("build", new(arguments) { ["force"] = true });
+
+        Assert.StartsWith("build ok", first, StringComparison.Ordinal);
+        Assert.StartsWith("build UNCHANGED", second, StringComparison.Ordinal);
+        Assert.Contains("force=true re-runs it", second, StringComparison.Ordinal);
+        Assert.StartsWith("build ok", forced, StringComparison.Ordinal);
+    }
 }

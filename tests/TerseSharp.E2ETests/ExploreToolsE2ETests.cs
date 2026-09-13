@@ -89,4 +89,13 @@ public sealed class ExploreToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
         Assert.Contains("test", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindUsages_AfterASourceReadOfTheSameSymbol_SteersToExploreSymbol()
+    {
+        await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Trading.OrderService.Submit" });
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "Trading.OrderService.Submit" });
+
+        Assert.Contains("explore_symbol symbolId=\"Trading.OrderService.Submit\"", text, StringComparison.Ordinal);
+    }
 }

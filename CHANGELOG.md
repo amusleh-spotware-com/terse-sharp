@@ -8,6 +8,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-09-13
+
+### Added
+
+- A locked-output `holder` line now carries `age=` (how long the process has run) and `cmd=` (its command line from the assembly name on, workspace root stripped; Windows via WMI, Linux via `/proc`, absent elsewhere), so telling a live E2E run from a stranded fixture host no longer costs shell fallbacks — `LockHolders.Describe`/`Scanned`/`BuildTools.StillLocked` became `DescribeAsync`/`ScannedAsync`/`StillLockedAsync`, covered by `LockHolders_ForThisProcess_ReportsItsAgeAndItsCommandLineTail` (I521).
+- `get_symbol_source` and `find_usages` end with an `explore_symbol symbolId="<id>"` steer, once per id, when a second navigation tool asks about a symbol another one already answered this session — the composite was measured at 7 calls in 683 sessions while the chains it collapses ran 1,922 adjacent pairs, so the steer rides on the answer instead of waiting to be remembered (`ExploreSteer`, covered by `ExploreSteerTests` and `FindUsages_AfterASourceReadOfTheSameSymbol_SteersToExploreSymbol`) (I520).
+
+### Fixed
+
+- `read_text ranges=[...]` on a markdown file over 8,000 characters was silently discarded — the section map answered and the steer told the caller to "pass a line range", the very thing they had passed; `ranges=` now joins `verbose=`, `startLine=`/`endLine=`, `tail=`, `section=` and `columns=` in opting back into the text, on the `.cs` outline interception too (`ReadText_WithRangesOnALargeMarkdownFile_AnswersTheRangesNotTheSectionMap`) (I530).
+- `SKILL.md` shed ~6,200 tokens (30,245 → 24,040 measured with `read_text tokens=true`): the per-job surface table now carries the job-to-tool mapping only — what each tool returns and its parameters stay in the advertised `[Description]`s every session already pays for — and `DocsCoverageE2ETests.TheShippedSkill_StaysWithinItsTokenBudget` is ratcheted from 30,300 to 24,600 so the file cannot grow back silently (I529).
+- A byte-identical `changed_files` repeat with no watcher event and no git state change since (watcher generations plus the mtimes of `.git/index`, `HEAD`, `packed-refs` and the current branch ref) replays the previous listing with an `UNCHANGED` marker instead of re-shelling to git — 112 of 424 weekly calls (26%) were such repeats; the stamp also counts every watcher event (`WorkspaceSync.Events`), so an in-place edit to a file no index classifies (`.md`, `.txt`, `.json`) still invalidates it, and a watcher that is Off, Degraded, lossy or backlogged never memoizes (`ListingMemo`, `ListingMemoTests`, `ChangedFiles_RepeatedWithNoEventInBetween_ReplaysTheListingAsUnchanged`) (I528).
+- A clipped `diff_text` is labelled `INCOMPLETE` and gains a real continuation: new optional `skipLines=` skips the first N diff lines, so the rest never re-pays the prefix, and the truncation hint names `skipLines=<next>` instead of steering to a wider `maxLines=` — 88% of real calls truncated and 83% of the truncated were read as whole (`DiffText_WhenClipped_LabelsItselfIncompleteAndContinuesWithSkipLines`) (I527).
+- An UNSCOPED `analyze`, `format` or `cleanup` ends with a `next: gate` steer (`next: gate dryRun=true` under `verify`/`dryRun`), because 526 of 641 weekly calls to the three were the whole-solution end-of-task sweep `gate` collapses into one call while `gate` itself was called 16 times (`AnalyzeFormatCleanup_Unscoped_EndBySteeringToGate`) (I526).
+- `build` gained the `UNCHANGED` refusal `run_tests` already had: a byte-identical repeat of a build that answered `build ok`, with nothing written and no watcher event since, replays the verdict instead of building — 205 of 332 weekly `build` calls (62%) were such repeats — with the same `force=true` opt-out (`UnchangedRun` now renders per tool; `Build_RepeatedWithNothingWrittenInBetween_AnswersUnchangedInsteadOfBuildingAgain`, `UnchangedRunTests`) (I525).
+- A plain redirect (`>`, `>>`, `2>`, `<`) no longer forces a whole-command guard refusal: it binds to the pipeline it follows, so a batch carrying one is stripped-and-run like every other sound shape — heredocs, target-less redirects and `>&-` still deny whole. Measured: 94 of 179 weekly `NO part of the command ran` denials were a bare redirect (`ToolGuard.Redirections`, pinned by `Guard_ForABatchWithAPlainRedirect_StripsTheReplacedPipelinesAndRunsTheRest`) (I524).
+- The I507 case-sensitivity fix in `FileTools.Grouped` and `FileTools.TrackedAsync` is now locked by tests that derive their expectation from the filesystem itself: `FindFiles_Tracked_IsCaseSensitiveExactlyWhereTheFilesystemIs` and `EditText_BatchGroupsPathsExactlyAsTheFilesystemDoes` create a case-only twin where the filesystem allows one, so reverting either comparer reddens the case-sensitive CI leg (I523).
+- A truncated `read_text section=` read reported the whole FILE's line count as its total (`40/5603 lines truncated`, `next: startLine=49 (total=5603)` for a ~90-line section); both now count against the section's own span, pinned by `ReadText_WithASectionThatIsTruncated_ReportsTheSectionsOwnSpanNotTheFiles` (I522).
+- The three token-ceiling claims in `README.md` and `NUGET_README.md` (`29,800-token ceiling`, `57 tools, ≤24,600 tokens`, `64 tools, ≤25,400 tokens`) were asserted by no test; they now read 30,400 / 25,100 / 25,900 — the ceilings `TokenBudgetE2ETests`, `MarkupProfileE2ETests` and `ToolSettingsE2ETests` actually assert — and `DocsCoverageE2ETests.EveryTokenCeilingTheDocsClaim_IsAssertedByATest` discovers every `≤N tokens` / `N-token ceiling` claim from the doc text and fails when no test under `tests/` names its number (I517).
+- `terse serve --help` described `--tools` as defaulting to `core` with unrecognised values falling back to `core`, while `ToolProfile.Resolve` has always defaulted to the families the loaded solution holds; the option text now lives in `ToolProfile.ToolsOptionDescription`, says so, and `ToolProfileTests.ToolsOptionDescription_NamesTheDefaultResolveReturns` asserts the help text against what `Resolve(null, null)` actually returns (I518).
+
 ## [0.58.0] - 2026-09-12
 
 ### Added
@@ -5539,7 +5560,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.58.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.59.0...HEAD
+[0.59.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.59.0
 [0.58.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.58.0
 [0.57.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.57.0
 [0.56.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.56.0

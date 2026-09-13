@@ -422,4 +422,20 @@ public sealed class WorkspaceSyncTests
         Assert.False(await loaded.SyncAsync(null, TestContext.Current.CancellationToken));
         Assert.Equal(written, File.GetLastWriteTimeUtc(loaded.Files.OrderServicePath));
     }
+
+    [Fact]
+    public void Notice_CountsAnInPlaceEditTheClassifierCannotMap()
+    {
+        using var sync = new WorkspaceSync(Path.GetTempPath(), default);
+        var before = sync.Events;
+
+        sync.Notice(Path.Combine(Path.GetTempPath(), "notes.md"));
+
+        Assert.Equal(before + 1, sync.Events);
+        Assert.Equal(0, sync.PendingCount);
+
+        sync.Notice(Path.Combine(Path.GetTempPath(), "bin", "skipped.md"));
+
+        Assert.Equal(before + 1, sync.Events);
+    }
 }

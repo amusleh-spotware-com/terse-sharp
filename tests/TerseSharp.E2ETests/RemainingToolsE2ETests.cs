@@ -137,7 +137,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task Build_WhenClean_AnswersInOneLineUnlessVerboseIsAsked()
     {
-        var quiet = await server.CallAsync("build", []);
+        var quiet = await server.CallAsync("build", new() { ["force"] = true });
 
         var verdict = quiet.Split('\n')[0];
 

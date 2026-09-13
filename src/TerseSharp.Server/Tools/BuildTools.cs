@@ -12,7 +12,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
     [McpServerTool(Name = "build")]
-    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity; configuration, targetFramework and properties scope the build.")]
+    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. A repeat of a build that already answered ok, with nothing written since, answers build UNCHANGED naming the previous verdict and its age, and force=true re-runs it. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity; configuration, targetFramework and properties scope the build.")]
     public Task<string> Build(
         [Description("Project path; empty builds the solution.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
@@ -20,8 +20,13 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Return every diagnostic, warnings included, and the full report even when the build succeeds. Default false, which answers a successful build in one line and hides warnings on a failed one. The warnings= count reports what this build emitted, so a build that recompiled nothing reports 0.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) =>
-        context.WithTargetAsync(workspace, project, target =>
+        [Description("Build even when this exact call already answered ok and nothing has been written since. Default false.")] bool force = false,
+        CancellationToken cancellationToken = default) => Replayable(
+        "build",
+        BuildGreen,
+        Key("build", [project, configuration, targetFramework, Joined(properties), Flag(verbose), workspace]),
+        force,
+        () => context.WithTargetAsync(workspace, project, target =>
         {
             if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
@@ -33,7 +38,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     target, resolved, scope.Value, verbose, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
         },
-        cancellationToken: cancellationToken);
+        cancellationToken: cancellationToken));
 
     [McpServerTool(Name = "clean", Destructive = true)]
     [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. path= cleans a solution or project that is NOT loaded - a fixture, a sibling repository - so reproducing a cold build needs no load and no shell. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
@@ -83,9 +88,11 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter. Replaces one call per class; a blank entry is refused by index, not with filter.")] string?[]? tests = null,
         [Description("Run even when this exact call already answered green and nothing has been written since. Default false.")] bool force = false,
-        CancellationToken cancellationToken = default) => Replayable(
-        Key(
-            "run_tests",
+    CancellationToken cancellationToken = default) => Replayable(
+    "run_tests",
+    GreenVerdict,
+    Key(
+        "run_tests",
             [test, Joined(tests), filter, project, Joined(projects), Flag(changed), Count(parallel), Joined(runSettings), configuration, targetFramework, Joined(properties), Flag(noBuild), Flag(includePassed), Count(slowest), Flag(verbose), Count(timeoutSeconds), workspace]),
         force,
         () => context.WithTargetAsync(
@@ -271,20 +278,21 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
         var second = await run().ConfigureAwait(false);
         var reloaded = await ReloadAsync(target.SolutionPath, cancellationToken).ConfigureAwait(false);
+        var trailer = second.Locked
+            ? await StillLockedAsync(operation, second.Response, target.Root, cancellationToken).ConfigureAwait(false)
+            : Recovered(operation);
 
-        return second.Response
-            + (second.Locked ? StillLocked(operation, second.Response, target.Root) : Recovered(operation))
-            + (reloaded ? string.Empty : ReloadFailed);
+        return second.Response + trailer + (reloaded ? string.Empty : ReloadFailed);
     }
 
     private static string Recovered(string operation) => string.Create(
         CultureInfo.InvariantCulture,
         $"\nNOTE the workspace held MSBuild file locks; it was unloaded, the {operation} retried, and the workspace reloaded. Symbol ids are unchanged; undo_last_change history was discarded.");
 
-    internal static string StillLocked(string operation, string output, string root = "")
+    internal static async Task<string> StillLockedAsync(string operation, string output, string root = "", CancellationToken cancellationToken = default)
     {
-        var named = LockHolders.Describe(output, root);
-        var holders = named.Length > 0 ? named : LockHolders.Scanned(root);
+        var named = await LockHolders.DescribeAsync(output, root, cancellationToken).ConfigureAwait(false);
+        var holders = named.Length > 0 ? named : await LockHolders.ScannedAsync(root, cancellationToken).ConfigureAwait(false);
 
         return string.Create(
             CultureInfo.InvariantCulture,
@@ -639,27 +647,30 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     private const string GreenVerdict = "run_tests PASSED";
 
-    private Task<string> Replayable(string key, bool force, Func<Task<string>> run)
+    private Task<string> Replayable(string tool, string green, string key, bool force, Func<Task<string>> run)
     {
         var stamp = Stamp();
         var now = Stopwatch.GetTimestamp();
 
-        return !force && unchanged.Replay(key, stamp, now) is { } previous
+        if (stamp is null)
+            return run();
+
+        return !force && unchanged.Replay(tool, key, stamp, now) is { } previous
             ? Task.FromResult(previous)
-            : Memoized(key, stamp, run());
+            : Memoized(green, key, stamp, run());
     }
 
-    private async Task<string> Memoized(string key, string stamp, Task<string> run)
+    private async Task<string> Memoized(string green, string key, string stamp, Task<string> run)
     {
         var text = await run.ConfigureAwait(false);
 
-        if (text.StartsWith(GreenVerdict, StringComparison.Ordinal) && !text.Contains('\n', StringComparison.Ordinal))
+        if (text.StartsWith(green, StringComparison.Ordinal) && !text.Contains('\n', StringComparison.Ordinal))
             unchanged.Remember(key, stamp, text, Stopwatch.GetTimestamp());
 
         return text;
     }
 
-    private string Stamp()
+    private string? Stamp()
     {
         var loaded = context.Registry.All();
         var stamp = new StringBuilder(128);
@@ -668,12 +679,17 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
         foreach (var workspace in loaded.OrderBy(entry => entry.Root, StringComparer.Ordinal))
         {
+            var sync = workspace.Sync;
+
+            if (sync.State is not WatchState.Active || sync.Gaps > 0)
+                return null;
+
             stamp.Append(' ')
                 .Append(workspace.Root)
                 .Append('@')
                 .Append(workspace.LoadedUtc.ToString("O", CultureInfo.InvariantCulture))
                 .Append('=')
-                .Append(workspace.Sync.Generations.ToString());
+                .Append(sync.Generations.ToString());
         }
 
         return stamp.ToString();
@@ -705,4 +721,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         (_, _, true) => "The build named no holding process, and no process on this machine maps a file of this tree, so the holder is outside it - an editor, a file browser or an antivirus scan over this output directory.",
         _ => "The build named no holding process, and no workspace root was known here, so nothing was scanned for one.",
     };
+
+    private const string BuildGreen = "build ok";
 }

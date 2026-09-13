@@ -26,8 +26,7 @@ public static class McpHost
         builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
         builder.Services.AddSingleton(_ => context);
-        builder.Services.AddSingleton<LastTestRun>();
-        builder.Services.AddSingleton<UnchangedRun>();
+        builder.Services.AddToolSingletons();
         builder.Services
             .AddMcpServer()
             .WithStdioServerTransport()

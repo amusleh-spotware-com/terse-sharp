@@ -1,3 +1,4 @@
+using System.Text;
 using TerseSharp.Core;
 
 namespace TerseSharp.E2ETests;
@@ -223,7 +224,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task DiffText_WhenItTruncates_NamesTheExactMaxLinesThatReturnsTheRest()
+    public async Task DiffText_WhenItTruncates_NamesTheSkipLinesContinuation()
     {
         var text = await server.CallAsync("diff_text", new()
         {
@@ -236,11 +237,9 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain("ERROR", summary, StringComparison.Ordinal);
         Assert.Contains("truncated", summary, StringComparison.Ordinal);
-
-        var total = summary.Split('/')[1].Split(' ')[0];
-
-        Assert.True(int.Parse(total, CultureInfo.InvariantCulture) > 1, summary);
-        Assert.EndsWith("narrow with path=, paths= or maxLines=" + total, summary, StringComparison.Ordinal);
+        Assert.EndsWith("continue with skipLines=1", summary, StringComparison.Ordinal);
+        Assert.Contains("INCOMPLETE", text, StringComparison.Ordinal);
+        Assert.Contains("next: skipLines=1 maxLines=1", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -557,6 +556,54 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
             File.SetLastWriteTimeUtc(path, written);
         }
+    }
+
+    [Fact]
+    public async Task DiffText_WhenClipped_LabelsItselfIncompleteAndContinuesWithSkipLines()
+    {
+        var root = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "FixtureSolution");
+        var path = Path.Combine(root, "notes.md");
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var appended = new StringBuilder(original);
+
+        for (var line = 1; line <= 30; line++)
+            appended.Append("probe line ").Append(line.ToString(CultureInfo.InvariantCulture)).Append('\n');
+
+        await File.WriteAllTextAsync(path, appended.ToString(), TestContext.Current.CancellationToken);
+
+        try
+        {
+            var clipped = await server.CallAsync("diff_text", new() { ["path"] = "notes.md", ["maxLines"] = 10 });
+            var resumed = await server.CallAsync("diff_text", new() { ["path"] = "notes.md", ["maxLines"] = 10, ["skipLines"] = 10 });
+            var whole = await server.CallAsync("diff_text", new() { ["path"] = "notes.md" });
+
+            Assert.Contains("INCOMPLETE", clipped, StringComparison.Ordinal);
+            Assert.Contains("next: skipLines=10", clipped, StringComparison.Ordinal);
+            Assert.Contains("window starts after skipLines=10", resumed, StringComparison.Ordinal);
+            Assert.DoesNotContain("INCOMPLETE", whole, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(path, stamp);
+        }
+    }
+
+    [Fact]
+    public async Task ChangedFiles_RepeatedWithNoEventInBetween_ReplaysTheListingAsUnchanged()
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["path"] = "notes.md",
+            ["exclude"] = "terse-memo-probe-unique/**",
+        };
+
+        var first = await server.CallAsync("changed_files", new(arguments));
+        var second = await server.CallAsync("changed_files", new(arguments));
+
+        Assert.DoesNotContain("UNCHANGED", first, StringComparison.Ordinal);
+        Assert.Contains("UNCHANGED - no watcher event and no git state change", second, StringComparison.Ordinal);
     }
 }
 

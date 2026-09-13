@@ -454,10 +454,10 @@ public sealed class ToolGuardTests
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 
     [Fact]
-    public void LockHolders_ForThisProcess_NamesItAsTheServerRatherThanAnUnknownPid()
+    public async Task LockHolders_ForThisProcess_NamesItAsTheServerRatherThanAnUnknownPid()
     {
         var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var described = LockHolders.Describe("MSB3027: Could not copy \"terse.dll\". The file is locked by: \"terse (" + pid + ")\"");
+        var described = await LockHolders.DescribeAsync("MSB3027: Could not copy \"terse.dll\". The file is locked by: \"terse (" + pid + ")\"", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("holder pid=" + pid, described, StringComparison.Ordinal);
         Assert.Contains("this terse server", described, StringComparison.Ordinal);
@@ -465,24 +465,24 @@ public sealed class ToolGuardTests
     }
 
     [Fact]
-    public void LockHolders_ForAPidThatIsGone_SaysTheLockIsReleasedInsteadOfGuessing()
+    public async Task LockHolders_ForAPidThatIsGone_SaysTheLockIsReleasedInsteadOfGuessing()
     {
-        var described = LockHolders.Describe("The file is locked by: \"testhost (2147483646)\"");
+        var described = await LockHolders.DescribeAsync("The file is locked by: \"testhost (2147483646)\"", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("holder pid=2147483646", described, StringComparison.Ordinal);
         Assert.Contains("already gone", described, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void LockHolders_WithNoPidInTheOutput_AddsNothing() =>
-        Assert.Equal(string.Empty, LockHolders.Describe("MSB3021: Unable to copy file, access is denied."));
+    public async Task LockHolders_WithNoPidInTheOutput_AddsNothing() =>
+        Assert.Equal(string.Empty, await LockHolders.DescribeAsync("MSB3021: Unable to copy file, access is denied.", cancellationToken: TestContext.Current.CancellationToken));
 
     [Theory]
     [InlineData("src/Fixture.Trading/OrderService.cs(12,5): warning CA1822: mark as static")]
     [InlineData("Microsoft.Build.Tasks.Core (17.0) could not be resolved")]
     [InlineData("Restore (1) succeeded in 2.3s")]
-    public void LockHolders_ForTextThatMerelyLooksLikeAPid_AddsNothing(string output) =>
-            Assert.Equal(string.Empty, LockHolders.Describe(output));
+    public async Task LockHolders_ForTextThatMerelyLooksLikeAPid_AddsNothing(string output) =>
+            Assert.Equal(string.Empty, await LockHolders.DescribeAsync(output, cancellationToken: TestContext.Current.CancellationToken));
 
     [Theory]
     [InlineData("$(git status)")]
@@ -503,9 +503,9 @@ public sealed class ToolGuardTests
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 
     [Fact]
-    public void StillLocked_WhenTheBuildNamedNoHolder_DoesNotPromiseAListBelow()
+    public async Task StillLocked_WhenTheBuildNamedNoHolder_DoesNotPromiseAListBelow()
     {
-        var note = Server.Tools.BuildTools.StillLocked("build", "MSB3021: Unable to copy file, access is denied.");
+        var note = await Server.Tools.BuildTools.StillLockedAsync("build", "MSB3021: Unable to copy file, access is denied.", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain("below before stopping it", note, StringComparison.Ordinal);
         Assert.Contains("named no holding process", note, StringComparison.Ordinal);
@@ -513,10 +513,10 @@ public sealed class ToolGuardTests
     }
 
     [Fact]
-    public void StillLocked_WhenTheBuildNamedAHolder_PointsAtTheListItAppends()
+    public async Task StillLocked_WhenTheBuildNamedAHolder_PointsAtTheListItAppends()
     {
         var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var note = Server.Tools.BuildTools.StillLocked("run_tests", "The file is locked by: \"terse (" + pid + ")\"");
+        var note = await Server.Tools.BuildTools.StillLockedAsync("run_tests", "The file is locked by: \"terse (" + pid + ")\"", cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("Resolve each holder below before stopping it.", note, StringComparison.Ordinal);
         Assert.Contains("holder pid=" + pid, note, StringComparison.Ordinal);
@@ -799,17 +799,17 @@ public sealed class ToolGuardTests
             Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 
     [Fact]
-    public void LockHolders_ForThisProcess_NamesTheExecutableItRunsSoTheCommandLineNeedsNoShellOut()
+    public async Task LockHolders_ForThisProcess_NamesTheExecutableItRunsSoTheCommandLineNeedsNoShellOut()
     {
         var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var output = "MSB3027: Could not copy \"terse.dll\". The file is locked by: \"testhost (" + pid + ")\"";
         var executable = Environment.ProcessPath!;
-        var described = LockHolders.Describe(output);
+        var described = await LockHolders.DescribeAsync(output, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("exe=" + executable, described, StringComparison.Ordinal);
         Assert.Contains(
             "exe=" + Path.GetFileName(executable),
-            LockHolders.Describe(output, Path.GetDirectoryName(executable)!),
+            await LockHolders.DescribeAsync(output, Path.GetDirectoryName(executable)!, TestContext.Current.CancellationToken),
             StringComparison.Ordinal);
     }
 
@@ -1166,7 +1166,10 @@ public sealed class ToolGuardTests
     [Theory]
     [InlineData("for f in a b; do echo hi; done; git log --oneline -3")]
     [InlineData("git branch -a && git fetch || git log --oneline -3")]
-    [InlineData("echo done > out.txt && git log --oneline -3")]
+    [InlineData("cat <<EOF && git log --oneline -3")]
+    [InlineData("sort <<< input && git log --oneline -3")]
+    [InlineData("echo hi > && git log --oneline -3")]
+    [InlineData("echo hi >&- && git log --oneline -3")]
     [InlineData("echo $(date) && git log --oneline -3")]
     [InlineData("(echo hi) && git log --oneline -3")]
     [InlineData("git log --oneline -3 && echo hi & echo bye")]
@@ -1283,12 +1286,12 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git tag --list \"v*\" | tail -3 && git rev-parse HEAD > sha.txt" });
+            new JsonObject { ["command"] = "git tag --list \"v*\" | tail -3 && echo $(git rev-parse HEAD)" });
 
         Assert.True(verdict.Denied);
         Assert.Contains("history tags=true", verdict.Routing, StringComparison.Ordinal);
         Assert.Contains("not replaced", verdict.Routing, StringComparison.Ordinal);
-        Assert.Contains("git rev-parse HEAD > sha.txt", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("echo $(git rev-parse HEAD)", verdict.Routing, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1364,12 +1367,12 @@ public sealed class ToolGuardTests
     }
 
     [Fact]
-    public void Inspect_ForAReplacedCommandCarryingAFileRedirection_StillRefusesTheWholeCommand()
+    public void Inspect_ForAReplacedCommandCarryingAFileRedirection_StripsItWithItsRedirect()
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build > build.log && echo finished" });
 
         Assert.True(verdict.Denied);
-        Assert.True(verdict.Rewrite is not { Length: > 0 }, verdict.Rewrite);
+        Assert.Equal("echo finished", verdict.Rewrite);
     }
 
     [Theory]
@@ -1442,20 +1445,20 @@ public sealed class ToolGuardTests
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 
     [Fact]
-    public void LockHolders_Scanned_FindsTheProcessesMappingThisTreeAndAnswersNothingOutsideIt()
+    public async Task LockHolders_Scanned_FindsTheProcessesMappingThisTreeAndAnswersNothingOutsideIt()
     {
-        var scanned = LockHolders.Scanned(AppContext.BaseDirectory);
+        var scanned = await LockHolders.ScannedAsync(AppContext.BaseDirectory, TestContext.Current.CancellationToken);
 
         Assert.Contains("holder pid=" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture), scanned, StringComparison.Ordinal);
         Assert.Contains("maps=", scanned, StringComparison.Ordinal);
-        Assert.Equal(string.Empty, LockHolders.Scanned(string.Empty));
-        Assert.Equal(string.Empty, LockHolders.Scanned(Path.Combine(Path.GetTempPath(), "terse-no-such-tree")));
+        Assert.Equal(string.Empty, await LockHolders.ScannedAsync(string.Empty, TestContext.Current.CancellationToken));
+        Assert.Equal(string.Empty, await LockHolders.ScannedAsync(Path.Combine(Path.GetTempPath(), "terse-no-such-tree"), TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void StillLocked_WithNoNamedHolder_ScansForThemInServerInsteadOfDelegatingToAShell()
+    public async Task StillLocked_WithNoNamedHolder_ScansForThemInServerInsteadOfDelegatingToAShell()
     {
-        var note = TerseSharp.Server.Tools.BuildTools.StillLocked("build", "MSB3021: Unable to copy file, access is denied.", AppContext.BaseDirectory);
+        var note = await TerseSharp.Server.Tools.BuildTools.StillLockedAsync("build", "MSB3021: Unable to copy file, access is denied.", AppContext.BaseDirectory, TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain("list the holders yourself", note, StringComparison.Ordinal);
         Assert.Contains("HEURISTIC", note, StringComparison.Ordinal);
@@ -1602,4 +1605,32 @@ public sealed class ToolGuardTests
             "waiting is not work",
             ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Reason,
             StringComparison.Ordinal);
+
+    [Fact]
+    public async Task LockHolders_ForThisProcess_ReportsItsAgeAndItsCommandLineTail()
+    {
+        var pid = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var output = "MSB3027: Could not copy \"terse.dll\". The file is locked by: \"testhost (" + pid + ")\"";
+        var described = await LockHolders.DescribeAsync(output, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Contains(" age=", described, StringComparison.Ordinal);
+
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+            Assert.Contains(" cmd=", described, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("echo finished > out.txt && git log --oneline -3", "echo finished > out.txt")]
+    [InlineData("sort < in.txt > out.txt && grep foo out.txt", "sort < in.txt > out.txt")]
+    [InlineData("grep foo src > hits.txt && echo ok", "echo ok")]
+    [InlineData("echo a 2> err.txt && git status", "echo a 2> err.txt")]
+    [InlineData("npm test >> all.log && git log --oneline -2", "npm test >> all.log")]
+    public void Guard_ForABatchWithAPlainRedirect_StripsTheReplacedPipelinesAndRunsTheRest(string command, string rewrite)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal(rewrite, verdict.Rewrite);
+        Assert.DoesNotContain("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
 }

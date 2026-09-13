@@ -76,7 +76,12 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
 
     public void Notice(string path)
     {
-        if (Classify(path) is null || WorkspaceFiles.IsTemporary(path) || WorkspaceFiles.IsExcluded(path, root))
+        if (WorkspaceFiles.IsTemporary(path) || WorkspaceFiles.IsExcluded(path, root))
+            return;
+
+        Interlocked.Increment(ref noticedEvents);
+
+        if (Classify(path) is null)
             return;
 
         if (pending.Count >= PendingCap)
@@ -396,4 +401,8 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         stamps.TryRemove(path, out _);
         pending[path] = 0;
     }
+
+    private int noticedEvents;
+
+    public int Events => Volatile.Read(ref noticedEvents);
 }

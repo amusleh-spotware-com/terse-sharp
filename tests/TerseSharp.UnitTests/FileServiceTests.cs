@@ -470,4 +470,64 @@ public sealed class FileServiceTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task ReadText_WithASectionThatIsTruncated_ReportsTheSectionsOwnSpanNotTheFiles()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        using var lease = registry.Resolve(null, null).Value!;
+        var name = "terse-sectioned-" + Guid.NewGuid().ToString("N") + ".md";
+        var path = Path.Combine(lease.Workspace.Root, name);
+        var lines = new List<string>(300) { "# Doc", "", "## One" };
+        lines.AddRange(Enumerable.Range(1, 87).Select(number => string.Create(CultureInfo.InvariantCulture, $"one {number}")));
+        lines.Add("## Two");
+        lines.AddRange(Enumerable.Range(1, 200).Select(number => string.Create(CultureInfo.InvariantCulture, $"two {number}")));
+        File.WriteAllLines(path, lines);
+
+        try
+        {
+            var request = new FileService.ReadRequest(new FileService.LineRange(0, 0, 10), false, "## One");
+            var result = await FileService.ReadTextAsync(lease.Workspace, name, request, TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsOk, result.Error?.Message);
+            Assert.Contains("10/88 lines truncated", result.Value!, StringComparison.Ordinal);
+            Assert.Contains("(total=88)", result.Value!, StringComparison.Ordinal);
+            Assert.DoesNotContain("total=291", result.Value!, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_WithRangesOnALargeMarkdownFile_AnswersTheRangesNotTheSectionMap()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        using var lease = registry.Resolve(null, null).Value!;
+        var name = "terse-ranged-" + Guid.NewGuid().ToString("N") + ".md";
+        var path = Path.Combine(lease.Workspace.Root, name);
+        var lines = new List<string>(400) { "# Doc" };
+
+        lines.AddRange(Enumerable.Range(1, 300).Select(number =>
+            string.Create(CultureInfo.InvariantCulture, $"content line {number} padded padded padded")));
+        File.WriteAllLines(path, lines);
+
+        try
+        {
+            var range = new FileService.LineRange(0, 0, 2000, Spans: [new FileService.LineSpan(5, 5)]);
+            var request = new FileService.ReadRequest(range, false, null);
+            var result = await FileService.ReadTextAsync(lease.Workspace, name, request, TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsOk, result.Error?.Message);
+            Assert.Contains("content line 4", result.Value!, StringComparison.Ordinal);
+            Assert.DoesNotContain("section map", result.Value!, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

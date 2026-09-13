@@ -1,17 +1,18 @@
 using System.Buffers;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Text;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
 
 [McpServerToolType]
-public sealed class GitTools(ToolContext context)
+public sealed class GitTools(ToolContext context, ListingMemo listings)
 {
     private const int MaxDiffLines = 3000;
 
     [McpServerTool(Name = "changed_files", ReadOnly = true)]
-    [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed.")]
+    [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed. A byte-identical repeat with no watcher event and no git state change since replays the previous listing plus an UNCHANGED marker instead of re-shelling to git.")]
     public Task<string> ChangedFiles(
         [Description("Commit, branch or range to compare against, e.g. main or HEAD~3. Empty compares the working tree against HEAD.")] string? baseRef = null,
         [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
@@ -27,7 +28,9 @@ public sealed class GitTools(ToolContext context)
             : context.WithWorkspaceAsync(
                 workspace,
                 path,
-                loaded => ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked), maxResults > 0, cancellationToken),
+                loaded => baseRef is { Length: > 0 }
+                ? ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked), maxResults > 0, cancellationToken)
+                : ListMemoizedAsync(loaded, path, exclude, NavigationTools.Cap(maxResults, 200), new ChangeScope(staged, untracked), maxResults > 0, cancellationToken),
                 semantic: false,
                 cancellationToken);
 
@@ -52,15 +55,16 @@ public sealed class GitTools(ToolContext context)
                 cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "diff_text", ReadOnly = true)]
-    [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. Pass paths to diff up to 10 files in ONE call. Replaces one call per file: every entry is handed to the same git invocation as its own pathspec, so the answer is one unified diff already labelled per file. It costs about one line of response per changed line, so bound it: path= and paths= scope it and maxLines= caps it at 1000 by default. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
+    [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. Pass paths to diff up to 10 files in ONE call. Replaces one call per file: every entry is handed to the same git invocation as its own pathspec, so the answer is one unified diff already labelled per file. It costs about one line of response per changed line, so bound it: path= and paths= scope it and maxLines= caps it at 3000 by default. A clipped answer is labelled INCOMPLETE and names the skipLines= that returns the rest without re-paying the lines you already have. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
     public Task<string> DiffText(
     [Description("Commit, branch or range to compare against. Empty compares the working tree against the INDEX, so a fully staged change set reads 0 lines - pass staged=true for the index against HEAD.")] string? baseRef = null,
     [Description("Answer the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
     [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
     [Description("Several paths or pathspecs answered in one diff, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
-    [Description("Max diff lines returned (3000). A truncated answer names the exact maxLines= that returns the rest, so one retry is enough.")] int maxLines = 0,
+    [Description("Max diff lines returned (3000). A clipped answer is labelled INCOMPLETE and names the skipLines= that continues it.")] int maxLines = 0,
     [Description("Workspace or worktree name.")] string? workspace = null,
     [Description("Absolute directory to answer about instead of the loaded workspace, e.g. a sibling worktree. The answer is tagged outside-workspace.")] string? root = null,
+    [Description("Skip the first N diff lines - the continuation an INCOMPLETE answer names, so the rest never re-pays the prefix. Default 0.")] int skipLines = 0,
     CancellationToken cancellationToken = default)
     {
         var combined = paths is { Length: > 0 } || path is { Length: > 0 }
@@ -74,11 +78,11 @@ public sealed class GitTools(ToolContext context)
         var hint = path ?? (scoped.IsDefaultOrEmpty ? null : scoped[0]);
 
         return root is { Length: > 0 }
-            ? OutsideAsync(root, full => TextAsync(full, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), full, staged, cancellationToken))
+            ? OutsideAsync(root, full => TextAsync(full, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), full, staged, skipLines, cancellationToken))
             : context.WithWorkspaceAsync(
                 workspace,
                 hint,
-                loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, staged, cancellationToken),
+                loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, staged, skipLines, cancellationToken),
                 semantic: false,
                 cancellationToken);
     }
@@ -185,6 +189,7 @@ public sealed class GitTools(ToolContext context)
             int maxLines,
             string? outside,
             bool staged,
+            int skipLines,
             CancellationToken cancellationToken)
     {
         string[] command = staged ? ["diff", "--cached", "--no-color"] : ["diff", "--no-color"];
@@ -197,14 +202,15 @@ public sealed class GitTools(ToolContext context)
         if (!diff.IsOk)
             return diff.Error!.Render();
 
-        var lines = new List<string>(maxLines);
+        var skipped = Math.Max(0, skipLines);
+        var lines = new List<string>(Math.Min(maxLines, 512));
         var total = 0;
 
         foreach (var line in diff.Value!.AsSpan().EnumerateLines())
         {
             total++;
 
-            if (lines.Count < maxLines)
+            if (total > skipped && lines.Count < maxLines)
                 lines.Add(new string(line));
         }
 
@@ -212,15 +218,25 @@ public sealed class GitTools(ToolContext context)
 
         response.Summary(
             lines.Count,
-            total,
+            skipped is 0 ? total : lines.Count,
             "lines",
-            string.Create(CultureInfo.InvariantCulture, $"path=, paths= or maxLines={total}"));
+            string.Create(CultureInfo.InvariantCulture, $"path=, paths=, or continue with skipLines={skipped + lines.Count}"));
+
+        if (skipped > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"window starts after skipLines={skipped} of {total} diff lines"));
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
 
         foreach (var line in lines)
             response.Line(line);
+
+        if (skipped + lines.Count < total)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"INCOMPLETE - {skipped + lines.Count} of {total} diff lines seen; next: skipLines={skipped + lines.Count} maxLines={maxLines} returns the rest without re-paying these lines"));
+        }
 
         return response.ToString();
     }
@@ -654,5 +670,101 @@ public sealed class GitTools(ToolContext context)
             : Errors.Invalid(
                 "describe=true answers HEAD's position against the nearest tag, so it cannot be combined with " + string.Join(", ", ignored),
                 "drop describe=true to list commits or tags with those filters, or drop the filters to answer the position");
+    }
+
+    private async Task<string> ListMemoizedAsync(
+        LoadedWorkspace loaded,
+        string? path,
+        string? exclude,
+        int maxResults,
+        ChangeScope scope,
+        bool capped,
+        CancellationToken cancellationToken)
+    {
+        var stamp = await GitStampAsync(loaded, cancellationToken).ConfigureAwait(false);
+        var key = string.Join('\u0001', loaded.Root, path, exclude, maxResults.ToString(CultureInfo.InvariantCulture), scope.ToString(), capped.ToString());
+        var now = Stopwatch.GetTimestamp();
+
+        if (stamp is not null && listings.Replay(key, stamp, now) is { } replay)
+            return replay;
+
+        var text = await ListAsync(loaded.Root, null, path, exclude, maxResults, null, scope, capped, cancellationToken).ConfigureAwait(false);
+
+        if (stamp is not null && !text.StartsWith("ERROR", StringComparison.Ordinal))
+            listings.Remember(key, stamp, text, now);
+
+        return text;
+    }
+
+    private static async Task<string?> GitStampAsync(LoadedWorkspace loaded, CancellationToken cancellationToken)
+    {
+        var sync = loaded.Sync;
+
+        if (sync.State is not WatchState.Active || sync.Gaps > 0 || sync.PendingCount > 0)
+            return null;
+
+        if (GitDirectory(loaded.Root) is not { } git)
+            return null;
+
+        var stamp = new StringBuilder(160);
+
+        stamp.Append(sync.Generations.ToString()).Append('#').Append(sync.Events.ToString(CultureInfo.InvariantCulture));
+        StatInto(stamp, Path.Combine(git, "index"));
+        StatInto(stamp, Path.Combine(git, "HEAD"));
+        StatInto(stamp, Path.Combine(git, "packed-refs"));
+
+        if (await HeadTargetAsync(git, cancellationToken).ConfigureAwait(false) is { } head)
+            StatInto(stamp, Path.Combine(git, head));
+
+        return stamp.ToString();
+    }
+
+    private static string? GitDirectory(string root)
+    {
+        for (var current = root; current is { Length: > 0 };)
+        {
+            var candidate = Path.Combine(current, ".git");
+
+            if (Directory.Exists(candidate))
+                return candidate;
+
+            if (File.Exists(candidate))
+                return null;
+
+            current = Path.GetDirectoryName(current) ?? string.Empty;
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> HeadTargetAsync(string git, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var head = await File.ReadAllTextAsync(Path.Combine(git, "HEAD"), cancellationToken).ConfigureAwait(false);
+
+            return head.StartsWith("ref: ", StringComparison.Ordinal) ? head[5..].Trim() : null;
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static void StatInto(StringBuilder stamp, string path)
+    {
+        var file = new FileInfo(path);
+
+        if (file.Exists)
+        {
+            stamp.Append(' ')
+                .Append(file.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture))
+                .Append(':')
+                .Append(file.Length.ToString(CultureInfo.InvariantCulture));
+        }
+        else
+        {
+            stamp.Append(" absent");
+        }
     }
 }

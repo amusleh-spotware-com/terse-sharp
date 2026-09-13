@@ -182,4 +182,15 @@ public sealed class ToolProfileTests
         Assert.DoesNotContain("advertised", described, StringComparison.Ordinal);
         Assert.Equal(1, described.Split("still answers when called by name").Length - 1);
     }
+
+    [Fact]
+    public void ToolsOptionDescription_NamesTheDefaultResolveReturns()
+    {
+        var surface = ToolProfile.Resolve(null, null);
+        var expected = surface.MarkupDerived ? "the families the loaded solution holds" : "core (default)";
+        var wrong = surface.MarkupDerived ? "core (default)" : "the families the loaded solution holds";
+
+        Assert.Contains(expected, ToolProfile.ToolsOptionDescription, StringComparison.Ordinal);
+        Assert.DoesNotContain(wrong, ToolProfile.ToolsOptionDescription, StringComparison.Ordinal);
+    }
 }

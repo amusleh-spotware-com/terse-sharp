@@ -235,10 +235,10 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     [Fact]
     public async Task GetSymbolSource_OnTheWidestMember_IsDedentedWithoutRewritingTheLines()
     {
-        var quiet = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderBook.TotalVolume" });
+        var quiet = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.OrderBook.TotalVolume" });
         var loud = await server.CallAsync("get_symbol_source", new()
         {
-            ["symbolId"] = "OrderBook.TotalVolume",
+            ["symbolId"] = "Fixture.Trading.OrderBook.TotalVolume",
             ["verbose"] = true,
         });
 
@@ -555,7 +555,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         return int.Parse(tokens[(tokens.LastIndexOf(' ') + 1)..], CultureInfo.InvariantCulture);
     }
 
-    private const int AdvertisedPayloadBudget = 30100;
+    private const int AdvertisedPayloadBudget = 30400;
 
     [Fact]
     public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()

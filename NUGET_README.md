@@ -191,7 +191,8 @@ for one covered command in it**: when a compound command mixes commands the serv
 it does not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at
 all, so the rest runs under your normal permission rules. The rewrite is only attempted where it is
 provably sound: every top-level separator is `&&`, `;` or a newline, and a pipeline holding a covered stage
-is dropped whole. A command carrying `||`, a background `&`, a subshell, a redirect, a substitution, a
+is dropped whole, its redirects with it — a plain `>`, `>>`, `2>` or `<` binds to the command it
+follows and no longer forces a refusal. A command carrying `||`, a background `&`, a subshell, a heredoc, a substitution, a
 comment, any backslash escape, a mixed `;`/`&&` run or a shell keyword is denied whole, as before.
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text tools
@@ -226,17 +227,17 @@ terse serve --tools core     # advertise the 21 tools that answer most questions
 
 An MCP server's fixed cost is its tool list, attached to every request — and past a certain size it
 measurably costs tool-selection accuracy. `workspace_status` prints `advertised=<n> tools <t> tokens` —
-asserted on every push against the list the server really sent, under a **29,800-token ceiling** — and lists
+asserted on every push against the list the server really sent, under a **30,400-token ceiling** — and lists
 the whole surface beside it under `verbose=true`, so what a narrowing saves is read off the running server
 rather than estimated. The surface shrinks three ways, all optional.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤24,600 tokens**. Load one that does and they come back, announced with
+  **57 tools, ≤25,100 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
 - **Per project.** The same `.terse.json`, found by walking up from the server's directory and never above
   the repository root, disables whole groups (`analysis` `build` `edit` `file` `git`
   `navigation` `project` `razor` `refactor` `resx` `workspace` `xaml`) or individual `names`, which outrank
-  their group. That file measures **64 tools, ≤25,400 tokens**. The guard follows it: a built-in whose
+  their group. That file measures **64 tools, ≤25,900 tokens**. The guard follows it: a built-in whose
   every replacement you disabled is allowed again. An unknown key is reported rather than silently
   dropped, and the file is read once at startup, so restart your agent after changing it.
 - **By profile.** `--tools core`, or `TERSE_TOOLS=core`; `--tools all` opts out of every narrowing.

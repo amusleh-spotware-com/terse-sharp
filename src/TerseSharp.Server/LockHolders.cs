@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Management;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -7,8 +9,9 @@ namespace TerseSharp.Server;
 internal static partial class LockHolders
 {
     private const int MaxHolders = 8;
+    private const int MaxTail = 160;
 
-    public static string Describe(string output, string root = "")
+    public static async Task<string> DescribeAsync(string output, string root = "", CancellationToken cancellationToken = default)
     {
         var seen = new HashSet<int>();
         var builder = new StringBuilder();
@@ -23,7 +26,8 @@ internal static partial class LockHolders
                 if (seen.Count >= MaxHolders || !seen.Add(pid))
                     continue;
 
-                builder.Append("\nholder pid=").Append(pid.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(Resolved(pid, root));
+                builder.Append("\nholder pid=").Append(pid.ToString(CultureInfo.InvariantCulture)).Append(' ')
+                    .Append(await ResolvedAsync(pid, root, cancellationToken).ConfigureAwait(false));
             }
         }
         catch (RegexMatchTimeoutException)
@@ -34,15 +38,16 @@ internal static partial class LockHolders
         return builder.ToString();
     }
 
-    private static string Resolved(int pid, string root)
+    private static async Task<string> ResolvedAsync(int pid, string root, CancellationToken cancellationToken)
     {
         try
         {
             using var process = Process.GetProcessById(pid);
+            var command = await CommandTailAsync(pid, root, cancellationToken).ConfigureAwait(false);
 
             return string.Create(
                 CultureInfo.InvariantCulture,
-                $"{process.ProcessName} startedUtc={Started(process)}{Executable(process, root)} - {Kind(process.Id, process.ProcessName, root)}");
+                $"{process.ProcessName} startedUtc={Started(process)} age={Age(process)}{Executable(process, root)}{command} - {Kind(process.Id, process.ProcessName, root)}");
         }
         catch (ArgumentException)
         {
@@ -64,6 +69,98 @@ internal static partial class LockHolders
         {
             return "unknown";
         }
+    }
+
+    private static string Age(Process process)
+    {
+        try
+        {
+            return Aged(DateTime.UtcNow - process.StartTime.ToUniversalTime());
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return "unknown";
+        }
+    }
+
+    private static string Aged(TimeSpan elapsed) => elapsed switch
+    {
+        { TotalHours: >= 1 } => elapsed.TotalHours.ToString("0.0", CultureInfo.InvariantCulture) + "h",
+        { TotalMinutes: >= 1 } => elapsed.TotalMinutes.ToString("0.0", CultureInfo.InvariantCulture) + "m",
+        _ => Math.Max(elapsed.TotalSeconds, 0).ToString("0", CultureInfo.InvariantCulture) + "s",
+    };
+
+    private static async Task<string> CommandTailAsync(int pid, string root, CancellationToken cancellationToken)
+    {
+        var line = await RawCommandLineAsync(pid, cancellationToken).ConfigureAwait(false);
+
+        return line is { Length: > 0 } ? " cmd=" + Tail(line, root) : string.Empty;
+    }
+
+    private static async Task<string?> RawCommandLineAsync(int pid, CancellationToken cancellationToken)
+    {
+        if (OperatingSystem.IsWindows())
+            return WindowsCommandLine(pid);
+
+        if (OperatingSystem.IsLinux())
+            return await LinuxCommandLineAsync(pid, cancellationToken).ConfigureAwait(false);
+
+        return null;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string? WindowsCommandLine(int pid)
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(string.Create(CultureInfo.InvariantCulture, $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {pid}"));
+            using var results = searcher.Get();
+
+            foreach (var item in results)
+            {
+                using (item)
+                    return item["CommandLine"] as string;
+            }
+        }
+        catch (ManagementException)
+        {
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+        }
+
+        return null;
+    }
+
+    private static async Task<string?> LinuxCommandLineAsync(int pid, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var raw = await File.ReadAllTextAsync(string.Create(CultureInfo.InvariantCulture, $"/proc/{pid}/cmdline"), cancellationToken).ConfigureAwait(false);
+
+            return raw.Replace('\0', ' ').TrimEnd();
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string Tail(string commandLine, string root)
+    {
+        var trimmed = root.Length > 0
+            ? commandLine.Replace(root + Path.DirectorySeparatorChar, "", StringComparison.OrdinalIgnoreCase)
+            : commandLine;
+        var span = trimmed.AsSpan();
+        var marker = span.IndexOf(".dll", StringComparison.OrdinalIgnoreCase);
+
+        if (marker < 0)
+            marker = span.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+
+        var start = marker < 0 ? 0 : span[..marker].LastIndexOfAny('\\', '/') + 1;
+        var tail = span[start..].Trim();
+
+        return tail.Length > MaxTail ? string.Concat(tail[..MaxTail], "...") : new string(tail);
     }
 
     private static string Kind(int pid, string name, string root)
@@ -139,14 +236,14 @@ internal static partial class LockHolders
         }
     }
 
-    public static string Scanned(string root)
+    public static async Task<string> ScannedAsync(string root, CancellationToken cancellationToken = default)
     {
         if (root.Length is 0)
             return string.Empty;
 
         var builder = new StringBuilder();
         var current = Environment.ProcessId;
-        var found = Self(builder, root);
+        var found = await SelfAsync(builder, root, cancellationToken).ConfigureAwait(false);
 
         foreach (var process in Process.GetProcesses())
         {
@@ -156,7 +253,7 @@ internal static partial class LockHolders
                     continue;
 
                 found++;
-                Append(builder, process, root, module);
+                await AppendAsync(builder, process, root, module, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -194,20 +291,24 @@ internal static partial class LockHolders
         || name.Contains("BuildHost", StringComparison.OrdinalIgnoreCase)
         || name.Contains("terse", StringComparison.OrdinalIgnoreCase);
 
-    private static int Self(StringBuilder builder, string root)
+    private static async Task<int> SelfAsync(StringBuilder builder, string root, CancellationToken cancellationToken)
     {
         using var current = Process.GetCurrentProcess();
 
         if (Mapped(current, root) is not { } module)
             return 0;
 
-        Append(builder, current, root, module);
+        await AppendAsync(builder, current, root, module, cancellationToken).ConfigureAwait(false);
 
         return 1;
     }
 
-    private static void Append(StringBuilder builder, Process process, string root, string module) =>
+    private static async Task AppendAsync(StringBuilder builder, Process process, string root, string module, CancellationToken cancellationToken)
+    {
+        var command = await CommandTailAsync(process.Id, root, cancellationToken).ConfigureAwait(false);
+
         builder.Append("\nholder pid=").Append(process.Id.ToString(CultureInfo.InvariantCulture)).Append(' ')
-            .Append(process.ProcessName).Append(" startedUtc=").Append(Started(process)).Append(Executable(process, root))
-            .Append(" maps=").Append(module).Append(" - ").Append(Kind(process.Id, process.ProcessName, root));
+            .Append(process.ProcessName).Append(" startedUtc=").Append(Started(process)).Append(" age=").Append(Age(process)).Append(Executable(process, root))
+            .Append(command).Append(" maps=").Append(module).Append(" - ").Append(Kind(process.Id, process.ProcessName, root));
+    }
 }

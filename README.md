@@ -258,9 +258,10 @@ harness already delivers cost 22.5 h and 29.7% of all tool wall time in a measur
 those 272 calls followed a real completion notification and were legitimate.
 
 The compound-command rewrite is only attempted where it is provably sound: every top-level separator is
-`&&`, `;` or a newline, and a pipeline containing a covered stage is dropped whole. A command carrying
-`||`, a background `&`, a subshell, a redirect, a substitution, a comment, any backslash escape, a mixed
-`;`/`&&` run or a shell keyword falls back to denying the command as before.
+`&&`, `;` or a newline, and a pipeline containing a covered stage is dropped whole, its redirects with
+it — a plain `>`, `>>`, `2>` or `<` binds to the command it follows and no longer forces a refusal. A
+command carrying `||`, a background `&`, a subshell, a heredoc, a substitution, a comment, any backslash
+escape, a mixed `;`/`&&` run or a shell keyword falls back to denying the command as before.
 
 Git rows fire only when the directory the command actually addresses sits under a
 `.sln`/`.slnx`/`.slnf`/`.csproj` — the `-C` target or a directory operand before the working directory —
@@ -288,13 +289,13 @@ terse serve --tools core     # advertise the 21 tools that answer most questions
 
 An MCP server's fixed cost is its tool list, attached to every request — and past a certain size it
 measurably costs tool-selection accuracy. `workspace_status` prints `advertised=<n> tools <t> tokens` —
-asserted on every push against the list the server really sent, under a **29,800-token ceiling** — and
+asserted on every push against the list the server really sent, under a **30,400-token ceiling** — and
 lists the whole surface beside it under `verbose=true`, so what a narrowing saves is read off the
 running server rather than estimated. The surface shrinks three ways, all optional; the default
 advertises everything.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤24,600 tokens**. Load one that does and they come back, announced with
+  **57 tools, ≤25,100 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
 - **Per project.** The same `.terse.json`, found by walking up from the server's directory and never
   above the repository root:
@@ -310,7 +311,7 @@ advertises everything.
 
   Twelve groups — `analysis` `build` `edit` `file` `git` `navigation` `project` `razor` `refactor` `resx`
   `workspace` `xaml` — plus any tool name under `names`, which outranks its group. That file measures
-  **64 tools, ≤25,400 tokens**. An unknown key is reported rather than silently dropped, and the guard
+  **64 tools, ≤25,900 tokens**. An unknown key is reported rather than silently dropped, and the guard
   follows the file: a built-in whose every replacement you disabled is allowed again. Read once at
   startup, so restart your agent after changing it.
 - **By profile.** `--tools core`, or `TERSE_TOOLS=core`; `--tools all` opts out of every narrowing.
