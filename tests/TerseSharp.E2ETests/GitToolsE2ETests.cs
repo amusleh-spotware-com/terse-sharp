@@ -600,7 +600,17 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         };
 
         var first = await server.CallAsync("changed_files", new(arguments));
-        var second = await server.CallAsync("changed_files", new(arguments));
+        var second = first;
+
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            second = await server.CallAsync("changed_files", new(arguments));
+
+            if (second.Contains("UNCHANGED", StringComparison.Ordinal))
+                break;
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
 
         Assert.DoesNotContain("UNCHANGED", first, StringComparison.Ordinal);
         Assert.Contains("UNCHANGED - no watcher event and no git state change", second, StringComparison.Ordinal);

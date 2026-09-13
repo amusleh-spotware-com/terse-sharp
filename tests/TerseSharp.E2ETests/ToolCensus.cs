@@ -67,7 +67,7 @@ internal static class ToolCensus
 
     public static ToolProbe[] ProcessProbes =>
     [
-        new("build", []),
+        new("build", new() { ["force"] = true }),
         new("list_tests", new() { ["project"] = TestProject }),
         new("run_tests", new() { ["project"] = TestProject, ["force"] = true }),
         new("rerun_failed", []),
@@ -117,7 +117,7 @@ internal static class ToolCensus
         new(
             "build",
             "build ok  ",
-            [],
+            new() { ["force"] = true },
             "the quiet success line is a verdict, not a request echo; BuildWarningsE2ETests asserts that exact prefix and the one-line shape it guarantees"),
         new(
             "run_tests",
