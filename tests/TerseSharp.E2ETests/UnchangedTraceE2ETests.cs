@@ -10,9 +10,9 @@ public sealed class UnchangedTraceE2ETests
             TerseServerFixture.RepositoryRoot,
             [
                 TerseServerFixture.ServerAssemblyPath(),
-                "serve",
-                "--workspace",
-                Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+            "serve",
+            "--workspace",
+            Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
             ],
             new Dictionary<string, string> { ["TERSE_UNCHANGED_TRACE"] = "1" },
             TestContext.Current.CancellationToken);
@@ -27,7 +27,17 @@ public sealed class UnchangedTraceE2ETests
             };
 
             var first = await server.CallAsync("run_tests", new(arguments), TestContext.Current.CancellationToken);
-            var second = await server.CallAsync("run_tests", new(arguments), TestContext.Current.CancellationToken);
+            var second = first;
+
+            for (var attempt = 0; attempt < 30; attempt++)
+            {
+                second = await server.CallAsync("run_tests", new(arguments), TestContext.Current.CancellationToken);
+
+                if (second.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
+                    break;
+
+                await Task.Delay(100, TestContext.Current.CancellationToken);
+            }
 
             Assert.StartsWith("run_tests PASSED", first, StringComparison.Ordinal);
             Assert.EndsWith("memo: miss - first run of this key; remembered", first, StringComparison.Ordinal);

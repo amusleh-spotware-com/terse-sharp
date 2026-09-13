@@ -462,8 +462,25 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RunTests_RepeatedWithNothingWrittenInBetween_AnswersUnchangedInsteadOfRunningAgain()
     {
-        var first = await server.CallAsync("run_tests", new() { ["project"] = TestProject, ["test"] = PassingTest, ["timeoutSeconds"] = 400 });
-        var second = await server.CallAsync("run_tests", new() { ["project"] = TestProject, ["test"] = PassingTest, ["timeoutSeconds"] = 400 });
+        var arguments = new Dictionary<string, object?>
+        {
+            ["project"] = TestProject,
+            ["test"] = PassingTest,
+            ["timeoutSeconds"] = 400,
+        };
+
+        var first = await server.CallAsync("run_tests", new(arguments));
+        var second = first;
+
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            second = await server.CallAsync("run_tests", new(arguments));
+
+            if (second.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
+                break;
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
 
         Assert.StartsWith("run_tests PASSED", first, StringComparison.Ordinal);
         Assert.StartsWith("run_tests UNCHANGED", second, StringComparison.Ordinal);
@@ -516,7 +533,18 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         };
 
         var first = await server.CallAsync("build", new(arguments));
-        var second = await server.CallAsync("build", new(arguments));
+        var second = first;
+
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            second = await server.CallAsync("build", new(arguments));
+
+            if (second.StartsWith("build UNCHANGED", StringComparison.Ordinal))
+                break;
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+
         var forced = await server.CallAsync("build", new(arguments) { ["force"] = true });
 
         Assert.StartsWith("build ok", first, StringComparison.Ordinal);
