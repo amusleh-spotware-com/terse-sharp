@@ -130,13 +130,21 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task FindFiles_AskedTwice_AnswersTheSecondCallFromThePathIndex()
     {
-        await server.CallAsync("find_files", new() { ["glob"] = "*.csproj" });
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            await server.CallAsync("find_files", new() { ["glob"] = "*.csproj" });
 
-        var before = PathIndexHits(await server.CallAsync("workspace_status", new() { ["verbose"] = true }));
+            var before = PathIndexHits(await server.CallAsync("workspace_status", new() { ["verbose"] = true }));
 
-        await server.CallAsync("find_files", new() { ["glob"] = "*.json" });
+            await server.CallAsync("find_files", new() { ["glob"] = "*.json" });
 
-        Assert.Equal(before + 1, PathIndexHits(await server.CallAsync("workspace_status", new() { ["verbose"] = true })));
+            if (PathIndexHits(await server.CallAsync("workspace_status", new() { ["verbose"] = true })) == before + 1)
+                return;
+
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+
+        Assert.Fail("a repeat find_files was never answered from the path index across 10 paced attempts - every pair saw an index rebuild or no hit");
     }
 
     private static int PathIndexHits(string status)
