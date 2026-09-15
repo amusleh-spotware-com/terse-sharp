@@ -49,6 +49,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   pathological at 5-9 s "per test" on every scoped run of a session. Covered by
   `DotnetRunnerTests.Pathological_ForARunTooSmallForItsFixedCostToAverageOut_SaysNothing` and
   `DotnetRunnerTests.Pathological_ForTheSmallestRunItStillRates_NamesTheAssemblyAndItsRate`.
+- `BacklogClosureE2ETests.GetDiagnostics_WithTheSeverityAlias_AcceptsItAndAnswersAsMinSeverityDoes`
+  compared two `get_diagnostics` responses for equality while **inheriting** a realized compilation
+  from whichever test happened to run before it. When it was the first semantic call after a load,
+  the aliased call carried the one-off `compilations=realized in Nms` line and the canonical one did
+  not, so the assertion failed - on the macOS leg only, because within-collection ordering differs
+  per runner and the tests added in this release shifted it. It now realizes the compilations itself
+  before the two compared calls, which is this repository's own standing rule: make the test produce
+  the state it asserts on, never inherit it. The assertion itself is unchanged.
+
 
 ### Changed
 

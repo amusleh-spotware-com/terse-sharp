@@ -569,13 +569,13 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             {
                 text = await server.CallAsync("write_text", new(arguments));
 
-            if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
-                break;
+                if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
+                    break;
 
-            File.Delete(callee);
-            File.Delete(caller);
+                File.Delete(callee);
+                File.Delete(caller);
 
-            await Task.Delay(500, TestContext.Current.CancellationToken);
+                await Task.Delay(500, TestContext.Current.CancellationToken);
             }
 
             Assert.False(text.Contains("ERROR", StringComparison.Ordinal), "write_text answered an error, in full: " + text);
@@ -2153,6 +2153,8 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     [Fact]
     public async Task GetDiagnostics_WithTheSeverityAlias_AcceptsItAndAnswersAsMinSeverityDoes()
     {
+        await server.CallAsync("get_diagnostics", new() { ["minSeverity"] = "error" });
+
         var aliased = await server.CallAsync("get_diagnostics", new() { ["severity"] = "error" });
         var canonical = await server.CallAsync("get_diagnostics", new() { ["minSeverity"] = "error" });
 
