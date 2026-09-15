@@ -127,7 +127,7 @@ public sealed class EditTools(ToolContext context)
             held?.Root);
     }
     [McpServerTool(Name = "add_member")]
-    [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. Replaces one call per missing import. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload; an unresolved typeSymbolId is held the same way. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. before= and after= place the new members above or below a member the type declares, and position=first|afterFields|last picks a coarse slot; the default appends at the end, above a trailing #region the type closes. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. Replaces one call per missing import. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload; an unresolved typeSymbolId is held the same way. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> AddMember(
             [Description("Symbol id of the containing type, or of an enum when adding enum members. Cannot be combined with path.")] string? typeSymbolId = null,
             [Description("One complete member declaration, or several in sequence; they are added together as one edit. With an enum container, one or more enum member names.")] string declaration = "",
@@ -142,6 +142,9 @@ public sealed class EditTools(ToolContext context)
             [Description(UsingsHelp)] string[]? usings = null,
             [Description(RetryHelp)] string? retryWith = null,
             [Description("Alias for declaration; entries join into the one edit.")] string[]? declarations = null,
+            [Description("Member of this type to land the new members ABOVE, by short name or documentation id. Not with after= or position=, and not held by a retryWith token.")] string? before = null,
+            [Description("Member of this type to land the new members BELOW, addressed as before= is. Not with before= or position=.")] string? after = null,
+            [Description("Coarse slot instead of an anchor: first, afterFields (after the last field) or last. Default last. Not with before= or after=.")] string? position = null,
             CancellationToken cancellationToken = default)
     {
         if (RejectedUsings(usings) is { } rejected)
@@ -149,6 +152,11 @@ public sealed class EditTools(ToolContext context)
 
         if (RejectedDeclarations(declarations) is { } malformed)
             return Task.FromResult(malformed);
+
+        var placement = Placement(before, after, position);
+
+        if (!placement.IsOk)
+            return Task.FromResult(placement.Error!.Render());
 
         var held = Held(retryWith, "add_member");
 
@@ -160,8 +168,9 @@ public sealed class EditTools(ToolContext context)
         var sent = Merged(declaration, declarations);
         var text = held is null ? sent : First(held.Payloads, sent);
         var imports = Kept(usings, held?.Usings);
+        var options = Options("add_member", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy, placement: placement.Value);
 
-        return Added(workspace, container, file, text, Options("add_member", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken, held?.Root, imports);
+        return Added(workspace, container, file, text, options, cancellationToken, held?.Root, imports);
     }
 
     private Task<string> Added(
@@ -177,6 +186,9 @@ public sealed class EditTools(ToolContext context)
             ({ Length: > 0 }, { Length: > 0 }) => Task.FromResult(Errors.Invalid(
                 "both a type symbol id and a path were passed, and they name different containers",
                 "pass typeSymbolId to add members to a type, or path to add namespace-level types to a file - not both").Render()),
+            (_, { Length: > 0 }) when options.Placement is not null => Task.FromResult(Errors.Invalid(
+                "before=, after= and position= place a member inside a type, and path= appends namespace-level types to a file, which has no member list to place them in",
+                "drop the placement to append the types to that file, or pass typeSymbolId to place members inside a type").Render()),
             (_, { Length: > 0 } file) when declaration is { Length: > 0 } => AddToFile(workspace, file, declaration, options, cancellationToken, heldRoot, usings),
             (_, { Length: > 0 }) => Task.FromResult(Errors.Blank("declaration").Render()),
             _ => Supplied(workspace, typeSymbolId, declaration, "declaration", (loaded, resolved) => SymbolEditService.AddMemberAsync(
@@ -236,8 +248,8 @@ public sealed class EditTools(ToolContext context)
             Supplied(workspace, symbolId ?? symbol, newName, "newName", (loaded, resolved) => RenameService.RenameAsync(
                 loaded, resolved, newName, Options("rename_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
-    private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null, string? addTo = null, bool rename = false, bool allowPolicy = false) =>
-            new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add], addTo, rename, allowPolicy);
+    private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null, string? addTo = null, bool rename = false, bool allowPolicy = false, MemberPlacement? placement = null) =>
+            new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add], addTo, rename, allowPolicy, placement);
 
     private Task<string> Guarded(
         string? workspace,
@@ -534,4 +546,40 @@ public sealed class EditTools(ToolContext context)
     private static string Repeat(int position, string named) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names {named}, which an earlier entry already corrected"),
         "name each held entry at most once - two corrections of one entry cannot both land").Render();
+
+    private static Result<MemberPosition> PlacementSlot(string? position)
+    {
+        if (position is null or "" || string.Equals(position, "last", StringComparison.OrdinalIgnoreCase))
+            return Result.Ok(MemberPosition.Last);
+
+        if (string.Equals(position, "first", StringComparison.OrdinalIgnoreCase))
+            return Result.Ok(MemberPosition.First);
+
+        return string.Equals(position, "afterFields", StringComparison.OrdinalIgnoreCase)
+            ? Result.Ok(MemberPosition.AfterFields)
+            : Result.Fail<MemberPosition>(Errors.Invalid(
+                "position=" + position + " is not a slot this tool declares",
+                "pass position=first, position=afterFields or position=last, or before=/after= to anchor on a member this type declares"));
+    }
+
+    private static Result<MemberPlacement?> Anchored(string? before, string? after, string? position)
+    {
+        var slot = PlacementSlot(position);
+
+        return slot.IsOk
+            ? Result.Ok<MemberPlacement?>(new MemberPlacement(before, after, slot.Value))
+            : Result.Fail<MemberPlacement?>(slot.Error!);
+    }
+
+    private static Result<MemberPlacement?> Placement(string? before, string? after, string? position) => (before, after, position) switch
+    {
+        ({ Length: > 0 }, { Length: > 0 }, _) => Result.Fail<MemberPlacement?>(Errors.Invalid(
+            "before= and after= both name an anchor, and one member cannot land in two places",
+            "pass before= to land the new members above that member, or after= to land them below it - not both")),
+        ({ Length: > 0 }, _, { Length: > 0 }) or (_, { Length: > 0 }, { Length: > 0 }) => Result.Fail<MemberPlacement?>(Errors.Invalid(
+            "position= names a coarse slot and before=/after= names an anchor, so the two describe different insertion points",
+            "pass before= or after= to anchor on a member, or position=first, afterFields or last - not both")),
+        (null or "", null or "", null or "") => Result.Ok<MemberPlacement?>(null),
+        _ => Anchored(before, after, position),
+    };
 }

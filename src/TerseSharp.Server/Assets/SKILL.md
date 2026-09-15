@@ -116,6 +116,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | renaming a member and rewriting its body in one edit | `replace_symbol(symbolIds: [...], declarations: [...], rename: true)` |
 | **Edit code** | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` |
 | **Edit code** | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` |
+| **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"` |
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
 | **Refactor** | hand-writing an interface from a class | `extract_interface(symbolId)` |
@@ -130,6 +131,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Git** | `Bash: git log` / `git show --stat` | `history` — `git blame` stays on the shell |
 | **Git** | `Bash: git describe` | `history(describe: true)` |
 | **Git** | `Bash: git tag --list` / `git tag -l "v*"` | `history(tags: true)` — creating or deleting a tag stays on the shell |
+| **Git** | `Bash: git ls-remote --tags origin` | `history(tags: true, remote: true)` — every row tagged `local=yes\|no remote=yes\|no` |
 | **Git** | `Bash: git diff --cached` for its hunk text or its declarations | `diff_symbols(staged: true)` · `diff_text(staged: true)` |
 | **Git** | `Bash: git diff --cached --name-only` / `git status --untracked-files=no` | `changed_files(staged: true)` · `changed_files(untracked: false)` |
 | **Git** | `Bash: git status` / `git diff --stat` | `changed_files` — a byte-identical repeat with no watcher event and no git state change replays as `UNCHANGED` |
@@ -266,7 +268,11 @@ re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=t
 directory the command actually addresses (`-C` target, then a directory operand, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
 `git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`, and a `git tag` **listing** —
-bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. Still on the shell: `git blame`
+bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. A tag listing of
+**origin** — `git ls-remote --tags` — is `history tags=true remote=true`, which merges both lists and
+tags every row `local=yes|no remote=yes|no`, putting the rows only the remote has FIRST so the cap
+cannot drop the ones a release check is looking for; `--heads` (even beside `--tags`), another remote
+and a bare `git ls-remote` are left alone. Still on the shell: `git blame`
 — measured at **one** call in 683 sessions — anything that mutates the index or history (`git add`,
 `git commit`, `git push`, and every `git tag` that creates, annotates or deletes one), and a
 **scripted extraction** such as
@@ -499,6 +505,20 @@ build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, 
 whose name and parameter list the type already declares answers `ERROR NameTaken` naming that member
 and its line - it used to cost a full compile round trip and the whole rejected declaration. An
 overload whose parameter list differs still lands.
+
+**`add_member` places the member; it no longer only appends it.** `before="Submit"` lands the new
+members above that member and `after="Submit"` below it, by short name or documentation id, resolved
+**inside the target type**; a name it does not declare is refused naming the members it does.
+`position="first"`, `"afterFields"` (after the last field) or `"last"` picks a coarse slot instead;
+two anchors together, an anchor beside `position=`, an anchor naming two overloads - the refusal
+names each overload's signature, and passing one of those verbatim places it - and any placement
+beside `path=` are refused rather than one being dropped - an indexer, operator, destructor or
+explicit interface implementation cannot be anchored on. The placement is **not** held by a
+`retryWith` token, as `add=` and `rename=` are not.
+**The default `last` is region-aware**: a trailing `#endregion` lives in the close brace's leading
+trivia, so an append lands above the region the type closes rather than inside it - where a new
+constant used to be filed silently under "Nested types". `replace_symbol add=` shares that default
+but takes no placement arguments.
 
 **A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **A NESTED TYPE's container is its declaring type**, so `symbolIds=["Outer.Nested", "Outer.Sibling"]
@@ -1006,6 +1026,7 @@ server ships. Component and parameter answers are then unavailable rather than e
 `durationMs` is summed test time and `elapsedMs` is wall clock — so running the suite after every
 change is nearly free. **A suite pathologically slow for its own size names itself**: past 5 000 ms per test the verdict gains
 ` slowAssembly=<name> <n>ms/test`. That is a 31x regression announcing itself, not a big-suite warning.
+It needs **at least five executed tests** in that project, below which the mean is all fixed cost.
 A run that spanned **more than one project** appends `concurrency=<summed/wall>x` plus
 `Name:total/durationMs`
 per project to that same line - and a run that already prints its counters in full adds the slowest

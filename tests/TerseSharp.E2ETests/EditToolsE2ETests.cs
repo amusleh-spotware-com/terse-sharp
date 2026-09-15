@@ -835,4 +835,196 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Assert.Contains("rolled back", gated, StringComparison.Ordinal);
         Assert.DoesNotContain("rolled back", allowed, StringComparison.Ordinal);
     }
+
+    private const string RegionTailSource = """
+namespace Fixture.Trading;
+
+public sealed class RegionTail
+{
+    private const int Seed = 3;
+
+    public int Value() => Seed;
+
+    #region Nested types
+
+    private sealed class Listener
+    {
+        public int Depth() => 1;
+    }
+
+    #endregion
+}
+
+""";
+
+    [Theory]
+    [InlineData(null, null, "@@ -18,0 +18,2 @@")]
+    [InlineData("position", "first", "@@ -5,0 +5,2 @@")]
+    [InlineData("position", "afterFields", "@@ -7,0 +7,2 @@")]
+    [InlineData("before", "Submit", "@@ -11,0 +11,2 @@")]
+    [InlineData("after", "Submit", "@@ -13,0 +13,2 @@")]
+    public async Task AddMember_WithAnAnchorOrASlot_PlacesTheMemberThereInsteadOfAppending(string? parameter, string? value, string expected)
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int Placed() => 1;",
+            ["dryRun"] = true,
+        };
+
+        if (parameter is not null)
+            arguments[parameter] = value;
+
+        var text = await server.CallAsync("add_member", arguments);
+
+        Assert.Contains(expected, text, StringComparison.Ordinal);
+        Assert.Contains("public int Placed() => 1;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_ForATypeWhoseTailSitsInARegion_LandsAboveTheRegionInsteadOfInsideIt()
+    {
+        const string Probe = "src/Fixture.Trading/RegionTail.cs";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["force"] = true, ["content"] = RegionTailSource });
+
+        try
+        {
+            var text = await server.CallAsync("add_member", new()
+            {
+                ["typeSymbolId"] = "T:Fixture.Trading.RegionTail",
+                ["declaration"] = "private const int Extra = 4;",
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("@@ -9,0 +9,2 @@", text, StringComparison.Ordinal);
+            Assert.Contains("private const int Extra = 4;", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["force"] = true, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task AddMember_WithBothBeforeAndAfter_IsRefusedRatherThanPickingOne()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int Placed() => 1;",
+            ["before"] = "Submit",
+            ["after"] = "Unused",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("one member cannot land in two places", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithAnAnchorBesideASlot_IsRefusedRatherThanIgnoringOne()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int Placed() => 1;",
+            ["before"] = "Submit",
+            ["position"] = "first",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("different insertion points", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithASlotItDoesNotDeclare_NamesTheThreeItDoes()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int Placed() => 1;",
+            ["position"] = "sideways",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("position=sideways is not a slot this tool declares", text, StringComparison.Ordinal);
+        Assert.Contains("position=afterFields", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithAnAnchorTheTypeDoesNotDeclare_NamesTheMembersItDoes()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public int Placed() => 1;",
+            ["before"] = "NoSuchThing",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("before=NoSuchThing names no member of OrderService", text, StringComparison.Ordinal);
+        Assert.Contains("Submit(Order)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithAPlacementBesideAPath_IsRefusedRatherThanDroppingThePlacement()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["declaration"] = "public sealed record PlacedRecord(int Value);",
+            ["position"] = "first",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("no member list to place them in", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("T:Fixture.Trading.OrderService", "M:Fixture.Trading.OrderService.Unused~System.Int32", "@@ -15,0 +15,2 @@")]
+    [InlineData("T:Fixture.Trading.Awkward", "M:Fixture.Trading.Awkward.Echo``1(``0)~``0", "@@ -18,0 +18,2 @@")]
+    public async Task AddMember_WithADocumentationIdAsTheAnchor_PlacesItInsteadOfRefusingIt(string type, string anchor, string expected)
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = type,
+            ["declaration"] = "public int Placed() => 1;",
+            ["before"] = anchor,
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains(expected, text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithAnAnchorThatNamesTwoOverloads_RefusesAndNamesSpellingsThatPlaceIt()
+    {
+        var refused = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.Awkward",
+            ["declaration"] = "public int Placed() => 1;",
+            ["before"] = "Weigh",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("the insertion point is not decided", refused, StringComparison.Ordinal);
+        Assert.Contains("Weigh(Boxed<IHandler>)", refused, StringComparison.Ordinal);
+
+        var placed = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.Awkward",
+            ["declaration"] = "public int Placed() => 1;",
+            ["before"] = "Weigh(Boxed<IHandler>)",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", placed, StringComparison.Ordinal);
+        Assert.Contains("@@ -22,0 +22,2 @@", placed, StringComparison.Ordinal);
+    }
 }

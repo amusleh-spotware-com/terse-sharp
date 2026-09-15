@@ -615,6 +615,16 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("UNCHANGED", first, StringComparison.Ordinal);
         Assert.Contains("UNCHANGED - no watcher event and no git state change", second, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task History_WithRemoteButNoTags_IsRefusedInsteadOfIgnoringIt()
+    {
+        var text = await server.CallAsync("history", new() { ["remote"] = true, ["maxResults"] = 5 });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("tags=true", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe

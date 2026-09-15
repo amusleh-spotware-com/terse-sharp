@@ -9,7 +9,7 @@ internal static class GitRunner
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
-        var run = await ChildProcess.RunAsync("git", arguments, workingDirectory, Deadline, cancellationToken, environment: null, Utf8).ConfigureAwait(false);
+        var run = await ChildProcess.RunAsync("git", arguments, workingDirectory, Deadline, cancellationToken, Unattended, Utf8).ConfigureAwait(false);
 
         if (run.TimedOut)
             return Result.Fail<string>(Errors.Invalid("git did not answer within 60 s and was killed", "narrow the request with path=, or run the command yourself"));
@@ -42,4 +42,6 @@ internal static class GitRunner
             string relativePath,
             CancellationToken cancellationToken) =>
             ReadAsync(workingDirectory, ["show", reference + ":./" + relativePath.Replace('\\', '/')], cancellationToken);
+
+    private static readonly KeyValuePair<string, string>[] Unattended = [new("GIT_TERMINAL_PROMPT", "0"), new("GIT_ASKPASS", string.Empty), new("GCM_INTERACTIVE", "never")];
 }

@@ -313,7 +313,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     }
 
     [McpServerTool(Name = "history", ReadOnly = true)]
-    [Description("Replaces Bash git log and git show --stat and git tag --list and git describe. Commits touching a path, one line each - short sha, author date, author, subject - workspace-relative and oneline by default. baseRef takes a commit, a branch or a range such as v0.32.0..HEAD; contains= is git's pickaxe, listing only the commits whose diff added or removed that literal; message= greps subject and body. commit= answers one commit instead - its subject and one line per file with added and deleted counts - and is refused beside baseRef=, contains= or message= rather than ignoring them. tags=true answers the repository's tags instead, newest first, one line each with the commit it names, and describe=true answers HEAD's own position instead - nearest tag, commits on top of it, short sha, dirty flag - which is the MinVer question a release asks. root= answers about any absolute directory, tagged outside-workspace.")]
+    [Description("Replaces Bash git log and git show --stat and git tag --list and git describe and git ls-remote --tags. Commits touching a path, one line each - short sha, author date, author, subject - workspace-relative and oneline by default. baseRef takes a commit, a branch or a range such as v0.32.0..HEAD; contains= is git's pickaxe, listing only the commits whose diff added or removed that literal; message= greps subject and body. commit= answers one commit instead - its subject and one line per file with added and deleted counts - and is refused beside baseRef=, contains= or message= rather than ignoring them. tags=true answers the repository's tags instead, newest first, one line each with the commit it names, and remote=true merges origin's tags into it, tagging every row local=yes|no remote=yes|no. describe=true answers HEAD's own position instead - nearest tag, commits on top of it, short sha, dirty flag - which is the MinVer question a release asks. root= answers about any absolute directory, tagged outside-workspace.")]
     public Task<string> History(
             [Description("Commit, branch or range to list, e.g. main, HEAD~20 or v0.32.0..HEAD. Empty lists from HEAD backwards.")] string? baseRef = null,
             [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
@@ -322,6 +322,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             [Description("One commit instead of a listing: its subject and one line per file with added and deleted counts. Cannot be combined with baseRef=, contains= or message=.")] string? commit = null,
             [Description("List tags instead of commits, newest version first - name, short sha, date. Refused beside baseRef=, path=, contains=, message= or commit=.")] bool tags = false,
             [Description("Answer HEAD's position instead of a listing: nearest tag, commits since it, short sha, dirty flag - one line. Refused beside every filter.")] bool describe = false,
+            [Description("Beside tags=true, also read origin's tags and tag every row local=yes|no remote=yes|no. Rows only the remote has come FIRST, so the cap never drops them; they carry no date. Refused on its own.")] bool remote = false,
             [Description("Max commits, or tags (50).")] int maxResults = 0,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Absolute directory to answer about instead of the loaded workspace. The answer is tagged outside-workspace.")] string? root = null,
@@ -330,6 +331,9 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         if (Conflicting(commit, baseRef, contains, message) is { } refusal)
             return Task.FromResult(refusal.Render());
 
+        if (Published(remote, tags) is { } unmergeable)
+            return Task.FromResult(unmergeable.Render());
+
         if (Unrelated(tags, commit, baseRef, contains, message, path) is { } tagged)
             return Task.FromResult(tagged.Render());
 
@@ -337,11 +341,11 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             return Task.FromResult(positioned.Render());
 
         return root is { Length: > 0 }
-            ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, tags, describe, NavigationTools.Cap(maxResults, 50), full, maxResults > 0, cancellationToken))
+            ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, tags, describe, remote, NavigationTools.Cap(maxResults, 50), full, maxResults > 0, cancellationToken))
             : context.WithWorkspaceAsync(
                 workspace,
                 path,
-                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, tags, describe, NavigationTools.Cap(maxResults, 50), null, maxResults > 0, cancellationToken),
+                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, tags, describe, remote, NavigationTools.Cap(maxResults, 50), null, maxResults > 0, cancellationToken),
                 semantic: false,
                 cancellationToken);
     }
@@ -355,11 +359,15 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             string? commit,
             bool tags,
             bool describe,
+            bool remote,
             int maxResults,
             string? outside,
             bool chosen,
             CancellationToken cancellationToken)
     {
+        if (remote)
+            return await RemoteTagsAsync(root, maxResults, outside, chosen, cancellationToken).ConfigureAwait(false);
+
         var arguments = Requested(baseRef, path, contains, message, commit, tags, describe, maxResults);
         var run = await GitRunner.ReadAsync(root, arguments, cancellationToken).ConfigureAwait(false);
 
@@ -776,4 +784,87 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             stamp.Append(" absent");
         }
     }
+
+    private const string TagPrefix = "refs/tags/";
+    private const int ShortSha = 7;
+
+    private const string Peeled = "^{}";
+    private static readonly string[] RemoteTagArguments = ["ls-remote", "--tags", "origin"];
+
+    private static void Recorded(Dictionary<string, string> tags, string line)
+    {
+        var text = line.AsSpan();
+        var tab = text.IndexOf('\t');
+
+        if (tab <= 0)
+            return;
+
+        var reference = text[(tab + 1)..].Trim();
+
+        if (!reference.StartsWith(TagPrefix, StringComparison.Ordinal))
+            return;
+
+        var name = reference[TagPrefix.Length..];
+
+        tags[new string(name.EndsWith(Peeled, StringComparison.Ordinal) ? name[..^Peeled.Length] : name)] = new string(text[..Math.Min(tab, ShortSha)]);
+    }
+
+    private static Dictionary<string, string> RemoteTags(string output)
+    {
+        var tags = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var line in Trimmed(output))
+            Recorded(tags, line);
+
+        return tags;
+    }
+
+    private static string TagName(string line)
+    {
+        var text = line.AsSpan();
+        var space = text.IndexOf(' ');
+
+        return new string(space < 0 ? text : text[..space]);
+    }
+
+    internal static string MergedTags(string local, string remote)
+    {
+        var published = RemoteTags(remote);
+        var lines = new List<string>(published.Count + 8);
+        var listed = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var line in Trimmed(local))
+            listed.Add(TagName(line));
+
+        foreach (var pair in published)
+        {
+            if (!listed.Contains(pair.Key))
+                lines.Add(pair.Key + " " + pair.Value + "  local=no remote=yes");
+        }
+
+        foreach (var line in Trimmed(local))
+            lines.Add(line + (published.ContainsKey(TagName(line)) ? "  local=yes remote=yes" : "  local=yes remote=no"));
+
+        return string.Join("\n", lines);
+    }
+
+    private static async Task<string> RemoteTagsAsync(string root, int maxResults, string? outside, bool chosen, CancellationToken cancellationToken)
+    {
+        var local = await GitRunner.ReadAsync(root, TagArguments(maxResults), cancellationToken).ConfigureAwait(false);
+
+        if (!local.IsOk)
+            return local.Error!.Render();
+
+        var published = await GitRunner.ReadAsync(root, RemoteTagArguments, cancellationToken).ConfigureAwait(false);
+
+        return published.IsOk
+            ? Rendered(MergedTags(local.Value!, published.Value!), "tags", string.Empty, maxResults, outside, chosen)
+            : published.Error!.Render();
+    }
+
+    private static TerseError? Published(bool remote, bool tags) => remote && !tags
+        ? Errors.Invalid(
+            "remote=true merges the remote's tag list into the local one, so it only answers beside tags=true",
+            "pass tags=true remote=true to compare the two tag lists, or drop remote= to list commits")
+        : null;
 }

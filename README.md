@@ -252,7 +252,8 @@ real command. It also covers `dotnet build`/`test`/`format`/`clean`, `dotnet wat
 `while`/`until`/`for` loop — because waiting is not work and nothing replaces it; and the working-tree
 half of git — `git status` and `git diff` in every flag and `-C` form, answered by `changed_files` and
 `diff_symbols`, with `git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files` to
-`find_files tracked=true`, and a `git tag` **listing** to `history tags=true`. `TaskOutput` and
+`find_files tracked=true`, a `git tag` **listing** to `history tags=true`, and origin's tag listing —
+`git ls-remote --tags` — to `history tags=true remote=true`. `TaskOutput` and
 `TaskList` are not denied — they are **allowed with a stand-down**, because polling for a result the
 harness already delivers cost 22.5 h and 29.7% of all tool wall time in a measured week, while 207 of
 those 272 calls followed a real completion notification and were legitimate.
@@ -289,13 +290,13 @@ terse serve --tools core     # advertise the 21 tools that answer most questions
 
 An MCP server's fixed cost is its tool list, attached to every request — and past a certain size it
 measurably costs tool-selection accuracy. `workspace_status` prints `advertised=<n> tools <t> tokens` —
-asserted on every push against the list the server really sent, under a **30,400-token ceiling** — and
+asserted on every push against the list the server really sent, under a **30,700-token ceiling** — and
 lists the whole surface beside it under `verbose=true`, so what a narrowing saves is read off the
 running server rather than estimated. The surface shrinks three ways, all optional; the default
 advertises everything.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤25,100 tokens**. Load one that does and they come back, announced with
+  **57 tools, ≤25,450 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
 - **Per project.** The same `.terse.json`, found by walking up from the server's directory and never
   above the repository root:
@@ -311,7 +312,7 @@ advertises everything.
 
   Twelve groups — `analysis` `build` `edit` `file` `git` `navigation` `project` `razor` `refactor` `resx`
   `workspace` `xaml` — plus any tool name under `names`, which outranks its group. That file measures
-  **64 tools, ≤25,900 tokens**. An unknown key is reported rather than silently dropped, and the guard
+  **64 tools, ≤26,250 tokens**. An unknown key is reported rather than silently dropped, and the guard
   follows the file: a built-in whose every replacement you disabled is allowed again. Read once at
   startup, so restart your agent after changing it.
 - **By profile.** `--tools core`, or `TERSE_TOOLS=core`; `--tools all` opts out of every narrowing.
@@ -450,14 +451,14 @@ nothing.
 | **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
 | **What grep can't reach** | `find_registrations` (DI: open generics, factories, `Add*` extensions) · `list_endpoints` (ASP.NET Core `Map*` + Blazor `@page`) |
 | **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
-| **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` · `rename_symbol` |
+| **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` (`before=` / `after=` / `position=` to place it, not append it) · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** — `package_list` replaces `dotnet list package` | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` (MSBuild's **evaluated** properties, each with the file that set it) · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` (`vulnerable=` / `outdated=`) · `package_add` · `package_remove` |
 | **XAML** — MAUI · WPF · WinUI · Avalonia | `xaml_outline` · `xaml_names` · `xaml_resources` · `xaml_resolve` · `xaml_styles` · `xaml_bindings` · `xaml_validate` · `xaml_find` · `xaml_codebehind` · `xaml_localization` · `xaml_set_property` · `xaml_add_element` · `xaml_remove_element` |
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Localization** (`.resx`/`.resw`) | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Files** — replaces `Glob`/`ls`/`cat` | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
-| **Git** — replaces `git status`/`git diff`/`git diff --cached`/`git log`/`git tag --list` | `changed_files` (`staged=true`, `untracked=false`) · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list) |
+| **Git** — replaces `git status`/`git diff`/`git diff --cached`/`git log`/`git tag --list`/`git ls-remote --tags` | `changed_files` (`staged=true`, `untracked=false`) · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list, `remote=true` to merge origin's) |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 <details>

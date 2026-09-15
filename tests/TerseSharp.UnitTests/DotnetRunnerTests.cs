@@ -869,11 +869,65 @@ public sealed class DotnetRunnerTests
     [Fact]
     public void Pathological_ForASingleProjectRunThatReportsNoPerProjectSummary_UsesTheTargetName()
     {
-        var report = TestRunReport.Empty with { Passed = 2, Total = 2, DurationMs = 40_000 };
+        var report = TestRunReport.Empty with { Passed = 5, Total = 5, DurationMs = 100_000 };
 
         var text = DotnetRunner.Pathological(report, Path.Combine("tests", "Slow.Tests", "Slow.Tests.csproj"));
 
         Assert.Contains("slowAssembly=Slow.Tests", text, StringComparison.Ordinal);
         Assert.Contains("20000ms/test", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    public void Pathological_ForARunTooSmallForItsFixedCostToAverageOut_SaysNothing(int total)
+    {
+        var report = TestRunReport.Empty with
+        {
+            Passed = total,
+            Total = total,
+            DurationMs = total * 9_000L,
+            Projects = [new TestProjectSummary("TerseSharp.E2ETests", total, 0, 0, total, total * 9_000L)],
+        };
+
+        Assert.Equal(string.Empty, DotnetRunner.Pathological(report, "TerseSharp.slnx"));
+    }
+
+    [Fact]
+    public void Pathological_ForTheSmallestRunItStillRates_NamesTheAssemblyAndItsRate()
+    {
+        var report = TestRunReport.Empty with
+        {
+            Passed = 5,
+            Total = 5,
+            DurationMs = 45_000,
+            Projects = [new TestProjectSummary("TerseSharp.E2ETests", 5, 0, 0, 5, 45_000)],
+        };
+
+        var text = DotnetRunner.Pathological(report, "TerseSharp.slnx");
+
+        Assert.Contains("slowAssembly=TerseSharp.E2ETests", text, StringComparison.Ordinal);
+        Assert.Contains("9000ms/test", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Pathological_WhenTheHighestRateProjectIsTooSmallToRate_StillNamesTheProjectThatQualifies()
+    {
+        var report = TestRunReport.Empty with
+        {
+            Passed = 341,
+            Total = 341,
+            DurationMs = 2_049_000,
+            Projects =
+            [
+                new TestProjectSummary("TerseSharp.UnitTests", 1, 0, 0, 1, 9_000),
+            new TestProjectSummary("TerseSharp.E2ETests", 340, 0, 0, 340, 2_040_000),
+        ],
+        };
+
+        var text = DotnetRunner.Pathological(report, "TerseSharp.slnx");
+
+        Assert.Contains("slowAssembly=TerseSharp.E2ETests", text, StringComparison.Ordinal);
+        Assert.Contains("6000ms/test", text, StringComparison.Ordinal);
     }
 }

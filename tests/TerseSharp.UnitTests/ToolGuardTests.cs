@@ -1650,4 +1650,24 @@ public sealed class ToolGuardTests
     [InlineData("2> err.log git commit -m fix")]
     public void Inspect_ForAnUnreplacedCommandBehindALeadingRedirect_StillAllows(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
+
+    [Theory]
+    [InlineData("git ls-remote --tags")]
+    [InlineData("git ls-remote --tags origin")]
+    [InlineData("git ls-remote --refs --tags origin")]
+    public void Inspect_ForARemoteTagListing_NamesHistoryRemoteTags(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("history tags=true remote=true", verdict.Reason, StringComparison.Ordinal);
+        Assert.Equal("history tags=true remote=true", verdict.Routing);
+    }
+
+    [Theory]
+    [InlineData("git ls-remote --tags upstream")]
+    [InlineData("git ls-remote --heads origin")]
+    [InlineData("git ls-remote --tags --heads origin")]
+    public void Inspect_ForARemoteListingHistoryCannotAnswer_LeavesItAlone(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 }

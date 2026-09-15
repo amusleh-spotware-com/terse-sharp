@@ -8,6 +8,100 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-09-15
+
+### Added
+
+- `history remote=true`, beside `tags=true`, merges origin's tag list into the local one and tags
+  every row `local=yes|no remote=yes|no` - so "was this version ever pushed?" is one call instead of
+  a `git ls-remote --tags` shell-out plus a by-eye diff of two listings. Passed on its own it is
+  refused rather than ignored, because there is nothing to merge it into. `ToolGuard` now denies
+  `git ls-remote --tags` (with or without `--refs`, with or without the `origin` operand) and routes
+  it to `history tags=true remote=true`; `--heads`, another remote and a bare `git ls-remote` stay
+  allowed, because nothing here answers them. Covered by `GitToolsTests`,
+  `ToolGuardTests.Inspect_ForARemoteTagListing_NamesHistoryRemoteTags`,
+  `ToolGuardTests.Inspect_ForARemoteListingHistoryCannotAnswer_LeavesItAlone` and
+  `GitToolsE2ETests.History_WithRemoteButNoTags_IsRefusedInsteadOfIgnoringIt`.
+- `add_member` takes `before=`, `after=` and `position=first|afterFields|last`, so a member is
+  **placed** rather than appended. The only positioned alternative was `replace_symbol` on a
+  neighbouring member, which re-sends a whole unrelated declaration to place four lines and carries
+  the attribute-drop trap with it. Anchors resolve inside the target type by short name or
+  documentation id; an anchor the type does not declare, two anchors together, an anchor beside a
+  slot, and any placement beside `path=` are each refused naming what went wrong rather than silently
+  ignored. The placement is not held by a `retryWith` token, exactly as `add=` and `rename=` are not.
+  Covered by `EditToolsE2ETests.AddMember_WithAnAnchorOrASlot_PlacesTheMemberThereInsteadOfAppending`,
+  `EditToolsE2ETests.AddMember_WithBothBeforeAndAfter_IsRefusedRatherThanPickingOne`,
+  `EditToolsE2ETests.AddMember_WithAnAnchorBesideASlot_IsRefusedRatherThanIgnoringOne`,
+  `EditToolsE2ETests.AddMember_WithASlotItDoesNotDeclare_NamesTheThreeItDoes`,
+  `EditToolsE2ETests.AddMember_WithAnAnchorTheTypeDoesNotDeclare_NamesTheMembersItDoes` and
+  `EditToolsE2ETests.AddMember_WithAPlacementBesideAPath_IsRefusedRatherThanDroppingThePlacement`.
+
+### Fixed
+
+- `add_member` and `replace_symbol add=` no longer append **into** a trailing `#region`. A closing
+  `#endregion` lives in the type's close-brace leading trivia, so every appended member landed inside
+  the last region of the file - new constants filed under "Nested types", invisible to the build, to
+  `analyze` and to the suite, and caught only in human review. The append point is now the last
+  position outside every region the type leaves open. Covered by
+  `EditToolsE2ETests.AddMember_ForATypeWhoseTailSitsInARegion_LandsAboveTheRegionInsteadOfInsideIt`.
+- `run_tests` no longer reports `slowAssembly=` for a project that executed fewer than five tests.
+  One test is all fixed cost - a server spawn plus a fixture build - so a healthy E2E suite was named
+  pathological at 5-9 s "per test" on every scoped run of a session. Covered by
+  `DotnetRunnerTests.Pathological_ForARunTooSmallForItsFixedCostToAverageOut_SaysNothing` and
+  `DotnetRunnerTests.Pathological_ForTheSmallestRunItStillRates_NamesTheAssemblyAndItsRate`.
+
+### Changed
+
+- Review-round corrections to the four rows above, each found by the fresh-context reviewer and each
+  with the test that would have caught it:
+  - `before=`/`after=` could not parse a **documentation id**, the half of the contract the outlines
+    print for generic methods and members of generic types, which have no addressable short name. The
+    anchor name is now cut at the first of `(`, `<`, `` ` `` or `~`, so `M:Ns.Type.Member~ReturnType`
+    resolves instead of matching the return type's last segment - which could also anchor on the
+    wrong member silently. Covered by
+    `EditToolsE2ETests.AddMember_WithADocumentationIdAsTheAnchor_PlacesItInsteadOfRefusingIt`.
+  - an anchor naming two overloads resolved to the first instead of refusing, which is the
+    `AmbiguousSymbol` shape this server refuses everywhere else. It now refuses - and the anchor is
+    matched on the **whole signature first**, falling back to the bare name only when no member
+    matches exactly, so `before="Weigh(Boxed<IHandler>)"` picks that overload where `before="Weigh"`
+    cannot. The refusal lists every overload's signature and says to pass one verbatim, which is
+    provably the spelling the exact pass accepts; the first attempt at this shipped a remedy naming
+    two actions that both re-refused, and the test now feeds the refusal's own text back in. Covered
+    by `EditToolsE2ETests.AddMember_WithAnAnchorThatNamesTwoOverloads_RefusesAndNamesSpellingsThatPlaceIt`.
+  - `history tags=true remote=true` appended the remote-only rows **last**, so the default
+    `maxResults=50` dropped exactly the rows the call exists to surface - measured on this repository,
+    which has 67 tags. They now come first.  Covered by
+    `GitToolsTests.MergedTags_ForATagOnlyTheRemoteHas_ListsItBeforeEveryLocalRowSoTheCapCannotDropIt`.
+  - `git ls-remote --tags --heads origin` was denied although `history` answers only the tag half,
+    against the rationale the guard itself prints. `--heads` beside `--tags` is now left alone.
+    Covered by an added row in
+    `ToolGuardTests.Inspect_ForARemoteListingHistoryCannotAnswer_LeavesItAlone`.
+  - the five-test floor was applied **after** `MaxBy(Rate)` picked the worst project, so one
+    one-test project suppressed the `slowAssembly=` line for a genuinely pathological one. The floor
+    now filters before the pick. Covered by
+    `DotnetRunnerTests.Pathological_WhenTheHighestRateProjectIsTooSmallToRate_StillNamesTheProjectThatQualifies`.
+  - `--refs` was dropped from the `ls-remote` arguments so an annotated tag's remote row carries the
+    **commit** sha its local row prints, not the tag object's; the peeled `^{}` line the parser
+    already deduped is what supplies it. A refusal now declares `showing N of M` candidates, git's
+    read-only invocations run with `GIT_TERMINAL_PROMPT=0` so a credential helper cannot block to the
+    60 s deadline, and a zero-length sha line is skipped rather than recorded.
+
+
+- The three advertised-surface token ceilings were re-based on the measured cost of the four new
+  optional parameters - `add_member`'s `before=`/`after=`/`position=` and `history`'s `remote=` -
+  whose JSON schema and descriptions are irreducible once the capability exists. The descriptions
+  were trimmed by ~780 characters first, which recovered about 195 of the ~415 tokens; the residual
+  is the schema itself. `TokenBudgetE2ETests.TheAdvertisedToolPayload_StaysWithinItsBudget` moves
+  from 30 400 to 30 700 (measured 30 565 over 88 tools),
+  `MarkupProfileE2ETests.ToolsList_OverASolutionWithNoMarkup_CostsMeasurablyLessThanTheWholeSurface`
+  from 25 100 to 25 450 (measured 25 331 over 57), and
+  `ToolSettingsE2ETests.ToolsList_WithASettingsFile_CostsMeasurablyLessThanTheWholeSurface` from
+  25 900 to 26 250 (measured 26 109 over 64). `SKILL.md` stayed inside its existing 24 600-token
+  budget after the trim, so `DocsCoverageE2ETests.TheShippedSkill_StaysWithinItsTokenBudget` is
+  unchanged. The ceilings remain ratchets: they are still tight enough that a format regression
+  reddens them.
+
+
 ## [0.59.0] - 2026-09-13
 
 ### Added
@@ -5566,7 +5660,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.59.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.60.0...HEAD
+[0.60.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.60.0
 [0.59.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.59.0
 [0.58.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.58.0
 [0.57.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.57.0

@@ -1152,21 +1152,36 @@ public static partial class DotnetRunner
 
     private const long SlowMillisecondsPerTest = 5000;
 
+    private const int SmallestRatedRun = 5;
+
     internal static string Pathological(TestRunReport report, string target)
     {
         var worst = Worst(report, target);
         var rate = Rate(worst);
 
-        return rate >= SlowMillisecondsPerTest
+        return rate >= SlowMillisecondsPerTest && worst.Total >= SmallestRatedRun
             ? string.Create(CultureInfo.InvariantCulture, $" slowAssembly={worst.Project} {rate}ms/test - pass slowest=10 to see which")
             : string.Empty;
     }
 
     private static TestProjectSummary Worst(TestRunReport report, string target) => report.Projects.IsDefaultOrEmpty
         ? new TestProjectSummary(Path.GetFileNameWithoutExtension(target), report.Passed, report.Failed, report.Skipped, report.Total, report.DurationMs)
-        : report.Projects.MaxBy(Rate);
+        : Rated(report.Projects);
 
     private static long Rate(TestProjectSummary project) => project.Total > 0 ? project.DurationMs / project.Total : 0;
+
+    private static TestProjectSummary Rated(System.Collections.Immutable.ImmutableArray<TestProjectSummary> projects)
+    {
+        var worst = default(TestProjectSummary);
+
+        foreach (var project in projects)
+        {
+            if (project.Total >= SmallestRatedRun && Rate(project) > Rate(worst))
+                worst = project;
+        }
+
+        return worst;
+    }
 }
 
 internal sealed record ProcessRun(

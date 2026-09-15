@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -79,12 +80,9 @@ public static class SymbolEditService
 
         var members = MemberDeclaration.ParseAll(declaration);
 
-        if (!members.IsOk)
-            return Result.Fail<string>(members.Error!);
-
-        return NameTaken(type, members.Value!) is { } taken
-            ? Result.Fail<string>(taken)
-            : await SwapAsync(workspace, target, [Appended(type, members.Value!)], options, cancellationToken).ConfigureAwait(false);
+        return members.IsOk
+            ? await AddedAsync(workspace, target, type, members.Value!, options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(members.Error!);
     }
 
     private static async Task<Result<string>> AddEnumMembersAsync(
@@ -253,12 +251,16 @@ public static class SymbolEditService
             .WithTrailingTrivia(member.GetTrailingTrivia().Add(SyntaxFactory.ElasticCarriageReturnLineFeed));
     }
 
-    private static TypeDeclarationSyntax Appended(TypeDeclarationSyntax type, IReadOnlyList<MemberDeclarationSyntax> members)
+    private static TypeDeclarationSyntax Appended(TypeDeclarationSyntax type, IReadOnlyList<MemberDeclarationSyntax> members, int index)
     {
         var updated = type;
+        var at = index;
 
         foreach (var member in members)
-            updated = updated.AddMembers(Separated(member, updated.Members.Count > 0 && NeedsBlankLine(member)));
+        {
+            updated = updated.WithMembers(updated.Members.Insert(at, Separated(member, at > 0 && NeedsBlankLine(member))));
+            at++;
+        }
 
         return updated.WithCloseBraceToken(OnItsOwnLine(updated.CloseBraceToken));
     }
@@ -674,7 +676,7 @@ public static class SymbolEditService
         if (current.GetCurrentNode(appended.Type) is not TypeDeclarationSyntax type)
             return null;
 
-        return current.ReplaceNode(type, Appended(type, appended.Members).WithAdditionalAnnotations(Formatter.Annotation));
+        return current.ReplaceNode(type, Appended(type, appended.Members, OutsideRegions(type)).WithAdditionalAnnotations(Formatter.Annotation));
     }
 
     private static int Chosen(IReadOnlyList<PlannedEdit> planned, BaseTypeDeclarationSyntax?[] types, string? addTo)
@@ -1036,6 +1038,192 @@ public static class SymbolEditService
     private static BaseTypeDeclarationSyntax? Container(SyntaxNode node) => node is BaseTypeDeclarationSyntax type
         ? node.Parent?.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>() ?? type
         : node.FirstAncestorOrSelf<BaseTypeDeclarationSyntax>();
+
+    private readonly record struct RegionScan(int Depth, int Opened);
+
+    private static RegionScan Stepped(RegionScan scan, SyntaxKind kind, int index) => kind switch
+    {
+        SyntaxKind.RegionDirectiveTrivia => new RegionScan(scan.Depth + 1, scan.Depth is 0 ? index : scan.Opened),
+        SyntaxKind.EndRegionDirectiveTrivia when scan.Depth <= 1 => new RegionScan(0, -1),
+        SyntaxKind.EndRegionDirectiveTrivia => new RegionScan(scan.Depth - 1, scan.Opened),
+        _ => scan,
+    };
+
+    private static RegionScan Scanned(RegionScan scan, SyntaxTriviaList leading, int index)
+    {
+        var current = scan;
+
+        foreach (var trivia in leading)
+            current = Stepped(current, trivia.Kind(), index);
+
+        return current;
+    }
+
+    private static int OutsideRegions(TypeDeclarationSyntax type)
+    {
+        var scan = new RegionScan(0, -1);
+
+        for (var index = 0; index < type.Members.Count; index++)
+            scan = Scanned(scan, type.Members[index].GetLeadingTrivia(), index);
+
+        return scan.Depth > 0 && scan.Opened >= 0 ? scan.Opened : type.Members.Count;
+    }
+
+    private static int AfterFields(TypeDeclarationSyntax type)
+    {
+        var last = -1;
+
+        for (var index = 0; index < type.Members.Count; index++)
+        {
+            if (type.Members[index] is FieldDeclarationSyntax)
+                last = index;
+        }
+
+        return last + 1;
+    }
+
+    private static int Cut(ReadOnlySpan<char> text)
+    {
+        var at = text.IndexOfAny(NameMarkers);
+
+        return at < 0 ? text.Length : at;
+    }
+
+    private static ReadOnlySpan<char> Plain(ReadOnlySpan<char> signature)
+    {
+        var head = signature[..Cut(signature)];
+        var dot = head.LastIndexOf('.');
+
+        return dot < 0 ? head : head[(dot + 1)..];
+    }
+
+    private static bool Names(MemberDeclarationSyntax member, string reference, bool whole) =>
+        Signature(member) is { } signature
+        && (whole
+            ? signature.AsSpan().Equals(reference, StringComparison.Ordinal)
+            : Plain(signature).Equals(Plain(reference), StringComparison.Ordinal));
+
+    private static string PlacementCandidates(TypeDeclarationSyntax type)
+    {
+        var names = new List<string>(Math.Min(type.Members.Count, MaxPlacementCandidates));
+        var total = 0;
+
+        foreach (var member in type.Members)
+        {
+            if (Signature(member) is not { } signature)
+                continue;
+
+            total++;
+
+            if (names.Count < MaxPlacementCandidates)
+                names.Add(signature);
+        }
+
+        return names.Count is 0
+            ? "it declares none that a name can address"
+            : string.Create(CultureInfo.InvariantCulture, $"showing {names.Count} of {total}: {string.Join(", ", names)}");
+    }
+
+    private const int MaxPlacementCandidates = 10;
+
+    private static TerseError PlacementNotFound(TypeDeclarationSyntax type, string wanted, string parameter) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"{parameter}={wanted} names no member of {type.Identifier.ValueText}"),
+        "pass a member this type declares - " + PlacementCandidates(type) + " - or drop it to append at the end");
+
+    private static Result<int> Indexed(TypeDeclarationSyntax type, string wanted, int offset, string parameter)
+    {
+        var reference = Reference(wanted);
+        var exact = Anchored(type, reference, whole: true);
+
+        if (exact.Count is 1)
+            return Result.Ok(exact.First + offset);
+
+        var loose = Anchored(type, reference, whole: false);
+
+        return loose.Count switch
+        {
+            1 => Result.Ok(loose.First + offset),
+            0 => Result.Fail<int>(PlacementNotFound(type, wanted, parameter)),
+            _ => Result.Fail<int>(PlacementAmbiguous(type, wanted, parameter, reference)),
+        };
+    }
+
+    private static int Positioned(TypeDeclarationSyntax type, MemberPosition position) => position switch
+    {
+        MemberPosition.First => 0,
+        MemberPosition.AfterFields => AfterFields(type),
+        _ => OutsideRegions(type),
+    };
+
+    private static Result<int> Placed(TypeDeclarationSyntax type, MemberPlacement? placement)
+    {
+        if (placement is not { } wanted)
+            return Result.Ok(OutsideRegions(type));
+
+        return (wanted.Before, wanted.After) switch
+        {
+            ({ Length: > 0 } before, _) => Indexed(type, before, 0, "before"),
+            (_, { Length: > 0 } after) => Indexed(type, after, 1, "after"),
+            _ => Result.Ok(Positioned(type, wanted.Position)),
+        };
+    }
+
+    private static async Task<Result<string>> AddedAsync(
+        LoadedWorkspace workspace,
+        EditTarget target,
+        TypeDeclarationSyntax type,
+        IReadOnlyList<MemberDeclarationSyntax> members,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (NameTaken(type, members) is { } taken)
+            return Result.Fail<string>(taken);
+
+        var at = Placed(type, options.Placement);
+
+        return at.IsOk
+            ? await SwapAsync(workspace, target, [Appended(type, members, at.Value)], options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(at.Error!);
+    }
+
+    private static readonly SearchValues<char> NameMarkers = SearchValues.Create("(<`~");
+
+    private static TerseError PlacementAmbiguous(TypeDeclarationSyntax type, string wanted, string parameter, string reference) => Errors.Invalid(
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{parameter}={wanted} names {AmbiguousAnchors(type, reference)}, so the insertion point is not decided"),
+        "pass one of those exactly as written - a parameter list picks one overload, and a bare name cannot");
+
+    private readonly record struct AnchorMatch(int First, int Count)
+    {
+        public AnchorMatch With(int index) => Count is 0 ? new AnchorMatch(index, 1) : this with { Count = Count + 1 };
+    }
+
+    private static AnchorMatch Anchored(TypeDeclarationSyntax type, string reference, bool whole)
+    {
+        var match = new AnchorMatch(-1, 0);
+
+        for (var index = 0; index < type.Members.Count; index++)
+        {
+            if (Names(type.Members[index], reference, whole))
+                match = match.With(index);
+        }
+
+        return match;
+    }
+
+    private static string AmbiguousAnchors(TypeDeclarationSyntax type, string reference)
+    {
+        var names = new List<string>(4);
+
+        foreach (var member in type.Members)
+        {
+            if (Names(member, reference, whole: false) && Signature(member) is { } signature)
+                names.Add(signature);
+        }
+
+        return string.Join(" and ", names);
+    }
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

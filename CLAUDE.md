@@ -20,7 +20,7 @@ Every read, search, edit, refactor, build and test **of this repository** goes t
 `replace_symbol` / `add_member` instead of `Edit`, `read_text` / `edit_text` / `write_text` for
 `.md`, `.csproj`, `.slnx` and `.json`, `build` and `run_tests` instead of shelling out to `dotnet`,
 and **`changed_files` / `diff_symbols` / `diff_text` instead of `Bash: git status` / `git diff`**,
-**`history` instead of `git log` / `git show --stat`** and **`read_text ref=` / `get_file_outline ref=`
+**`history` instead of `git log` / `git show --stat` / `git ls-remote --tags`** and **`read_text ref=` / `get_file_outline ref=`
 instead of `git show <ref>:<path>`** — so only `git blame` and index/history mutation (`git add`,
 `git commit`, `git tag`, `git push`) stay on `Bash`.
 
