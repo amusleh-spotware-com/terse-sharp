@@ -369,7 +369,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("unrecognized", documented, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", plain, StringComparison.Ordinal);
         Assert.Contains("analyzed=", plain, StringComparison.Ordinal);
-        Assert.Equal(plain, documented, StringComparer.Ordinal);
+        Assert.Equal(WithoutTheOncePerLoadNote(plain), WithoutTheOncePerLoadNote(documented));
     }
 
     [Fact]
@@ -433,4 +433,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    private static string[] WithoutTheOncePerLoadNote(string response) =>
+        [.. response.Split('\n').Where(line => !line.StartsWith("compilations=realized", StringComparison.Ordinal))];
 }

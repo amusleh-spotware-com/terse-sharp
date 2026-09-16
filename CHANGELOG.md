@@ -173,6 +173,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `fixtures/FixtureSolution/.claude/worktrees/probe` and then removed the whole `.claude` tree in its
   `finally` - harmless while nothing else lived there, and destructive now that checked-in fixture
   content does. It removes only the directory it created.
+- **A `gate` equality assertion no longer compares the once-per-load realization note.**
+  `AnalysisToolsE2ETests.Gate_WithChangedTrue_AnswersTheSameVerdictBecauseItIsAlreadyScopedThatWay`
+  compared two whole `gate` responses, and the FIRST of the pair may carry
+  `compilations=realized in Nms (once per load, not per call)` while the second never can - so the
+  test was red or green according to whether the workspace had realized its compilations before it
+  ran. It went red on the macOS leg only, after this release's larger fixture moved that timing. The
+  comparison now drops that one documented line and keeps every other line, so a real difference
+  still fails it.
+
 
 
 
