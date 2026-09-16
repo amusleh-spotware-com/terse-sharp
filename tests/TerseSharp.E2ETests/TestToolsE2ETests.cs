@@ -119,7 +119,12 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RunTests_ThatExceedsItsTimeout_SaysSoInsteadOfClaimingSuccess()
     {
-        var text = await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 1 });
+        var text = await RunAsync(new()
+        {
+            ["project"] = TestProject,
+            ["timeoutSeconds"] = 1,
+            ["properties"] = new[] { "TerseStallBuild=true" },
+        });
 
         Assert.Contains("FAILED timed out after", text, StringComparison.Ordinal);
         Assert.DoesNotContain("0 failures", text, StringComparison.Ordinal);
@@ -579,15 +584,15 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
 
             var repeat = primed;
 
-        for (var attempt = 0; attempt < 50; attempt++)
-        {
-            repeat = await server.CallAsync("run_tests", new(arguments));
+            for (var attempt = 0; attempt < 50; attempt++)
+            {
+                repeat = await server.CallAsync("run_tests", new(arguments));
 
-            if (!repeat.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
-                break;
+                if (!repeat.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
+                    break;
 
-            await Task.Delay(100, TestContext.Current.CancellationToken);
-        }
+                await Task.Delay(100, TestContext.Current.CancellationToken);
+            }
 
             Assert.StartsWith("run_tests PASSED", repeat, StringComparison.Ordinal);
         }

@@ -181,6 +181,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   ran. It went red on the macOS leg only, after this release's larger fixture moved that timing. The
   comparison now drops that one documented line and keeps every other line, so a real difference
   still fails it.
+- **The single-project run-timeout test no longer races the runner either.** `I399` gave
+  `fixtures/SelectionSolution` a `TerseStallBuild` target so the BATCH timeout test could not be
+  decided by how fast the machine was; `TestToolsE2ETests.RunTests_ThatExceedsItsTimeout_SaysSoInsteadOfClaimingSuccess`
+  was the same shape and was missed - it drove one project with `timeoutSeconds=1` and hoped the
+  build would not finish inside the second. On the macOS leg of `818ce3b` it did finish, and the run
+  answered `3 failures` where the test wanted `FAILED timed out after`. `fixtures/FixtureSolution`
+  gains the same conditional stall target and the test passes the property, so the build phase cannot
+  finish inside the budget on any runner.
+
 
 
 

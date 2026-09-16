@@ -1,0 +1,8 @@
+<Project>
+
+  <Target Name="TerseStallBuild" BeforeTargets="Build" Condition="'$(TerseStallBuild)' == 'true'">
+    <Exec Command="powershell -NoProfile -Command &quot;Start-Sleep -Seconds 90&quot;" Condition="'$(OS)' == 'Windows_NT'" />
+    <Exec Command="sleep 90" Condition="'$(OS)' != 'Windows_NT'" />
+  </Target>
+
+</Project>
