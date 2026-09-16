@@ -1,5 +1,5 @@
 ---
-description: Mine every Claude Code session across all projects for the two numbers that decide a task's cost - how many tool calls it took and how many wall-clock minutes the user waited - with ONE single-pass script that measures payload, speed and emitted code together; score the corpus for unspent parallelism, unused batch parameters and redundant calls against a published target; mine the user's own turns for every intervention and trap that cost an extra prompt; deep-research the state of the art in agent token efficiency, parallel tool calling and speculative execution IN PARALLEL with the scan; log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
+description: Mine every Claude Code session across all projects for the two numbers that decide a task's cost - how many tool calls it took and how many wall-clock minutes the user waited - with ONE single-pass script that measures payload, speed and emitted code together; score the corpus for unspent parallelism, unused batch parameters and redundant calls against a published target; mine the user's own turns for every intervention and trap that cost an extra prompt; score every SUCCESSFUL call for what it actually did - collateral edits, refusals, and the built-in fallbacks they forced; deep-research the state of the art in agent token efficiency, parallel tool calling and speculative execution IN PARALLEL with the scan; log every measured finding as an open row in IMPROVEMENTS.md, then commit and push.
 argument-hint: "[weeks to scan, default 1]"
 ---
 
@@ -8,8 +8,8 @@ argument-hint: "[weeks to scan, default 1]"
 `$ARGUMENTS` — a number of **weeks** to scan. Absent or unparseable → **1 week**. Nothing else takes
 input from the user; do not ask, do not confirm the window.
 
-**The five goals this command exists to serve.** Every phase feeds at least one; every row logged in
-M9 is tagged with the one it serves; and M11 proves all five were mined or states what was checked and
+**The six goals this command exists to serve.** Every phase feeds at least one; every row logged in
+M9 is tagged with the one it serves; and M11 proves all six were mined or states what was checked and
 why that goal came back clean. They are not ranked by taste — they are ranked by what a failure costs:
 
 | Tag | Goal | What a finding for it looks like |
@@ -19,8 +19,9 @@ why that goal came back clean. They are not ranked by taste — they are ranked 
 | `[perf]` | **the agent emits code that is not slow** | sync-over-async, sync file I/O, an allocation on a per-file/per-line/per-symbol path in emitted text — section C, confirmed in M5 |
 | `[speed]` | **the agent finishes the task sooner, in fewer calls** | wall time per task, tool calls per task, a serial round trip that had no dependency, a batch parameter that existed and was not used, a blind wait, a re-run of work whose inputs never moved — section B |
 | `[cost]` | **the agent pays fewer tokens for the same answer** | payload, framing, round trips, surface, cache churn — sections A and B, priced in M3 |
+| `[correctness]` | **the tool does what it was asked, and no more** | a call that SUCCEEDED and still did the wrong thing — an edit that changed lines nobody named, a resolver refusing a name it should have taken, the fallback the refusal forced — measured in section C's three success-side ledgers |
 
-**`[accuracy]` and `[speed]` are co-primary, and both outrank `[cost]`.** An intervention costs a whole
+**`[accuracy]`, `[correctness]` and `[speed]` are co-primary, and all three outrank `[cost]`.** An intervention costs a whole
 turn at the corpus turn `p50`, plus the tokens of the re-issued work, plus the context already spent on
 the wrong path — so a payload row of equal token size is worth less than an intervention row. And a
 round trip costs the corpus **model gap** (`tool_result` → next `tool_use`, measured **p50 6 097 ms**
@@ -40,7 +41,7 @@ so as a degraded run:
 | **round-trip latency** | model gap p50 + the called tool's p50 | **6 097 ms** of model gap, before the tool runs at all |
 | **parallelism score** | section B — calls per assistant message, multi-call share, unspent-parallelism count, unused-batch count, redundant-call share | **1.165 calls/msg**, **14.3%** multi, redundant **8.3%** (3 008 of 36 075) |
 
-**Nine gates that outrank everything else in this command:**
+**Ten gates that outrank everything else in this command:**
 
 1. **A finding without a number is not a finding.** "Reads feel wasteful" is banned. "36 `Read` calls
    in one session, 214 KB of tool results, ~53 500 tokens, against 10 `search_text` calls" is a
@@ -120,6 +121,21 @@ so as a degraded run:
    **unused batch parameters**, **redundant calls** — each defined in M2's correction 6 and each
    convertible into a row on its own. A run that reports a parallelism score without naming which of
    the three dominates has not done this gate.
+
+10. **A tool's SUCCESS is corpus too — and until 2026-09-16 this command could not see it at all.**
+    Every failure signal in the script answers one question: *did the call fail?* — `is_error`, a
+    leading `ERROR `, `0 files changed`. None of them answers *did the call do what it was asked?*,
+    so a tool that succeeded while rewriting lines nobody named, or that refused a name it should
+    have resolved and pushed the agent onto a built-in, scored as a clean call and left no trace in
+    any ledger. Three defects had to be reported by hand (`I544`, `I545`, `I547`) while sitting in
+    the corpus at scale: over 4 weeks, **1 011 successful edits changed more lines than the call
+    asked for (34 643 collateral lines), `add_member` on 19.7% of its bounded edits**, and
+    **`AmbiguousSymbol` 164 plus `cannot be resolved safely` 65, produced almost entirely by
+    `get_symbol_source`, `get_type_outline` and `find_usages`** — every one of those outside the trap
+    ledger, which ran only for edit tools. Section C now carries three success-side ledgers —
+    **collateral**, **refusal-and-recovery**, **reshaped retry** — and a `[correctness]` row outranks
+    a `[cost]` row of equal measured size, because a wrong answer costs the whole task that acted on
+    it. A run that reports none of the three has not done this gate.
 
 **Also banned:** `AskUserQuestion`, `ExitPlanMode`, editing any file other than `IMPROVEMENTS.md` and
 `IMPROVEMENTS-ARCHIVE.md`, `git add -A`, a `Co-Authored-By:` trailer, and writing any script anywhere
@@ -243,6 +259,7 @@ NARROW = ('project', 'filter', 'projects', 'test', 'path')
 CODE_KEYS = ('newText', 'new_string', 'content', 'body', 'source', 'code', 'members', 'declaration')
 PATH_KEYS = ('path', 'file_path', 'filePath', 'file', 'symbolId', 'symbol')
 TARGET_KEYS = ('path', 'file', 'filePath', 'symbolId', 'symbol', 'query', 'pattern', 'name', 'command')
+SHAPE_KEYS = ('symbolId', 'symbol', 'path', 'file', 'filePath', 'name')
 
 SHELL_TEXT = re.compile(r'\b(grep|rg|cat|head|tail|sed|awk|ls|find|type)\b')
 SHELL_GIT = re.compile(r'\bgit\s+(status|diff)\b')
@@ -260,6 +277,10 @@ AWAITED = re.compile(r'\bawait\s')
 CONFIGURED = re.compile(r'ConfigureAwait\(')
 RULE = re.compile(r'\b((?:CA|IDE|CS|SYSLIB|RS)\d{4})\b')
 NOOP = re.compile(r'\b0 files changed\b|changedLines=0')
+CHANGED = re.compile(r'changedLines=(\d+)')
+INSERTS = {'add_member', 'xaml_add_element', 'razor_add_element'}
+REPLACERS = {'replace_symbol', 'replace_symbol_body', 'edit_text', 'xaml_set_property',
+             'resx_set', 'razor_set_attribute', 'project_set_property'}
 
 LEGACY = (
     ('collection expression [] (IDE0300/IDE0301)',
@@ -325,6 +346,23 @@ def pick(arguments, keys):
         if isinstance(value, str) and value:
             return value[:200]
     return ''
+
+
+def flatten(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return '\n'.join(b.get('text', '') if isinstance(b, dict) and b.get('type') == 'text'
+                         else '' if isinstance(b, dict) else str(b) for b in content)
+    return json.dumps(content or '')
+
+
+def leaf(target):
+    text = target.split('(')[0].strip('`" ')
+    if len(text) > 2 and text[1] == ':':
+        text = text[2:]
+    text = text.split('.')[-1]
+    return text.split('`')[0].lower()
 
 
 def stamp(record):
@@ -428,6 +466,11 @@ edit_calls = collections.Counter(); edit_rejects = collections.Counter()
 wasted_input = collections.Counter(); traps = collections.Counter(); trap_input = collections.Counter()
 rules = collections.Counter(); gate_red = collections.Counter(); after_edit = collections.Counter()
 cues = collections.Counter(); before = collections.Counter(); rework = collections.Counter()
+collateral = collections.Counter(); collateral_lines = collections.Counter()
+bounded = collections.Counter(); excess = collections.Counter()
+code_by_tool = collections.defaultdict(collections.Counter)
+recovery = collections.Counter(); recovery_builtin = collections.Counter()
+reshaped = collections.Counter(); shaped_ms = []
 per_session = []; payloads = []; turns = []; compactions = []; api_errors = collections.Counter()
 sessions = set(); slept = interrupted = think_chars = think_n = think_sealed = 0
 sleep_bare = sleep_bare_s = 0; sleep_ms = 0.0; serial_ms = 0.0
@@ -487,6 +530,7 @@ for path, project, spilled in walk():
         continue
     sessions.add(path)
     pending, seen_calls, order, events, marks = {}, collections.Counter(), [], [], []
+    failed_calls, call_at = {}, {}
     by_message = collections.Counter(); ms_by_message = collections.defaultdict(float)
     msg_order = []; msg_calls = {}; arg_order = []; result_text = {}; session_tools = set()
     edited = collections.Counter(); last_tool = None
@@ -625,7 +669,8 @@ for path, project, spilled in walk():
                 input_chars[tool] += len(encoded)
                 seen_calls[(tool, encoded[:4000])] += 1
                 order.append((tool, pick(arguments, TARGET_KEYS)))
-                arg_order.append((tool, arguments))
+                arg_order.append((tool, arguments, block.get('id')))
+                call_at[block.get('id')] = at
                 if mid in msg_calls:
                     msg_calls[mid][1].append((tool, arguments, block.get('id')))
                 if last_result_at and at and at >= last_result_at:
@@ -680,8 +725,7 @@ for path, project, spilled in walk():
             elif shape == 'tool_result':
                 tool, started, mid_of, arguments = pending.pop(block.get('tool_use_id'),
                                                                (None, None, None, {}))
-                content = block.get('content')
-                text = content if isinstance(content, str) else json.dumps(content or '')
+                text = flatten(block.get('content'))
                 if at:
                     last_result_at = at
                 if not tool:
@@ -694,8 +738,14 @@ for path, project, spilled in walk():
                 if bad:
                     errors[tool] += 1
                     found = ERRCODE.search(text)
-                    if found:
-                        error_codes[found.group(1)] += 1
+                    code = found.group(1) if found else 'unlabelled'
+                    error_codes[code] += 1
+                    code_by_tool[code][tool] += 1
+                    failed_calls[block.get('tool_use_id')] = code
+                    for label, needle in TRAPS:
+                        if needle in text:
+                            traps[label] += 1
+                            trap_input[label] += len(json.dumps(arguments, sort_keys=True))
                 if 'narrow with' in text or '(truncated=true' in text:
                     steers[tool] += 1
                     structured_trunc['tool steer'] += 1
@@ -704,10 +754,23 @@ for path, project, spilled in walk():
                     if bad or NOOP.search(text):
                         edit_rejects[tool] += 1
                         wasted_input[tool] += len(json.dumps(arguments, sort_keys=True))
-                        for label, needle in TRAPS:
-                            if needle in text:
-                                traps[label] += 1
-                                trap_input[label] += len(json.dumps(arguments, sort_keys=True))
+                        if not bad:
+                            for label, needle in TRAPS:
+                                if needle in text:
+                                    traps[label] += 1
+                                    trap_input[label] += len(json.dumps(arguments, sort_keys=True))
+                    elif CHANGED.search(text) and (tool in INSERTS or tool in REPLACERS):
+                        chunks = []
+                        harvest(arguments, chunks)
+                        asked = sum(chunk.count('\n') + 1 for chunk in chunks)
+                        if asked:
+                            reported = int(CHANGED.search(text).group(1))
+                            allowed = asked + 1 if tool in INSERTS else asked * 2 + 2
+                            bounded[tool] += 1
+                            excess[min(max(reported - allowed, -1), 9)] += 1
+                            if reported > allowed:
+                                collateral[tool] += 1
+                                collateral_lines[tool] += reported - allowed
                 if tool in VERIFY:
                     for rule in RULE.findall(text):
                         rules[rule] += 1
@@ -775,6 +838,20 @@ for path, project, spilled in walk():
         if key and j > i and not any(arg_order[k][1].get(key) for k in range(i, j + 1)):
             batch_missed[arg_order[i][0]] += j - i + 1
         i = j + 1
+    for i in range(len(arg_order) - 1):
+        code = failed_calls.get(arg_order[i][2])
+        if not code:
+            continue
+        tool, arguments, call_id = arg_order[i]
+        nxt_tool, nxt_args, nxt_id = arg_order[i + 1]
+        recovery[(tool, code, nxt_tool)] += 1
+        if nxt_tool in BUILTIN:
+            recovery_builtin[tool] += 1
+        was, now = pick(arguments, SHAPE_KEYS), pick(nxt_args, SHAPE_KEYS)
+        if was and now and was != now and leaf(was) == leaf(now):
+            reshaped[(tool, code, nxt_tool)] += 1
+            if call_at.get(call_id) and call_at.get(nxt_id):
+                shaped_ms.append((call_at[nxt_id] - call_at[call_id]) * 1000)
     touched = collections.defaultdict(set)
     for tool, spot in order:
         if spot:
@@ -1039,6 +1116,33 @@ print('\n== trap ledger (each one is an extra call nobody asked for)')
 for label, count in traps.most_common():
     print(f'  {label:<40}{count:>5}x re-paid input {trap_input[label]:>9,} ch ~{trap_input[label] // 4:>7,} tok')
 
+print('\n== COLLATERAL: a SUCCESSFUL edit that changed more lines than the call asked for')
+print(f'  bound: an insert may change asked+1 lines, a replace asked*2+2 (removed+added+2); '
+      f'whole-file and cross-file tools are excluded, so this UNDER-reports')
+for tool, count in collateral.most_common():
+    n = max(bounded[tool], 1)
+    print(f'  {tool:<30}{count:>5} of {bounded[tool]:>5} bounded edits = {count * 100 / n:>5.1f}%  '
+          f'{collateral_lines[tool]:>7,} lines nobody asked for')
+print('  excess over the bound, histogram (-1 = inside it): '
+      + '  '.join(f'{k}:{v}' for k, v in sorted(excess.items())))
+
+print('\n== REFUSALS by tool, and what the agent called NEXT (the fallback ledger)')
+for code, tools in sorted(code_by_tool.items(), key=lambda kv: -sum(kv[1].values()))[:12]:
+    print(f'  {code:<22}{sum(tools.values()):>5}  '
+          + ', '.join(f'{t}={n}' for t, n in tools.most_common(5)))
+print(f'  recovery calls={sum(recovery.values()):,}  '
+      f'to a built-in={sum(recovery_builtin.values()):,} '
+      f'({sum(recovery_builtin.values()) * 100 // max(sum(recovery.values()), 1)}%)  '
+      f'~{sum(recovery.values()) * gp50 / 3.6e6:.2f}h of gap re-paid')
+for (tool, code, nxt), count in recovery.most_common(12):
+    print(f'  {count:>5}x  {tool} [{code}] -> {nxt}')
+
+print('\n== RESHAPED RETRY: the same target re-spelled after a refusal (same leaf, new spelling)')
+print(f'  {sum(reshaped.values()):,} retries  ~{sum(shaped_ms) / 3.6e6:.2f}h of gap  '
+      f'- each one is the resolver refusing a name the caller already had right')
+for (tool, code, nxt), count in reshaped.most_common(10):
+    print(f'  {count:>5}x  {tool} [{code}] -> {nxt}')
+
 print('\n== intervention cues (labels only - no prompt text ever leaves this script)')
 for label, count in cues.most_common():
     print(f'  {label:<24}{count:>6}')
@@ -1076,13 +1180,18 @@ print(f'== SPEEDLINE cycles={cycles} callspercycle={sum(cycles_c) / max(len(cycl
 print(f'== EMITTED editcalls={sum(edit_calls.values())} rejects={sum(edit_rejects.values())} '
       f'lines={emitted_lines} legacy={sum(legacy.values())} slow={sum(slow.values())} '
       f'prompts={prompts} interventions={interventions} traps={sum(traps.values())}')
+print(f'== CORRECTNESS collateral={sum(collateral.values())} '
+      f'collaterallines={sum(collateral_lines.values())} bounded={sum(bounded.values())} '
+      f'refusals={sum(sum(t.values()) for t in code_by_tool.values())} '
+      f'recovery={sum(recovery.values())} builtinrecovery={sum(recovery_builtin.values())} '
+      f'reshaped={sum(reshaped.values())}')
 ```
 
 Run it as `python <script> <WEEKS>` **in the background**, and read the **whole** output when it
 lands. **Do not** re-derive any number by hand afterwards — the script is the measurement of record,
 and the next run must be comparable.
 
-**Six corrections this script encodes, each one a measured under-report in a version before it:**
+**Eight corrections this script encodes, each one a measured under-report in a version before it:**
 
 1. **It reads every record class, not just the ones with a `message.content` list.** That guard alone
    dropped **73 915 of 282 061 records (26.2%)** — every `turn_duration` (348.0 h of wall clock),
@@ -1137,6 +1246,41 @@ and the next run must be comparable.
      shipped, the agent did not use it, so the lever is `(e)` teaching and costs no server change at
      all;
    - **redundant share** — identical arguments inside one session, against MCP-Bench's `<10%` bar.
+
+7. **It reads `tool_result.content` as text, not as JSON.** The content arrives as a **list of
+   blocks**, and the old line `text = content if isinstance(content, str) else json.dumps(content)`
+   turned every one of those into a string starting with `[` — so `text.lstrip().startswith('ERROR ')`
+   was False for **every** TerseSharp refusal, which returns its error as ordinary text with
+   `is_error` unset. Measured on one 1-week window, flattening the blocks turned up **96
+   `CompileRegression`, 25 `SymbolNotFound`, 18 `AmbiguousSymbol`, 14 `DocumentNotFound`** that the
+   previous script scored as *successful calls*. The same line fed `result_chars`, `payloads` and the
+   whole trim ledger, so section A was counting JSON escaping and block framing as payload: **the
+   payload and trim numbers step down at this fix**, and a trend comparison across that boundary must
+   say so rather than reporting an improvement nobody shipped.
+8. **It scores what a successful call DID, not only whether it failed** — gate 10. Three ledgers, all
+   inside the existing pass, all deliberately under-reporting:
+   - **collateral** — a successful edit whose `changedLines=N` exceeds what its own payload can
+     account for. The bound is per shape: an **insert** (`add_member`, `xaml_add_element`,
+     `razor_add_element`) may change `asked + 1` lines, one for the separator the tool adds; a
+     **replace** (`replace_symbol`, `replace_symbol_body`, `edit_text`, `xaml_set_property`,
+     `resx_set`, `razor_set_attribute`, `project_set_property`) may change `asked * 2 + 2`, because a
+     diff counts the removed lines too. Whole-file (`write_text`) and deliberately cross-file
+     (`rename_symbol`, `change_signature`, `move_type_to_*`) tools are **excluded**, since their
+     change is not bounded by their payload. `asked` comes from the same `harvest()` the emitted-code
+     regexes already use, so this costs one comparison. The histogram is printed beside the counts
+     because **the mode is `+1`** — the benign separator line — and a reader who does not see that
+     will read the whole class as collateral.
+   - **refusal and recovery** — the trap scan now runs for **every** tool, not only edit tools, the
+     error code is attributed **per tool** (`code_by_tool`), and the call that followed a refusal is
+     recorded with it. The share of those recovery calls that went to a **built-in** is the product
+     defect: it is the measured moment an agent gave up on the server. One week: **942 recovery
+     calls, 29% of them to a built-in, ~1.5 h of model gap re-paid.**
+   - **reshaped retry** — consecutive calls whose target argument differs but whose **leaf** (last
+     dotted segment, doc-id prefix and parameter list stripped) is the same: the
+     `Ns.Type` → `Type` → `T:Ns.Type` walk. It compares symbol- and path-shaped keys only, never
+     `command`, or every failed shell retry lands in it. This is the fingerprint of a resolver
+     refusing a name the caller already had right, and `dupes` cannot see it because the arguments
+     are not identical.
 
 **Two refinements, so the script does not over-claim either:**
 
@@ -1456,6 +1600,26 @@ trap already carried in `CLAUDE.md`'s traps section or already closed in `IMPROV
 a **discoverability** row, not a new capability row; and a trap whose only fix is "be careful" is not
 implementable and does not become a row — state it in the report so the next run re-measures it.
 
+### M5.4 — Confirm a `[correctness]` candidate against the tool, never against the count
+
+The three success-side ledgers **rank** candidates; they do not prove one, and each has a benign
+explanation that must be excluded before a row is written — the same bar gate 7 sets for `[modern]`
+and `[perf]`:
+
+- **collateral** — take the widest offender from the `excess` histogram and ask what the extra lines
+  were. A formatter run over the whole document instead of the inserted node is a defect; a diff
+  counting the lines it removed is arithmetic, and the `+1` separator mode is neither. Confirm with
+  instrument (d): call the tool on `fixtures/FixtureSolution` with `dryRun=true` and read the diff.
+  One call settles it, and a row naming no such call is not written.
+- **refusal** — a refusal the **caller** caused (a hand-written documentation id, a stale anchor) is a
+  `CLAUDE.md` trap and is already carried; a refusal the **resolver** caused — a correct name refused
+  while a documentation id for the same symbol resolves — is a product row. The reshaped-retry ledger
+  is the discriminator: a retry that succeeded under a different spelling of the same leaf proves the
+  target existed all along.
+- **recovery to a built-in** — name the tool that refused and the built-in pair that answered it.
+  That pair **is** the missing capability, and by this repo's ranking a fallback outranks a new
+  capability.
+
 ### M5.3 — The ratios that only mean anything as a trend
 
 Record all six in M11 so the next run can compare: **interventions per session**, **edits per user
@@ -1667,12 +1831,14 @@ existing row is **not** a new row:
    `| **I<n>** <the finding> | <tool> | <proposed change> | <expected saving> | <approaches already refuted for this row, or —> |`
 
    - **Finding** — the goal tag first, then what was measured, in how many sessions, over which
-     window. The tag is one of `[accuracy]` `[modern]` `[perf]` `[speed]` `[cost]`, written
+     window. The tag is one of `[accuracy]` `[correctness]` `[modern]` `[perf]` `[speed]` `[cost]`, written
      immediately after the bolded id — `| **I245** [accuracy] …` — so a later run can count coverage
      per goal without re-reading every row. Bold the headline number. One row, one line.
    - **Instrument** — a `[modern]` or `[perf]` row states inside its `Finding` cell which `analyze` /
-     `search_regex` / `get_symbol_source` call confirmed the class on real source (gate 7). A row
-     carrying only the regex count from section C is not written.
+     `search_regex` / `get_symbol_source` call confirmed the class on real source (gate 7); a
+     `[correctness]` row states the M5.4 confirming call — the `dryRun` diff, the documentation id
+     that resolved where the name did not, or the built-in pair that answered the refusal. A row
+     carrying only the regex or ledger count from section C is not written.
    - **Tool** — the terse-sharp tool, or the document (`SKILL.md`, `README.md`, `CLAUDE.md`,
      `.claude/commands/…`) or the hook when the lever is discoverability, teaching or workflow rather
      than capability. There is no separate workflow table; the `Tool` cell carries that distinction.
@@ -1689,8 +1855,9 @@ existing row is **not** a new row:
    existing tool or response format outranks adding a tool**; **a lever that costs no server change at
    all — `(e)`, teaching the call site — outranks both when the capability already exists**. Within
    that, M6's mechanism order decides between two rows addressing the same chain. Highest measured
-   cost first — **except that an `[accuracy]` row outranks a `[cost]` row of equal measured size**.
-   Order within the file: `[accuracy]` and `[speed]` — co-primary, tie broken by measured hours —
+   cost first — **except that an `[accuracy]` or `[correctness]` row outranks a `[cost]` row of equal
+   measured size**, because a wrong or unrequested answer costs the whole task that acted on it.
+   Order within the file: `[accuracy]`, `[correctness]` and `[speed]` — co-primary, tie broken by measured hours —
    then `[perf]` and `[modern]` where a gate already exists to carry them, then `[cost]`. Within
    `[speed]`, `(a)`, `(b)`, `(d)` and `(e)` outrank `(c)` of equal size.
 4. **No cap, and no silent drop — the floor and the aggregation rule are the discipline.**
@@ -1744,7 +1911,8 @@ existing row is **not** a new row:
 | Emitted code | legacy and slow-construct rates per 1000 emitted lines, top classes with session counts, which instrument (d) confirmed each, and the classes dropped as already-caught, out-of-scope for the allocation gate, or deliberately-off in `.editorconfig` |
 | Interventions | interventions per session and as a share of prompts, the cue histogram, the tool immediately before each, and the shape each top entry was classified into |
 | Traps & rework | the trap ledger with counts and re-paid input tokens, the edit rejection rate per tool, gates red after an edit, the same-target rework distribution |
-| Goal ledger | one line per goal — `[accuracy]` `[modern]` `[perf]` `[speed]` `[cost]` — naming the rows it produced, or what was measured and why it came back clean. A missing line is a degraded run and says so |
+| **Correctness (gate 10)** | **the three success-side ledgers, and a run reporting none of them is degraded:** collateral calls, collateral lines and the per-tool share of *bounded* edits, with the excess histogram so the benign `+1` mode is visible; the refusal table by error code **and tool**; recovery calls with the **built-in share** and the hours of gap they re-paid; reshaped retries with the tool that refused. Each candidate carries its M5.4 confirming call or is named as dropped |
+| Goal ledger | one line per goal — `[accuracy]` `[correctness]` `[modern]` `[perf]` `[speed]` `[cost]` — naming the rows it produced, or what was measured and why it came back clean. A missing line is a degraded run and says so |
 | Productivity trend | the six ratios of M5.3 against the previous run's figures when one exists |
 | New rows | every id written, with its one-line finding and expected saving, highest cost first |
 | Strengthened | existing rows given a new measurement instead of a duplicate |
