@@ -22,6 +22,7 @@ public static class PolicyService
             Members(member, scope);
 
         Expressions(root, scope);
+        Comments(root, scope);
 
         return found;
     }
@@ -316,4 +317,37 @@ public static class PolicyService
 
         return parent;
     }
+
+    private static void Comments(SyntaxNode root, Scope scope)
+    {
+        if (!scope.Options.Enforces(PolicyRule.Comments))
+            return;
+
+        var allowed = scope.Limit(PolicyRule.Comments);
+        var seen = new HashSet<SyntaxNode>();
+
+        foreach (var trivia in root.DescendantTrivia())
+        {
+            if (IsComment(trivia)
+                && Over(Lines(trivia), allowed, "comment line(s)") is { } measure
+                && trivia.Token.Parent is { } node
+                && seen.Add(Owner(node)))
+            {
+                scope.Check(PolicyRule.Comments, node, measure);
+            }
+        }
+    }
+
+    private static bool IsComment(SyntaxTrivia trivia) =>
+        trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) || trivia.IsKind(SyntaxKind.MultiLineCommentTrivia);
+
+    private static int Lines(SyntaxTrivia trivia)
+    {
+        var span = trivia.GetLocation().GetLineSpan();
+
+        return span.EndLinePosition.Line - span.StartLinePosition.Line + 1;
+    }
+
+    private static SyntaxNode Owner(SyntaxNode node) =>
+        node.AncestorsAndSelf().FirstOrDefault(ancestor => ancestor is MemberDeclarationSyntax or BaseTypeDeclarationSyntax) ?? node;
 }

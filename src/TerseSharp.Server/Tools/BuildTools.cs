@@ -651,28 +651,23 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     private async Task<string> Replayable(string tool, string green, string key, bool force, Func<Task<string>> run, CancellationToken cancellationToken)
     {
+        var watched = Watched(run);
+
         await context.ReadyAsync().ConfigureAwait(false);
 
-        try
-        {
-            foreach (var workspace in context.Registry.All())
-                await workspace.Sync.SyncAsync(workspace, null, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return await run().ConfigureAwait(false);
-        }
+        if (!await SyncedAsync(cancellationToken).ConfigureAwait(false))
+            return await watched().ConfigureAwait(false);
 
         var stamp = Stamp(out var unavailable);
         var now = Stopwatch.GetTimestamp();
 
         if (stamp is null)
-            return await Traced(run(), unavailable!).ConfigureAwait(false);
+            return await Traced(watched(), unavailable!).ConfigureAwait(false);
 
         if (!force && unchanged.Replay(tool, key, stamp, now) is { } previous)
             return previous;
 
-        return await Memoized(green, key, stamp, run, Miss(force, key, stamp)).ConfigureAwait(false);
+        return await Memoized(green, key, stamp, watched, Miss(force, key, stamp)).ConfigureAwait(false);
     }
 
     private async Task<string> Memoized(string green, string key, string stamp, Func<Task<string>> run, string miss)
@@ -765,4 +760,27 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         !TraceMemo ? string.Empty
             : force ? "force=true"
             : unchanged.MissReason(key, stamp);
+
+    private static Func<Task<string>> Watched(Func<Task<string>> run) => async () =>
+    {
+        var before = EditPulse.Changed;
+        var verdict = await run().ConfigureAwait(false);
+
+        return StaleRun.Annotated(verdict, before, EditPulse.Changed);
+    };
+
+    private async Task<bool> SyncedAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            foreach (var workspace in context.Registry.All())
+                await workspace.Sync.SyncAsync(workspace, null, cancellationToken).ConfigureAwait(false);
+
+            return true;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
 }

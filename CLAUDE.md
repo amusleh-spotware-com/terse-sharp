@@ -56,8 +56,8 @@ dotnet test tests/TerseSharp.UnitTests/TerseSharp.UnitTests.csproj
 dotnet test tests/TerseSharp.E2ETests/TerseSharp.E2ETests.csproj --filter "FullyQualifiedName~NavigationToolsE2ETests"
 
 # required before a PR - CI runs both on ubuntu. From an agent these are DENIED by the guard: use
-# cleanup verify=true fix=analyzers and cleanup verify=true fix=style, which check exactly the same
-# rule sets, plus cleanup verify=true fix=all as the superset sweep.
+# cleanup verify=true fix=ci, which checks exactly the same two rule sets in ONE call, plus
+# cleanup verify=true fix=all as the superset sweep.
 dotnet format analyzers TerseSharp.slnx --verify-no-changes --severity info
 dotnet format style     TerseSharp.slnx --verify-no-changes --severity info
 
@@ -67,7 +67,7 @@ dotnet pack src/TerseSharp.Server -c Release -o artifacts/nupkg
 ```
 
 **Those shell forms are for humans and CI.** From an agent they are `build`, `run_tests`,
-`rerun_failed`, `list_tests`, `cleanup verify=true fix=style`, `cleanup verify=true fix=analyzers`
+`rerun_failed`, `list_tests`, `cleanup verify=true fix=ci` (both CI rule sets in one call)
 and `clean` — the
 `dotnet` CLI is a fallback under the gate above, not a shortcut, and `cd … && dotnet …` was the single
 most common breach in this repo's own session log.
@@ -122,7 +122,11 @@ Before every push, in this order, reading each result before trusting the next:
    A lingering `testhost` or `terse` process holds the E2E binary and produces the same false green:
    kill it, rebuild, re-run.
 2. **`run_tests` over the whole solution** — unit and E2E.
-3. **`cleanup verify=true fix=style` and `cleanup verify=true fix=analyzers`** — one per CI command, and
+3. **`cleanup verify=true fix=ci`** — both CI commands in ONE call since `I540`, which is the form to
+   use; it applies the IDE fixers and then the CA fixers over the same documents, never runs the
+   whitespace formatter, and tags every named file `style`, `analyzers` or `style+analyzers` so the
+   verdict says which CI command would be red. `cleanup verify=true fix=style` and
+   `cleanup verify=true fix=analyzers` remain one per CI command, and
    since `I236` each is byte-equivalent to it: those two modes apply code fixes only and no longer run
    the Roslyn whitespace formatter, so a `VERIFY_FAILED` there **is** a red ubuntu leg. `fix=all` and
    the default `fix=usings` still reformat, so they stay **supersets**: measured at `b3c381e`,
@@ -353,7 +357,11 @@ If yes, all four hold, in the same commit:
    row also ends with the `Remember` clause, so the agent does not retry the same command in `Bash`.
    A row whose replacement only answers inside a loaded workspace is **scoped** — the git rows check
    the hook payload's `cwd` for a `.sln`/`.slnx`/`.slnf`/`.csproj` at or above it, because the guard
-   is installed user-wide and `git status` in a TypeScript repo has no replacement.
+   is installed user-wide and `git status` in a TypeScript repo has no replacement. Since `I549` the
+   **shell-text rows carry the same scope test**: a text command naming no .NET source whose every
+   path operand resolves outside that tree is allowed, so a `tail` on a temp file is not refused for
+   the cwd's sake. Since `I541` the routing also follows the **direction**: a denied command whose
+   only path operand is its own write-redirect target answers `write_text`, not an outline.
    **"Denies" means the command does not reach `Bash`, not that the whole call is refused.** In a
    compound command the guard STRIPS the replaced pipelines and returns `updatedInput` with the
    remainder — `Denied` stays `true` on the verdict, `Render` chooses the shape. So a new row is
@@ -865,9 +873,9 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
 - [ ] `build` clean — **read before** any test result; `run_tests` green over the whole solution.
 - [ ] `analyze` down to `info` on every touched file → `format` / `cleanup` → re-`analyze`;
       `get_diagnostics` for the solution-wide sweep.
-- [ ] `cleanup verify=true fix=style` **and** `cleanup verify=true fix=analyzers` — the ubuntu-only
-      CI step, byte for byte. `fix=all` and `format verify=true` are the wider sweep, and a file only
-      they name is not a red CI leg.
+- [ ] `cleanup verify=true fix=ci` — the ubuntu-only CI step, both commands, byte for byte, in one
+      call, each named file tagged with the rule set that would change it. `fix=all` and
+      `format verify=true` are the wider sweep, and a file only they name is not a red CI leg.
 - [ ] New behaviour has an E2E test asserting **values** against `fixtures/FixtureSolution`, observed
       failing first; a new tool is in `ToolCoverageE2ETests.Exercised`; a listing tool has a
       `TokenBudgetE2ETests` assertion against the **widest** fixture case.

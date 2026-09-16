@@ -17,7 +17,7 @@ public static class PolicySettings
             var file = new FileInfo(path);
 
             if (file.Length > TerseConfigFile.MaxBytes)
-                return PolicyOptions.Off with { Path = path, Failure = TerseConfigFile.Oversized(file.Length) };
+                return PolicyOptions.Off with { Configured = true, Path = path, Failure = TerseConfigFile.Oversized(file.Length) };
 
             var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
 
@@ -25,7 +25,7 @@ public static class PolicySettings
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return PolicyOptions.Off with { Path = path, Failure = exception.Message };
+            return PolicyOptions.Off with { Configured = true, Path = path, Failure = exception.Message };
         }
     }
 
@@ -37,7 +37,7 @@ public static class PolicySettings
         }
         catch (JsonException exception)
         {
-            return PolicyOptions.Off with { Failure = exception.Message };
+            return PolicyOptions.Off with { Configured = true, Failure = exception.Message };
         }
     }
 
@@ -58,12 +58,13 @@ public static class PolicySettings
             return PolicyOptions.Off;
 
         if (Flag(policy, "enabled") is false)
-            return PolicyOptions.Off;
+            return PolicyOptions.Off with { Configured = true };
 
         var ignored = ImmutableArray.CreateBuilder<string>();
 
         var options = PolicyOptions.Defaults with
         {
+            Configured = true,
             AllowOverride = Flag(policy, "allowOverride") ?? true,
             CognitiveThreshold = Number(policy, "cognitiveThreshold") ?? PolicyRules.CognitiveThreshold,
         };

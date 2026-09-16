@@ -1340,17 +1340,15 @@ public static class ToolGuard
         if (Replaced(segment, cwd) is { } subcommand)
             return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound, unfenceable), BuildRouting(subcommand, segment), BuildReplacement(subcommand));
 
-        var covered = Covered(segment);
+        if (!Denies(segment, cwd))
+            return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
 
-        if ((covered || (IsDotNetTree(cwd) && Operanded(segment))) && IsTextRead(segment))
-        {
-            var trimmed = segment.Trim();
-            var reason = !covered && OutsideTree(segment, cwd) ? OutsideReason(trimmed) : Reason("Bash", trimmed);
+        var trimmed = segment.Trim();
 
-            return new GuardVerdict(true, reason + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
-        }
+        if (WriteTarget(segment) is { Length: > 0 } target)
+            return new GuardVerdict(true, ShellWriteReason(trimmed, target) + Priced + Nothing(compound, unfenceable), ShellWriteRouting(target), ShellWriter(target));
 
-        return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
+        return new GuardVerdict(true, Reason("Bash", trimmed) + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
     }
 
     private static readonly string[] PatternCommands = ["grep", "rg", "egrep", "fgrep", "findstr", "select-string", "sls", "awk", "sed"];
@@ -1427,10 +1425,6 @@ public static class ToolGuard
 
         return operands.Count > 0 && !operands.Exists(operand => Inside(root, operand));
     }
-
-    private static string OutsideReason(string target) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"TerseSharp guard: the working directory is a .NET tree, so shell text tools are denied here - and '{Trim(target)}' is OUTSIDE that tree, so the denial is the cwd rule, not the file: it is not C#/.NET source. Use the terse-sharp MCP instead - read_text takes an absolute path outside the workspace and tags it outside-workspace. Read the tool's remedy: line rather than falling back to a built-in.");
 
     private static readonly string[] PowerShellHosts = ["powershell", "pwsh"];
 
@@ -1557,6 +1551,72 @@ public static class ToolGuard
         Array.Exists(tokens, token => token is "--tags" or "-t")
         && !Array.Exists(tokens, token => token is "--heads" or "-h")
         && Subcommand(tokens, Array.IndexOf(tokens, "ls-remote") + 1) is null or "origin";
+
+    private static readonly string[] Sinks = ["/dev/null", "nul", "/dev/stdout", "/dev/stderr", "$null"];
+
+    private static bool Denies(string segment, string? cwd) =>
+        IsTextRead(segment)
+        && (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment) && !OutsideTree(segment, cwd)));
+
+    private static int Written(ReadOnlySpan<char> token)
+    {
+        var length = RedirectOperatorLength(token);
+
+        return length > 0 && token[..length].Contains('>') ? length : 0;
+    }
+
+    private static string RedirectTarget(string segment)
+    {
+        var tokens = segment.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        for (var index = 0; index < tokens.Length; index++)
+        {
+            var length = Written(tokens[index].AsSpan());
+
+            if (length is 0)
+                continue;
+
+            return Bare(tokens[index].Length > length
+                ? tokens[index][length..]
+                : index + 1 < tokens.Length ? tokens[index + 1] : string.Empty);
+        }
+
+        return string.Empty;
+    }
+
+    private static string? WriteTarget(string segment) =>
+        RedirectTarget(segment) is { Length: > 0 } target
+        && !Sinks.Contains(target, StringComparer.OrdinalIgnoreCase)
+        && !Listing(segment)
+        && PathOperands(segment) is [var only]
+        && string.Equals(Unredirected(only), target, StringComparison.Ordinal)
+            ? target
+            : null;
+
+    private static string ShellWriter(string target) => IsCSharp(target)
+        ? "write_text(path, content, force=true) - a shell redirect rewrites the WHOLE file, which is exactly what write_text does, and it is compile-gated"
+        : "write_text(path, content)";
+
+    private static string ShellWriteRouting(string target) => Call("write_text", "path", target)
+        + (IsCSharp(target) ? " force=true" : string.Empty)
+        + " content=\"<the text you were redirecting>\"";
+
+    private static string ShellWriteReason(string segment, string target) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"TerseSharp guard: this Bash command WRITES '{Trim(target)}' - '{Trim(segment)}' redirects into it, so the replacement is a WRITE tool, not a read one. Use the terse-sharp MCP instead - {ShellWriter(target)}. Read the tool's remedy: line rather than falling back to a built-in.");
+
+    private static bool Listing(string segment) =>
+        ListCommands.Contains(
+            Path.GetFileNameWithoutExtension(Command(segment).FirstOrDefault() ?? string.Empty),
+            StringComparer.OrdinalIgnoreCase);
+
+    private static string Unredirected(string operand)
+    {
+        var bare = Bare(operand);
+        var length = Written(bare.AsSpan());
+
+        return length > 0 && bare.Length > length ? Bare(bare[length..]) : bare;
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

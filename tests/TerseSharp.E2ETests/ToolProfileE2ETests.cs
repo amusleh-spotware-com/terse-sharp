@@ -64,11 +64,12 @@ public sealed class ToolProfileE2ETests : IAsyncLifetime
 
         Assert.NotNull(line);
 
-        var parts = line.Split(' ');
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        Assert.Equal("of", parts[4]);
         Assert.Equal(ToolProfile.CoreTools.Count, int.Parse(parts[0]["advertised=".Length..], CultureInfo.InvariantCulture));
-        Assert.True(int.Parse(parts[5], CultureInfo.InvariantCulture) > ToolProfile.CoreTools.Count, line);
-        Assert.True(int.Parse(parts[7], CultureInfo.InvariantCulture) > int.Parse(parts[2], CultureInfo.InvariantCulture), line);
+        Assert.StartsWith("surface=", parts[4], StringComparison.Ordinal);
+        Assert.Equal("tokens", parts[7]);
+        Assert.True(int.Parse(parts[4]["surface=".Length..], CultureInfo.InvariantCulture) > ToolProfile.CoreTools.Count, line);
+        Assert.True(int.Parse(parts[6], CultureInfo.InvariantCulture) > int.Parse(parts[2], CultureInfo.InvariantCulture), line);
     }
 }

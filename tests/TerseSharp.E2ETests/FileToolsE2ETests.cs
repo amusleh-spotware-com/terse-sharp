@@ -1676,4 +1676,33 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
                 File.Delete(upper);
         }
     }
+
+    [Fact]
+    public async Task FindFiles_ForACheckedInClaudeCommand_ListsItWhileStillHidingTheSessionState()
+    {
+        var text = await server.CallAsync("find_files", new()
+        {
+            ["globs"] = new[] { ".claude/**/*.md", ".claude/**/*.json" },
+        });
+
+        Assert.Contains("ship.md", text, StringComparison.Ordinal);
+        Assert.Contains("reviewer.md", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("settings.json", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Ghost.md", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("session.json", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_RestoringAFileThatAlreadyMatchesTheRef_IsAByteIdenticalNoOpAndSaysSo()
+    {
+        await server.CallAsync("write_text", new() { ["path"] = "appsettings.json", ["ref"] = "HEAD" });
+
+        var restored = await server.CallAsync("write_text", new() { ["path"] = "appsettings.json", ["ref"] = "HEAD" });
+        var status = await server.CallAsync("changed_files", new() { ["path"] = "appsettings.json" });
+
+        Assert.Contains("0 files changed", restored, StringComparison.Ordinal);
+        Assert.Contains("no change - the result is identical to what is already there", restored, StringComparison.Ordinal);
+        Assert.DoesNotContain("changedLines=", restored, StringComparison.Ordinal);
+        Assert.StartsWith("0 files", status, StringComparison.Ordinal);
+    }
 }

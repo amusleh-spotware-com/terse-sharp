@@ -9,13 +9,14 @@ public enum FixMode
     Style,
     Analyzers,
     All,
+    Ci,
 }
 
 public readonly record struct FixScope(string? Path, bool ChangedOnly);
 
 public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, DiagnosticSeverity Severity, bool Verify)
 {
-    public bool AppliesCodeFixes => Mode is FixMode.Style or FixMode.Analyzers or FixMode.All;
+    public bool AppliesCodeFixes => Mode is FixMode.Style or FixMode.Analyzers or FixMode.All or FixMode.Ci;
 
     public bool CleansUsings => Mode is FixMode.Usings or FixMode.All;
 
@@ -34,5 +35,5 @@ public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, Diagnos
 
     private static bool IsStyle(string id) => id.StartsWith("IDE", StringComparison.Ordinal);
 
-    public bool Reformats => Mode is not (FixMode.Style or FixMode.Analyzers);
+    public bool Reformats => Mode is not (FixMode.Style or FixMode.Analyzers or FixMode.Ci);
 }

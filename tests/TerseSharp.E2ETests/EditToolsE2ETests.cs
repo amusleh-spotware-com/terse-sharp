@@ -1027,4 +1027,99 @@ public sealed class RegionTail
         Assert.DoesNotContain("ERROR", placed, StringComparison.Ordinal);
         Assert.Contains("@@ -22,0 +22,2 @@", placed, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AddMember_FormatsOnlyTheInsertedNode_SoUnrelatedLinesStayOutOfTheDiff()
+    {
+        var text = await ProbedAsync(new()
+        {
+            ["typeSymbolId"] = "SpacingProbe",
+            ["declaration"] = "public static int Doubled(int value) => value * 2;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public static int Doubled(int value) => value * 2;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("(int)boxed", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("-    public static int Widened", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("-    public static int Narrowed", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_ToAFileWithANamespace_FormatsOnlyTheInsertedTypeAndNotTheWholeFile()
+    {
+        var text = await ProbedAsync(new()
+        {
+            ["path"] = SpacingProbe,
+            ["declaration"] = "public sealed record Spacing(int Value);",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+public sealed record Spacing(int Value);", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("(int)boxed", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("-    public static int Widened", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_IntroducingAComment_WarnsWithNoCheckedInPolicyAtAll()
+    {
+        var text = await ProbedAsync(new()
+        {
+            ["typeSymbolId"] = "SpacingProbe",
+            ["declaration"] = "public static int Halved(int value)\n{\n    // halve it\n    return value / 2;\n}",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("WARNING policy", text, StringComparison.Ordinal);
+        Assert.Contains("TERSE112", text, StringComparison.Ordinal);
+        Assert.Contains("1 comment line(s) exceeds 0", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithNoComment_CarriesNoCommentPolicyWarning()
+    {
+        var text = await ProbedAsync(new()
+        {
+            ["typeSymbolId"] = "SpacingProbe",
+            ["declaration"] = "public static int Quartered(int value) => value / 4;",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("TERSE112", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_IntroducingAnXmlDocComment_IsNotFlagged()
+    {
+        var text = await ProbedAsync(new()
+        {
+            ["typeSymbolId"] = "SpacingProbe",
+            ["declaration"] = "/// <summary>Public API.</summary>\npublic static int Fifthed(int value) => value / 5;",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("TERSE112", text, StringComparison.Ordinal);
+    }
+
+    private const string SpacingProbe = "src/Fixture.Trading/SpacingProbe.cs";
+    private const string SpacingProbeSource =
+        "namespace Fixture.Trading;\n\npublic static class SpacingProbe\n{\n    public static int Widened(object boxed) => (int) boxed + 1;\n\n    public static int Narrowed(object boxed) => (int) boxed - 1;\n}\n";
+
+    private async Task<string> ProbedAsync(Dictionary<string, object?> arguments)
+    {
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = SpacingProbe,
+            ["content"] = SpacingProbeSource,
+            ["force"] = true,
+        });
+
+        try
+        {
+            return await server.CallAsync("add_member", arguments);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = SpacingProbe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

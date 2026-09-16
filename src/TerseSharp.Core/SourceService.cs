@@ -201,20 +201,10 @@ public static class SourceService
             : message + "  " + error.Remedy;
     }
 
-    private static string Trimmed(string message, string symbolId)
-    {
-        const string Opening = "symbol '";
-
-        var text = message.AsSpan();
-        var length = Opening.Length + symbolId.Length + 2;
-
-        return text.Length > length
-            && text.StartsWith(Opening, StringComparison.Ordinal)
-            && text.Slice(Opening.Length, symbolId.Length).SequenceEqual(symbolId)
-            && text[Opening.Length + symbolId.Length] is '\''
-                ? message[length..]
-                : message;
-    }
+    private static string Trimmed(string message, string symbolId) =>
+        After(message, "symbol '", symbolId, "' ")
+        ?? After(message, "'", symbolId, "' did not resolve: ")
+        ?? message;
 
     private static SyntaxNode Declaration(SyntaxNode node) =>
             node is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1, Parent: BaseFieldDeclarationSyntax field } }
@@ -261,5 +251,18 @@ public static class SourceService
         }
 
         return response.Answered(answered, symbolIds.Count, "symbols").ToString();
+    }
+
+    private static string? After(string message, string opening, string symbolId, string closing)
+    {
+        var length = opening.Length + symbolId.Length + closing.Length;
+        var text = message.AsSpan();
+
+        return text.Length > length
+            && text.StartsWith(opening, StringComparison.Ordinal)
+            && text.Slice(opening.Length, symbolId.Length).SequenceEqual(symbolId)
+            && text.Slice(opening.Length + symbolId.Length, closing.Length).SequenceEqual(closing)
+                ? message[length..]
+                : null;
     }
 }

@@ -97,7 +97,7 @@ public static class AdvertisedCost
             };
 
     private static string OfWhole(Reading reading) => Volatile.Read(ref unnarrowed) is { } full && full.Tools > reading.Tools
-            ? string.Create(CultureInfo.InvariantCulture, $" of {full.Tools} tools {full.Tokens}")
+            ? string.Create(CultureInfo.InvariantCulture, $"  surface={full.Tools} tools {full.Tokens} tokens")
             : string.Empty;
 
     public static void Observe(IList<Tool> advertised, IList<Tool> whole)

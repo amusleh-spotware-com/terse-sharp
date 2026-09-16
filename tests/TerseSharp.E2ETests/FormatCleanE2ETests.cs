@@ -234,4 +234,42 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("unrecognized", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR ", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Cleanup_WithFixCi_TagsEachFileWithTheCiRuleSetsThatWouldChangeItAndNeverTheFormatter()
+    {
+        var style = await server.CallAsync("cleanup", new() { ["path"] = StyleSample, ["fix"] = "style", ["verify"] = true });
+        var analyzers = await server.CallAsync("cleanup", new() { ["path"] = StyleSample, ["fix"] = "analyzers", ["verify"] = true });
+        var ci = await server.CallAsync("cleanup", new() { ["path"] = StyleSample, ["fix"] = "ci", ["verify"] = true });
+
+        Assert.Contains("StyleSample.cs  fixers", style, StringComparison.Ordinal);
+        Assert.Contains("StyleSample.cs  fixers", analyzers, StringComparison.Ordinal);
+        Assert.Contains("VERIFY_FAILED 1 file(s) would change", ci, StringComparison.Ordinal);
+        Assert.Contains("StyleSample.cs  style+analyzers", ci, StringComparison.Ordinal);
+        Assert.DoesNotContain("whitespace", ci, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cleanup_WithFixCi_AppliesTheIdeAndTheAnalyzerCodeFixInOnePass()
+    {
+        var text = await server.CallAsync("cleanup", new()
+        {
+            ["path"] = StyleSample,
+            ["fix"] = "ci",
+            ["ids"] = "IDE0028,CA1822",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public List<int> Quantities { get; } = [];", text, StringComparison.Ordinal);
+        Assert.Contains("+    public static int Doubled(int quantity) => quantity * 2;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cleanup_WithAnUnknownFixMode_NamesCiAmongTheModes()
+    {
+        var text = await server.CallAsync("cleanup", new() { ["fix"] = "everything" });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("fix=ci", text, StringComparison.Ordinal);
+    }
 }

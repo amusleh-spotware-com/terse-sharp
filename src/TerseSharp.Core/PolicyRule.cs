@@ -20,7 +20,8 @@ public enum PolicyRule
     AsyncVoid,
     ComplexCondition,
     ChainedReferences,
-    NestingDepth
+    NestingDepth,
+    Comments
 }
 
 public sealed record PolicyLimit(PolicyAction Action, int Value);
@@ -54,7 +55,9 @@ public static class PolicyRules
             new(PolicyRule.ChainedReferences, "TERSE110", "chainedReferences", 3, PolicyAction.Off,
                 "ask the collaborator for what you need instead of reaching through it"),
             new(PolicyRule.NestingDepth, "TERSE111", "nestingDepth", 4, PolicyAction.Reject,
-                "invert the condition and return early, or extract the inner block")
+                "invert the condition and return early, or extract the inner block"),
+            new(PolicyRule.Comments, "TERSE112", "comments", 0, PolicyAction.Warn,
+                "make the code say it - rename, extract a method, or split the type; /// XML doc comments are never flagged, and {\"policy\":{\"enabled\":false}} turns the whole policy, this rule included, off")
         ];
 
     public const int CognitiveThreshold = 10;

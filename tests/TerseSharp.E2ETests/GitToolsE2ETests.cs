@@ -57,9 +57,10 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             return;
 
         var lines = text.Split('\n');
+        var body = lines.Skip(1).Where(line => !line.StartsWith("INCOMPLETE", StringComparison.Ordinal)).ToArray();
 
         Assert.Contains("lines", lines[0], StringComparison.Ordinal);
-        Assert.True(lines.Length - 1 <= 5, text);
+        Assert.True(body.Length <= 5, text);
     }
 
     [Theory]

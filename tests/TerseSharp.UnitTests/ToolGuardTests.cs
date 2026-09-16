@@ -1507,16 +1507,14 @@ public sealed class ToolGuardTests
     }
 
     [Fact]
-    public void Inspect_ForATextReadOfAPathOutsideTheTree_DeniesWithoutClaimingItIsDotNetSource()
+    public void Inspect_ForATextReadOfAPathOutsideTheTree_AllowsItInsteadOfDenyingWhatIsNotDotNetSource()
     {
         var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
         var outside = Path.Combine(Path.GetTempPath(), "terse-guard-probe.output");
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat " + outside }, root);
 
-        Assert.True(verdict.Denied);
-        Assert.Contains("OUTSIDE that tree", verdict.Reason, StringComparison.Ordinal);
-        Assert.Contains("read_text", verdict.Reason, StringComparison.Ordinal);
-        Assert.DoesNotContain("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+        Assert.False(verdict.Denied, verdict.Reason);
+        Assert.Equal("no-tool cat", verdict.Allowance);
     }
 
     [Fact]
@@ -1670,4 +1668,55 @@ public sealed class ToolGuardTests
     [InlineData("git ls-remote --tags --heads origin")]
     public void Inspect_ForARemoteListingHistoryCannotAnswer_LeavesItAlone(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Theory]
+    [InlineData("tail -5 notes/scan.out")]
+    [InlineData("cat src/App/OrderService.cs")]
+    public void Inspect_ForAShellTextReadWhoseOperandIsInsideTheDotNetTree_StillDenies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
+
+    [Fact]
+    public void Inspect_ForAShellRedirectThatWritesACSharpFile_NamesWriteTextRatherThanAReadTool()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat > fixtures/Region/RegionTail.cs <<'EOF'" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("write_text", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("force=true", verdict.Routing, StringComparison.Ordinal);
+        Assert.DoesNotContain("get_file_outline", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("write_text", verdict.Replaces, StringComparison.Ordinal);
+        Assert.Contains("WRITES", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("cat src/App/OrderService.cs > /dev/null")]
+    [InlineData("cat src/App/OrderService.cs > out.txt")]
+    public void Inspect_ForAShellReadThatMerelyRedirectsItsOutput_StillNamesTheReadTool(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("get_file_outline", verdict.Routing, StringComparison.Ordinal);
+        Assert.DoesNotContain("write_text", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAGluedShellRedirectThatWritesACSharpFile_StillNamesWriteText()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat >fixtures/Region/RegionTail.cs" });
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("write_text", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("force=true", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAListingRedirectedIntoAFile_NamesFindFilesRatherThanWriteText()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "ls src/App/*.cs > listing.txt" });
+
+        Assert.True(verdict.Denied);
+        Assert.DoesNotContain("write_text", verdict.Routing, StringComparison.Ordinal);
+        Assert.Contains("find_files", verdict.Replaces, StringComparison.Ordinal);
+    }
 }

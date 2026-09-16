@@ -110,23 +110,19 @@ public static class ProjectFile
 
     public static async Task<Result<string>> SetProperty(string projectPath, string name, string value, bool dryRun, bool verbose)
     {
-        var document = Load(projectPath);
-
-        if (document is null)
+        if (await SourceAsync(projectPath).ConfigureAwait(false) is not { } source)
             return Result.Fail<string>(Errors.DocumentNotFound(projectPath));
 
-        var before = document.ToString();
-        var existing = document.Descendants(name).FirstOrDefault();
+        var existing = source.Document.Descendants(name).FirstOrDefault();
 
         if (existing is null)
-            Group(document).Add(new XElement(name, value));
+            Append(Group(source.Document), new XElement(name, value));
         else
             existing.Value = value;
 
-        return await Save(projectPath, document, before, dryRun, verbose, "project_set_property", name + "=" + value).ConfigureAwait(false);
+        return await Save(projectPath, source.Document, source.Text, dryRun, verbose, "project_set_property", name + "=" + value).ConfigureAwait(false);
     }
 
-    [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous read of Directory.Packages.props inside a synchronous XML edit path; the write beside it already goes through AtomicWrite.TextAsync.")]
     private static async Task<Result<string>> AddCentralPackage(
         string projectPath,
         string centralPath,
@@ -142,25 +138,22 @@ public static class ProjectFile
                 "pass version=<x.y.z>; it is written to Directory.Packages.props"));
         }
 
-        var central = XDocument.Load(centralPath);
-        var before = central.ToString();
+        if (await SourceAsync(centralPath).ConfigureAwait(false) is not { } central)
+            return Result.Fail<string>(Errors.DocumentNotFound(centralPath));
 
-        if (central.Descendants("PackageVersion").All(element => !Named(element, package)))
-            ItemGroup(central, "PackageVersion").Add(new XElement("PackageVersion", new XAttribute("Include", package), new XAttribute("Version", version)));
+        if (central.Document.Descendants("PackageVersion").All(element => !Named(element, package)))
+            Append(ItemGroup(central.Document, "PackageVersion"), new XElement("PackageVersion", new XAttribute("Include", package), new XAttribute("Version", version)));
+
+        var after = Serialized(central.Document, central.Text);
 
         if (!dryRun)
-            await AtomicWrite.TextAsync(centralPath, central.ToString() + Environment.NewLine).ConfigureAwait(false);
+            await AtomicWrite.TextAsync(centralPath, after).ConfigureAwait(false);
 
         var added = await AddItem(projectPath, "PackageReference", package, dryRun, verbose, "package_add").ConfigureAwait(false);
 
-        if (!added.IsOk)
-            return added;
-
-        var relative = PositionFormat.Relative(Path.GetDirectoryName(Path.GetFullPath(projectPath))!, centralPath);
-
-        return Result.Ok(added.Value + "\n" + (dryRun || verbose
-            ? UnifiedDiff.Between(relative, before, central.ToString())
-            : string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={UnifiedDiff.ChangedLines(before, central.ToString())}")));
+        return added.IsOk
+            ? Result.Ok(added.Value + "\n" + Central(projectPath, centralPath, central.Text, after, dryRun, verbose))
+            : added;
     }
 
     private static async Task<Result<string>> AddItem(
@@ -172,23 +165,20 @@ public static class ProjectFile
         string tool,
         string? version = null)
     {
-        var document = Load(projectPath);
-
-        if (document is null)
+        if (await SourceAsync(projectPath).ConfigureAwait(false) is not { } source)
             return Result.Fail<string>(Errors.DocumentNotFound(projectPath));
 
-        if (Items(document, itemName).Contains(include, StringComparer.OrdinalIgnoreCase))
+        if (Items(source.Document, itemName).Contains(include, StringComparer.OrdinalIgnoreCase))
             return Result.Fail<string>(Errors.Invalid($"'{include}' is already referenced", "nothing to add"));
 
-        var before = document.ToString();
         var element = new XElement(itemName, new XAttribute("Include", include));
 
         if (version is not null)
             element.Add(new XAttribute("Version", version));
 
-        ItemGroup(document, itemName).Add(element);
+        Append(ItemGroup(source.Document, itemName), element);
 
-        return await Save(projectPath, document, before, dryRun, verbose, tool, include).ConfigureAwait(false);
+        return await Save(projectPath, source.Document, source.Text, dryRun, verbose, tool, include).ConfigureAwait(false);
     }
 
     private static async Task<Result<string>> RemoveItem(
@@ -199,20 +189,17 @@ public static class ProjectFile
         bool verbose,
         string tool)
     {
-        var document = Load(projectPath);
-
-        if (document is null)
+        if (await SourceAsync(projectPath).ConfigureAwait(false) is not { } source)
             return Result.Fail<string>(Errors.DocumentNotFound(projectPath));
 
-        var before = document.ToString();
-        var element = document.Descendants(itemName).FirstOrDefault(candidate => Named(candidate, include));
+        var element = source.Document.Descendants(itemName).FirstOrDefault(candidate => Named(candidate, include));
 
         if (element is null)
             return Result.Fail<string>(Errors.Invalid($"'{include}' is not referenced", "check package_list"));
 
-        element.Remove();
+        Detach(element);
 
-        return await Save(projectPath, document, before, dryRun, verbose, tool, include).ConfigureAwait(false);
+        return await Save(projectPath, source.Document, source.Text, dryRun, verbose, tool, include).ConfigureAwait(false);
     }
 
     private static bool Named(XElement element, string include) =>
@@ -229,29 +216,11 @@ public static class ProjectFile
             .Select(element => element.Parent)
             .FirstOrDefault(parent => parent is not null && parent.Attribute("Condition") is null);
 
-        if (existing is not null)
-            return existing;
-
-        var created = new XElement("ItemGroup");
-
-        document.Root!.Add(created);
-
-        return created;
+        return existing ?? Created(document.Root!, "ItemGroup");
     }
 
-    private static XElement Group(XDocument document)
-    {
-        var existing = document.Descendants("PropertyGroup").FirstOrDefault();
-
-        if (existing is not null)
-            return existing;
-
-        var created = new XElement("PropertyGroup");
-
-        document.Root!.Add(created);
-
-        return created;
-    }
+    private static XElement Group(XDocument document) =>
+        document.Descendants("PropertyGroup").FirstOrDefault() ?? Created(document.Root!, "PropertyGroup");
 
     private static XElement Properties(string kind, string? targetFramework)
     {
@@ -354,7 +323,7 @@ public static class ProjectFile
         string tool,
         string argument)
     {
-        var after = document.ToString() + Environment.NewLine;
+        var after = Serialized(document, before);
 
         if (!dryRun)
             await AtomicWrite.TextAsync(Path.GetFullPath(projectPath), after).ConfigureAwait(false);
@@ -400,5 +369,71 @@ public static class ProjectFile
         var full = Path.GetFullPath(projectPath);
 
         return File.Exists(full) ? XDocument.Load(full) : null;
+    }
+
+    private readonly record struct ProjectSource(XDocument Document, string Text);
+
+    private static async Task<ProjectSource?> SourceAsync(string projectPath)
+    {
+        var full = Path.GetFullPath(projectPath);
+
+        if (!File.Exists(full))
+            return null;
+
+        var text = await File.ReadAllTextAsync(full).ConfigureAwait(false);
+
+        return new ProjectSource(XDocument.Parse(text, LoadOptions.PreserveWhitespace), text);
+    }
+
+    internal static string Serialized(XDocument document, string before)
+    {
+        var declaration = document.Declaration is { } head ? head.ToString() : string.Empty;
+        var body = declaration + document.ToString(SaveOptions.DisableFormatting);
+
+        return before.Length is 0
+            ? body + Environment.NewLine
+            : LineEndings.Adopt(Compacted(body, before), LineEndings.Dominant(before));
+    }
+
+    private static string Compacted(string after, string before) =>
+        before.Contains(" />", StringComparison.Ordinal) || !before.Contains("/>", StringComparison.Ordinal)
+            ? after
+            : after.Replace(" />", "/>", StringComparison.Ordinal);
+
+    private static void Detach(XElement element)
+    {
+        if (element.PreviousNode is XText whitespace && whitespace.Value.AsSpan().IsWhiteSpace())
+            whitespace.Remove();
+
+        element.Remove();
+    }
+
+    private static string Central(string projectPath, string centralPath, string before, string after, bool dryRun, bool verbose)
+    {
+        var relative = PositionFormat.Relative(Path.GetDirectoryName(Path.GetFullPath(projectPath))!, centralPath);
+
+        return dryRun || verbose
+            ? UnifiedDiff.Between(relative, before, after)
+            : string.Create(CultureInfo.InvariantCulture, $"{relative}  changedLines={UnifiedDiff.ChangedLines(before, after)}");
+    }
+
+    private static void Append(XElement parent, XElement element)
+    {
+        var indent = (parent.Elements().LastOrDefault()?.PreviousNode as XText)?.Value;
+
+        if (parent.LastNode is XText tail && tail.Value.AsSpan().IsWhiteSpace())
+            tail.AddBeforeSelf(new XText(indent ?? tail.Value + "  "), element);
+        else
+            parent.Add(element);
+    }
+
+    private static XElement Created(XElement root, string name)
+    {
+        var group = new XElement(name);
+
+        Append(root, group);
+        group.Add(new XText(Environment.NewLine + "  "));
+
+        return group;
     }
 }

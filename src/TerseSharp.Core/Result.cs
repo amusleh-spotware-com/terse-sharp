@@ -53,7 +53,7 @@ public static class Errors
     public static TerseError SaturatedName(string name, int cap) => new(
         TerseErrorCode.AmbiguousSymbol,
         string.Create(CultureInfo.InvariantCulture, $"name '{name}' matches more than {cap} symbols, so it cannot be resolved safely"),
-        "qualify the name with its containing type, or pass the documentation id from search_symbols");
+        Qualifying(name));
 
     public static TerseError DocumentNotFound(string path) => new(
         TerseErrorCode.DocumentNotFound,
@@ -208,11 +208,9 @@ public static class Errors
     internal static bool HoldsUsings(string? tool) =>
         tool is null or "replace_symbol" or "replace_symbol_body" or "add_member";
 
-
     internal static string Missing(IReadOnlyList<string> imports, string? tool) => HoldsUsings(tool)
         ? "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway"
         : tool + " declares no usings= and no retryWith=, so put " + QuotedList(imports) + " in the file's own using directives in the content you send, or pass allowErrors=true to apply it anyway";
-
 
     internal static string Ambiguity(IReadOnlyList<string> collisions, string? tool) => HoldsUsings(tool)
         ? "the ambiguity was introduced by usings=[" + QuotedList(collisions) + "] which this edit added - retry with usings=[] and the retryWith token below to drop it, fully qualify the name, or pass allowErrors=true to apply it anyway"
@@ -221,4 +219,8 @@ public static class Errors
     internal static string Broken(IReadOnlyList<string> callers, string? tool) => HoldsUsings(tool)
         ? CallerBatch(callers) + ", or pass allowErrors=true to apply it anyway"
         : tool + " cannot batch a symbol edit, so fix these callers in the content you send: " + string.Join(", ", callers) + ", or pass allowErrors=true to apply it anyway";
+
+    private static string Qualifying(string name) => name.Contains('.', StringComparison.Ordinal)
+        ? string.Create(CultureInfo.InvariantCulture, $"'{name}' is already qualified, so qualifying it further will not help: pass its documentation id - symbolId=\"T:{name}\" when it names a type, or take the id from search_symbols")
+        : "qualify the name with its containing type, or pass the documentation id from search_symbols";
 }

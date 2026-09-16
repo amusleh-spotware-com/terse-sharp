@@ -74,15 +74,15 @@ public sealed class AnalysisTools(ToolContext context)
             verify || dryRun);
 
     [McpServerTool(Name = "cleanup")]
-    [Description("Replaces Bash dotnet format style and dotnet format analyzers. fix=usings and fix=all remove unused usings, sort them System-first and reformat; fix=style and fix=analyzers apply code fixes ONLY and never reformat, so each matches its CI command byte for byte. Those three fix modes apply the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, paths=[...] up to 10 in ONE pass as analyze and format do - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
+    [Description("Replaces Bash dotnet format style and dotnet format analyzers. fix=ci applies BOTH CI rule sets in ONE pass and answers one verdict; fix=usings and fix=all remove unused usings, sort them System-first and reformat; fix=style and fix=analyzers apply code fixes ONLY and never reformat, so each matches its CI command byte for byte. Those fix modes apply the code fixes of every analyzer the project references, reporting UNFIXED for a diagnostic no fixer covers. path takes a file, a directory or a glob, paths=[...] up to 10 in ONE pass as analyze and format do - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded. Reports one line per changed file (verbose=true for the diff) and is rolled back if it breaks the build.")]
     public Task<string> Cleanup(
         [Description("File, directory or glob such as src/**/*.cs; empty cleans every document.")] string? path = null,
-        [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, or all.")] string? fix = null,
+        [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, ci for both CI rule sets in one pass, or all.")] string? fix = null,
         [Description("Optional comma-separated diagnostic ids to fix, e.g. IDE0005,CA1822.")] string? ids = null,
         [Description("Minimum severity to fix: error, warning, info, hidden. Default info.")] string? severity = null,
         [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing. fix=style verifies exactly what dotnet format style checks and fix=analyzers exactly what dotnet format analyzers checks, so those two are the CI pre-empt; fix=all and the default fix=usings are supersets and can name files CI accepts.")] bool verify = false,
+        [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing. fix=ci verifies BOTH CI commands in one call, tagging each named file style, analyzers or style+analyzers; fix=style and fix=analyzers verify one each; fix=all and the default fix=usings are supersets and can name files CI accepts.")] bool verify = false,
         [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Several files, directories or globs in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
@@ -119,9 +119,10 @@ public sealed class AnalysisTools(ToolContext context)
         "style" => Result.Ok(FixMode.Style),
         "analyzers" => Result.Ok(FixMode.Analyzers),
         "all" => Result.Ok(FixMode.All),
+        "ci" => Result.Ok(FixMode.Ci),
         _ => Result.Fail<FixMode>(Errors.Invalid(
             string.Create(CultureInfo.InvariantCulture, $"fix='{fix}' is not a known mode"),
-            "pass fix=usings, style, analyzers or all")),
+            "pass fix=ci for both CI rule sets in one pass, or fix=usings, style, analyzers or all")),
     };
 
     private static string[] Split(string? ids) =>

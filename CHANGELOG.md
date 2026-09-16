@@ -8,6 +8,180 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-09-16
+
+### Added
+
+- **`cleanup fix=ci` applies BOTH CI rule sets in one pass and answers one verdict.** This project's
+  `CLAUDE.md` mandates `cleanup verify=true fix=style` and `cleanup verify=true fix=analyzers`
+  back-to-back, so they were always two calls and two model gaps on every end-of-task gate. `fix=ci`
+  runs the IDE fixers and then the CA fixers over the same document set, never runs the Roslyn
+  whitespace formatter CI does not run, and tags every file a `verify=true` run names with the rule
+  set that would change it - `style`, `analyzers` or `style+analyzers` - so the verdict says which CI
+  command would be red. Covered by
+  `FormatCleanE2ETests.Cleanup_WithFixCi_TagsEachFileWithTheCiRuleSetsThatWouldChangeItAndNeverTheFormatter`,
+  `FormatCleanE2ETests.Cleanup_WithFixCi_AppliesTheIdeAndTheAnalyzerCodeFixInOnePass` and
+  `FormatCleanE2ETests.Cleanup_WithAnUnknownFixMode_NamesCiAmongTheModes`. Closes `I540`.
+- **The guard routes a shell WRITE to `write_text`, not to a read tool.** `cat > Foo.cs <<'EOF'` was
+  correctly denied, and then answered `Call this instead: get_file_outline path="Foo.cs"` - a read tool
+  for what is plainly a write, so the one runnable thing the hook exists to hand you was wrong. A
+  denied text command whose only path operand is its own write-redirect target now answers
+  `write_text path="Foo.cs" force=true content="..."`, and says `WRITES` in its reason. A read that
+  merely redirects its output (`cat Foo.cs > out.txt`, `> /dev/null`) is unchanged and still routes to
+  the read tool. Covered by
+  `ToolGuardTests.Inspect_ForAShellRedirectThatWritesACSharpFile_NamesWriteTextRatherThanAReadTool` and
+  `ToolGuardTests.Inspect_ForAShellReadThatMerelyRedirectsItsOutput_StillNamesTheReadTool`.
+  Closes `I541`.
+- **`workspace_status verbose=true` names the WHOLE tool surface's cost beside the advertised one**
+  as `advertised=78 tools 28567 tokens  surface=88 tools 30237 tokens`. The figure was already
+  computed but printed as an unlabelled `of 88 tools 30237` with no unit and no test, so the number a
+  whole-surface budget census asserts could not be read from a probe and was re-derived by running
+  the census - measured at three E2E runs against one 3 s probe. Covered by
+  `ToolProfileE2ETests.WorkspaceStatusVerbose_ReportsTheWholeSurfaceBesideTheNarrowedOne`
+  and `InstallCommandE2ETests.Call_WorkspaceStatus_AnswersWhatTheAdvertisedSurfaceCostsWithoutAnMcpSession`.
+  Closes `I543`.
+- **`build`, `run_tests`, `rerun_failed` and `list_tests` say when the tree moved under them.** A
+  whole-solution run was launched, code was then edited, and the verdict that arrived described a
+  tree that no longer existed - twice in one session, about 19 minutes of wall clock abandoned. Every
+  one of those tools now records how many documents this server had written when the run began and
+  ends its verdict with `STALE n document(s) changed after this run started` when that count moved.
+  A stale verdict is never memoized, so the next identical call really re-runs. Covered by
+  `StaleRunTests.Note_WhenDocumentsChangedWhileTheRunWasInFlight_CountsThem`,
+  `StaleRunTests.Note_WhenNothingWasWrittenWhileTheRunWasInFlight_IsNull`,
+  `StaleRunTests.Annotated_WhenADocumentChanged_AppendsTheStaleLineBelowTheVerdict`,
+  `StaleRunTests.Annotated_WhenNothingChanged_ReturnsTheVerdictUntouched` and
+  `BuildWarningsE2ETests.Build_WithNothingWrittenWhileItRan_CarriesNoStaleMarker`. Closes `I542`.
+- **`TERSE112 comments` - the code policy's first rule that is ON with no `.terse.json` at all.**
+  Nothing stopped an agent writing comments into C#, so it did: over four weeks of transcripts the
+  edit family emitted **26 273 comment lines into C#-shaped payloads - 38.7 per 1000 emitted lines,
+  on 16.1% of those edits (2 053 of 12 750) across 190 sessions**. The compile gate accepts every one
+  of them, no analyzer fires on a comment, and `format`/`cleanup` must not rewrite payload text - so
+  the only place to catch it is the moment of the edit. Every mutation now answers
+  `WARNING policy  TERSE112  <file>:<line>  <declaration>  N comment line(s) exceeds 0` when it
+  INTRODUCES a `//` or `/* */`, and still lands: the default action is `warn`, not `reject`, because
+  refusing edits by default in every workspace would be a breaking change to the edit contract.
+  `///` XML doc comments are never flagged. `{"policy": {"enabled": false}}` turns it off - that
+  form and not `{"policy": {"rules": {"comments": false}}}`, because declaring a `policy` section at
+  all turns the other twelve rules ON at their defaults, eight of them `reject`. Inside a policy you
+  already want, `"rules": {"comments": {"action": "reject"}}` makes it a refusal, and a `.terse.json`
+  that could not be read leaves the ambient rule off rather than enforcing what it could not parse. Covered by
+  `PolicyServiceTests.Inspect_ForAnOwnLineComment_ReportsIt`,
+  `PolicyServiceTests.Inspect_ForABlockComment_CountsEveryLineItSpans`,
+  `PolicyServiceTests.Inspect_ForAnXmlDocComment_ReportsNothing`,
+  `PolicyServiceTests.Inspect_WithNoCheckedInPolicy_StillReportsCommentsAndNothingElse`,
+  `PolicyServiceTests.Effective_ForACheckedInPolicyThatDisablesEverything_StaysOff`,
+  `EditToolsE2ETests.AddMember_IntroducingAComment_WarnsWithNoCheckedInPolicyAtAll`,
+  `EditToolsE2ETests.AddMember_WithNoComment_CarriesNoCommentPolicyWarning` and
+  `EditToolsE2ETests.AddMember_IntroducingAnXmlDocComment_IsNotFlagged`. Closes `I550`.
+
+
+
+
+### Changed
+
+- **The shell-text rows are scoped to the tree, the way the git rows already were.** The guard is
+  installed user-wide, so `tail -5 scan.out` on a temp file - no `.cs` anywhere - was denied purely
+  because the working directory happened to be a .NET tree, and the whole compound command had to be
+  re-issued. A text command that names no .NET source and whose every path operand resolves OUTSIDE
+  the tree is now **allowed**; one naming .NET source, or with any operand inside the tree, is denied
+  exactly as before. The unit test that encoded the old denial is replaced in the same change by
+  `ToolGuardTests.Inspect_ForATextReadOfAPathOutsideTheTree_AllowsItInsteadOfDenyingWhatIsNotDotNetSource`;
+  `ToolGuardTests.Inspect_ForATextReadOfAPathInsideTheTree_StillNamesItAsDotNetSource` and
+  `ToolGuardTests.Inspect_ForAShellTextReadWhoseOperandIsInsideTheDotNetTree_StillDenies` hold the
+  other direction. Closes `I549`.
+- **A name is saturation-checked against its EXACT matches, not against the fuzzy candidate set.**
+  `SymbolLookup.ByNameAsync` asked `SymbolSearch` for the leaf name - subsequence-ranked, so
+  `ISymbolModel` also matched `ISymbolViewModel` and `IVwapSymbolViewModel` - refused at
+  `found.Count > NameCap`, and never reached the exact-name filter on the next line. One exact match
+  among 138 fuzzy candidates was therefore unresolvable, and qualifying the name narrowed nothing,
+  because `SymbolReference.Matches` also sat after the cap. The exact-name filter and the qualifier
+  filter now run FIRST: a name with exactly one exact match resolves however many fuzzy candidates
+  exist, and `SaturatedName` is answered only when the EXACT set saturates, or when there is no exact
+  match at all and the fuzzy set does. `ByContainerAsync` gets the same ordering, and the remedy no
+  longer tells you to qualify a name that is already qualified - it names
+  `symbolId="T:<fully qualified name>"` instead. The search window widens from 101 to 512 candidates
+  so the exact set is really the exact set. `fixtures/FixtureSolution` gains `ExactSaturation.cs`,
+  101 symbols named exactly `Saturate`, because the fixture could not previously fail an
+  exact-saturation assertion. Covered by
+  `NavigationToolsE2ETests.GetSymbolSource_ForANameWhoseOneExactMatchIsBuriedInFuzzyCandidates_ResolvesItInsteadOfRefusing`,
+  `NavigationToolsE2ETests.GetSymbolSource_ForAnUnqualifiedNameThatSaturates_StillRefusesRatherThanGuessing`,
+  `NavigationToolsE2ETests.GetSymbolSource_ForAQualifiedNameThatStillSaturates_TellsYouToPassTheDocumentationId`
+  and the unchanged
+  `NavigationToolsE2ETests.GetSymbolSource_QualifiedByATypeThatDeclaresNoSuchMember_BlamesTheQualifierNotTheName`.
+  Closes `I547`.
+- **`.claude/commands`, `.claude/agents`, `.claude/skills` and `.claude/hooks` are listed, searched
+  and read again.** The whole directory was excluded from the
+  workspace walk, so a repo's own checked-in project commands and agent definitions - tracked by git,
+  edited as often as a `.cs` file - could not be found at all: `find_files glob=".claude/**/*.md"`
+  answered `0 files` and the file had to be reached through an absolute `root=`, which defeats the
+  workspace-relative contract. The exclusion now covers only the session state beneath `.claude` -
+  `worktrees/` (whole copies of the tree), `todos/`, `shell-snapshots/`, every other unlisted
+  subdirectory and the files directly in `.claude` - so the agent-worktree doubling the exclusion
+  existed to prevent is still prevented, and a session rewriting `settings.local.json` still cannot
+  bump the sync generation. The rule holds at any depth, so a `.claude` created by a session started
+  in a subdirectory is excluded exactly as the root one is.
+  `fixtures/FixtureSolution` gains a `.claude` tree holding both kinds. Covered by
+  `FileToolsE2ETests.FindFiles_ForACheckedInClaudeCommand_ListsItWhileStillHidingTheSessionState`,
+  `WorkspaceExclusionTests.IsExcluded_UnderClaude_KeepsTheAuthoredFilesAndDropsTheSessionState` and
+  `WorkspaceExclusionTests.Traversable_UnderClaude_KeepsTheAuthoredSubtreesAndDropsTheSessionState`.
+  Closes `I548`.
+
+### Fixed
+
+- **A `write_text` or `edit_text` that changes nothing answers `0 files changed`, writes nothing, and
+  says so.** `write_text path=X ref=HEAD` on a file that already matched HEAD answered
+  `1 files changed` above an EMPTY diff and `changedLines=0`, while `changed_files` reported the tree
+  clean - a claim of a change that did not happen, and the file was rewritten anyway, moving its
+  mtime for nothing. The non-gated write path now compares the text first: identical content skips
+  the write and answers the same `no change - the result is identical to what is already there` note
+  the compile-gated path has always used. The workspace apply path also takes the target file's own
+  byte-order mark rather than whatever encoding the Roslyn document happened to carry, so a restore
+  of a BOM-less file cannot acquire one. Covered by
+  `FileToolsE2ETests.WriteText_RestoringAFileThatAlreadyMatchesTheRef_IsAByteIdenticalNoOpAndSaysSo`.
+  Closes `I546`.
+- **`add_member` formats the node it inserted, not the whole declaration around it.** The inserted
+  member was added and then the ENTIRE containing type - or, with `path=`, the entire file - was
+  handed to the Roslyn formatter, so on a file whose style the formatter disagrees with, a two-line
+  insertion rewrote unrelated lines: measured on a 960-line file with no `.editorconfig` governing
+  `csharp_space_after_cast`, a 2-line insert answered `changedLines=7` and respaced five casts across
+  four untouched methods. Across four weeks of transcripts `add_member` exceeded its own insert bound
+  on 19.7% of its bounded edits. The `Formatter.Annotation` now rides on the inserted members instead
+  of on their container, so only their spans are formatted; `replace_symbol` and
+  `replace_symbol_body` still annotate the declaration they replace, which is the declaration they
+  are rewriting. Covered by
+  `EditToolsE2ETests.AddMember_FormatsOnlyTheInsertedNode_SoUnrelatedLinesStayOutOfTheDiff` and
+  `EditToolsE2ETests.AddMember_ToAFileWithANamespace_FormatsOnlyTheInsertedTypeAndNotTheWholeFile`,
+  against a probe file each test writes and deletes, whose casts the formatter would respace. A
+  checked-in formatter-dirty fixture cannot serve here: the first `format` call in the suite rewrites
+  it and the test then passes vacuously, which is exactly what the first full run showed. Closes `I544`.
+- **A `.csproj` write changes the lines it targets and nothing else.** `project_set_property`,
+  `project_add_reference`, `project_remove_reference`, `package_add` and `package_remove` round-tripped
+  the file through `XDocument.ToString()`, so removing ONE line re-indented the whole file, respaced
+  every `<Tag/>` to `<Tag />`, deleted the blank lines between `ItemGroup`s, flipped LF to CRLF and
+  appended a trailing newline - a 69-line diff for a 1-line change, on a 148-project solution. Worse,
+  the reported `changedLines` was computed against the reparsed document, so the response claimed the
+  1-line change the file did not get. The document is now parsed with `LoadOptions.PreserveWhitespace`
+  and written with `SaveOptions.DisableFormatting`, the original's trailing bytes, line endings and
+  empty-element spacing convention are carried through, a removed element takes its own leading
+  whitespace with it, and a newly created `ItemGroup`/`PropertyGroup` is indented like its siblings.
+  Covered by
+  `ProjectToolsE2ETests.ProjectSetProperty_ChangesOnlyTheLineItTargets_LeavingEveryOtherLineByteIdentical`
+  and `ProjectToolsE2ETests.PackageRemove_DeletesOnlyItsOwnLine_LeavingEveryOtherLineByteIdentical`,
+  which compare every untouched line byte for byte. Closes `I545`.
+- **A test no longer deletes a fixture directory it did not create.**
+  `TruncationAndScopeE2ETests.FindFilesAndSearch_SkipANestedAgentWorktree` created
+  `fixtures/FixtureSolution/.claude/worktrees/probe` and then removed the whole `.claude` tree in its
+  `finally` - harmless while nothing else lived there, and destructive now that checked-in fixture
+  content does. It removes only the directory it created.
+
+
+
+
+
+
+
+
+
 ## [0.60.0] - 2026-09-15
 
 ### Added
@@ -5669,7 +5843,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.60.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.61.0...HEAD
+[0.61.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.61.0
 [0.60.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.60.0
 [0.59.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.59.0
 [0.58.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.58.0

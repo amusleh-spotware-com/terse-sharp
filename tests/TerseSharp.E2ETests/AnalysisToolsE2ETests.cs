@@ -409,4 +409,28 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.Contains("paths", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Analyze_WithNoCheckedInPolicy_StaysSilentAboutTheAmbientCommentRule()
+    {
+        const string probe = "src/Fixture.Trading/CommentProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = probe,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class CommentProbe\n{\n    // explain the obvious\n    public static int Value => 1;\n}\n",
+        });
+
+        try
+        {
+            var text = await server.CallAsync("analyze", new() { ["path"] = probe, ["minSeverity"] = "info" });
+
+            Assert.DoesNotContain("TERSE112", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

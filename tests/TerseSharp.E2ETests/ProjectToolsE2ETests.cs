@@ -296,4 +296,102 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("properties=", text, StringComparison.Ordinal);
     }
+
+    private const string StyledProject =
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n\n    <PropertyGroup>\n        <TargetFramework>net10.0</TargetFramework>\n        <Nullable>enable</Nullable>\n    </PropertyGroup>\n\n    <ItemGroup>\n        <PackageReference Include=\"Serilog\" Version=\"3.0.0\"/>\n        <Compile Remove=\"gone.cs\"/>\n    </ItemGroup>\n\n</Project>";
+
+    private static string[] DifferentLines(string before, string after)
+    {
+        var left = before.Split('\n');
+        var right = after.Split('\n');
+
+        Assert.Equal(left.Length, right.Length);
+
+        return [.. right.Where((line, index) => !string.Equals(line, left[index], StringComparison.Ordinal))];
+    }
+
+    [Fact]
+    public async Task ProjectSetProperty_ChangesOnlyTheLineItTargets_LeavingEveryOtherLineByteIdentical()
+    {
+        const string relative = "styled-property-probe.csproj";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, relative);
+
+        await File.WriteAllTextAsync(path, StyledProject, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("project_set_property", new()
+            {
+                ["project"] = relative,
+                ["name"] = "Nullable",
+                ["value"] = "annotations",
+            });
+
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("changedLines=1", text, StringComparison.Ordinal);
+            Assert.Equal(["        <Nullable>annotations</Nullable>"], DifferentLines(StyledProject, after));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task PackageRemove_DeletesOnlyItsOwnLine_LeavingEveryOtherLineByteIdentical()
+    {
+        const string relative = "styled-package-probe.csproj";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, relative);
+
+        await File.WriteAllTextAsync(path, StyledProject, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("package_remove", new() { ["project"] = relative, ["package"] = "Serilog" });
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Equal(
+                StyledProject.Split('\n').Where(line => !line.Contains("Serilog", StringComparison.Ordinal)),
+                after.Split('\n'));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    private const string DeclaredProject =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<Project Sdk=\"Microsoft.NET.Sdk\">\n    <PropertyGroup>\n        <Nullable>enable</Nullable>\n    </PropertyGroup>\n</Project>\n";
+
+    [Fact]
+    public async Task ProjectSetProperty_OnAFileWithADeclarationAndATrailingNewline_AddsNeitherABlankLineNorANewline()
+    {
+        const string relative = "declared-probe.csproj";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, relative);
+
+        await File.WriteAllTextAsync(path, DeclaredProject, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("project_set_property", new()
+            {
+                ["project"] = relative,
+                ["name"] = "Nullable",
+                ["value"] = "annotations",
+            });
+
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("changedLines=1", text, StringComparison.Ordinal);
+            Assert.Equal(["        <Nullable>annotations</Nullable>"], DifferentLines(DeclaredProject, after));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

@@ -40,7 +40,7 @@
 | 💸 **Token saving** | Answers semantically instead of dumping text — outlines, symbol ids, one record per line | **4.56M tokens** never sent in one measured week — **2.9× the entire bill** |
 | ⏱️ **Speed** | Deletes round trips: batched reads, batched edits, one compile gate, concurrent test projects | a round trip costs **6.1 s** of model latency before the tool runs; `run_tests` **38 % faster** |
 | 🧪 **Code quality** | Every edit is compile-gated and rolled back if it breaks; `gate` runs analyze → format → cleanup → analyze again in one call | a broken edit never reaches your branch |
-| 🚦 **Control** | `.terse.json` policy rejects code that compiles but isn't mergeable; the guard denies `Read`/`Grep`/`dotnet build`; `--read-only` freezes everything | **12 rules**, `TERSE100`–`TERSE111`, ReSharper's own defaults |
+| 🚦 **Control** | `.terse.json` policy rejects code that compiles but isn't mergeable; the guard denies `Read`/`Grep`/`dotnet build`; `--read-only` freezes everything | **13 rules**, `TERSE100`–`TERSE112`, ReSharper's own defaults |
 | 🧩 **Your stack** | Blazor/Razor, XAML for MAUI · WPF · WinUI · Avalonia, ASP.NET Core Minimal APIs, `.resx` localization, DI containers | answers **what the compiler itself cannot check** |
 
 ---
@@ -169,6 +169,9 @@ verifies *before* it reports success.
 gate                 →  analyze at info severity → format → cleanup fix=all → analyze again
                      →  clean  analyzed=42 fixed=3 remaining=0
 gate dryRun=true     →  verify instead of writing: nothing is modified
+cleanup verify=true fix=ci
+                     →  both CI format rule sets in ONE call, each named file tagged
+                        style, analyzers or style+analyzers
 ```
 
 `analyze` reaches the info-severity CA/IDE rules a build never prints — `CA1822`, `CA1859`, `CA1806`,
@@ -206,9 +209,13 @@ TERSE100  src/Trading/OrderService.cs:41  OrderService.Reconcile  cognitive comp
 remedy: fix the code above, or pass allowPolicy=true to apply it anyway; the response then names every rule it bypassed
 ```
 
-Twelve rules, `TERSE100`–`TERSE111` — cognitive complexity, method statements, methods per type,
+Thirteen rules, `TERSE100`–`TERSE112` — cognitive complexity, method statements, methods per type,
 constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
-declaration kind, `async void`, condition operands, chained references, nesting depth. **Every default is
+declaration kind, `async void`, condition operands, chained references, nesting depth, and **comments
+(`TERSE112`) — the one rule enforced at `warn` with no `.terse.json` at all, because an agent writes
+38.7 comment lines per 1000 it emits and every one of them is a line the next agent re-reads. `///`
+XML docs are never flagged; `{"policy": {"enabled": false}}` turns it off — declaring a `policy`
+section instead turns the other twelve rules ON at their defaults.** **Every default is
 ReSharper's**, not invented: the limits mirror `MaximumMethodStatements`, `MaximumMethodsInClass`,
 `MaximumConstructorDependencies`, `MinimumMeaningfulMethodNameLength` and `MeaninglessClassNameSuffixes`,
 and cognitive complexity is a **percentage of a threshold** exactly as the JetBrains CognitiveComplexity
@@ -233,7 +240,11 @@ Use the terse-sharp MCP instead - get_file_outline, get_symbol_source, xaml_outl
 A denial is not only a prohibition. It returns `additionalContext` — the **complete replacement call,
 arguments filled in from the command it just denied** — which Claude Code places beside the tool result:
 `Call this instead: get_file_outline path="src/App/OrderService.cs"`. A positive routing instruction at
-the moment the agent is about to fall back beats a negation. And **a batch is not denied whole for one
+the moment the agent is about to fall back beats a negation. The call it names follows the **direction**
+as well as the file kind, so a shell redirect that creates a file answers
+`write_text path="..." force=true`, never an outline. And the shell-text rows are scoped to the tree:
+a text command naming no .NET source whose every path operand lands outside it is allowed, because the
+working directory is not a reason to refuse a file your solution does not contain. And **a batch is not denied whole for one
 covered command in it**: when a compound command mixes commands the server answers with commands it does
 not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at all, so
 the rest runs under your normal permission rules.
@@ -450,7 +461,7 @@ nothing.
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
 | **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
 | **What grep can't reach** | `find_registrations` (DI: open generics, factories, `Add*` extensions) · `list_endpoints` (ASP.NET Core `Map*` + Blazor `@page`) |
-| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
+| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` (`fix=ci` runs both CI rule sets in ONE pass and tags each named file with the one that would change it) · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
 | **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` (`before=` / `after=` / `position=` to place it, not append it) · `delete_symbol` · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** — `package_list` replaces `dotnet list package` | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` (MSBuild's **evaluated** properties, each with the file that set it) · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` (`vulnerable=` / `outdated=`) · `package_add` · `package_remove` |

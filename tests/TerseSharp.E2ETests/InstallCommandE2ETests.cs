@@ -332,6 +332,12 @@ public sealed class InstallCommandE2ETests : IDisposable
             int.Parse(reading.Split(' ')[0], CultureInfo.InvariantCulture));
 
         Assert.EndsWith(" tokens", reading, StringComparison.Ordinal);
+        Assert.DoesNotContain("surface=", quiet, StringComparison.Ordinal);
+        Assert.Contains(
+            string.Create(CultureInfo.InvariantCulture, $"surface={ToolCoverageE2ETests.ExercisedCount} tools "),
+            verbose,
+            StringComparison.Ordinal);
+
         Assert.Contains("toolDescriptions=", verbose, StringComparison.Ordinal);
         Assert.Contains("parameterDescriptions=", verbose, StringComparison.Ordinal);
     }

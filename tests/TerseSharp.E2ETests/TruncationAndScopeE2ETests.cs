@@ -40,7 +40,8 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
     [Fact]
     public async Task FindFilesAndSearch_SkipANestedAgentWorktree()
     {
-        var nested = Path.Combine(TerseServerFixture.FixtureRoot, ".claude", "worktrees", "probe");
+        var worktrees = Path.Combine(TerseServerFixture.FixtureRoot, ".claude", "worktrees");
+        var nested = Path.Combine(worktrees, "probe");
 
         Directory.CreateDirectory(nested);
         await File.WriteAllTextAsync(
@@ -58,7 +59,7 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
         }
         finally
         {
-            Directory.Delete(Path.Combine(TerseServerFixture.FixtureRoot, ".claude"), recursive: true);
+            Directory.Delete(nested, recursive: true);
         }
     }
 

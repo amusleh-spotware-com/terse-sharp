@@ -536,10 +536,32 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task GetSymbolSource_ForAnUnqualifiedNameThatSaturates_StillRefusesRatherThanGuessing()
     {
-        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Probe" });
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Saturate" });
 
         Assert.Contains("matches more than 100 symbols", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForANameWhoseOneExactMatchIsBuriedInFuzzyCandidates_ResolvesItInsteadOfRefusing()
+    {
+        var fuzzy = await server.CallAsync("search_symbols", new() { ["query"] = "Probe", ["maxResults"] = 200 });
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Probe" });
+
+        Assert.True(fuzzy.Split('\n').Count(line => line.Contains("Probe", StringComparison.Ordinal)) > 100, fuzzy);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("public static int Probe()", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForAQualifiedNameThatStillSaturates_TellsYouToPassTheDocumentationId()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Saturate" });
+
+        Assert.Contains("matches more than 100 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("is already qualified", text, StringComparison.Ordinal);
+        Assert.Contains("symbolId=\"T:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("qualify the name with its containing type", text, StringComparison.Ordinal);
     }
 
     [Fact]

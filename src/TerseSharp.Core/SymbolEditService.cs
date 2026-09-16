@@ -177,9 +177,10 @@ public static class SymbolEditService
             EditTarget target,
             IReadOnlyList<SyntaxNode> replacements,
             EditOptions options,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool annotate = true)
     {
-        var planned = new PlannedEdit(target, replacements);
+        var planned = new PlannedEdit(target, replacements, annotate);
 
         if (Identical(planned) && options.Usings.IsDefaultOrEmpty)
             return Result.Ok(Unchanged(options.Tool));
@@ -364,11 +365,9 @@ public static class SymbolEditService
         if (!members.IsOk)
             return Result.Fail<string>(members.Error!);
 
-        var appended = Spaced(members.Value!);
+        var appended = Formattable(Spaced(members.Value!));
 
-        return Namespaced(unit) is { } declared
-            ? await SwapAsync(workspace, new EditTarget(document, declared), [Filled(declared, appended)], options, cancellationToken).ConfigureAwait(false)
-            : await RootedAsync(workspace, document, unit.WithMembers(unit.Members.AddRange(appended)), options, cancellationToken).ConfigureAwait(false);
+        return await RootedAsync(workspace, document, Placed(unit, appended), options, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<string>> RootedAsync(
@@ -378,8 +377,7 @@ public static class SymbolEditService
     EditOptions options,
     CancellationToken cancellationToken)
     {
-        var annotated = unit.WithAdditionalAnnotations(Formatter.Annotation);
-        var withUsings = UsingDirectives.Ensured(annotated, options.Usings);
+        var withUsings = UsingDirectives.Ensured(unit, options.Usings);
         var formatted = await IndentedAsync(document.WithSyntaxRoot(withUsings), cancellationToken).ConfigureAwait(false);
         var updated = workspace.Solution.WithDocumentSyntaxRoot(document.Id, formatted);
 
@@ -403,7 +401,7 @@ public static class SymbolEditService
 
     private const int MaxBatchedEdits = 20;
 
-    private readonly record struct PlannedEdit(EditTarget Target, IReadOnlyList<SyntaxNode> Nodes);
+    private readonly record struct PlannedEdit(EditTarget Target, IReadOnlyList<SyntaxNode> Nodes, bool Annotate = true);
 
     private static Result<PlannedEdit> Plan(EditTarget found, string declaration) =>
         found.Node is EnumMemberDeclarationSyntax ? EnumPlan(found, declaration) : MemberPlan(found, declaration);
@@ -470,7 +468,7 @@ public static class SymbolEditService
             if (current.GetCurrentNode(edit.Target.Node) is not { } node)
                 return null;
 
-            current = current.ReplaceNode(node, edit.Nodes.Select(replacement => replacement.WithAdditionalAnnotations(Formatter.Annotation)));
+            current = current.ReplaceNode(node, edit.Nodes.Select(replacement => Annotated(replacement, edit.Annotate)));
         }
 
         return Grown(current, appended);
@@ -676,7 +674,7 @@ public static class SymbolEditService
         if (current.GetCurrentNode(appended.Type) is not TypeDeclarationSyntax type)
             return null;
 
-        return current.ReplaceNode(type, Appended(type, appended.Members, OutsideRegions(type)).WithAdditionalAnnotations(Formatter.Annotation));
+        return current.ReplaceNode(type, Appended(type, Formattable(appended.Members), OutsideRegions(type)));
     }
 
     private static int Chosen(IReadOnlyList<PlannedEdit> planned, BaseTypeDeclarationSyntax?[] types, string? addTo)
@@ -1182,7 +1180,7 @@ public static class SymbolEditService
         var at = Placed(type, options.Placement);
 
         return at.IsOk
-            ? await SwapAsync(workspace, target, [Appended(type, members, at.Value)], options, cancellationToken).ConfigureAwait(false)
+            ? await SwapAsync(workspace, target, [Appended(type, Formattable(members), at.Value)], options, cancellationToken, annotate: false).ConfigureAwait(false)
             : Result.Fail<string>(at.Error!);
     }
 
@@ -1224,6 +1222,17 @@ public static class SymbolEditService
 
         return string.Join(" and ", names);
     }
+
+    private static MemberDeclarationSyntax[] Formattable(IReadOnlyList<MemberDeclarationSyntax> members) =>
+        [.. members.Select(member => member.WithAdditionalAnnotations(Formatter.Annotation))];
+
+    private static CompilationUnitSyntax Placed(CompilationUnitSyntax unit, IReadOnlyList<MemberDeclarationSyntax> appended) =>
+        Namespaced(unit) is { } declared
+            ? unit.ReplaceNode(declared, Filled(declared, appended))
+            : unit.WithMembers(unit.Members.AddRange(appended));
+
+    private static SyntaxNode Annotated(SyntaxNode replacement, bool annotate) =>
+        annotate ? replacement.WithAdditionalAnnotations(Formatter.Annotation) : replacement;
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

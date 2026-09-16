@@ -270,4 +270,134 @@ public sealed class PolicyServiceTests
 
     private static string Statements(int count) =>
         "class Sample { void Long() {" + string.Concat(Enumerable.Range(0, count).Select(index => " var a" + index.ToString(CultureInfo.InvariantCulture) + " = 1;")) + " } }";
+
+    [Fact]
+    public void Inspect_ForAnOwnLineComment_ReportsIt()
+    {
+        var found = Findings(PolicyRule.Comments, """
+        class Sample
+        {
+            void Work()
+            {
+                // explain the obvious
+                var count = 1;
+            }
+        }
+        """);
+
+        var finding = Assert.Single(found);
+
+        Assert.Equal("Sample.Work", finding.Declaration);
+        Assert.Equal("1 comment line(s)", finding.Measured);
+        Assert.Equal("0", finding.Allowed);
+        Assert.Equal(PolicyAction.Warn, finding.Action);
+        Assert.StartsWith("TERSE112", finding.Render(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForABlockComment_CountsEveryLineItSpans()
+    {
+        var found = Findings(PolicyRule.Comments, """
+        class Sample
+        {
+            void Work()
+            {
+                /* one
+                   two
+                   three */
+                var count = 1;
+            }
+        }
+        """);
+
+        Assert.Equal("3 comment line(s)", Assert.Single(found).Measured);
+    }
+
+    [Fact]
+    public void Inspect_ForAnXmlDocComment_ReportsNothing()
+    {
+        var found = Findings(PolicyRule.Comments, """
+        class Sample
+        {
+            /// <summary>Documents a public API.</summary>
+            public void Work()
+            {
+            }
+        }
+        """);
+
+        Assert.Empty(found);
+    }
+
+    [Fact]
+    public void Inspect_ForCodeWithNoComment_ReportsNothing()
+    {
+        var found = Findings(PolicyRule.Comments, """
+        class Sample
+        {
+            void Work() => System.Console.Write(1);
+        }
+        """);
+
+        Assert.Empty(found);
+    }
+
+    [Fact]
+    public void Inspect_WithNoCheckedInPolicy_StillReportsCommentsAndNothingElse()
+    {
+        var found = PolicyService.Inspect(
+            Root("class m { void x() { int Q; /* noisy */ } }"),
+            "Sample.cs",
+            PolicyOptions.Off.Effective);
+
+        Assert.Equal([PolicyRule.Comments], found.Select(finding => finding.Rule).Distinct());
+    }
+
+    [Fact]
+    public void Effective_ForACheckedInPolicyThatDisablesEverything_StaysOff() =>
+        Assert.False((PolicyOptions.Off with { Configured = true }).Effective.Active);
+
+    [Fact]
+    public void Inspect_ForSeveralCommentsInOneMember_ReportsItOnce()
+    {
+        var found = Findings(PolicyRule.Comments, """
+        class Sample
+        {
+            void Work()
+            {
+                // one
+                // two
+                var count = 1; // three
+            }
+        }
+        """);
+
+        Assert.Equal("Sample.Work", Assert.Single(found).Declaration);
+    }
+
+    [Fact]
+    public void Parse_ForAPolicyThatOnlyDisablesComments_StillTurnsTheOtherRulesOn()
+    {
+        var options = PolicySettings.Parse("""{"policy":{"rules":{"comments":false}}}""");
+
+        Assert.False(options.Enforces(PolicyRule.Comments));
+        Assert.True(options.Enforces(PolicyRule.CognitiveComplexity));
+    }
+
+    [Fact]
+    public void Parse_ForAnExplicitlyDisabledPolicy_TurnsTheAmbientCommentRuleOffToo()
+    {
+        var options = PolicySettings.Parse("""{"policy":{"enabled":false}}""");
+
+        Assert.False(options.Effective.Active);
+    }
+
+    [Fact]
+    public void Parse_ForAPolicyFileThatCannotBeRead_LeavesTheAmbientCommentRuleOffRatherThanEnforcingIt()
+    {
+        var options = PolicySettings.Parse("{ not json");
+
+        Assert.NotNull(options.Failure);
+        Assert.False(options.Effective.Active);
+    }
 }

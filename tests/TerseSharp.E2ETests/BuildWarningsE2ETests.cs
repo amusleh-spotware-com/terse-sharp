@@ -204,4 +204,12 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
         Assert.StartsWith("build ok  errors=0 warnings=3", text.Split('\n')[0], StringComparison.Ordinal);
         Assert.All(text.Split('\n').Skip(1), line => Assert.True(ToolCensus.IsFraming(line), line));
     }
+
+    [Fact]
+    public async Task Build_WithNothingWrittenWhileItRan_CarriesNoStaleMarker()
+    {
+        var text = await RebuiltAsync(new() { ["project"] = SourceProject });
+
+        Assert.DoesNotContain("STALE", text, StringComparison.Ordinal);
+    }
 }

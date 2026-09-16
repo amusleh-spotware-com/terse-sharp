@@ -46,24 +46,18 @@ public static class SymbolLookup
         if (SymbolReference.Parse(text) is not { } query)
             return Unparsed(text);
 
-        var found = (await SymbolSearch.FindAsync(workspace, query.Member, null, null, NameCap + 1, cancellationToken).ConfigureAwait(false)).Ranked;
+        var found = (await SymbolSearch.FindAsync(workspace, query.Member, null, null, SearchCap, cancellationToken).ConfigureAwait(false)).Ranked;
+        var named = Exactly(found, query.Member);
+        var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
+        var saturated = Saturated(found, named);
 
-        if (found.Count > NameCap)
+        if (matches.Length is 0 || saturated)
         {
-            return await ByContainerAsync(workspace, text, query, cancellationToken).ConfigureAwait(false)
-                ?? Result.Fail<ISymbol>(Errors.SaturatedName(text, NameCap));
+            if (await FallbackAsync(workspace, text, query, saturated, cancellationToken).ConfigureAwait(false) is { } fallback)
+                return await Referenced(workspace, query, fallback, referenced, cancellationToken).ConfigureAwait(false);
         }
 
-        var named = found.Where(symbol => string.Equals(symbol.Name, query.Member, StringComparison.Ordinal)).ToArray();
-        var matches = named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal).ToArray();
-
-        if (!typesOnly)
-            return await Referenced(workspace, query, Chosen(text, matches, found), referenced, cancellationToken).ConfigureAwait(false);
-
-        var types = matches.Where(symbol => symbol is INamedTypeSymbol).ToArray();
-        var chosen = OnlyTypes(text, types, matches.Length - types.Length) ?? Chosen(text, types, found);
-
-        return await Referenced(workspace, query, chosen, referenced, cancellationToken).ConfigureAwait(false);
+        return await Referenced(workspace, query, Selected(text, matches, found, typesOnly), referenced, cancellationToken).ConfigureAwait(false);
     }
 
     private static Result<ISymbol>? OnlyTypes(string text, ISymbol[] types, int dropped) => types.Length is 0 && dropped > 0
@@ -210,7 +204,6 @@ public static class SymbolLookup
             matches.Length)),
     };
 
-
     private static bool DeclaredIn(ISymbol symbol, string? filePath) =>
         filePath is { Length: > 0 } && symbol.DeclaringSyntaxReferences.Any(reference =>
             string.Equals(reference.SyntaxTree.FilePath, filePath, StringComparison.OrdinalIgnoreCase));
@@ -229,12 +222,11 @@ public static class SymbolLookup
             return null;
 
         var name = qualifier[(qualifier.LastIndexOf('.') + 1)..];
-        var types = (await SymbolSearch.FindAsync(workspace, name, null, null, NameCap + 1, cancellationToken).ConfigureAwait(false)).Ranked;
-
-        if (types.Count > NameCap)
-            return null;
-
+        var types = (await SymbolSearch.FindAsync(workspace, name, null, null, SearchCap, cancellationToken).ConfigureAwait(false)).Ranked;
         var named = Named(types, name);
+
+        if (Saturated(types, named))
+            return null;
 
         return Scoped(text, Declared(named, query)) ?? Unmatched(text, named, query);
     }
@@ -255,7 +247,6 @@ public static class SymbolLookup
         .DistinctBy(Describe, StringComparer.Ordinal),
     ];
 
-
     private static string[] Nearest(INamedTypeSymbol type, string member) =>
     [
         .. type.GetMembers()
@@ -266,7 +257,6 @@ public static class SymbolLookup
         .ThenBy(name => name, StringComparer.Ordinal)
         .Take(MaxNearestMembers),
     ];
-
 
     private static Result<ISymbol>? Unmatched(string text, INamedTypeSymbol[] types, SymbolQuery query) => types is [var only]
         ? Result.Fail<ISymbol>(Errors.NoSuchMember(text, SymbolReference.Simple(only), Nearest(only, query.Member)))
@@ -296,4 +286,35 @@ public static class SymbolLookup
         || type.ContainingNamespace?.ToDisplayString() is { } space
         && (string.Equals(space, wanted, StringComparison.Ordinal)
             || space.EndsWith("." + wanted, StringComparison.Ordinal));
+
+    private const int SearchCap = 512;
+
+    private static ISymbol[] Exactly(IReadOnlyList<ISymbol> found, string member) =>
+        [.. found.Where(symbol => string.Equals(symbol.Name, member, StringComparison.Ordinal))];
+
+    private static bool Saturated(IReadOnlyList<ISymbol> found, ISymbol[] named) =>
+        named.Length > NameCap || (named.Length is 0 && found.Count > NameCap);
+
+    private static async Task<Result<ISymbol>?> FallbackAsync(
+        LoadedWorkspace workspace,
+        string text,
+        SymbolQuery query,
+        bool saturated,
+        CancellationToken cancellationToken)
+    {
+        if (await ByContainerAsync(workspace, text, query, cancellationToken).ConfigureAwait(false) is { } contained)
+            return contained;
+
+        return saturated ? Result.Fail<ISymbol>(Errors.SaturatedName(text, NameCap)) : null;
+    }
+
+    private static Result<ISymbol> Selected(string text, ISymbol[] matches, IReadOnlyList<ISymbol> found, bool typesOnly)
+    {
+        if (!typesOnly)
+            return Chosen(text, matches, found);
+
+        var types = matches.Where(symbol => symbol is INamedTypeSymbol).ToArray();
+
+        return OnlyTypes(text, types, matches.Length - types.Length) ?? Chosen(text, types, found);
+    }
 }

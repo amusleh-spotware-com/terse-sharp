@@ -20,8 +20,7 @@ public sealed class ProbeFileE2ETests
 
         Assert.Contains("VERIFY_FAILED", text, StringComparison.Ordinal);
         Assert.Contains("UntidyProbe.cs  whitespace", text, StringComparison.Ordinal);
-        Assert.Contains("cleanup verify=true fix=style", text, StringComparison.Ordinal);
-        Assert.Contains("cleanup verify=true fix=analyzers", text, StringComparison.Ordinal);
+        Assert.Contains("cleanup verify=true fix=ci", text, StringComparison.Ordinal);
     }
 
     [Fact]

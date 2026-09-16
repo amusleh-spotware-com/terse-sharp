@@ -12,8 +12,9 @@ public static class PolicyGate
             bool overridden,
             CancellationToken cancellationToken)
     {
-        var options = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
-        var notice = PolicySettings.Notice(options);
+        var loaded = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
+        var notice = PolicySettings.Notice(loaded);
+        var options = loaded.Effective;
 
         if (!options.Active)
             return PolicyVerdict.Clean with { Notice = notice };
@@ -35,7 +36,7 @@ public static class PolicyGate
         IReadOnlyList<DocumentId> documents,
         CancellationToken cancellationToken)
     {
-        var options = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
+        var options = (await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false)).Effective;
 
         return options.Active
             ? await FindingsAsync(workspace.Solution, documents, workspace.Root, options, cancellationToken).ConfigureAwait(false)

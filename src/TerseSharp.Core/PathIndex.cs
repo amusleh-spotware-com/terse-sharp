@@ -46,6 +46,9 @@ public sealed class PathIndex
             foreach (var child in Directories(directory))
                 pending.Push(child);
 
+            if (WorkspaceFiles.HoldsSessionState(directory))
+                continue;
+
             foreach (var file in Entries(directory))
                 yield return file;
         }

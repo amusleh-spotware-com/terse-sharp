@@ -217,6 +217,9 @@ public static class FileService
         foreach (var note in notes ?? [])
             response.Note(note);
 
+        if (quiet && string.Equals(before, after, StringComparison.Ordinal))
+            return Unchanged(response, path);
+
         return quiet && UnifiedDiff.ChangedLines(before, after) is var changed && changed > 0
             ? Condensed(response, path, changed, before, after, context)
             : Detailed(response, path, before, after, dryRun, verbose, escaped);
@@ -938,7 +941,7 @@ public static class FileService
             return Introduced(workspace, full, content);
 
         var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-        var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
+        var encoding = Preamble(existing.Encoding, document.FilePath!);
         var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, encoding));
 
         return new StagedWrite(updated, document.Id);
@@ -982,7 +985,7 @@ public static class FileService
 
         var document = workspace.Solution.GetDocument(entry.Document)!;
         var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-        var encoding = existing.Encoding ?? AtomicWrite.EncodingOf(document.FilePath!);
+        var encoding = Preamble(existing.Encoding, document.FilePath!);
 
         return updated.WithDocumentText(entry.Document!, SourceText.From(entry.After, encoding));
     }
@@ -1319,7 +1322,7 @@ public static class FileService
         if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
             return gated;
 
-        if (!dryRun)
+        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(DiffResponse("write_text", path, before, after, dryRun, verbose));
@@ -1335,7 +1338,7 @@ public static class FileService
     {
         var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
 
-        if (!dryRun)
+        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
             await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(DiffResponse("write_text", full, before, after, dryRun, verbose, full));
@@ -1907,4 +1910,16 @@ public static class FileService
 
     private static int SectionLines(LineRange range, int fileTotal) =>
         Math.Min(range.End <= 0 ? fileTotal : range.End, fileTotal) - Math.Max(1, range.Start) + 1;
+
+    private static Encoding Preamble(Encoding? existing, string path) => existing is null or UTF8Encoding
+        ? AtomicWrite.EncodingOf(path)
+        : existing;
+
+    private static string Unchanged(ResponseBuilder response, string path)
+    {
+        response.Summary(0, 0, "files changed");
+        response.Note("no change - the result is identical to what is already there  " + path);
+
+        return response.ToString();
+    }
 }

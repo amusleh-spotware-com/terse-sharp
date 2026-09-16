@@ -134,8 +134,8 @@ internal static class ToolCensus
             "returns a full default page of 100 matches, each a path:line and the matched source line; the response is bounded by maxResults=, not by the read-tool cap, and a .cs-scoped page carries the one-line containers=true steer on top of it"),
         new(
             "search_regex",
-            2300,
-            "same full page as search_text, on a pattern that matches every public declaration in the fixture; bounded by maxResults="),
+            2700,
+            "same full page as search_text, on a pattern that matches every public declaration in the fixture; bounded by maxResults=, and the fixture's ExactSaturation.cs adds 101 long public declarations to that page"),
     ];
 
     public static int Budget(string tool) =>

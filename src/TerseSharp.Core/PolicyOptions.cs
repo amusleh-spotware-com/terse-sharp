@@ -50,4 +50,17 @@ public sealed record PolicyOptions(
     public string Describe() => string.Create(
         CultureInfo.InvariantCulture,
         $"policy enabled=true rules={Rules.Count(entry => entry.Value.Action is not PolicyAction.Off)} cognitiveThreshold={CognitiveThreshold} allowOverride={AllowOverride}");
+
+    public bool Configured { get; init; }
+
+    public static PolicyOptions Ambient { get; } = Off with
+    {
+        Enabled = true,
+        Rules = new Dictionary<PolicyRule, PolicyLimit>
+        {
+            [PolicyRule.Comments] = new(PolicyRules.Of(PolicyRule.Comments).Action, PolicyRules.Of(PolicyRule.Comments).Default),
+        }.ToFrozenDictionary(),
+    };
+
+    public PolicyOptions Effective => Configured ? this : Ambient;
 }

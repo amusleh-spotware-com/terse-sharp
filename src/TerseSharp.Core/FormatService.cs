@@ -19,6 +19,9 @@ public static class FormatService
         if (documents.Length is 0)
             return Result.Fail<string>(Empty(scope));
 
+        if (request.Mode is FixMode.Ci)
+            return await CiAsync(workspace, documents, request, options, cancellationToken).ConfigureAwait(false);
+
         var outcome = request.AppliesCodeFixes
             ? await CodeFixService.ApplyAsync(workspace.Solution, documents, request, cancellationToken).ConfigureAwait(false)
             : new FixOutcome(workspace.Solution, []);
@@ -72,23 +75,11 @@ public static class FormatService
         if (changed.Length is 0 && outcome.Unfixed.Count is 0)
             return "clean";
 
-        var response = new ResponseBuilder(tool, "verify");
+        var note = RunsTheFormatterCiDoesNot(request, changed)
+            ? "this mode also runs the whitespace formatter, which the CI format step does not - the byte-equivalent CI pair is cleanup verify=true fix=ci"
+            : null;
 
-        response.Summary(changed.Length, changed.Length, "files would change");
-
-        if (changed.Length > 0)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"VERIFY_FAILED {changed.Length} file(s) would change"));
-
-        if (RunsTheFormatterCiDoesNot(request, changed))
-            response.Note("this mode also runs the whitespace formatter, which the CI format step does not - the byte-equivalent CI pair is cleanup verify=true fix=style and cleanup verify=true fix=analyzers");
-
-        foreach (var file in changed)
-            response.Line(file.Path + "  " + file.ChangedBy);
-
-        foreach (var line in outcome.Unfixed)
-            response.Note(line);
-
-        return response.ToString();
+        return Verdict(tool, changed, outcome.Unfixed, note);
     }
     private static async Task<VerifiedFile[]> ChangedAsync(
         LoadedWorkspace workspace,
@@ -225,7 +216,6 @@ public static class FormatService
         _ => "whitespace",
     };
 
-
     private static bool RunsTheFormatterCiDoesNot(FixRequest request, VerifiedFile[] changed) =>
         request.Reformats
         && Array.Exists(changed, file => file.ChangedBy is "whitespace" or "fixers+whitespace");
@@ -275,5 +265,104 @@ public static class FormatService
 
             return ++seen > allowed;
         }
+    }
+
+    private static async Task<Result<string>> CiAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<DocumentId> documents,
+        FixRequest request,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var styled = await CodeFixService.ApplyAsync(workspace.Solution, documents, request with { Mode = FixMode.Style }, cancellationToken).ConfigureAwait(false);
+        var fixedUp = await CodeFixService.ApplyAsync(styled.Solution, documents, request with { Mode = FixMode.Analyzers }, cancellationToken).ConfigureAwait(false);
+        string[] unfixed = [.. styled.Unfixed, .. fixedUp.Unfixed];
+
+        if (request.Verify)
+            return Result.Ok(await CiVerifiedAsync(workspace, styled.Solution, fixedUp.Solution, documents, options.Tool, unfixed, cancellationToken).ConfigureAwait(false));
+
+        var applied = await EditGate.ApplyAsync(workspace, fixedUp.Solution, documents, options, cancellationToken).ConfigureAwait(false);
+
+        return Annotated(applied, unfixed);
+    }
+
+    private static async Task<string> CiVerifiedAsync(
+        LoadedWorkspace workspace,
+        Solution styled,
+        Solution fixedUp,
+        IReadOnlyList<DocumentId> documents,
+        string tool,
+        string[] unfixed,
+        CancellationToken cancellationToken)
+    {
+        var changed = await CiChangedAsync(workspace, styled, fixedUp, documents, cancellationToken).ConfigureAwait(false);
+
+        return changed.Length is 0 && unfixed.Length is 0 ? "clean" : Verdict(tool, changed, unfixed, null);
+    }
+
+    private static async Task<VerifiedFile[]> CiChangedAsync(
+        LoadedWorkspace workspace,
+        Solution styled,
+        Solution fixedUp,
+        IReadOnlyList<DocumentId> documents,
+        CancellationToken cancellationToken)
+    {
+        var changed = new List<VerifiedFile>(documents.Count);
+
+        foreach (var id in documents)
+        {
+            if (await CiFileAsync(workspace, styled, fixedUp, id, cancellationToken).ConfigureAwait(false) is { } file)
+                changed.Add(file);
+        }
+
+        changed.Sort((left, right) => string.CompareOrdinal(left.Path, right.Path));
+
+        return [.. changed];
+    }
+
+    private static async Task<VerifiedFile?> CiFileAsync(
+        LoadedWorkspace workspace,
+        Solution styled,
+        Solution fixedUp,
+        DocumentId id,
+        CancellationToken cancellationToken)
+    {
+        if (!await DiffersAsync(workspace.Solution, fixedUp, id, cancellationToken).ConfigureAwait(false))
+            return null;
+
+        var byStyle = await DiffersAsync(workspace.Solution, styled, id, cancellationToken).ConfigureAwait(false);
+        var byAnalyzers = await DiffersAsync(styled, fixedUp, id, cancellationToken).ConfigureAwait(false);
+
+        return new VerifiedFile(
+            PositionFormat.Relative(workspace.Root, fixedUp.GetDocument(id)?.FilePath),
+            CiChangedBy(byStyle, byAnalyzers));
+    }
+
+    private static string CiChangedBy(bool byStyle, bool byAnalyzers) => (byStyle, byAnalyzers) switch
+    {
+        (true, true) => "style+analyzers",
+        (true, false) => "style",
+        _ => "analyzers",
+    };
+
+    private static string Verdict(string tool, VerifiedFile[] changed, IReadOnlyList<string> unfixed, string? note)
+    {
+        var response = new ResponseBuilder(tool, "verify");
+
+        response.Summary(changed.Length, changed.Length, "files would change");
+
+        if (changed.Length > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"VERIFY_FAILED {changed.Length} file(s) would change"));
+
+        if (note is not null)
+            response.Note(note);
+
+        foreach (var file in changed)
+            response.Line(file.Path + "  " + file.ChangedBy);
+
+        foreach (var line in unfixed)
+            response.Note(line);
+
+        return response.ToString();
     }
 }

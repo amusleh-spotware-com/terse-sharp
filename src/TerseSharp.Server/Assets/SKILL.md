@@ -122,7 +122,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Refactor** | hand-writing an interface from a class | `extract_interface(symbolId)` |
 | **Refactor** | cut-and-paste between files | `move_type_to_file` · `move_type_to_namespace` |
 | **Refactor** | editing a signature and every call site by hand | `change_signature(symbolId, …)` |
-| **Projects** | editing a `.csproj` by hand | `project_set_property` · `project_properties` · `project_add_reference` · `project_remove_reference` · `project_create` |
+| **Projects** | editing a `.csproj` by hand | `project_set_property` · `project_properties` · `project_add_reference` · `project_remove_reference` · `project_create` — untouched lines survive byte for byte |
 | **Projects** | editing `PackageReference` by hand | `package_list` · `package_add` · `package_remove` |
 | **Projects** | `Bash: dotnet list package --vulnerable` | `package_list(vulnerable: true)` · `package_list(outdated: true)` |
 | **Projects** | "which properties does this project really have?" | `project_properties(project)` — MSBuild's evaluated set |
@@ -214,7 +214,7 @@ one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
 
-**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs. A `2>&1` no longer forces a whole-command refusal, a `$( )` no longer shadows the real command, and a denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
+**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out` - is allowed. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs. A `2>&1` no longer forces a whole-command refusal, a `$( )` no longer shadows the real command, and a denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
 
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
 denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
@@ -228,7 +228,7 @@ and a `.resx` read to `resx_get`, not to `get_file_outline`.
 `dotnet format analyzers` -> `cleanup fix=analyzers` (add `verify=true` for `--verify-no-changes`),
 `dotnet format style` -> `cleanup fix=style`, a bare `dotnet format` -> `format` plus `cleanup fix=all`,
 and `dotnet clean` -> `clean`. Those two verify modes check exactly the rule sets the two CI commands
-check, so never shell out for them. `dotnet list package` routes to `package_list`
+check, so never shell out for them - and **`cleanup verify=true fix=ci` is both in ONE call**. `dotnet list package` routes to `package_list`
 (`vulnerable=true`, `outdated=true`, same restored graph). `dotnet restore`, `pack`,
 `publish`, `run` and `tool` are **not** covered: nothing here replaces them.
 
@@ -324,7 +324,7 @@ advertises everything regardless and `--tools core` narrows to about twenty. A h
 answers when called by name — but an agent can only call what its client lists, so treat a narrowed
 surface as narrowing what you can reach, not merely what you can see. `workspace_status` prints
 `tools=core - N advertised` under a profile and `tools=<families> hidden` when the workspace narrowed
-it.
+it. `verbose=true` adds `surface=<n> tools <t> tokens` - what the WHOLE surface costs.
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold - the first semantic call realizes them and pays for it once`, and the first
 semantic call that realizes them appends `compilations=realized in Nms (once per load, not per call)`.
@@ -481,6 +481,9 @@ files CI accepts. **You no longer have to work that out**: every file a verify n
 that would change it — `whitespace`, `fixers` or `fixers+whitespace` — and a mode that also reformats
 names the byte-equivalent CI pair. Every file `whitespace` is a green CI leg; any `fixers` is a red one.
 
+**`cleanup verify=true fix=ci` is both CI commands in ONE call** - the same union, no whitespace
+formatter, each named file tagged `style`, `analyzers` or `style+analyzers`.
+
 **A batched symbol read counts what it ANSWERED, not what it was asked for.** `get_symbol`,
 `get_symbol_source` and `get_type_outline` answer `1/2 symbols` when one id did not resolve - a
 partial batch, not a truncation - and the `NOT_RESOLVED` line names which one.
@@ -500,6 +503,8 @@ them** — `WARNING attributes dropped: McpServerTool, Description`. The edit st
 dropping an attribute is sometimes the intent, but an un-advertised tool is exactly what a clean
 build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, or use
 `replace_symbol_body`.
+
+**`add_member` formats only what it inserted** - no collateral hunks.
 
 **`add_member` refuses a duplicate member from syntax, before anything is compiled.** A declaration
 whose name and parameter list the type already declares answers `ERROR NameTaken` naming that member
@@ -619,8 +624,10 @@ your `maxResults` is a confidently wrong answer you cannot detect. **A glob expa
 nested and across separators - `**/*.{md,yml}`, `{src,tests}/**/*.cs`, `{src/**/*.cs,notes.md}` -
 everywhere a glob is taken, `exclude=` and every `path=` scope included; an unclosed brace is a
 literal rather than a swallowed glob. All three skip `bin`, `obj`,
-`.git`, `.claude`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules` and directory symlinks —
-the same set every index uses, so a nested agent worktree never doubles a result.
+`.git`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules`, directory symlinks and `.claude`
+SESSION STATE — the same set every index uses, so a nested agent worktree never doubles a result.
+**`.claude/commands`, `agents`, `skills` and `hooks` ARE listed** - project source. The files
+directly in `.claude` are not: a session rewrites `settings.local.json` constantly.
 
 **A `.cs` file returned verbatim ends with `symbolIds=[...]`** when the read covered the whole file and
 it has at most ten members, so the *next* read is member-scoped. A line-ranged read gets nothing.
@@ -878,16 +885,22 @@ reads the same file, so a built-in whose every replacement the project disabled 
 ## Code policy - when an edit is refused for style, not for compiling
 
 A project can make this server **reject an edit that violates its standards**, through a `policy`
-section in the same `.terse.json`. It is **off unless that section exists**. When on, an edit answers
+section in the same `.terse.json`. It is **off unless that section exists - except `TERSE112
+comments`**, enforced at `warn` with no `.terse.json` at all: an edit introducing a `//` or `/* */`
+answers `WARNING policy  TERSE112 ...` and still lands. `///` is never flagged. Make the code say it
+instead. `{"policy":{"enabled":false}}` turns it off - NOT `{"rules":{"comments":false}}`, because
+declaring a `policy` section turns the other twelve rules ON, eight of them `reject`. Inside a policy
+you want, `"rules":{"comments":{"action":"reject"}}` refuses. When on, an edit answers
 `ERROR PolicyViolation` naming each rule, the declaration, measured against allowed, and a `fix:` line.
 
 **Only what the edit INTRODUCES counts** - a violation already in the file does not block you, so never
 "fix" unrelated members to get an edit through. A finding is keyed by rule, path and declaration, not
 by its measured value, so neither improving nor worsening an already-violating member registers.
 
-Twelve rules, `TERSE100`-`TERSE111`: cognitive complexity, method statements, methods per type,
+Thirteen rules, `TERSE100`-`TERSE112`: cognitive complexity, method statements, methods per type,
 constructor dependencies, parameter count, method-name length, meaningless type suffixes, naming per
-declaration kind, `async void`, condition operands, chained references (off by default), nesting depth.
+declaration kind, `async void`, condition operands, chained references (off by default), nesting depth,
+and **comments (`TERSE112`), the one rule that is ON with no `.terse.json` at all**.
 Each is `reject`, `warn` or `off`; a `warn` rule lets the edit land and answers `WARNING policy  ...`.
 Cognitive complexity is a **percentage of a threshold** - default `150`% of `10`, so a score above 15
 fails: `cognitive complexity 21 (210% of threshold 10) exceeds 150% (15)`.
@@ -1070,6 +1083,9 @@ produced no results says so, and never `0 failures`.
 `command: dotnet test ...` - because that is exactly the case where the arguments are the answer and
 the payload is otherwise empty. `verbose=true` echoes it on any run.
 
+**`STALE n document(s) changed after this run started`** ends a `build`/`run_tests` verdict when an
+edit landed mid-run: the answer is about the tree as it WAS - re-run it.
+
 **A stopped run says why.** Above 30 s, `timeoutSeconds` arms VSTest's blame collector 15 s below it,
 so a *hung* test is named in
 `WARNING the run was stopped while these test(s) were still running: <name>`; a merely *slow* one
@@ -1124,7 +1140,9 @@ naming `MSB3026`. Run the probe from a copy outside the solution.
 
 Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest names;
 `AmbiguousSymbol` lists the candidates and says how many of the total it shows; `SaturatedName` means
-the name matched too many symbols to resolve safely — and it is now reached only by a **bare** name:
+too many symbols carry that name **exactly** - a unique exact match resolves however many fuzzy
+candidates share its letters, and an already-dotted name is told to pass `symbolId="T:<fqn>"`. It is
+otherwise reached only by a **bare** name:
 a `Type.Member` whose member name saturates is resolved through the members of the types called
 `Type`, so qualifying the name really is the fix the remedy names, and a type declaring no such member
 answers `SymbolNotFound` listing its members instead of a saturation count; `OutOfWorkspace` means the path
