@@ -93,6 +93,9 @@ public sealed class ShadowCopyAnalyzerLoaderTests
             .ToImmutableArray();
 
         Assert.False(analyzers.IsEmpty, "the fixture exposed no analyzer, so the assertion cannot fail");
+        Assert.True(
+            compilation?.SyntaxTrees.Any() is true,
+            project.Name + " loaded with no syntax tree, so the analyzer had nothing to flag - its design-time build did not produce the documents");
 
         return await compilation!
             .WithAnalyzers(analyzers)
