@@ -39,8 +39,7 @@ public static class DiffSymbolService
 
         if (document is null)
         {
-            foreach (var hunk in hunks)
-                Add(records, seen, Raw(path, hunk, "not a C# document in this workspace"));
+            Add(records, seen, Unmapped(path, hunks));
 
             return;
         }
@@ -116,12 +115,14 @@ public static class DiffSymbolService
         var unmapped = records
             .Capped(maxResults)
             .Where(record => record.Contains("  HEURISTIC  ", StringComparison.Ordinal))
-            .Select(record => record[..record.IndexOf(':', StringComparison.Ordinal)])
+            .Select(Addressed)
             .Distinct(StringComparer.Ordinal)
             .Take(MaxSteeredPaths)
             .ToArray();
+
         if (unmapped.Length is 0)
             return;
+
         response.Note("for the hunk text these could not map, call " + string.Join(" then ", unmapped.Select(path => "diff_text path=" + path)));
     }
 
@@ -145,4 +146,22 @@ public static class DiffSymbolService
     private readonly record struct Mapped(string? Id, string? Raw);
 
     private readonly record struct Folded(string Id, List<string> Ranges);
+
+    private static string Unmapped(string path, IEnumerable<DiffHunk> hunks)
+    {
+        var count = hunks.Count();
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{path}  {count} hunk{(count is 1 ? string.Empty : "s")}  HEURISTIC  not a C# document in this workspace");
+    }
+
+    private static string Addressed(string record)
+    {
+        var marker = record.IndexOf("  ", StringComparison.Ordinal);
+        var head = marker > 0 ? record.AsSpan(0, marker) : record.AsSpan();
+        var range = head.LastIndexOf(':');
+
+        return new string(range > 0 ? head[..range] : head);
+    }
 }

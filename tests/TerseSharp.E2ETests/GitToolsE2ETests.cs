@@ -626,6 +626,112 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Contains("tags=true", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ChangedFiles_AfterAFileAppearsUnderAWatcherExcludedDirectory_DoesNotReplayTheStaleListing()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "node_modules");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, "first.txt"), "scratch", TestContext.Current.CancellationToken);
+
+            var arguments = new Dictionary<string, object?> { ["path"] = "node_modules" };
+            var first = await server.CallAsync("changed_files", new(arguments));
+
+            await File.WriteAllTextAsync(Path.Combine(scratch, "second.txt"), "scratch", TestContext.Current.CancellationToken);
+
+            var second = string.Empty;
+
+            for (var attempt = 0; attempt < 30; attempt++)
+            {
+                second = await server.CallAsync("changed_files", new(arguments));
+
+                if (second.Contains("second.txt", StringComparison.Ordinal))
+                    break;
+
+                await Task.Delay(100, TestContext.Current.CancellationToken);
+            }
+
+            Assert.Contains("first.txt", first, StringComparison.Ordinal);
+            Assert.DoesNotContain("second.txt", first, StringComparison.Ordinal);
+            Assert.Contains("second.txt", second, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DiffSymbols_ForANonCSharpFile_FoldsEveryHunkOntoOneRecord()
+    {
+        const string Probe = "notes.md";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, Probe);
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var written = File.GetLastWriteTimeUtc(path);
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                path,
+                original
+                    .Replace("# Fixture notes", "# Fixture notes edited", StringComparison.Ordinal)
+                    .Replace("**F0** older row", "**F0** older row edited", StringComparison.Ordinal),
+                TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("diff_symbols", new() { ["path"] = Probe });
+
+            Assert.Contains("notes.md  2 hunks  HEURISTIC  not a C# document in this workspace", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("notes.md:", text, StringComparison.Ordinal);
+            Assert.Contains("diff_text path=" + Probe, text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, original, CancellationToken.None);
+            File.SetLastWriteTimeUtc(path, written);
+        }
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_AtARef_AnswersThatRevisionsWholeDeclarationRatherThanALineRange()
+    {
+        var member = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "OrderService.Submit(Order)",
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "HEAD",
+        });
+
+        var unaddressed = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "OrderService.Submit",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.DoesNotContain("ERROR", member, StringComparison.Ordinal);
+        Assert.Contains("Submit", member, StringComparison.Ordinal);
+        Assert.Contains("at HEAD", member, StringComparison.Ordinal);
+        Assert.Contains("ERROR InvalidArgument", unaddressed, StringComparison.Ordinal);
+        Assert.Contains("ref= needs path=", unaddressed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_AtARef_ResolvesAFullDocumentationIdCarryingAFrameworkParameterType()
+    {
+        var byId = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Unused~System.Int32",
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.DoesNotContain("ERROR", byId, StringComparison.Ordinal);
+        Assert.Contains("Unused", byId, StringComparison.Ordinal);
+        Assert.Contains("at HEAD", byId, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe

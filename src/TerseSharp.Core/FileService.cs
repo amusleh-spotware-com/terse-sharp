@@ -251,11 +251,16 @@ public static class FileService
                 "drop headings=true, or use get_file_outline for a .cs file"));
         }
 
-        var rows = HeadingRows(DocumentOutline.Headings(text), request.MaxLevel);
+        var sections = DocumentOutline.Headings(text);
+        var level = request.MaxLevel > 0 || request.Verbose ? request.MaxLevel : Fitting(sections);
+        var rows = HeadingRows(sections, level);
         var shown = Math.Min(rows.Count, request.Range.MaxLines);
         var response = new ResponseBuilder("read_text", label + " headings").Verbose(request.Verbose);
 
         response.Summary(shown, rows.Count, "sections", "maxLines= or maxLevel=");
+
+        if (level > 0 && request.MaxLevel is 0)
+            response.Note(Folded(level, sections.Count - rows.Count));
 
         for (var index = 0; index < shown; index++)
             response.Line(rows[index]);
@@ -713,12 +718,12 @@ public static class FileService
             return Result.Fail<string>(opened.Error!);
 
         var (full, before) = opened.Value;
-        var failures = new List<string>();
+        var failed = new string?[edits.Count];
         var notes = new List<string>();
         var after = before;
         var applied = 0;
 
-        for (var index = 0; index < edits.Count; index++)
+        foreach (var index in Order(before, edits))
         {
             var rewritten = edits[index].NewText is null
                 ? Result.Fail<string>(Errors.Blank("newText"))
@@ -731,14 +736,14 @@ public static class FileService
             }
             else
             {
-                failures.Add(Failed(index + 1, rewritten.Error!));
+                failed[index] = Failed(index + 1, rewritten.Error!);
             }
         }
 
         if (applied > 0 && !request.DryRun)
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(BatchResponse(path, before, after, failures, notes, applied, edits.Count, request));
+        return Result.Ok(BatchResponse(path, before, after, [.. failed.OfType<string>()], notes, applied, edits.Count, request));
     }
 
     private static int ReachableLines(LineSelection selection) =>
@@ -1733,7 +1738,7 @@ public static class FileService
     private static TerseError Collision(int earlier, int later, TextEdit first, TextEdit second) => Errors.Invalid(
         string.Create(
             CultureInfo.InvariantCulture,
-            $"edits[{earlier}] and edits[{later}] address the same {Addressed(first)} in the same file with occurrence={first.Occurrence} and occurrence={second.Occurrence}, and entries are applied in order against the text the previous one produced, so the second cannot address the occurrence you counted"),
+            $"edits[{earlier}] and edits[{later}] address the same {Addressed(first)} in the same file with occurrence={first.Occurrence} and occurrence={second.Occurrence}, so once the first has landed the second can no longer address the occurrence you counted"),
         CollisionRemedy(first));
 
     private static int Shadowed(IReadOnlyList<TextEdit> edits, int index, string defaultPath, string root)
@@ -1816,9 +1821,10 @@ public static class FileService
     private static bool Same(TextEdit earlier, TextEdit later, string anchor, string defaultPath, string root) =>
         string.Equals(Anchored(earlier), anchor, StringComparison.Ordinal)
         && ByText(earlier) == ByText(later)
-        && (ByText(later) || Renumbers(earlier))
         && string.Equals(PathGuard.Full(root, earlier.Path ?? defaultPath), PathGuard.Full(root, later.Path ?? defaultPath), StringComparison.OrdinalIgnoreCase)
-        && (earlier.Occurrence > 0 || later.Occurrence > 0);
+        && (ByText(later)
+            ? Ordinal(earlier) == Ordinal(later)
+            : Renumbers(earlier) && (earlier.Occurrence > 0 || later.Occurrence > 0));
 
     private static EditRequest Forced(EditRequest request, IReadOnlyList<TextEdit> edits)
     {
@@ -1837,12 +1843,6 @@ public static class FileService
     private static bool ByText(TextEdit edit) => edit.OldText is { Length: > 0 };
 
     private static string? Anchored(TextEdit edit) => ByText(edit) ? edit.OldText : edit.Section;
-
-    private static string Addressed(TextEdit edit) => ByText(edit) ? "oldText" : "section heading";
-
-    private static string CollisionRemedy(TextEdit edit) => ByText(edit)
-        ? "lengthen each anchor so it is unique, or send the second in its own call - once the first has landed it is occurrence=1"
-        : "send the second in its own call - the first entry adds or drops a heading, so the ordinals move under it";
 
     private static bool Renumbers(TextEdit edit) => Headings(edit.NewText) != (edit.Place is { Length: > 0 } ? 0 : 1);
 
@@ -1922,4 +1922,82 @@ public static class FileService
 
         return response.ToString();
     }
+
+    private static int[] Order(string before, IReadOnlyList<TextEdit> edits)
+    {
+        var order = new int[edits.Count];
+
+        for (var index = 0; index < order.Length; index++)
+            order[index] = index;
+
+        var starts = Starts(before, edits);
+
+        return starts is null ? order : [.. order.OrderByDescending(index => starts[index])];
+    }
+
+    private static int[]? Starts(string before, IReadOnlyList<TextEdit> edits)
+    {
+        var starts = new int[edits.Count];
+
+        for (var index = 0; index < starts.Length; index++)
+        {
+            if (!ByText(edits[index]))
+                return null;
+
+            var match = SnippetSearch.Find(before, edits[index].OldText!, edits[index].Occurrence > 0 ? edits[index].Occurrence : 1);
+
+            if (match.Start < 0)
+                return null;
+
+            starts[index] = match.Start;
+        }
+
+        return starts;
+    }
+
+    private const int MaxUnnarrowedSections = 40;
+    private const int MaxHeadingLevel = 6;
+
+    private static string Folded(int level, int hidden) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"maxLevel={level} applied - {hidden} deeper section(s) hidden; pass maxLevel= or verbose=true for every level");
+
+    private static int Fitting(IReadOnlyList<DocumentSection> sections)
+    {
+        if (sections.Count <= MaxUnnarrowedSections)
+            return 0;
+
+        var deepest = 2;
+
+        for (var level = 3; level <= MaxHeadingLevel; level++)
+        {
+            if (Counted(sections, level) > MaxUnnarrowedSections)
+                break;
+
+            deepest = level;
+        }
+
+        return Counted(sections, deepest) > 1 ? deepest : 0;
+    }
+
+    private static int Counted(IReadOnlyList<DocumentSection> sections, int level)
+    {
+        var counted = 0;
+
+        foreach (var section in sections)
+        {
+            if (section.Level <= level)
+                counted++;
+        }
+
+        return counted;
+    }
+
+    private static string Addressed(TextEdit edit) => ByText(edit) ? "oldText" : "section heading";
+
+    private static string CollisionRemedy(TextEdit edit) => ByText(edit)
+        ? "give the two entries different occurrence= values - occurrence=1 and occurrence=2 of one anchor do land in a single call - or lengthen each anchor so it is unique"
+        : "send the second in its own call - the first entry adds or drops a heading, so the ordinals move under it";
+
+    private static int Ordinal(TextEdit edit) => edit.Occurrence > 0 ? edit.Occurrence : 1;
 }

@@ -844,9 +844,7 @@ public sealed class ToolGuardTests
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied, command);
 
     [Theory]
-    [InlineData("git diff --cached --name-only")]
     [InlineData("git diff --cached")]
-    [InlineData("git diff --staged --stat")]
     public void Guard_ForAStagedDiff_NamesTheStagedFormOfEveryToolThatAnswersIt(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
@@ -855,6 +853,33 @@ public sealed class ToolGuardTests
         Assert.Contains("diff_symbols staged=true", verdict.Reason, StringComparison.Ordinal);
         Assert.Contains("diff_text staged=true", verdict.Reason, StringComparison.Ordinal);
         Assert.Contains("changed_files staged=true", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git diff --stat", "changed_files")]
+    [InlineData("git diff --numstat", "changed_files")]
+    [InlineData("git diff --name-only", "changed_files")]
+    [InlineData("git diff --name-status", "changed_files")]
+    [InlineData("git diff --cached --name-only", "changed_files staged=true")]
+    [InlineData("git diff --staged --stat", "changed_files staged=true")]
+    public void Guard_ForACountsOnlyDiff_RoutesToTheToolThatAdvertisesIt(string command, string routing)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.StartsWith(routing, verdict.Routing ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("diff_symbols", verdict.Routing ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("dotnet test --list-tests", "list_tests")]
+    [InlineData("dotnet list package", "package_list")]
+    public void Guard_ForAListingCommand_RoutesToTheListingToolRatherThanTheRunner(string command, string routing)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.StartsWith(routing, verdict.Routing ?? string.Empty, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1744,5 +1769,31 @@ public sealed class ToolGuardTests
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff -- src/App/OrderService.cs" });
 
         Assert.Contains("diff_symbols", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git diff -p --stat")]
+    [InlineData("git diff --patch --numstat")]
+    [InlineData("git diff --unified=5 --stat")]
+    public void Guard_ForADiffAskingForHunkTextBesideCounts_DoesNotRouteToTheCountsTool(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.DoesNotContain("changed_files", verdict.Routing ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git diff --stat=200")]
+    [InlineData("dotnet vstest --ListTests")]
+    public void Guard_ForAFlagSpelledTheOtherWay_StillRoutesToTheListingTool(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command });
+
+        Assert.True(verdict.Denied, command);
+        Assert.True(
+            (verdict.Routing ?? string.Empty).StartsWith("changed_files", StringComparison.Ordinal)
+            || (verdict.Routing ?? string.Empty).StartsWith("list_tests", StringComparison.Ordinal),
+            command + " routed to " + verdict.Routing);
     }
 }

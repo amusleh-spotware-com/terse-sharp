@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis;
 using TerseSharp.Server.Tools;
 
 namespace TerseSharp.Server;
@@ -94,6 +95,41 @@ internal static class RefRead
             ? size
             : null;
     }
+
+    public static async Task<string> SourceAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string reference,
+        string symbolId,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        var relative = Relative(workspace, path);
+        var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
+
+        if (!shown.IsOk)
+            return shown.Error!.Render();
+
+        var source = await SourceService.FromTextAsync(
+            workspace.Root,
+            relative + "@" + reference,
+            shown.Value!,
+            symbolId,
+            References(workspace, path),
+            format,
+            cancellationToken).ConfigureAwait(false);
+
+        return source.IsOk ? source.Value! + "\n" + Historical(reference) : source.Error!.Render();
+    }
+
+    public static TerseError Unaddressed() => Errors.Invalid(
+        "ref= needs path=, because a revision has no workspace index to resolve a name against",
+        "pass path=<the file the symbol lives in> beside ref=, or drop ref= to read the working tree");
+
+    private static IEnumerable<MetadataReference> References(LoadedWorkspace workspace, string path) =>
+        DocumentLookup.Find(workspace, path)?.Project.MetadataReferences
+        ?? workspace.Solution.Projects.FirstOrDefault()?.MetadataReferences
+        ?? [];
 }
 
 internal readonly record struct OutlineOptions(bool Signatures, string Ids, bool Usings, bool ParameterNames, string? Contains, bool All = false);

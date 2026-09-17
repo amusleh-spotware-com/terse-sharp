@@ -58,7 +58,7 @@ public static class Errors
     public static TerseError DocumentNotFound(string path) => new(
         TerseErrorCode.DocumentNotFound,
         string.Create(CultureInfo.InvariantCulture, $"'{path}' is not a document in the loaded workspace"),
-        "check the path, or use find_files to locate it");
+        "check the path, or run find_files on it - a concrete path answers ABSENT, EXCLUDED or EXISTS, so a missing file and an excluded one are told apart without a shell");
 
     public static TerseError OutOfWorkspace(string path) => new(
         TerseErrorCode.OutOfWorkspace,

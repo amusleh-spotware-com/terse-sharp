@@ -189,7 +189,10 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
         var matches = loaded.Where(workspace => workspace.Contains(pathHint)).ToArray();
 
-        return matches.Length is 0 ? null : Ok(matches.MaxBy(workspace => workspace.Root.Length)!, semantic);
+        if (matches.Length > 0)
+            return Ok(matches.MaxBy(workspace => workspace.Root.Length)!, semantic);
+
+        return Path.IsPathRooted(pathHint) ? null : Holding(loaded, pathHint, semantic);
     }
 
     private static Result<WorkspaceLease> Single(LoadedWorkspace[] loaded, bool semantic) =>
@@ -331,4 +334,18 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
     private const long PressureBytes = 2L * 1024 * 1024 * 1024;
     private static readonly TimeSpan MinimumIdle = TimeSpan.FromMinutes(1);
+
+    private static Result<WorkspaceLease>? Holding(LoadedWorkspace[] loaded, string pathHint, bool semantic)
+    {
+        var holders = loaded.Where(workspace => Present(workspace.Root, pathHint)).ToArray();
+
+        return holders.Length is 1 ? Ok(holders[0], semantic) : null;
+    }
+
+    private static bool Present(string root, string relative)
+    {
+        var full = Path.Combine(root, relative);
+
+        return PathBoundary.Contains(root, full) && (File.Exists(full) || Directory.Exists(full));
+    }
 }

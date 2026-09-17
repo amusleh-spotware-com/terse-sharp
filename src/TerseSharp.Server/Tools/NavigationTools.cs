@@ -103,17 +103,37 @@ public sealed class NavigationTools(ToolContext context)
     Described(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, verbose, path, cancellationToken);
 
     [McpServerTool(Name = "get_symbol_source", ReadOnly = true)]
-    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
+    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. ref= returns the member as it was at a git ref; it takes one id and requires path=, so a pre-change body needs no line range that can clip it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
     public Task<string> GetSymbolSource(
-[Description("Symbol id of the member.")] string? symbolId = null,
-[Description("Several symbol ids returned in one response. Replaces one call per member; an entry that does not resolve answers NOT_RESOLVED inline rather than failing the call.")] string[]? symbolIds = null,
-[Description("Workspace or worktree name.")] string? workspace = null,
-[Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
-[Description("Alias for symbolId.")] string? symbol = null,
-[Description("Include doc comments and inline comments. Default true; false drops them, which is the cheap read when you only need the shape.")] bool comments = true,
-[Description("File the names live in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
-CancellationToken cancellationToken = default) =>
-SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, new SourceFormat(verbose, comments), path, cancellationToken);
+        [Description("Symbol id of the member.")] string? symbolId = null,
+        [Description("Several symbol ids returned in one response. Replaces one call per member; an entry that does not resolve answers NOT_RESOLVED inline rather than failing the call.")] string[]? symbolIds = null,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
+        [Description("Alias for symbolId.")] string? symbol = null,
+        [Description("Include doc comments and inline comments. Default true; false drops them, which is the cheap read when you only need the shape.")] bool comments = true,
+        [Description("File the names live in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
+        [Description("Git ref to read the member at, e.g. main. Takes one symbol id and requires path=; the declaration is resolved from that revision's own text.")] string? @ref = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (@ref is not { Length: > 0 } reference)
+            return SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, new SourceFormat(verbose, comments), path, cancellationToken);
+
+        if (symbolIds is { Length: > 0 })
+            return Task.FromResult(RefRead.Batched("symbolIds=").Render());
+
+        if ((symbolId ?? symbol) is not { Length: > 0 } target)
+            return Task.FromResult(Errors.Blank("symbolId").Render());
+
+        if (path is not { Length: > 0 } file)
+            return Task.FromResult(RefRead.Unaddressed().Render());
+
+        return context.WithWorkspaceAsync(
+            workspace,
+            file,
+            loaded => RefRead.SourceAsync(loaded, file, reference, target, new SourceFormat(verbose, comments), cancellationToken),
+            semantic: false,
+            cancellationToken);
+    }
 
     private Task<string> SourceOf(string[] requested, bool batched, string? workspace, SourceFormat format, string? path, CancellationToken cancellationToken) => requested switch
     {

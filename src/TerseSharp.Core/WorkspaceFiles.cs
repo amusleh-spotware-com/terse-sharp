@@ -111,4 +111,48 @@ public static class WorkspaceFiles
 
     public static bool HoldsSessionState(string directory) =>
         Path.GetFileName(directory.AsSpan()).Equals(ClaudeDirectory, StringComparison.OrdinalIgnoreCase);
+
+    private static readonly string[] GitInternals = [".git"];
+
+    public static bool IsGitPath(string file, string root) =>
+        HoldsSegment(Path.GetRelativePath(root, file), GitInternals);
+
+    private static bool HoldsSegment(ReadOnlySpan<char> relativePath, string[] names)
+    {
+        var remaining = relativePath;
+
+        while (!remaining.IsEmpty)
+        {
+            var separator = remaining.IndexOfAny('/', '\\');
+
+            if (Matches(separator < 0 ? remaining : remaining[..separator], names))
+                return true;
+
+            remaining = separator < 0 ? default : remaining[(separator + 1)..];
+        }
+
+        return false;
+    }
+
+    public static string? ExcludedBy(string file, string root) => IsExcluded(file, root)
+        ? FirstExcludedSegment(Path.GetRelativePath(root, file)) ?? ClaudeDirectory + " session state"
+        : null;
+
+    private static string? FirstExcludedSegment(ReadOnlySpan<char> relativePath)
+    {
+        var remaining = relativePath;
+
+        while (!remaining.IsEmpty)
+        {
+            var separator = remaining.IndexOfAny('/', '\\');
+            var segment = separator < 0 ? remaining : remaining[..separator];
+
+            if (Matches(segment, ExcludedDirectories))
+                return new string(segment);
+
+            remaining = separator < 0 ? default : remaining[(separator + 1)..];
+        }
+
+        return null;
+    }
 }

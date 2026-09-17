@@ -43,7 +43,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` |
 | **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline; `verbose: true` or a line range for the text |
-| **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId)` on a **type** id |
+| **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId, verbose: true)` on a **type** id — the default answers its member outline |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` |
 | **Navigate** | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` |
 | **Navigate** | one `get_type_outline` call per type | `get_type_outline(symbolIds: [...])` |
@@ -65,7 +65,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` |
 | **Files** | `ls` in a directory outside the workspace | `find_files(glob, root: "C:/logs")` |
 | **Files** | one `find_files` call per glob | `find_files(globs: [...])` |
-| **Files** | `Glob` / `ls` | `find_files(glob)` |
+| **Files** | `Glob` / `ls` | `find_files(glob)` — a concrete path matching nothing answers `ABSENT`, `EXCLUDED` or `EXISTS` |
 | **Files** | globbing a whole tree to learn its shape | `find_files(glob, depth: 2)` |
 | **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` |
 | **Files** | `Bash: git ls-files` | `find_files(glob, tracked: true)` |
@@ -81,6 +81,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Files** | `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` |
 | **Files** | `sort \| uniq -c` over repeated log lines | `search_text(query, unique: true)` |
 | **Files** | `Bash: git show <ref>:<path>` | `read_text(path, ref: "main")` · `get_file_outline(path, ref: "main")` |
+| **Navigate** | the pre-change body of ONE member | `get_symbol_source(symbolId, path, ref: "main")` — `path=` required at a ref |
 | **Files** | `Read` a non-`.cs` file | `read_text(path)` |
 | **Files** | `Read` **several** files | `read_text(paths: [...])` |
 | **Files** | `tail -n 200 log.txt` | `read_text(path, tail: 200)` |
@@ -89,7 +90,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Files** | `wc -c file` for a size you want *while* reading | `read_text(path, bytes: true)` |
 | **Files** | guessing what a budgeted document costs before its test runs | `read_text(path, tokens: true)` |
 | **Files** | a file whose lines are enormous | `read_text(path, maxChars: 20000)` |
-| **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` |
+| **Files** | `Read` a whole `.md` to find a section | `read_text(path, headings: true)` then `read_text(path, section: "## Commands")` — a map over 40 sections folds to the levels that fit; `verbose: true` lists every level |
 | **Files** | reading a whole `.md` whose content is one long table | `read_text(path, columns: "Finding,Tool")` |
 | **Files** | a projection whose first column is PROSE, when you only want the row ids | `read_text(path, columns: "Finding", cellChars: 60)` |
 | **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` |
@@ -104,7 +105,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` — an entry carries its own `path` and `force` |
 | **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` — every `.cs` among them shares ONE compile gate |
-| **Edit text** | two entries of one `edits=` batch addressing occurrence 1 and 2 of the SAME anchor | `edit_text` refuses them up front — lengthen the anchors, or send the second alone |
+| **Edit text** | two entries of one `edits=` batch addressing occurrence 1 and 2 of the SAME anchor | `edit_text(path, edits: [...])` — ordinals resolve against the ORIGINAL text |
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` |
 | **Edit text** | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` |
 | **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` already handles it — dedented payloads still match |
@@ -134,7 +135,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Git** | `Bash: git ls-remote --tags origin` | `history(tags: true, remote: true)` — every row tagged `local=yes\|no remote=yes\|no` |
 | **Git** | `Bash: git diff --cached` for its hunk text or its declarations | `diff_symbols(staged: true)` · `diff_text(staged: true)` |
 | **Git** | `Bash: git diff --cached --name-only` / `git status --untracked-files=no` | `changed_files(staged: true)` · `changed_files(untracked: false)` |
-| **Git** | `Bash: git status` / `git diff --stat` | `changed_files` — a byte-identical repeat with no watcher event and no git state change replays as `UNCHANGED` |
+| **Git** | `Bash: git status` / `git diff --stat` / `--numstat` / `--name-only` / `--name-status` | `changed_files` — the counts family routes here, not to `diff_symbols`; a byte-identical repeat with nothing moved replays as `UNCHANGED` |
 | **Git** | `Bash: git diff` to decide what to review | `diff_symbols` — hunks become symbol ids for `get_symbol_source` |
 | **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` — a clipped answer is `INCOMPLETE` and names the `skipLines=` that continues it |
 | **Build and test** | `Bash: dotnet build` / `msbuild` | `build` — a byte-identical repeat with nothing written since answers `build UNCHANGED` |

@@ -725,7 +725,12 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         var stamp = new StringBuilder(160);
 
-        stamp.Append(sync.Generations.ToString()).Append('#').Append(sync.Events.ToString(CultureInfo.InvariantCulture));
+        stamp.Append(sync.Generations.ToString())
+            .Append('#')
+            .Append(sync.Events.ToString(CultureInfo.InvariantCulture))
+            .Append('#')
+            .Append(sync.Stirred.ToString(CultureInfo.InvariantCulture));
+
         StatInto(stamp, Path.Combine(git, "index"));
         StatInto(stamp, Path.Combine(git, "HEAD"));
         StatInto(stamp, Path.Combine(git, "packed-refs"));

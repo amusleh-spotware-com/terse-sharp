@@ -443,4 +443,36 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
             "advertised as a verdict-answering build or test tool but no verdict census calls it: " + string.Join(", ", uncensused));
         Assert.All(ToolCensus.VerdictPrefixed, verdict => Assert.Contains(verdict.Tool, spawning));
     }
+
+    [Fact]
+    public async Task EveryToolThatAdvertisesItReplacesAShellCommand_IsWhereTheGuardRoutesIt()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var advertised = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        foreach (var tool in tools)
+        {
+            foreach (var command in Shell(tool.Description ?? string.Empty))
+            {
+                if (!advertised.TryGetValue(command, out var owners))
+                    advertised[command] = owners = new HashSet<string>(StringComparer.Ordinal);
+
+                owners.Add(tool.Name);
+            }
+        }
+
+        var misrouted = advertised
+            .Select(entry => (entry.Key, Routing: ToolGuard.Inspect("Bash", new JsonObject { ["command"] = entry.Key }).Routing ?? string.Empty, Owners: entry.Value))
+            .Where(entry => !entry.Owners.Any(owner => entry.Routing.Contains(owner, StringComparison.Ordinal)))
+            .Select(entry => $"'{entry.Key}' is advertised by {string.Join("/", entry.Owners)} but the guard routes it to '{entry.Routing}'")
+            .ToArray();
+
+        Assert.True(
+            advertised.Count >= ToolCensus.MinShellReplacements,
+            $"the enrolled shell-command set is a ratchet: {advertised.Count} < {ToolCensus.MinShellReplacements}");
+
+        Assert.True(
+            misrouted.Length is 0,
+            "the guard sends the agent to a tool other than the one whose description claims the command: " + string.Join("; ", misrouted));
+    }
 }

@@ -63,4 +63,34 @@ public sealed class WorkspaceExclusionTests
             temporary.Delete(recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData(".git/index", true)]
+    [InlineData(".git/refs/heads/main", true)]
+    [InlineData("src/.git/HEAD", true)]
+    [InlineData("node_modules/pkg/index.js", false)]
+    [InlineData("bin/Debug/terse.dll", false)]
+    [InlineData("src/App/Order.cs", false)]
+    [InlineData("gitignore.md", false)]
+    public void IsGitPath_IsTrueOnlyForThePathsInsideTheGitDirectory(string relative, bool internalToGit)
+    {
+        var root = Path.GetTempPath();
+        var file = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+        Assert.Equal(internalToGit, WorkspaceFiles.IsGitPath(file, root));
+    }
+
+    [Theory]
+    [InlineData("node_modules/pkg/index.js", "node_modules")]
+    [InlineData("src/App/obj/Debug/App.dll", "obj")]
+    [InlineData(".claude/todos/session.json", ".claude session state")]
+    [InlineData("src/App/Order.cs", null)]
+    [InlineData(".claude/commands/ship.md", null)]
+    public void ExcludedBy_NamesTheRuleThatSkipsThePathAndNothingForAWalkedOne(string relative, string? rule)
+    {
+        var root = Path.GetTempPath();
+        var file = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+        Assert.Equal(rule, WorkspaceFiles.ExcludedBy(file, root));
+    }
 }

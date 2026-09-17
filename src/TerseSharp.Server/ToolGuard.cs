@@ -169,7 +169,7 @@ public static class ToolGuard
         return DotNetSubcommand(tokens) switch
         {
             "build" or "msbuild" => "build",
-            "test" or "vstest" => "test",
+            "test" or "vstest" => Testing(tokens),
             "format" => Formatting(tokens),
             "clean" => "clean",
             "list" => Listing(tokens),
@@ -201,9 +201,12 @@ public static class ToolGuard
         "format-style" => "use cleanup fix=style, or cleanup verify=true fix=style for --verify-no-changes - that verifies exactly what this command checks",
         "clean" => "use clean",
         "list-package" => "use package_list, with vulnerable=true or outdated=true for the resolved-graph answers",
+        "test-list" => "use list_tests, with contains= for the substring filter - it lists the names without running anything",
         "status" => "use changed_files, with untracked=false for --untracked-files=no, or changed_files root=<that directory> when it is not the loaded workspace",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show; for a directory that is not loaded, diff_text root=<that directory>",
         "diff-cached" => "use diff_symbols staged=true, then diff_text staged=true for the hunk text it cannot show - or changed_files staged=true for the --name-only and --stat answer, one line per file",
+        "diff-counts" => "use changed_files, with path= for the pathspec this command names - one line per file with the added and deleted counts and the status letter, which is exactly what --stat, --numstat, --name-only and --name-status ask for",
+        "diff-cached-counts" => "use changed_files staged=true, with path= for the pathspec this command names - one line per staged file with the added and deleted counts and the status letter",
         "diff-text" => "use diff_text for that path - it returns the hunk text itself, which is the whole answer for a file that declares no C# symbols",
         "diff-cached-text" => "use diff_text staged=true for that path - it returns the hunk text itself, which is the whole answer for a file that declares no C# symbols",
         "ls-files" => "use find_files tracked=true",
@@ -219,10 +222,12 @@ public static class ToolGuard
     private static string Rationale(string subcommand) => subcommand switch
     {
         "format" or "format-analyzers" or "format-style" or "clean" => "Shelling out rewrites or deletes files outside the compile gate and returns raw CLI output; the tool returns a diff or freed-byte counters, rolls back an edit that breaks the build, names every diagnostic no fixer covers, and answers a verify in one line instead of a per-file listing.",
+        "test-list" => "list_tests answers the test names a project or solution declares without running one of them, bounded and with the raw VSTest framing removed, and it takes contains=, project=, configuration= and targetFramework= exactly as run_tests does.",
         "list-package" => "package_list answers the declared references from the project file with no restore at all, and vulnerable=true or outdated=true runs the same resolved-graph audit through the shared child-process runner, workspace-relative and without the CLI's table framing.",
         "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, staged= and untracked=, so the end-of-task review costs a listing instead of a diff.",
         "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths.",
         "diff-cached" => "diff_symbols, diff_text and changed_files all take staged=true and read the index rather than the working tree, which is the question a pre-commit check asks - the first two answer the declarations and the hunk text, the third one bounded line per file.",
+        "diff-counts" or "diff-cached-counts" => "changed_files is the tool that advertises this command - it answers one bounded line per file with the added and deleted counts and the status letter, which is the whole of what a --stat family diff asks for, and it takes baseRef=, path=, exclude= and staged=. diff_symbols would map hunks onto declarations, which is a different and far more expensive question.",
         "diff-text" or "diff-cached-text" => "diff_symbols answers a hunk as the C# declaration containing it, and the path this command names declares none, so it would be a dead end; diff_text returns that path's unified diff directly, bounded, workspace-relative, and it takes baseRef= and staged= as well.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
         "ls-remote-tags" => "history tags=true remote=true reads both tag lists through the same runner and answers one bounded line per tag saying which side has it, so 'was this version ever pushed?' needs no shell and no diffing two listings by eye. Only origin's tag listing is replaced: --heads, another remote and a bare ls-remote are left alone.",
@@ -624,6 +629,8 @@ public static class ToolGuard
     {
         "build" => "build",
         "test" => "run_tests",
+        "test-list" => "list_tests",
+        "list-package" => "package_list",
         "clean" => "clean",
         "format" => "format, then cleanup fix=all",
         "format-analyzers" => "cleanup fix=analyzers",
@@ -631,6 +638,8 @@ public static class ToolGuard
         "status" => "changed_files",
         "diff" => "diff_symbols",
         "diff-cached" => "diff_symbols staged=true",
+        "diff-counts" => "changed_files",
+        "diff-cached-counts" => "changed_files staged=true",
         "diff-text" => "diff_text",
         "diff-cached-text" => "diff_text staged=true",
         "ls-files" => "find_files tracked=true",
@@ -726,6 +735,14 @@ public static class ToolGuard
 
     private static string? Listing(string[] tokens) =>
         Array.Exists(tokens, token => token.Equals("package", StringComparison.OrdinalIgnoreCase)) ? "list-package" : null;
+
+    private static string Testing(string[] tokens) => Array.Exists(
+        tokens,
+        token => token.Equals("--list-tests", StringComparison.OrdinalIgnoreCase)
+            || token.Equals("--listtests", StringComparison.OrdinalIgnoreCase)
+            || token.Equals("-lt", StringComparison.OrdinalIgnoreCase))
+        ? "test-list"
+        : "test";
 
     private static bool Described(string[] tokens) =>
         !Array.Exists(tokens, token => token.StartsWith("--", StringComparison.Ordinal)
@@ -1629,8 +1646,16 @@ public static class ToolGuard
         return length > 0 && bare.Length > length ? Bare(bare[length..]) : bare;
     }
 
-    private static string Diffing(string subcommand, string segment) =>
-        subcommand is "diff" or "diff-cached" && Unmappable(segment) ? subcommand + "-text" : subcommand;
+    private static string Diffing(string subcommand, string segment)
+    {
+        if (subcommand is not ("diff" or "diff-cached"))
+            return subcommand;
+
+        if (Counting(segment))
+            return subcommand + "-counts";
+
+        return Unmappable(segment) ? subcommand + "-text" : subcommand;
+    }
 
     private static bool Unmappable(string segment) =>
         DiffPath(segment) is { } path
@@ -1659,6 +1684,22 @@ public static class ToolGuard
 
     private static bool IsDotFile(ReadOnlySpan<char> name) =>
         name.Length > 1 && name[0] is '.' && !name[1..].Contains('.');
+
+    private static bool Counting(string segment)
+    {
+        var tokens = Tokens(segment);
+
+        return !Array.Exists(
+            tokens,
+            token => token is "-p" or "-u" or "--patch"
+                || token.StartsWith("-U", StringComparison.Ordinal)
+                || token.StartsWith("--unified", StringComparison.Ordinal))
+            && Array.Exists(
+                tokens,
+                token => token is "--numstat" or "--shortstat" or "--name-only" or "--name-status"
+                    || token.StartsWith("--stat", StringComparison.Ordinal));
+    }
+
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

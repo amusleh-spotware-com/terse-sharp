@@ -1,3 +1,4 @@
+using System.Text;
 using TerseSharp.Core;
 
 namespace TerseSharp.E2ETests;
@@ -1704,5 +1705,83 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("no change - the result is identical to what is already there", restored, StringComparison.Ordinal);
         Assert.DoesNotContain("changedLines=", restored, StringComparison.Ordinal);
         Assert.StartsWith("0 files", status, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_ForAConcretePath_TellsAbsentApartFromExcluded()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "node_modules", "pkg");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, "index.js"), "scratch", TestContext.Current.CancellationToken);
+
+            var excluded = await server.CallAsync("find_files", new() { ["glob"] = "node_modules/pkg/index.js" });
+            var absent = await server.CallAsync("find_files", new() { ["glob"] = "node_modules/pkg/missing.js" });
+
+            Assert.Contains("EXCLUDED", excluded, StringComparison.Ordinal);
+            Assert.Contains("'node_modules'", excluded, StringComparison.Ordinal);
+            Assert.Contains("ABSENT", absent, StringComparison.Ordinal);
+            Assert.DoesNotContain("EXCLUDED", absent, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(Path.Combine(TerseServerFixture.FixtureRoot, "node_modules"), recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_WithHeadings_FoldsADeepMapToTheLevelsThatFitAndSaysWhatItHid()
+    {
+        const string Probe = "terse-i556-probe.md";
+        var content = new StringBuilder("# Probe\n");
+
+        for (var section = 0; section < 45; section++)
+        {
+            content.Append(CultureInfo.InvariantCulture, $"\n## Section {section}\n");
+
+            for (var nested = 0; nested < 2; nested++)
+                content.Append(CultureInfo.InvariantCulture, $"\n### Nested {section}-{nested}\n\nbody\n");
+        }
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = content.ToString() });
+
+        try
+        {
+            var folded = await server.CallAsync("read_text", new() { ["path"] = Probe, ["headings"] = true });
+            var whole = await server.CallAsync("read_text", new() { ["path"] = Probe, ["headings"] = true, ["verbose"] = true });
+
+            Assert.Contains("46 sections", folded, StringComparison.Ordinal);
+            Assert.Contains("maxLevel=2 applied - 90 deeper section(s) hidden", folded, StringComparison.Ordinal);
+            Assert.DoesNotContain("Nested 0-0", folded, StringComparison.Ordinal);
+            Assert.Contains("136 sections", whole, StringComparison.Ordinal);
+            Assert.Contains("Nested 0-0", whole, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task FindFiles_ForAConcretePathOutsideTheRoot_SaysSoInsteadOfProbingIt()
+    {
+        var escaped = await server.CallAsync("find_files", new() { ["glob"] = "../../README.md" });
+
+        Assert.Contains("OUTSIDE", escaped, StringComparison.Ordinal);
+        Assert.DoesNotContain("EXISTS", escaped, StringComparison.Ordinal);
+        Assert.DoesNotContain("ABSENT", escaped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WhenAFilterDroppedTheOnlyMatch_NamesTheFilterRatherThanGuessingACause()
+    {
+        var filtered = await server.CallAsync("find_files", new() { ["glob"] = "appsettings.json", ["name"] = "zzz-no-such-name" });
+
+        Assert.Contains("EXISTS", filtered, StringComparison.Ordinal);
+        Assert.Contains("the name= filter is applied after the glob", filtered, StringComparison.Ordinal);
+        Assert.DoesNotContain("symlink", filtered, StringComparison.Ordinal);
     }
 }

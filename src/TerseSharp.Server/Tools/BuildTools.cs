@@ -26,7 +26,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         BuildGreen,
         Key("build", [project, configuration, targetFramework, Joined(properties), Flag(verbose), workspace]),
         force,
-        () => context.WithTargetAsync(workspace, project, target =>
+        WatchedRun.From(() => context.WithTargetAsync(workspace, project, target =>
         {
             if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
@@ -38,7 +38,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     target, resolved, scope.Value, verbose, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
         },
-        cancellationToken: cancellationToken),
+        cancellationToken: cancellationToken)),
         cancellationToken);
 
     [McpServerTool(Name = "clean", Destructive = true)]
@@ -96,7 +96,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         "run_tests",
             [test, Joined(tests), filter, project, Joined(projects), Flag(changed), Count(parallel), Joined(runSettings), configuration, targetFramework, Joined(properties), Flag(noBuild), Flag(includePassed), Count(slowest), Flag(verbose), Count(timeoutSeconds), workspace]),
         force,
-        () => context.WithTargetAsync(
+        WatchedRun.From(() => context.WithTargetAsync(
             workspace,
             project,
             target =>
@@ -144,7 +144,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             },
             changed && WholeSolution(project, projects),
             WholeSolution(project, projects),
-            cancellationToken),
+            cancellationToken)),
         cancellationToken);
 
     [McpServerTool(Name = "rerun_failed")]
@@ -649,25 +649,23 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     private const string GreenVerdict = "run_tests PASSED";
 
-    private async Task<string> Replayable(string tool, string green, string key, bool force, Func<Task<string>> run, CancellationToken cancellationToken)
+    private async Task<string> Replayable(string tool, string green, string key, bool force, WatchedRun run, CancellationToken cancellationToken)
     {
-        var watched = Watched(run);
-
         await context.ReadyAsync().ConfigureAwait(false);
 
         if (!await SyncedAsync(cancellationToken).ConfigureAwait(false))
-            return await watched().ConfigureAwait(false);
+            return await run.InvokeAsync().ConfigureAwait(false);
 
         var stamp = Stamp(out var unavailable);
         var now = Stopwatch.GetTimestamp();
 
         if (stamp is null)
-            return await Traced(watched(), unavailable!).ConfigureAwait(false);
+            return await Traced(run.InvokeAsync(), unavailable!).ConfigureAwait(false);
 
         if (!force && unchanged.Replay(tool, key, stamp, now) is { } previous)
             return previous;
 
-        return await Memoized(green, key, stamp, watched, Miss(force, key, stamp)).ConfigureAwait(false);
+        return await Memoized(green, key, stamp, run.InvokeAsync, Miss(force, key, stamp)).ConfigureAwait(false);
     }
 
     private async Task<string> Memoized(string green, string key, string stamp, Func<Task<string>> run, string miss)
@@ -760,14 +758,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         !TraceMemo ? string.Empty
             : force ? "force=true"
             : unchanged.MissReason(key, stamp);
-
-    private static Func<Task<string>> Watched(Func<Task<string>> run) => async () =>
-    {
-        var before = EditPulse.Changed;
-        var verdict = await run().ConfigureAwait(false);
-
-        return StaleRun.Annotated(verdict, before, EditPulse.Changed);
-    };
 
     private async Task<bool> SyncedAsync(CancellationToken cancellationToken)
     {

@@ -76,6 +76,9 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
 
     public void Notice(string path)
     {
+        if (!WorkspaceFiles.IsGitPath(path, root))
+            Interlocked.Increment(ref stirredEvents);
+
         if (WorkspaceFiles.IsTemporary(path) || WorkspaceFiles.IsExcluded(path, root))
             return;
 
@@ -405,4 +408,8 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     private int noticedEvents;
 
     public int Events => Volatile.Read(ref noticedEvents);
+
+    private int stirredEvents;
+
+    public int Stirred => Volatile.Read(ref stirredEvents);
 }

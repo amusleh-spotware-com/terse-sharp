@@ -13,6 +13,7 @@ public sealed class EditTools(ToolContext context)
     public Task<string> ReplaceSymbolBody(
             [Description("Symbol id of the member.")] string? symbolId = null,
             [Description("New body: statements with or without the surrounding braces, or an expression body as '=> expr'. On a member that is already expression-bodied, a bare expression is accepted and stays expression-bodied.")] string body = "",
+        [Description("Alias for body.")] string? declaration = null,
             [Description("Diff only, write nothing.")] bool dryRun = false,
             [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
             [Description(PolicyHelp)] bool allowPolicy = false,
@@ -32,14 +33,15 @@ public sealed class EditTools(ToolContext context)
             return Task.FromResult(Unknown(token, "replace_symbol_body"));
 
         var target = symbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
-        var text = held is null ? body : First(held.Payloads, body);
+        var supplied = body is { Length: > 0 } ? body : declaration ?? string.Empty;
+        var text = held is null ? supplied : First(held.Payloads, supplied);
         var imports = Kept(usings, held?.Usings);
 
         return Supplied(workspace, target, text, "body", (loaded, resolved) => SymbolEditService.ReplaceBodyAsync(
-            loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken),
-            cancellationToken,
-            new Carry("replace_symbol_body", [target ?? string.Empty], [text], Usings: imports),
-            held?.Root);
+                loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken),
+                cancellationToken,
+                new Carry("replace_symbol_body", [target ?? string.Empty], [text], Usings: imports),
+                held?.Root);
     }
 
     [McpServerTool(Name = "replace_symbol")]

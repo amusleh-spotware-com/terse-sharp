@@ -208,7 +208,9 @@ comment, any backslash escape, a mixed `;`/`&&` run or a shell keyword is denied
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text tools
 (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that names a
 path operand at all, while a piped `head -40` reading stdin still runs; `dotnet build`/`test`/`format`/`clean`,
-`dotnet watch build`/`test`, `msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose command
+`dotnet watch build`/`test`, `msbuild`, `dotnet list package` (routed to `package_list`, as
+`dotnet test --list-tests` is to `list_tests` and a `--stat`/`--numstat`/`--name-only`/`--name-status`
+diff is to `changed_files`); a **bare `sleep`** — a segment whose command
 word is `sleep`, or a `powershell -Command "Start-Sleep …"` hosting one, outside a `while`/`until`/`for`
 loop — because waiting is not work and nothing replaces
 it; and the working-tree half of git — `git status` and `git diff` in every flag and `-C` form,
@@ -238,17 +240,17 @@ terse serve --tools core     # advertise the 21 tools that answer most questions
 
 An MCP server's fixed cost is its tool list, attached to every request — and past a certain size it
 measurably costs tool-selection accuracy. `workspace_status` prints `advertised=<n> tools <t> tokens` —
-asserted on every push against the list the server really sent, under a **30,700-token ceiling** — and lists
+asserted on every push against the list the server really sent, under a **30,900-token ceiling** — and lists
 the whole surface beside it under `verbose=true`, so what a narrowing saves is read off the running server
 rather than estimated. The surface shrinks three ways, all optional.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤25,450 tokens**. Load one that does and they come back, announced with
+  **57 tools, ≤25,700 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
 - **Per project.** The same `.terse.json`, found by walking up from the server's directory and never above
   the repository root, disables whole groups (`analysis` `build` `edit` `file` `git`
   `navigation` `project` `razor` `refactor` `resx` `workspace` `xaml`) or individual `names`, which outrank
-  their group. That file measures **64 tools, ≤26,250 tokens**. The guard follows it: a built-in whose
+  their group. That file measures **64 tools, ≤26,450 tokens**. The guard follows it: a built-in whose
   every replacement you disabled is allowed again. An unknown key is reported rather than silently
   dropped, and the file is read once at startup, so restart your agent after changing it.
 - **By profile.** `--tools core`, or `TERSE_TOOLS=core`; `--tools all` opts out of every narrowing.

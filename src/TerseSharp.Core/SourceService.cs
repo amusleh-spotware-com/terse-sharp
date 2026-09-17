@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace TerseSharp.Core;
@@ -264,5 +265,61 @@ public static class SourceService
             && text.Slice(opening.Length + symbolId.Length, closing.Length).SequenceEqual(closing)
                 ? message[length..]
                 : null;
+    }
+
+    private static IEnumerable<ISymbol> Declared(INamespaceOrTypeSymbol container)
+    {
+        foreach (var member in container.GetMembers())
+        {
+            if (member is not INamespaceSymbol && member.DeclaringSyntaxReferences.Length > 0)
+                yield return member;
+
+            if (member is INamespaceOrTypeSymbol nested)
+            {
+                foreach (var deeper in Declared(nested))
+                    yield return deeper;
+            }
+        }
+    }
+
+    private static Result<ISymbol> Resolve(Compilation compilation, string text)
+    {
+        if (SymbolReference.IsDocumentationId(text))
+        {
+            return DocumentationCommentId.GetFirstSymbolForDeclarationId(text, compilation) is { } byId
+                ? Result.Ok(byId)
+                : Result.Fail<ISymbol>(Errors.SymbolNotFound(text, []));
+        }
+
+        if (SymbolReference.Parse(text) is not { } query)
+            return Result.Fail<ISymbol>(Errors.SymbolNotFound(text, []));
+
+        var matches = Declared(compilation.Assembly.GlobalNamespace)
+            .Where(symbol => string.Equals(symbol.Name, query.Member, StringComparison.Ordinal) && SymbolReference.Matches(symbol, query))
+            .ToArray();
+
+        return matches switch
+        {
+            [var only] => Result.Ok(only),
+            [] => Result.Fail<ISymbol>(Errors.SymbolNotFound(text, [])),
+            _ => Result.Fail<ISymbol>(Errors.AmbiguousName(text, [.. matches.Take(5).Select(match => SymbolId.From(match).Value)], matches.Length)),
+        };
+    }
+
+    public static async Task<Result<string>> FromTextAsync(
+        string root,
+        string label,
+        string text,
+        string symbolId,
+        IEnumerable<MetadataReference> references,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        var tree = CSharpSyntaxTree.ParseText(text, path: label, cancellationToken: cancellationToken);
+        var resolved = Resolve(CSharpCompilation.Create("terse-ref", [tree], references), symbolId);
+
+        return resolved.IsOk
+            ? await OfSymbolAsync(root, resolved.Value!, format, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(resolved.Error!);
     }
 }

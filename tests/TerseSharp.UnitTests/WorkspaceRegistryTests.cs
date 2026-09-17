@@ -432,4 +432,34 @@ public sealed class WorkspaceRegistryTests
             File.SetLastWriteTimeUtc(touched, stamp);
         }
     }
+
+    [Fact]
+    public async Task Resolve_WithARelativePathHintThatExistsUnderOneRootOnly_PicksThatWorkspace()
+    {
+        using var registry = new WorkspaceRegistry(maxWorkspaces: 2);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        var result = registry.Resolve(null, "notes.md");
+
+        Assert.True(result.IsOk, result.Error?.Message);
+        Assert.Equal(Path.GetFullPath(Fixtures.SolutionPath), result.Value!.Workspace.SolutionPath);
+
+        result.Value!.Dispose();
+    }
+
+    [Fact]
+    public async Task Resolve_WithARelativePathHintUnderNoRoot_StillRefusesRatherThanGuessing()
+    {
+        using var registry = new WorkspaceRegistry(maxWorkspaces: 2);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        var result = registry.Resolve(null, "no-such-file-anywhere.md");
+
+        Assert.False(result.IsOk);
+        Assert.Equal(TerseErrorCode.AmbiguousWorkspace, result.Error!.Code);
+    }
 }

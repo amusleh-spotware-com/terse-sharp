@@ -96,7 +96,7 @@ public static class TextSearchService
             string? name = null,
             int depth = 0,
             bool chosen = false) =>
-            Rendered(Tracked(Matched(workspace, glob), tracked), glob, maxResults, stamps, name, depth, null, chosen);
+            Rendered(Tracked(Matched(workspace, glob), tracked), glob, maxResults, stamps, name, depth, null, chosen, workspace.Root, tracked is not null);
 
     private static List<WorkspacePath> Named(List<WorkspacePath> files, string? name)
     {
@@ -841,7 +841,9 @@ public static class TextSearchService
         string? name,
         int depth,
         string? root,
-        bool chosen = false)
+        bool chosen = false,
+        string? tree = null,
+        bool tracked = false)
     {
         var files = Named(matched, name);
         var rows = depth > 0 ? Rolled(files, depth, stamps) : Listed(files, stamps);
@@ -856,8 +858,8 @@ public static class TextSearchService
         if (root is { Length: > 0 })
             response.Note("outside-workspace  " + root);
 
-        if (files.Count is 0 && name is not { Length: > 0 })
-            response.Note("no file matched - pass name=<text> to match a file name substring instead of a glob");
+        if (files.Count is 0)
+            response.Note(Absence(glob, tree ?? root, name, tracked));
 
         Folding(response, files, depth, Covered(shown));
         Batch(response, shown, root);
@@ -1054,4 +1056,38 @@ public static class TextSearchService
 
         return empties + counts.Count;
     }
+
+    private static string Absence(string glob, string? tree, string? name, bool tracked)
+    {
+        if (tree is not { Length: > 0 } root || Globbed(glob))
+        {
+            return name is { Length: > 0 }
+                ? "no file matched"
+                : "no file matched - pass name=<text> to match a file name substring instead of a glob";
+        }
+
+        var probe = Path.Combine(root, glob);
+
+        if (!PathBoundary.Contains(root, probe))
+            return string.Create(CultureInfo.InvariantCulture, $"OUTSIDE  '{glob}' resolves outside the workspace root, so this listing never covered it");
+
+        if (!File.Exists(probe) && !Directory.Exists(probe))
+            return string.Create(CultureInfo.InvariantCulture, $"ABSENT  '{glob}' is not on disk");
+
+        return WorkspaceFiles.ExcludedBy(probe, root) is { } rule
+            ? string.Create(CultureInfo.InvariantCulture, $"EXCLUDED  '{glob}' is on disk; the walk skips '{rule}' - read it with read_text, which reads any path")
+            : string.Create(CultureInfo.InvariantCulture, $"EXISTS  '{glob}' is on disk but this listing did not select it{Filtering(name, tracked)}");
+    }
+
+    private static bool Globbed(string glob) => glob.AsSpan().IndexOfAny(GlobMarkers) >= 0;
+
+    private static readonly SearchValues<char> GlobMarkers = SearchValues.Create("*?{[");
+
+    private static string Filtering(string? name, bool tracked) => (name, tracked) switch
+    {
+        ({ Length: > 0 }, true) => " - the name= and tracked= filters are applied after the glob",
+        ({ Length: > 0 }, false) => " - the name= filter is applied after the glob",
+        (_, true) => " - tracked=true keeps only the files git tracks",
+        _ => string.Empty,
+    };
 }

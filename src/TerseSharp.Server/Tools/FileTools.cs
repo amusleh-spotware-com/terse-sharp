@@ -186,7 +186,7 @@ bool verbose) =>
         [Description("With section=, lowercase: append writes after its last non-blank line, prepend directly under its heading. With toPath=, prepend puts the moved section at the top of the target, anything else appends it. Empty replaces the section.")] string? place = null,
         [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE that section or those rows into. Cut from path, written into toPath as one write, one line per changed file. Naming the same file twice is refused. Not with oldText; edits= entries ride beside row= or rows=, not beside section=.")] string? toPath = null,
         [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched against the first cell of each row - e.g. row=\"I286\". It must match exactly one, and the refusal says how many it matched. Not with section= or a top-level oldText.")] string? row = null,
-        [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place, path and force, so a .cs entry rides in a markdown batch. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total. Two entries of one file anchoring on the SAME oldText with occurrence= are refused before anything is written, naming both by index.")] FileService.TextEdit[]? edits = null,
+        [Description("Several edits applied in one call: each entry takes oldText, newText and optionally section, occurrence, place, path and force, so a .cs entry rides in a markdown batch. Entries sharing a path are applied in order as one write to it; path defaults to the top-level path, which may be omitted when every entry carries its own. Cannot be combined with a top-level oldText, newText or section. Max 10 per file, 25 in total. occurrence= resolves against the ORIGINAL text and entries apply by descending offset, so occurrence=1 and 2 of one anchor both land in ONE call; two section= entries still refuse when the first moves the ordinals.")] FileService.TextEdit[]? edits = null,
         [Description("Markdown only, with toPath=: several table rows moved in ONE call, at most 25, each taking row and optionally newText. Replaces one call per row: cut and landed in order, written once per file. Not with row=, section= or a top-level oldText.")] FileService.TextRow[]? rows = null,
         [Description("Return the N lines around each applied change in their POST-edit state, numbered, instead of only changedLines - the confirm-read a successful edit otherwise costs. 1-10, refused outside that range; 0 (default) adds nothing. Not a diff - verbose=true returns the diff instead.")] int context = 0,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
@@ -249,7 +249,7 @@ bool verbose) =>
     }
 
     [McpServerTool(Name = "find_files", ReadOnly = true)]
-    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are excluded; .claude/commands, agents, skills and hooks ARE listed. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell. depth=N answers the shape of a tree instead of its files: everything below the Nth path segment folds into one src/Core/**  xN files row, and the count line still counts every file. root= lists any absolute directory instead of the workspace, tagged outside-workspace, so no shell ls is needed. Pass globs to answer up to 10 globs in ONE response. Replaces one call per glob: each is answered under its own header line with its own count.")]
+    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are excluded; .claude/commands, agents, skills and hooks ARE listed. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. A listing of zero for a CONCRETE path answers ABSENT, EXCLUDED naming the rule that skips it, or EXISTS. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell. depth=N answers the shape of a tree instead of its files: everything below the Nth path segment folds into one src/Core/**  xN files row, and the count line still counts every file. root= lists any absolute directory instead of the workspace, tagged outside-workspace, so no shell ls is needed. Pass globs to answer up to 10 globs in ONE response. Replaces one call per glob: each is answered under its own header line with its own count.")]
     public Task<string> FindFiles(
             [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator, and {a,b} matches either alternative.")] string? glob = null,
             [Description("Workspace or worktree name.")] string? workspace = null,
@@ -535,9 +535,6 @@ context.RejectWrite() is { } rejection
         FileService.TextRow[]? rows,
         CancellationToken cancellationToken)
     {
-        if (FileService.Colliding(edits ?? [], path, loaded.Root) is { } collision)
-            return collision.Render();
-
         if ((request.Row is { Length: > 0 } || rows is { Length: > 0 }) && request.ToPath is not { Length: > 0 })
         {
             return Errors.Invalid(
@@ -546,7 +543,11 @@ context.RejectWrite() is { } rejection
         }
 
         if (request.ToPath is { Length: > 0 } moved)
-            return await MovedAsync(loaded, path, moved, request, newText, edits, rows, cancellationToken).ConfigureAwait(false);
+        {
+            return FileService.Colliding(edits ?? [], path, loaded.Root) is { } moving
+                ? moving.Render()
+                : await MovedAsync(loaded, path, moved, request, newText, edits, rows, cancellationToken).ConfigureAwait(false);
+        }
 
         if (edits is not { Length: > 0 } batch)
         {
@@ -571,9 +572,12 @@ context.RejectWrite() is { } rejection
 
         var grouped = Grouped(loaded.Root, path, batch);
 
-        return grouped.IsOk
-            ? NavigationTools.Unwrap(await FileService.EditTextGroupedAsync(loaded, grouped.Value!, request, cancellationToken).ConfigureAwait(false))
-            : grouped.Error!.Render();
+        if (!grouped.IsOk)
+            return grouped.Error!.Render();
+
+        return FileService.Colliding(batch, path, loaded.Root) is { } collision
+            ? collision.Render()
+            : NavigationTools.Unwrap(await FileService.EditTextGroupedAsync(loaded, grouped.Value!, request, cancellationToken).ConfigureAwait(false));
     }
 
     private static async Task<string> MovedAsync(

@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-09-17
+
 ### Fixed
 
 - **A hand-formatted `.csproj` survives a new `.cs` file.** `write_text` creating a source file under
@@ -48,6 +50,113 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   unrelated line into the diff - `changedLines=3` for a one-line member, the surplus landing at the end
   of the file. The close brace is now taken as already on its own line when the **preceding token's**
   trailing trivia ends the line, which is where that newline lives after a mid-type insertion.
+- **`changed_files` no longer replays a listing the watcher cannot invalidate.** The memo's freshness
+  test was the watcher's own counters plus `.git/index`, `HEAD` and `packed-refs` - but
+  `WorkspaceSync.Notice` and `Touched` discard every path under `bin`, `obj`, `artifacts`,
+  `TestResults`, `node_modules`, `.vs`, `.idea` and `.claude` session state, and an untracked file is
+  in no git index, so a file appearing or vanishing under one of those directories moved nothing the
+  stamp reads. A repeat call then replayed the previous listing with `UNCHANGED` while the tree had
+  moved under it - and that stale answer is the cheap unscoped call every end-of-task review opens
+  with. `WorkspaceSync` now counts **every** watcher event as `Stirred` before any exclusion test,
+  skipping only `.git` internals - whose churn the stamp already reads through `index` - and
+  `GitStampAsync` folds that count into the stamp. Covered by
+  `ChangedFiles_AfterAFileAppearsUnderAWatcherExcludedDirectory_DoesNotReplayTheStaleListing` and
+  `IsGitPath_IsTrueOnlyForThePathsInsideTheGitDirectory`.
+- **`edit_text edits=` lands occurrence 1 and occurrence 2 of one anchor in a single call.** Entries
+  were applied in order against the text the previous one produced, so the second entry's ordinal no
+  longer existed by the time it ran - and the batch was refused up front rather than mis-applied, which
+  cost three calls for every repeated-anchor sweep across sibling declarations. Every entry's anchor is
+  now resolved against the **original** text and the entries are applied by **descending offset**, so
+  both land in one call; a batch whose anchors do not all resolve in the original text keeps the
+  previous in-order behaviour and its per-entry errors. Two entries whose ordinals **normalize to the
+  same occurrence** are still refused before anything is written - descending order cannot separate
+  them, and applying both would silently rewrite an occurrence nobody addressed. That refusal now also
+  covers `occurrence=0` beside `occurrence=1` and two `occurrence=0` entries, which resolve to the same
+  match and previously either half-applied or, when the replacement re-introduced the anchor, landed
+  twice and reported `edits=2/2`. The `section=` case is unchanged, because adding or dropping a
+  heading really does move the ordinals under it. Covered by
+  `TwoBatchEntriesAnchoringOnOneAnchorWithDifferentOccurrences_BothLandInOneCall` and
+  `TwoBatchEntriesNamingOneFileTwoWays_AreOneWriteAndShareTheOriginalOrdinals`,
+  `TwoBatchEntriesNamingTheSameOccurrenceOfOneAnchor_AreStillRefusedBeforeAnythingIsWritten` and
+  `TwoBatchEntriesWhoseOrdinalsNormalizeToTheSameOccurrence_AreRefusedBeforeAnythingIsWritten`.
+- **`find_files` tells an absent path apart from an excluded one.** A zero-result listing said only
+  `no file matched`, so a file the workspace walk refuses to hold - anything under `bin`, `obj`,
+  `artifacts`, `TestResults`, `node_modules`, `.vs`, `.idea` or `.claude` session state - was
+  indistinguishable from one that is not on disk, and the only way to tell them apart was a
+  `powershell Test-Path` fallback. A listing of zero whose pattern is a **concrete path** now probes the
+  disk and answers `ABSENT`, `EXCLUDED` naming the directory rule that skips it, `OUTSIDE` when the
+  path resolves outside the workspace root - which is never probed - or `EXISTS`, and an `EXISTS`
+  names the `name=` or `tracked=` filter that dropped it rather than guessing a cause it cannot prove.
+  A real glob keeps the previous note. `Errors.DocumentNotFound` points at that verdict.
+  Covered by `FindFiles_ForAConcretePath_TellsAbsentApartFromExcluded` and
+  `ExcludedBy_NamesTheRuleThatSkipsThePathAndNothingForAWalkedOne`.
+- **`diff_symbols` folds a non-C# file onto one record.** Every hunk of a file the tool cannot map got
+  its own `path:start-end  HEURISTIC  not a C# document in this workspace` line - a line range that
+  addresses nothing, repeated once per hunk, measured at ~15 % of a mixed change set's response. Those
+  hunks now answer one record per file, `SKILL.md  12 hunks  HEURISTIC  not a C# document in this
+  workspace`, and the `diff_text path=` steer still names every such path. Covered by
+  `DiffSymbols_ForANonCSharpFile_FoldsEveryHunkOntoOneRecord`.
+- **`read_text headings=true` bounds a deep heading map.** `CHANGELOG.md` answered 240 section lines -
+  about 3 000 tokens - to locate one heading, which costs more than reading the section would. A map
+  over 40 sections now folds to the deepest heading level that fits, never shallower than `##`, and
+  says `maxLevel=2 applied - N deeper section(s) hidden`; `maxLevel=` still narrows explicitly and
+  `verbose=true` restores every level. A file whose folded level would answer a single heading is left
+  unfolded, so a document written entirely in `###` is never reduced to nothing. Covered by
+  `ReadText_WithHeadings_FoldsADeepMapToTheLevelsThatFitAndSaysWhatItHid`.
+- **`replace_symbol_body` takes `declaration=` as an alias for `body=`.** That is the parameter name
+  `replace_symbol` and `add_member` both take, so the obvious guess cost a rejected call plus a re-sent
+  body. Covered by `ReplaceSymbolBody_TakesDeclarationAsAnAliasForBody`.
+- **`get_symbol_source` reads a member at a git ref.** `read_text` and `get_file_outline` took `ref=`
+  and this one did not, so "what did this member look like before the change" had to be a line range
+  against a revision - and a clipped range rewrote a body from truncated text with the build, the
+  analyzers and 389 tests all green on the corruption. `get_symbol_source(symbolId, path, ref)` now
+  parses that revision's own text against the owning project's metadata references - so a full
+  documentation id carrying a framework parameter type resolves - and returns the whole declaration;
+  `path=` is required there, because a revision has no workspace index to search, and a batch is
+  refused rather than partly answered. Covered by
+  `GetSymbolSource_AtARef_AnswersThatRevisionsWholeDeclarationRatherThanALineRange` and
+  `GetSymbolSource_AtARef_ResolvesAFullDocumentationIdCarryingAFrameworkParameterType`.
+- **A relative `path` hint picks the workspace that actually holds the file.** `PathBoundary.Contains`
+  resolves a relative path against the server's working directory, so with two workspaces loaded a hint
+  naming a file under exactly one of them was undecidable and every call answered
+  `ERROR AmbiguousWorkspace`. A relative hint that matched no root by prefix is now resolved against
+  each loaded root and taken when the file exists under exactly one; nothing is guessed - zero or two
+  still refuse. Covered by `Resolve_WithARelativePathHintThatExistsUnderOneRootOnly_PicksThatWorkspace`
+  and `Resolve_WithARelativePathHintUnderNoRoot_StillRefusesRatherThanGuessing`.
+- **The guard routes a replaced command to the tool that advertises it.** `git diff --stat` was sent to
+  `diff_symbols` while `changed_files`'s own description opens `Replaces Bash git status and git diff
+  --stat`; the `--stat`, `--numstat`, `--name-only` and `--name-status` family now routes to
+  `changed_files` (`changed_files staged=true` under `--cached`/`--staged`). The new census
+  `EveryToolThatAdvertisesItReplacesAShellCommand_IsWhereTheGuardRoutesIt` found two more of the same
+  class and both are fixed: `dotnet test --list-tests` routes to `list_tests` instead of `run_tests`,
+  and `dotnet list package` to `package_list` instead of falling through to `run_tests`. Also covered by
+  `Guard_ForACountsOnlyDiff_RoutesToTheToolThatAdvertisesIt` and
+  `Guard_ForAListingCommand_RoutesToTheListingToolRatherThanTheRunner`.
+- **The stale-run annotation cannot be unwired.** `build` and `run_tests` wrapped their runner in one
+  line inside `Replayable`, and substituting the raw runner for the wrapped one left every test green,
+  because the only E2E assertion was the *absence* of a marker. `Replayable` now takes a `WatchedRun`,
+  whose only execution path snapshots `EditPulse`, runs and annotates - there is no unwrapped runner in
+  scope to substitute - and the snapshot is proven in both directions by a deterministic unit test whose
+  own run delegate writes while it is in flight. Covered by
+  `InvokeAsync_WhenADocumentChangesWhileTheRunIsInFlight_AnnotatesTheVerdictStale` and
+  `InvokeAsync_NeverReplacesTheVerdictItWraps`; `StaleRun`'s own two directions stay covered by
+  `StaleRunTests`, which needs no process-global counter to do it.
+- **`edit_text` names a batch's size limit before its anchor collisions.** A batch that is both over
+  the 25-entry cap (or the 10-per-file cap) and carries repeated anchors was answered with the
+  collision, which is the less actionable of the two - the caps are hard limits and the collision is
+  fixable by an argument. `Grouped` and both caps now run first; nothing is written before the
+  collision check either way, because grouping only reads.
+- **The four surface-cost ratchets are raised by a measured, stated amount.** `ref=` on
+  `get_symbol_source` and `declaration=` on `replace_symbol_body` are two new optional parameters, and
+  a parameter costs its name, its description and its schema frame in **every** `tools/list`. After
+  trimming the new description text as far as it can go without losing the contract, the whole surface
+  measures 30 816 tokens against a 30 700 budget, `SKILL.md` 25 095 against 25 000, the markup-narrowed
+  surface 25 581 against 25 450 and the settings-narrowed surface 26 342 against 26 250. The budgets move
+  to 30 900 / 25 200 / 25 700 / 26 450 - the measured cost plus a small margin, not a round number
+  chosen to fit. Both parameters clear this repo's own bar of 32 calls per 500 sessions by a wide
+  margin: `ref=` closes a defect class that shipped a silent body corruption past a green build, green
+  analyzers and 389 passing tests, and `declaration=` removes a rejected call plus a re-sent body every
+  time the name `replace_symbol` and `add_member` use is guessed here.
 
 ## [0.61.0] - 2026-09-16
 
@@ -5902,7 +6011,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.61.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.62.0...HEAD
+[0.62.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.62.0
 [0.61.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.61.0
 [0.60.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.60.0
 [0.59.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.59.0

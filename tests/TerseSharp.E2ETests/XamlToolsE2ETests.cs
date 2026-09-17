@@ -360,7 +360,8 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
         });
 
         Assert.Contains("ERROR DocumentNotFound", text, StringComparison.Ordinal);
-        Assert.Contains("use find_files to locate it", text, StringComparison.Ordinal);
+        Assert.Contains("run find_files on it", text, StringComparison.Ordinal);
+        Assert.Contains("ABSENT, EXCLUDED or EXISTS", text, StringComparison.Ordinal);
         Assert.DoesNotContain("fix the markup", text, StringComparison.Ordinal);
     }
 }
