@@ -339,6 +339,15 @@ public sealed class ToolGuardTests
     [InlineData("git show 1a2b3c4d", "history commit=1a2b3c4d")]
     [InlineData("git diff main...HEAD", "diff_symbols baseRef=main...HEAD")]
     [InlineData("git diff -- src/App/OrderService.cs", "diff_symbols path=src/App/OrderService.cs")]
+    [InlineData("git diff -- src/App/App.csproj", "diff_text path=src/App/App.csproj")]
+    [InlineData("git diff README.md", "diff_text path=README.md")]
+    [InlineData("git diff --cached -- src/App/App.csproj", "diff_text staged=true path=src/App/App.csproj")]
+    [InlineData("git diff -- Directory.Build.targets", "diff_text path=Directory.Build.targets")]
+    [InlineData("git diff -- .editorconfig", "diff_text path=.editorconfig")]
+    [InlineData("git diff -- src/TerseSharp.Core", "diff_symbols path=src/TerseSharp.Core")]
+    [InlineData("git diff src/TerseSharp.Core", "diff_symbols path=src/TerseSharp.Core")]
+    [InlineData("git diff -- fixtures/FixtureSolution/src/Fixture.Trading", "diff_symbols path=fixtures/FixtureSolution/src/Fixture.Trading")]
+    [InlineData("git diff -- src/App/Program.CS", "diff_symbols path=src/App/Program.CS")]
     [InlineData("git status", "changed_files")]
     public void Inspect_ForGitHistoryInADotNetTree_NamesTheToolThatReplacesIt(string command, string replacement)
     {
@@ -1718,5 +1727,22 @@ public sealed class ToolGuardTests
         Assert.True(verdict.Denied);
         Assert.DoesNotContain("write_text", verdict.Routing, StringComparison.Ordinal);
         Assert.Contains("find_files", verdict.Replaces, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForADiffOfANonCSharpPath_NamesDiffTextRatherThanDiffSymbols()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff -- src/App/App.csproj" });
+
+        Assert.Contains("use diff_text for that path", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("use diff_symbols", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForADiffOfACSharpPath_StillNamesDiffSymbols()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff -- src/App/OrderService.cs" });
+
+        Assert.Contains("diff_symbols", verdict.Reason, StringComparison.Ordinal);
     }
 }

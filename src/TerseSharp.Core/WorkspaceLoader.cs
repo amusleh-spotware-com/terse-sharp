@@ -50,20 +50,44 @@ internal static class WorkspaceLoader
         Solution solution,
         long elapsedMilliseconds,
         IReadOnlyCollection<WorkspaceDiagnostic> reported,
-        string? targetFramework) =>
-        new(
+        string? targetFramework)
+    {
+        var loaded = Loaded(solution).GetAlternateLookup<ReadOnlySpan<char>>();
+
+        return new(
             path,
             solution.Projects.Count(),
             solution.Projects.Sum(project => project.Documents.Count()),
             elapsedMilliseconds,
-            Messages(reported, WorkspaceDiagnosticKind.Failure),
-            Messages(reported, WorkspaceDiagnosticKind.Warning),
+            Messages(reported, loaded, stopped: true),
+            Messages(reported, loaded, stopped: false),
             targetFramework);
+    }
 
-    private static string[] Messages(IReadOnlyCollection<WorkspaceDiagnostic> reported, WorkspaceDiagnosticKind kind) =>
+    private static string[] Messages(
+        IReadOnlyCollection<WorkspaceDiagnostic> reported,
+        HashSet<string>.AlternateLookup<ReadOnlySpan<char>> loaded,
+        bool stopped) =>
         [.. reported
-            .Where(diagnostic => diagnostic.Kind == kind)
+            .Where(diagnostic => StoppedALoad(diagnostic, loaded) == stopped)
             .Select(diagnostic => diagnostic.Message)
             .Distinct(StringComparer.Ordinal)
             .Take(20)];
+
+    private static HashSet<string> Loaded(Solution solution)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var project in solution.Projects)
+        {
+            if (project.FilePath is { Length: > 0 } path)
+                paths.Add(path);
+        }
+
+        return paths;
+    }
+
+    private static bool StoppedALoad(WorkspaceDiagnostic diagnostic, HashSet<string>.AlternateLookup<ReadOnlySpan<char>> loaded) =>
+        diagnostic.Kind is WorkspaceDiagnosticKind.Failure
+        && !loaded.Contains(LoadFailureSummary.ProjectPathOf(diagnostic.Message));
 }

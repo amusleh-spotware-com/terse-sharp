@@ -53,6 +53,28 @@ public sealed class LoadFailureE2ETests : IAsyncLifetime
         Assert.Contains("FAILED Absent.csproj  messages=1", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task WorkspaceStatus_WithAnMsBuildAdvisoryWarning_CountsItAsAWarningAndNotAsALoadFailure()
+    {
+        var text = await CallAsync("workspace_status", []);
+
+        Assert.Contains("1 load failure(s) in 1 project(s)", text, StringComparison.Ordinal);
+        Assert.Contains("1 MSBuild message(s) from project(s) that loaded, not load failures", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("known high severity vulnerability", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("FAILED Present.csproj", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkspaceStatus_Verbose_ListsTheAdvisoryWarningWithoutCallingItAFailure()
+    {
+        var text = await CallAsync("workspace_status", new() { ["verbose"] = true });
+
+        Assert.Contains("MSBUILD ", text, StringComparison.Ordinal);
+        Assert.Contains("known high severity vulnerability", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("FAILED Present.csproj", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("WARNING Msbuild", text, StringComparison.Ordinal);
+    }
+
     private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
 }

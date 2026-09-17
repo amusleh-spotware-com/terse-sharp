@@ -194,12 +194,10 @@ forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it 
 concurrently; one call per message pays a **6 136 ms (p50)** model gap before its tool even starts.
 Measured over a fortnight and 647 transcripts, grouping `tool_use` blocks by the API `message.id`
 that carried them: **1.165 calls per assistant message, and only 14.3% of messages carry two or
-more**. That is 8 620 round trips already deleted - 14.7 h of gap not paid - and a large remainder.
-One session in the same corpus reached **1.78 calls per message**. Measured A/B on the same eight
+more**. Measured A/B on the same eight
 files: eight `get_file_outline` calls one-per-message cost **151.4 s wall**, of which **148.5 s was
 model gap**; the identical work as one `paths=[...]` call cost **10.2 s** - **14.8x faster**, and
-**98% of the saving was gap, not tool time**. No response-format change can touch that; only issuing
-fewer, wider calls can. What it is worth has been measured elsewhere too:
+**98% of the saving was gap, not tool time**. What it is worth has been measured elsewhere too:
 three tool calls per turn cut wall clock **40.6%** while accuracy *rose* (arXiv:2602.07359), and one
 batched call rather than 38 separate ones measured **57% faster and 41% fewer tokens**
 (arXiv:2511.19477). Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
@@ -260,10 +258,10 @@ raising a number you chose; the steer returns as soon as you drop the argument.
 **The working tree is covered as well.** `git status`, `git status --porcelain`, `git diff`,
 `git diff <ref>` and the whole `git diff --cached` family are served by `changed_files`
 (`staged=true` for the index, `untracked=false` for `--untracked-files=no`), `diff_symbols` and
-`diff_text` — **all three take `staged=true`**, so a `--cached` diff asked for its declarations or its
-hunk text is answered rather than handed the counts tool, and all three take
+`diff_text` — **all three take `staged=true`**, and all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
-re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. Running them in
+re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. A diff of a path
+that is not `.cs` routes to `diff_text`, which is what can answer it. Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
@@ -379,13 +377,16 @@ user.** Without the `PreToolUse` guard nothing stops an agent answering with `Re
 `dotnet build` - measured at 884 such `Bash` calls in one week. Tell the user to run
 `terse install --guard`; do not run it yourself, because it writes their settings file.
 
-**`failures=` and `warnings=` are different things.** `failures=` counts projects that did not load;
-`warnings=` counts MSBuild diagnostics that did not stop a load — NuGet advisories (NU1903), target
-framework notes (NU1701) and the like. A big solution routinely reports `failures=0 warnings=20` and
-is fully usable. **Neither is listed by default**: the warnings are a count, and the failures are
-folded to one `FAILED <project>  messages=N` line per project under a `N load failure(s) in M
-project(s)` header. `verbose=true` prints every message of both. So do not read a warning count as a
-broken workspace, and do not fall back to the built-ins over one.
+**`failures=` counts projects that did NOT load; `warnings=` counts everything else** — NuGet
+advisories (NU1903), target framework notes (NU1701). Roslyn hands over every MSBuild design-time
+message, warning and error alike, as one `Failure`-kind diagnostic, so the split is made on the one
+observable fact: whether the project the message names is in the loaded solution — which means a
+design-time **error** on a project that still loaded lands in `warnings=` too. **Neither is listed by
+default**: the warnings are one `N MSBuild message(s) from project(s) that loaded, not load failures`
+note, the failures one `FAILED <project>  messages=N` line per project under a `N load failure(s) in M
+project(s)` header. `verbose=true` prints every message of both — read them before trusting an odd
+project. A big solution routinely reports `failures=0 warnings=20`, is fully usable, and is never a
+reason to fall back to the built-ins.
 
 **Success is quiet.** `build`, `run_tests`, `rerun_failed`, `format`, `cleanup` and `clean` answer a
 result that has nothing to say in one line, or one line per changed file. `verbose=true` restores the
@@ -504,7 +505,8 @@ dropping an attribute is sometimes the intent, but an un-advertised tool is exac
 build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, or use
 `replace_symbol_body`.
 
-**`add_member` formats only what it inserted** - no collateral hunks.
+**`add_member` formats only what it inserted** - no collateral hunks, and an anchored insert leaves the
+close brace alone.
 
 **`add_member` refuses a duplicate member from syntax, before anything is compiled.** A declaration
 whose name and parameter list the type already declares answers `ERROR NameTaken` naming that member
@@ -845,11 +847,10 @@ that answers nothing, and the clip always names `next: startLine=`.
 
     **The one exception: when a call needs a value a previous call returns** — a symbol id from an
     outline, a path from `changed_files`, a `retryWith` token from a rollback — call them
-    sequentially, and **never guess a parameter to make a call parallel**. A measured fortnight
-    carried **1.165 calls per message**, while **13 820** calls still sat in runs of three or more of the
-    same tool. Every one of those runs was a `paths=`/`edits=`/`files=` batch that was not used, or a
-    parallel message that was not sent. The argument you SEND costs too - a run of writes re-sends its
-    whole argument frame, and the four writers sent **19% of all tool output** that way.
+    sequentially, and **never guess a parameter to make a call parallel**. In that same fortnight
+    **13 820** calls sat in runs of three or more of the same tool - each one a `paths=`/`edits=`/`files=`
+    batch not used, or a parallel message not sent. The argument you SEND costs too: a run of writes
+    re-sends its whole argument frame, and the four writers sent **19% of all tool output** that way.
 15. **A subagent does not inherit this skill — the brief carries it, or the delegate greps.** A spawn
     aimed at this workspace carries, inline: the mandate and ban list above, the workspace name, **the
     `changed_files` output and the `diff_symbols` ids as its scope**, and a call ceiling. A delegate

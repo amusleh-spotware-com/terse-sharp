@@ -1,4 +1,6 @@
 using System.Text;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace TerseSharp.Core;
 
@@ -42,30 +44,66 @@ public static class ProjectFileGuard
 
     internal static bool OnlyRedundantCompileItems(string before, string after, IReadOnlyList<string> addedFiles)
     {
-        var remaining = Lines(before);
-        var rewritten = Lines(after);
-
-        ExpandSelfClosingRoot(remaining);
-        ExpandSelfClosingRoot(rewritten);
-
-        foreach (var line in rewritten)
-        {
-            if (remaining.Remove(line))
-                continue;
-
-            if (!IsAddedItem(line, addedFiles) && !IsItemGroupTag(line))
-                return false;
-        }
-
-        return remaining.Count is 0;
-    }
-
-    private static bool IsAddedItem(string line, IReadOnlyList<string> addedFiles)
-    {
-        if (!line.StartsWith("<Compile ", StringComparison.Ordinal) || Included(line) is not { } include)
+        if (Parsed(before) is not { } original || Parsed(after) is not { } rewritten)
             return false;
 
-        var name = Path.GetFileName(include.AsSpan());
+        Strip(original, addedFiles);
+        Strip(rewritten, addedFiles);
+
+        return XNode.DeepEquals(original, rewritten);
+    }
+
+    private static XElement? Parsed(string text)
+    {
+        try
+        {
+            if (XDocument.Parse(text).Root is not { } root)
+                return null;
+
+            Condense(root);
+
+            return root;
+        }
+        catch (XmlException)
+        {
+            return null;
+        }
+    }
+
+    private static void Condense(XElement element)
+    {
+        foreach (var node in element.Nodes().OfType<XText>().Where(IsBlank).ToArray())
+            node.Remove();
+
+        foreach (var child in element.Elements())
+            Condense(child);
+    }
+
+    private static bool IsBlank(XText node) => node.Value.AsSpan().IsWhiteSpace();
+
+    private static void Strip(XElement root, IReadOnlyList<string> addedFiles)
+    {
+        foreach (var item in root.Descendants().Where(element => IsAddedItem(element, addedFiles)).ToArray())
+        {
+            if (item.Parent is not { } group)
+                continue;
+
+            item.Remove();
+
+            if (group is { HasAttributes: false, HasElements: false, Name.LocalName: "ItemGroup", Parent: not null })
+                group.Remove();
+        }
+    }
+
+    private static bool IsAddedItem(XElement element, IReadOnlyList<string> addedFiles)
+    {
+        if (element.Name.LocalName is not "Compile" || element.HasElements)
+            return false;
+
+        if (element.Attribute("Include") is not { NextAttribute: null, PreviousAttribute: null } include)
+            return false;
+
+        var name = Path.GetFileName(include.Value.AsSpan());
 
         foreach (var file in addedFiles)
         {
@@ -76,55 +114,5 @@ public static class ProjectFileGuard
         return false;
     }
 
-    private static string? Included(string line)
-    {
-        const string Marker = "Include=\"";
-        var start = line.IndexOf(Marker, StringComparison.Ordinal);
-
-        if (start < 0)
-            return null;
-
-        var from = start + Marker.Length;
-        var end = line.IndexOf('"', from);
-
-        return end < 0 ? null : line[from..end];
-    }
-
-    private static bool IsItemGroupTag(string line) =>
-        line is "<ItemGroup>" or "</ItemGroup>";
-
-    private static List<string> Lines(string text)
-    {
-        var lines = new List<string>(64);
-
-        foreach (var line in text.AsSpan().EnumerateLines())
-        {
-            var trimmed = line.Trim();
-
-            if (!trimmed.IsEmpty)
-                lines.Add(new string(trimmed));
-        }
-
-        return lines;
-    }
-
-    private static string Text(byte[] bytes) =>
-        Encoding.UTF8.GetString(bytes).TrimStart('﻿');
-
-    private static void ExpandSelfClosingRoot(List<string> lines)
-    {
-        var index = lines.FindIndex(IsSelfClosingRoot);
-
-        if (index < 0)
-            return;
-
-        var root = lines[index];
-
-        lines[index] = string.Concat(root.AsSpan(0, root.Length - 2).TrimEnd(), ">");
-        lines.Add("</Project>");
-    }
-
-    private static bool IsSelfClosingRoot(string line) =>
-        line.EndsWith("/>", StringComparison.Ordinal)
-        && (line.StartsWith("<Project ", StringComparison.Ordinal) || line is "<Project/>");
+    private static string Text(byte[] bytes) => Encoding.UTF8.GetString(bytes).TrimStart('﻿');
 }

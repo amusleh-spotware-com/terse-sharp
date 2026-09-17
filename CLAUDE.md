@@ -237,8 +237,12 @@ that globs its sources — is the one case where Roslyn's own apply path writes 
 `LoadedWorkspace.TryApplyAsync` snapshots that project's bytes first — but only when
 `ProjectGlobs.CompilesByGlob` says the SDK already globs the file, read from MSBuild's *evaluated*
 `EnableDefaultItems`/`EnableDefaultCompileItems`, never from text — and restores them afterwards
-through `AtomicWrite.BytesAsync`, and only when `ProjectFileGuard` can attribute every added line to
-MSBuild's redundant `<Compile>` item. A concurrent external edit is left alone.
+through `AtomicWrite.BytesAsync`, and only when `ProjectFileGuard` can attribute the whole rewrite to
+MSBuild's redundant `<Compile>` items: both documents are parsed as XML and must be deep-equal once
+the items naming the added files are removed from each, so a reserialized indentation, a re-spaced
+self-closing tag or a joined multi-line element no longer defeats the restore. A concurrent external
+edit — a changed attribute value, a changed comment, anything else — still refuses it and is left
+alone.
 
 All mutations funnel through `EditGate.ApplyAsync`, which diffs only the changed documents, compares
 error counts before/after, **rolls back any edit that introduces a new compile error** (unless

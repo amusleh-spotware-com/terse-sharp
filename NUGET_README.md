@@ -212,7 +212,7 @@ path operand at all, while a piped `head -40` reading stdin still runs; `dotnet 
 word is `sleep`, or a `powershell -Command "Start-Sleep …"` hosting one, outside a `while`/`until`/`for`
 loop — because waiting is not work and nothing replaces
 it; and the working-tree half of git — `git status` and `git diff` in every flag and `-C` form,
-`git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files` to
+a diff of a non-`.cs` path to `diff_text`, `git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files` to
 `find_files tracked=true`, a `git tag` **listing** to `history tags=true`, and origin's tag listing —
 `git ls-remote --tags` — to `history tags=true remote=true`. `TaskOutput` and
 `TaskList` are not denied — they are **allowed with a stand-down**, because polling for a result the

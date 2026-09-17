@@ -184,9 +184,14 @@ public static class ToolGuard
         _ => "format",
     };
 
-    private static string BuildReason(string segment, string subcommand) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"TerseSharp guard: '{Trim(segment.Trim())}' is replaced by the terse-sharp MCP - {BuildReplacement(subcommand)}. {Rationale(subcommand)}{Remember}");
+    private static string BuildReason(string segment, string subcommand)
+    {
+        var effective = Diffing(subcommand, segment);
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"TerseSharp guard: '{Trim(segment.Trim())}' is replaced by the terse-sharp MCP - {BuildReplacement(effective)}. {Rationale(effective)}{Remember}");
+    }
 
     private static string BuildReplacement(string subcommand) => subcommand switch
     {
@@ -199,6 +204,8 @@ public static class ToolGuard
         "status" => "use changed_files, with untracked=false for --untracked-files=no, or changed_files root=<that directory> when it is not the loaded workspace",
         "diff" => "use diff_symbols, then diff_text only for the hunk text it cannot show; for a directory that is not loaded, diff_text root=<that directory>",
         "diff-cached" => "use diff_symbols staged=true, then diff_text staged=true for the hunk text it cannot show - or changed_files staged=true for the --name-only and --stat answer, one line per file",
+        "diff-text" => "use diff_text for that path - it returns the hunk text itself, which is the whole answer for a file that declares no C# symbols",
+        "diff-cached-text" => "use diff_text staged=true for that path - it returns the hunk text itself, which is the whole answer for a file that declares no C# symbols",
         "ls-files" => "use find_files tracked=true",
         "ls-remote-tags" => "use history tags=true remote=true, which merges origin's tag list into the local one and tags every row local=yes|no remote=yes|no",
         "log" => "use history, which takes path=, baseRef=, contains= for the pickaxe and message= for the subject grep",
@@ -216,6 +223,7 @@ public static class ToolGuard
         "status" => "changed_files answers the whole working tree as one line per file - path, added and deleted counts, status letter - and takes baseRef=, staged= and untracked=, so the end-of-task review costs a listing instead of a diff.",
         "diff" => "A raw diff is the most expensive answer in a session; diff_symbols maps every hunk onto the declaration containing it and answers with symbol ids, and both take baseRef= and return workspace-relative paths.",
         "diff-cached" => "diff_symbols, diff_text and changed_files all take staged=true and read the index rather than the working tree, which is the question a pre-commit check asks - the first two answer the declarations and the hunk text, the third one bounded line per file.",
+        "diff-text" or "diff-cached-text" => "diff_symbols answers a hunk as the C# declaration containing it, and the path this command names declares none, so it would be a dead end; diff_text returns that path's unified diff directly, bounded, workspace-relative, and it takes baseRef= and staged= as well.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
         "ls-remote-tags" => "history tags=true remote=true reads both tag lists through the same runner and answers one bounded line per tag saying which side has it, so 'was this version ever pushed?' needs no shell and no diffing two listings by eye. Only origin's tag listing is replaced: --heads, another remote and a bare ls-remote are left alone.",
         "log" or "show" => "history answers the same commits workspace-relative and bounded, with the pickaxe and the subject grep as parameters instead of flags. Only git blame and index or history mutation stay on the shell.",
@@ -623,6 +631,8 @@ public static class ToolGuard
         "status" => "changed_files",
         "diff" => "diff_symbols",
         "diff-cached" => "diff_symbols staged=true",
+        "diff-text" => "diff_text",
+        "diff-cached-text" => "diff_text staged=true",
         "ls-files" => "find_files tracked=true",
         "ls-remote-tags" => "history tags=true remote=true",
         "log" => "history",
@@ -1100,7 +1110,8 @@ public static class ToolGuard
     private static readonly SearchValues<char> PathMarks = SearchValues.Create("/\\");
     private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789abcdefABCDEF");
 
-    private static string BuildRouting(string subcommand, string segment) => BuildRouting(subcommand) + GitArguments(subcommand, segment);
+    private static string BuildRouting(string subcommand, string segment) =>
+        BuildRouting(Diffing(subcommand, segment)) + GitArguments(subcommand, segment);
 
     private static string GitArguments(string subcommand, string segment) => subcommand switch
     {
@@ -1137,18 +1148,12 @@ public static class ToolGuard
 
     private static string DiffArguments(string segment)
     {
-        string? path = null;
         string? baseRef = null;
-        var separated = false;
 
         foreach (var token in Tokens(segment))
-        {
-            path ??= PathOperand(token, separated);
             baseRef ??= RefOperand(token);
-            separated |= token is "--";
-        }
 
-        return Appended("baseRef", baseRef) + Appended("path", path);
+        return Appended("baseRef", baseRef) + Appended("path", DiffPath(segment));
     }
 
     private static string CommitArgument(string segment)
@@ -1338,7 +1343,13 @@ public static class ToolGuard
     private static GuardVerdict Direct(string segment, string? cwd, bool compound, string unfenceable)
     {
         if (Replaced(segment, cwd) is { } subcommand)
-            return new GuardVerdict(true, BuildReason(segment, subcommand) + Nothing(compound, unfenceable), BuildRouting(subcommand, segment), BuildReplacement(subcommand));
+        {
+            return new GuardVerdict(
+                true,
+                BuildReason(segment, subcommand) + Nothing(compound, unfenceable),
+                BuildRouting(subcommand, segment),
+                BuildReplacement(Diffing(subcommand, segment)));
+        }
 
         if (!Denies(segment, cwd))
             return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
@@ -1617,6 +1628,37 @@ public static class ToolGuard
 
         return length > 0 && bare.Length > length ? Bare(bare[length..]) : bare;
     }
+
+    private static string Diffing(string subcommand, string segment) =>
+        subcommand is "diff" or "diff-cached" && Unmappable(segment) ? subcommand + "-text" : subcommand;
+
+    private static bool Unmappable(string segment) =>
+        DiffPath(segment) is { } path
+        && (IsDotFile(Path.GetFileName(path.AsSpan())) || NamesANonCSharpFile(Path.GetExtension(path.AsSpan())));
+
+    private static string? DiffPath(string segment)
+    {
+        string? path = null;
+        var separated = false;
+
+        foreach (var token in Tokens(segment))
+        {
+            path ??= PathOperand(token, separated);
+            separated |= token is "--";
+        }
+
+        return path;
+    }
+
+    private static bool NamesANonCSharpFile(ReadOnlySpan<char> extension) =>
+        extension.Length is > 1 and <= 8
+        && !extension[1..].ContainsAnyExcept(LowerAlphanumerics)
+        && !extension.Equals(".cs", StringComparison.Ordinal);
+
+    private static readonly SearchValues<char> LowerAlphanumerics = SearchValues.Create("abcdefghijklmnopqrstuvwxyz0123456789");
+
+    private static bool IsDotFile(ReadOnlySpan<char> name) =>
+        name.Length > 1 && name[0] is '.' && !name[1..].Contains('.');
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

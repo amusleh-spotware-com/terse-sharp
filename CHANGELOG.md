@@ -8,6 +8,47 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **A hand-formatted `.csproj` survives a new `.cs` file.** `write_text` creating a source file under
+  a project that globs its sources lets Roslyn's own apply path write the redundant `<Compile Include>`
+  item, and `ProjectFileGuard` restores the original bytes afterwards - but it attributed the rewrite by
+  comparing **trimmed lines**, so MSBuild's own reserialization defeated it: a
+  `<PackageReference Include="NLog"/>` re-spaced to `... />`, or a multi-line element joined onto one
+  line, left the guard unable to attribute the change, and the project file kept both the duplicate item
+  (`error NETSDK1022`, a build that dies during MSBuild evaluation, which no semantic compile gate can
+  see) and the whole reformat. The attribution is now **structural**: both documents are parsed, the
+  `<Compile>` items naming the added files are removed from each, and the rest must be XML-deep-equal -
+  so indentation, self-closing spacing, blank lines and attribute wrapping no longer matter, while a
+  changed attribute value, a changed comment or any other concurrent edit still refuses the restore. A
+  create-then-delete round trip leaves the project file byte-identical too.
+- **MSBuild diagnostics from a project that loaded are no longer counted as load failures.** Roslyn
+  hands `MSBuildWorkspace` every design-time build message - warning **and** error alike - as one
+  `WorkspaceDiagnosticKind.Failure` wrapped in `Msbuild failed when processing the file '...' with
+  message: ...`, so splitting on the kind did nothing: a solution whose projects all loaded reported
+  `20 load failure(s) in 10 project(s)` over NuGet advisories (NU1903) and target-framework notes
+  (NU1701), and this repo's agent instructions say a failed load invalidates every compilation-dependent
+  query for that project. The split is now made on the only thing that can be proven - whether the
+  project the diagnostic names is in the loaded solution. `failures=` counts the ones that are not;
+  everything else is `warnings=`, noted as `N MSBuild message(s) from project(s) that loaded, not load
+  failures` and listed only with `verbose=true`. Those lines are prefixed `MSBUILD `, not `WARNING `:
+  since Roslyn does not hand over the severity, a real `error NU1605` on a project that still loaded
+  sits in that bucket too, and the old prefix asserted a severity nothing here can prove.
+- **The guard routes a non-`.cs` `git diff` to `diff_text`, not `diff_symbols`.**
+  `git diff -- src/App/App.csproj` was answered `diff_symbols path=src/App/App.csproj`, which maps hunks
+  onto C# declarations a project file has none of - a dead end on the one path the command named. A diff
+  whose path operand names a **file** - an extension of at most seven lowercase letters or digits, not
+  `.cs` - now routes to `diff_text path=...` (`diff_text staged=true ...` for `--cached`) and says why.
+  A `.cs` path, a whole-tree diff and a directory still route to `diff_symbols`: `Path.GetExtension`
+  answers `.Core` for `src/TerseSharp.Core`, so a looser test would have sent every dotted project
+  folder - the normal shape in a .NET tree - to the raw diff this repo calls its most expensive answer.
+- **`add_member` no longer adds a blank line before the closing brace.** Inserting a member with
+  `before=` or `after=` ahead of an existing member left the type's close brace carrying an elastic
+  newline that the inserted-span formatter never normalizes, so every anchored insertion carried one
+  unrelated line into the diff - `changedLines=3` for a one-line member, the surplus landing at the end
+  of the file. The close brace is now taken as already on its own line when the **preceding token's**
+  trailing trivia ends the line, which is where that newline lives after a mid-type insertion.
+
 ## [0.61.0] - 2026-09-16
 
 ### Added

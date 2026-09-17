@@ -7,7 +7,7 @@ public sealed class ProjectFileIntegrityE2ETests : IAsyncLifetime
     private TerseTempSolution solution = null!;
 
     public async ValueTask InitializeAsync() =>
-        solution = await TerseTempSolution.StartAsync(watch: true, TestContext.Current.CancellationToken);
+        solution = await TerseTempSolution.StartAsync(watch: true, TestContext.Current.CancellationToken, HandFormatAsync);
 
     public async ValueTask DisposeAsync() => await solution.DisposeAsync();
 
@@ -61,6 +61,56 @@ public sealed class ProjectFileIntegrityE2ETests : IAsyncLifetime
         Assert.DoesNotContain("NETSDK1022", output, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task WriteText_CreatingANewSourceFile_LeavesAHandFormattedProjectFileByteIdentical()
+    {
+        var project = solution.ProjectPath;
+        var before = await File.ReadAllBytesAsync(project, TestContext.Current.CancellationToken);
+
+        var applied = await solution.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/ProbeAdded.cs",
+            ["content"] = "namespace Fixture.Trading;\n\ninternal static class ProbeAdded;\n",
+            ["force"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+
+        var after = await File.ReadAllBytesAsync(project, TestContext.Current.CancellationToken);
+
+        Assert.Equal(before, after);
+
+        var (exitCode, output) = await BuildAsync(project);
+
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain("NETSDK1022", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_DeletingAFileItJustCreated_LeavesTheProjectFileByteIdentical()
+    {
+        var project = solution.ProjectPath;
+        var before = await File.ReadAllBytesAsync(project, TestContext.Current.CancellationToken);
+
+        await solution.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/ProbeRoundTrip.cs",
+            ["content"] = "namespace Fixture.Trading;\n\ninternal static class ProbeRoundTrip;\n",
+            ["force"] = true,
+        });
+
+        var deleted = await solution.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/ProbeRoundTrip.cs",
+            ["delete"] = true,
+            ["force"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", deleted, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(solution.ProjectDirectory, "ProbeRoundTrip.cs")));
+        Assert.Equal(before, await File.ReadAllBytesAsync(project, TestContext.Current.CancellationToken));
+    }
+
     private static async Task<(int ExitCode, string Output)> BuildAsync(string project)
     {
         var start = new ProcessStartInfo("dotnet")
@@ -88,4 +138,21 @@ public sealed class ProjectFileIntegrityE2ETests : IAsyncLifetime
 
         return (process.ExitCode, await output + await error);
     }
+
+    private static readonly string HandFormattedProject = string.Join('\n',
+    [
+        "<Project Sdk=\"Microsoft.NET.Sdk\">",
+        "\t<ItemGroup>",
+        "\t\t<EmbeddedResource Remove=\"**\\*.resx\"/>",
+        "\t</ItemGroup>",
+        "",
+        "\t<PropertyGroup>",
+        "\t\t<RootNamespace>Fixture.Trading</RootNamespace>",
+        "\t</PropertyGroup>",
+        "</Project>",
+        "",
+    ]);
+
+    private static Task HandFormatAsync(string root) =>
+        File.WriteAllTextAsync(Path.Combine(root, "src", "Fixture.Trading", "Fixture.Trading.csproj"), HandFormattedProject);
 }

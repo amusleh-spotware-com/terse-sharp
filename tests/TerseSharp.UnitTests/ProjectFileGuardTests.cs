@@ -128,4 +128,130 @@ public sealed class ProjectFileGuardTests
             rewritten,
             ["src/IOrderService.cs"]));
     }
+
+    [Fact]
+    public void OnlyRedundantCompileItems_WhenMsBuildRespacedAnUntouchedSelfClosingTag_IsAttributable()
+    {
+        const string hand = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="NLog" Version="5.3.4"/>
+              </ItemGroup>
+            </Project>
+            """;
+
+        const string rewritten = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="NLog" Version="5.3.4" />
+              </ItemGroup>
+              <ItemGroup>
+                <Compile Include="IOrderService.cs" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        Assert.True(ProjectFileGuard.OnlyRedundantCompileItems(hand, rewritten, ["src/IOrderService.cs"]));
+    }
+
+    [Fact]
+    public void OnlyRedundantCompileItems_WhenMsBuildJoinedAMultiLineElement_IsAttributable()
+    {
+        const string hand = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="NLog"
+                                  Version="5.3.4" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        const string rewritten = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="NLog" Version="5.3.4" />
+              </ItemGroup>
+              <ItemGroup>
+                <Compile Include="IOrderService.cs" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        Assert.True(ProjectFileGuard.OnlyRedundantCompileItems(hand, rewritten, ["src/IOrderService.cs"]));
+    }
+
+    [Fact]
+    public void OnlyRedundantCompileItems_WhenAnAttributeValueAlsoChanged_IsRefused()
+    {
+        const string hand = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="NLog" Version="5.3.4"/>
+              </ItemGroup>
+            </Project>
+            """;
+
+        const string rewritten = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="NLog" Version="6.0.0" />
+              </ItemGroup>
+              <ItemGroup>
+                <Compile Include="IOrderService.cs" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        Assert.False(ProjectFileGuard.OnlyRedundantCompileItems(hand, rewritten, ["src/IOrderService.cs"]));
+    }
+
+    [Fact]
+    public void OnlyRedundantCompileItems_WhenACommentAlsoChanged_IsRefused()
+    {
+        const string hand = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <!-- owned by the trading team -->
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+            </Project>
+            """;
+
+        const string rewritten = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <!-- owned by the risk team -->
+              <PropertyGroup>
+                <TargetFramework>net10.0</TargetFramework>
+              </PropertyGroup>
+              <ItemGroup>
+                <Compile Include="IOrderService.cs" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        Assert.False(ProjectFileGuard.OnlyRedundantCompileItems(hand, rewritten, ["src/IOrderService.cs"]));
+    }
+
+    [Fact]
+    public void OnlyRedundantCompileItems_WhenTheItemLandedInAnExistingItemGroup_IsAttributable()
+    {
+        const string hand = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <EmbeddedResource Remove="**/*.resx"/>
+              </ItemGroup>
+            </Project>
+            """;
+
+        const string rewritten = """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <EmbeddedResource Remove="**/*.resx" />
+                <Compile Include="IOrderService.cs" />
+              </ItemGroup>
+            </Project>
+            """;
+
+        Assert.True(ProjectFileGuard.OnlyRedundantCompileItems(hand, rewritten, ["src/IOrderService.cs"]));
+    }
 }

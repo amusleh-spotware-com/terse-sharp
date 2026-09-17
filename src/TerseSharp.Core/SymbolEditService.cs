@@ -267,7 +267,7 @@ public static class SymbolEditService
     }
 
     private static SyntaxToken OnItsOwnLine(SyntaxToken closeBrace) =>
-        closeBrace.LeadingTrivia.Any(SyntaxKind.EndOfLineTrivia)
+        StartsALine(closeBrace)
             ? closeBrace
             : closeBrace.WithLeadingTrivia(closeBrace.LeadingTrivia.Insert(0, SyntaxFactory.ElasticCarriageReturnLineFeed));
     private static string Unchanged(string tool) => new ResponseBuilder(tool, "applied")
@@ -1233,6 +1233,10 @@ public static class SymbolEditService
 
     private static SyntaxNode Annotated(SyntaxNode replacement, bool annotate) =>
         annotate ? replacement.WithAdditionalAnnotations(Formatter.Annotation) : replacement;
+
+    private static bool StartsALine(SyntaxToken closeBrace) =>
+        closeBrace.LeadingTrivia.Any(SyntaxKind.EndOfLineTrivia)
+        || closeBrace.GetPreviousToken().TrailingTrivia.Any(SyntaxKind.EndOfLineTrivia);
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

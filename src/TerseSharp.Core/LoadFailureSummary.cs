@@ -21,26 +21,7 @@ public static class LoadFailureSummary
         return [.. groups];
     }
 
-    public static ReadOnlySpan<char> ProjectOf(ReadOnlySpan<char> failure)
-    {
-        var remaining = failure;
-
-        while (remaining.IndexOf('\'') is var open and >= 0)
-        {
-            var rest = remaining[(open + 1)..];
-            var close = rest.IndexOf('\'');
-
-            if (close < 0)
-                return [];
-
-            if (rest[..close] is var quoted && quoted.EndsWith("proj", StringComparison.OrdinalIgnoreCase))
-                return FileName(quoted);
-
-            remaining = rest[(close + 1)..];
-        }
-
-        return [];
-    }
+    public static ReadOnlySpan<char> ProjectOf(ReadOnlySpan<char> failure) => FileName(ProjectPathOf(failure));
 
     private static ReadOnlySpan<char> FileName(ReadOnlySpan<char> path) =>
         path.LastIndexOfAny('/', '\\') is var separator and >= 0 ? path[(separator + 1)..] : path;
@@ -98,15 +79,33 @@ public static class LoadFailureSummary
     private static bool Bounded(ReadOnlySpan<char> span, int after) =>
         after >= span.Length || IsSeparator(span[after]) || !IsPathCharacter(span[after]);
 
-
     private static int Separator(ReadOnlySpan<char> span, int after) =>
         after < span.Length && IsSeparator(span[after]) ? 1 : 0;
-
 
     private static bool IsSeparator(char character) =>
         character == Path.DirectorySeparatorChar || character == Path.AltDirectorySeparatorChar;
 
-
     private static bool IsPathCharacter(char character) =>
         char.IsLetterOrDigit(character) || character is '.' or '-' or '_' or '~' or ' ';
+
+    public static ReadOnlySpan<char> ProjectPathOf(ReadOnlySpan<char> failure)
+    {
+        var remaining = failure;
+
+        while (remaining.IndexOf('\'') is var open and >= 0)
+        {
+            var rest = remaining[(open + 1)..];
+            var close = rest.IndexOf('\'');
+
+            if (close < 0)
+                return [];
+
+            if (rest[..close] is var quoted && quoted.EndsWith("proj", StringComparison.OrdinalIgnoreCase))
+                return quoted;
+
+            remaining = rest[(close + 1)..];
+        }
+
+        return [];
+    }
 }

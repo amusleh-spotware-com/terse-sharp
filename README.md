@@ -262,7 +262,8 @@ real command. It also covers `dotnet build`/`test`/`format`/`clean`, `dotnet wat
 `powershell -Command "Start-Sleep …"` hosting one, outside a
 `while`/`until`/`for` loop — because waiting is not work and nothing replaces it; and the working-tree
 half of git — `git status` and `git diff` in every flag and `-C` form, answered by `changed_files` and
-`diff_symbols`, with `git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files` to
+`diff_symbols` (a diff of a non-`.cs` path to `diff_text`, which is what can answer it), with
+`git diff --cached` routed to `changed_files staged=true`, a bare `git ls-files` to
 `find_files tracked=true`, a `git tag` **listing** to `history tags=true`, and origin's tag listing —
 `git ls-remote --tags` — to `history tags=true remote=true`. `TaskOutput` and
 `TaskList` are not denied — they are **allowed with a stand-down**, because polling for a result the

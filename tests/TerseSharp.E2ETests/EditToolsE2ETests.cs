@@ -1122,4 +1122,42 @@ public sealed class RegionTail
             await server.CallAsync("write_text", new() { ["path"] = SpacingProbe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Theory]
+    [InlineData("TailBare", "{0}\n{{\n    public int Seed() => 1;\n}}", null, "\n")]
+    [InlineData("TailAnchored", "{0}\n{{\n    public int Seed() => 1;\n}}\n", "Seed", "\n")]
+    [InlineData("TailSiblingBare", "{0}\n{{\n    public int Seed() => 1;\n}}\n\npublic sealed class {0}Sibling;", null, "\n")]
+    [InlineData("TailLfMid", "{0}\n{{\n    public int Seed() => 1;\n\n    public int Next() => 2;\n}}", "Seed", "\n")]
+    [InlineData("TailCrlfMid", "{0}\n{{\n    public int Seed() => 1;\n\n    public int Next() => 2;\n}}", "Seed", "\r\n")]
+    public async Task AddMember_HoweverTheMemberLands_ChangesNoLineButTheOnesItInserts(string name, string shape, string? after, string ending)
+    {
+        var body = string.Format(CultureInfo.InvariantCulture, "namespace Fixture.Trading;\n\npublic sealed class " + shape, name);
+
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            root => File.WriteAllTextAsync(
+                Path.Combine(root, "src", "Fixture.Trading", name + ".cs"),
+                Ended(body, ending),
+                TestContext.Current.CancellationToken));
+
+        var arguments = new Dictionary<string, object?>
+        {
+            ["typeSymbolId"] = name,
+            ["declaration"] = "    private static int Extra => 2;",
+            ["dryRun"] = true,
+            ["verbose"] = true,
+        };
+
+        if (after is not null)
+            arguments["after"] = after;
+
+        var text = await solution.CallAsync("add_member", arguments);
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.True(text.Split("@@").Length / 2 is 1, text);
+    }
+
+    private static string Ended(string body, string ending) =>
+        ending is "\n" ? body : body.Replace("\n", ending, StringComparison.Ordinal);
 }

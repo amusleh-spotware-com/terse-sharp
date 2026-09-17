@@ -1,0 +1,5 @@
+<Project>
+  <Target Name="TerseAdvisoryWarning" BeforeTargets="CoreCompile">
+    <Warning Code="NU1903" Text="Package 'Fixture.Audit' 1.0.0 has a known high severity vulnerability" />
+  </Target>
+</Project>
