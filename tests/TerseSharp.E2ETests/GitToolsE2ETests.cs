@@ -343,27 +343,37 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
     public async Task ChangedFiles_FoldsADirectoryContributingManyUntrackedFilesIntoOneRow()
     {
         var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i237");
+        var notes = Path.Combine(scratch, "notes");
 
-        Directory.CreateDirectory(scratch);
+        Directory.CreateDirectory(notes);
 
         try
         {
             for (var index = 0; index < 8; index++)
             {
                 await File.WriteAllTextAsync(
-                    Path.Combine(scratch, string.Create(CultureInfo.InvariantCulture, $"note{index}.txt")),
+                    Path.Combine(notes, string.Create(CultureInfo.InvariantCulture, $"note{index}.txt")),
                     "scratch",
                     TestContext.Current.CancellationToken);
             }
 
-            var text = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i237" });
-            var rows = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            var folded = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i237" });
+            var expanded = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i237/notes" });
 
-            Assert.Contains("8 files", text, StringComparison.Ordinal);
-            Assert.Contains("scratch-i237/**", text, StringComparison.Ordinal);
-            Assert.Contains("x8 untracked", text, StringComparison.Ordinal);
-            Assert.DoesNotContain("note3.txt", text, StringComparison.Ordinal);
-            Assert.Equal(2, rows.Length);
+            Assert.Contains("8 files", folded, StringComparison.Ordinal);
+            Assert.Contains("scratch-i237/notes/**", folded, StringComparison.Ordinal);
+            Assert.Contains("x8 untracked", folded, StringComparison.Ordinal);
+            Assert.Contains("pass path=<that directory> to list what it covers", folded, StringComparison.Ordinal);
+            Assert.DoesNotContain("note3.txt", folded, StringComparison.Ordinal);
+
+            Assert.Contains("8 files", expanded, StringComparison.Ordinal);
+            Assert.Contains("note3.txt", expanded, StringComparison.Ordinal);
+            Assert.DoesNotContain("/**", expanded, StringComparison.Ordinal);
+
+            var dotted = await server.CallAsync("changed_files", new() { ["path"] = "./scratch-i237/notes" });
+
+            Assert.Contains("note3.txt", dotted, StringComparison.Ordinal);
+            Assert.DoesNotContain("/**", dotted, StringComparison.Ordinal);
         }
         finally
         {

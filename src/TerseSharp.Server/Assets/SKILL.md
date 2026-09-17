@@ -171,7 +171,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Localization** | `Grep` a resource key | `resx_find(query)` |
 | **Localization** | "is this key still used" | `resx_usages(key)` |
 | **Localization** | "which strings are untranslated" | `resx_validate()` |
-| **Localization** | one `resx_set` call per key | `resx_set(entries: "Key=Value\nOther=Second")` — `files: [{path, entries}, …]` writes up to 10 culture files |
+| **Localization** | one `resx_set` call per key | `resx_set(entries: "Key=Value\nOther=Second")` — `files: [{path, entries}, …]` writes up to 10 culture files, and needs no top-level `path` |
 | **Localization** | `Edit` a `.resx`/`.resw` | `resx_set` · `resx_remove` · `resx_rename` |
 | **Razor** | `Read` a `.razor` or `.cshtml` file | `razor_outline(path)` |
 | **Razor** | "how do I use this component" | `razor_component(name)` |
@@ -474,6 +474,13 @@ multi-member `add_member` leaves behind never need a shell rewrite. It edits tri
 so a raw string literal is safe. `cleanup fix=all` and `fix=usings` fold too; `fix=style` and
 `fix=analyzers` do not reformat at all.
 
+**`cleanup` removes unused `using` directives; it never reorders the ones already there** - sorting the
+block System-first is a rewrite neither CI command makes. A directive `usings=` adds still lands
+sorted. **And a run that REFORMATTED text where no `.editorconfig` at or above those files sets
+`indent_style` says so**: whitespace then follows Roslyn's own defaults, which may not be the repo's
+convention, and a ReSharper `*.sln.DotSettings` is **not** read. `fix=style`, `fix=analyzers` and
+`fix=ci` never reformat, so they never say it, and a run that changed nothing says nothing.
+
 **`format verify` and `cleanup verify` are not the same gate.** `format` compares against the Roslyn
 whitespace formatter, which `dotnet format style` and `dotnet format analyzers` do not run — a
 `VERIFY_FAILED` there can still be a green CI leg. `cleanup verify=true fix=style` and
@@ -485,6 +492,25 @@ names the byte-equivalent CI pair. Every file `whitespace` is a green CI leg; an
 
 **`cleanup verify=true fix=ci` is both CI commands in ONE call** - the same union, no whitespace
 formatter, each named file tagged `style`, `analyzers` or `style+analyzers`.
+
+**`find_usages` and `resx_usages` report one record per SOURCE POSITION.** A multi-targeted project
+gives Roslyn one symbol per target framework, each finding the same call site, so one usage used to
+print two to eight times. They deduplicate by position now, so the count IS the blast radius.
+
+**Refusals the tool descriptions do not spell out:** `cellChars=` without `columns=`; `bytes=` and
+`stamp=` answer `UNRESOLVED` under `ref=`; `edit_text` refuses `toPath=` naming the same file twice
+and `row=`/`rows=` beside `section=`; `replace_symbol` refuses two `symbolIds=` entries where one
+declaration contains the other, and takes enum member declarations on an enum member id; `fix=`
+replays every held entry it does not name and refuses an index the batch does not carry;
+`ifUnchangedSince=` carries ONE file's stamp, so a call writing more than one file is refused, and a
+value that is not a round-trip UTC timestamp is refused by name. A `retryWith` token is bound to the
+workspace AND the tool that issued it, so a `replace_symbol` token replayed through `add_member` is
+not recognised. With `toPath=`, `place=prepend` puts the moved section at the top of the target.
+
+**A write is visible to THIS workspace's next call with no reload** - but another loaded workspace
+over the same root, and another terse process, pick it up through their own watcher, so their next
+call may still answer from the pre-write snapshot. The compile gate reads the workspace as it is NOW,
+so two new interdependent `.cs` files land in either order.
 
 **A batched symbol read counts what it ANSWERED, not what it was asked for.** `get_symbol`,
 `get_symbol_source` and `get_type_outline` answer `1/2 symbols` when one id did not resolve - a
@@ -609,7 +635,8 @@ tools that can answer. All three take `baseRef=` (empty compares the working tre
 inside a larger repository never reports a file outside it. On a tree shared with other sessions,
 a directory contributing more than five **untracked** files folds into one
 `.research/**  +? -?  ?  x40 untracked` row - tracked files stay one per line and the count still counts
-every file - and `changed_files(path: "src")` is the difference between reading your own change set and reading
+every file. **A folded row opens**: the fold key is the first segment BELOW the `path=` scope, so
+`changed_files(path: ".research")` descends into it until the files are listed. And `changed_files(path: "src")` is the difference between reading your own change set and reading
 everybody's, and `changed_files(exclude: ".research/**")` drops the folders a positive pathspec
 cannot leave out. `diff_symbols` tags a hunk `EXACT` only when it sits
 inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.
@@ -948,7 +975,12 @@ The writers are surgical: only the addressed `<data>` element is rewritten, so t
 not parse is refused. Typed and binary entries (`type=`, `mimetype=`) are reported `TYPED`/`BINARY` and
 passed through — `resx_set` on one is refused rather than corrupting it. `resx_set(entries: ...)` writes
 every `Key=Value` line in one pass, and a line with no separator is named by number and refuses the
-batch rather than vanishing from it. `resx_remove` covers every file of
+batch rather than vanishing from it. **`comment=` reaches the whole batch** - the single key, every
+line of `entries=` and every file of `files=` - so one key across 23 locales is 3 calls, not 23, and a
+line written `Key=Value\tComment` overrides it for that key - so a value that must itself CONTAIN a
+tab is written with `key=`/`value=`, which never splits. With `files=`, `path=` is only the default
+target of an entry that declares none, so a batch where every entry names its own file needs no
+`path=`. A repeated `designerStale=` note is printed once per call, not once per file. `resx_remove` covers every file of
 the family unless you pass `culture:`, and refuses while the key is still referenced unless `force: true`.
 `resx_rename` is all-or-nothing across the family plus the references it can prove.
 

@@ -633,4 +633,98 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
         Assert.Contains("top-level key, value or entries", mixed, StringComparison.Ordinal);
         Assert.Contains("files[1] carries no entries", blank, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ResxSet_WithFilesAndAComment_WritesThatCommentIntoEveryFileOfTheBatch()
+    {
+        var text = await server.CallAsync("resx_set", Batched(verbose: true));
+
+        Assert.Equal(2, Occurrences(text, "<comment>Batched</comment>"));
+    }
+
+    [Fact]
+    public async Task ResxSet_AcrossSeveralFilesOfOneFamily_ReportsDesignerStaleOncePerCall()
+    {
+        var text = await server.CallAsync("resx_set", Batched(verbose: false));
+
+        Assert.Equal(1, Occurrences(text, "designerStale=true"));
+    }
+
+    [Fact]
+    public async Task ResxSet_WithFilesThatCarryTheirOwnPath_NeedsNoTopLevelPath()
+    {
+        var text = await server.CallAsync("resx_set", Batched(verbose: false));
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("dryRun", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResxSet_WithNeitherPathNorFiles_IsRefusedByName()
+    {
+        var text = await server.CallAsync("resx_set", []);
+
+        Assert.Contains("neither path nor files", text, StringComparison.Ordinal);
+        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResxSet_WithATabbedEntryLine_WritesThatLinesOwnCommentAndTheSharedOneElsewhere()
+    {
+        var text = await server.CallAsync("resx_set", new()
+        {
+            ["path"] = "src/Fixture.Trading/Strings.resx",
+            ["entries"] = "Zz_Alpha=Alpha\tAlpha note\nZz_Beta=Beta",
+            ["comment"] = "shared note",
+            ["dryRun"] = true,
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("<value>Alpha</value>", text, StringComparison.Ordinal);
+        Assert.Contains("<comment>Alpha note</comment>", text, StringComparison.Ordinal);
+        Assert.Contains("<comment>shared note</comment>", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<value>Alpha\tAlpha note</value>", text, StringComparison.Ordinal);
+    }
+
+    private static Dictionary<string, object?> Batched(bool verbose) => new()
+    {
+        ["files"] = new object[]
+        {
+        new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Strings.resx", ["entries"] = "Zz_Batch=Batched" },
+        new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Strings.fr.resx", ["entries"] = "Zz_Batch=Groupe" },
+        },
+        ["comment"] = "Batched",
+        ["dryRun"] = true,
+        ["verbose"] = verbose,
+    };
+
+    private static int Occurrences(string text, string needle)
+    {
+        var seen = 0;
+        var at = text.IndexOf(needle, StringComparison.Ordinal);
+
+        while (at >= 0)
+        {
+            seen++;
+            at = text.IndexOf(needle, at + needle.Length, StringComparison.Ordinal);
+        }
+
+        return seen;
+    }
+
+    [Fact]
+    public async Task ResxSet_WithATrailingTab_KeepsItInTheValueRatherThanReadingAnEmptyComment()
+    {
+        var text = await server.CallAsync("resx_set", new()
+        {
+            ["path"] = "src/Fixture.Trading/Strings.resx",
+            ["entries"] = "Zz_Trailing=Alpha\t",
+            ["comment"] = "shared note",
+            ["dryRun"] = true,
+            ["verbose"] = true,
+        });
+
+        Assert.Contains("<value>Alpha\t</value>", text, StringComparison.Ordinal);
+        Assert.Contains("<comment>shared note</comment>", text, StringComparison.Ordinal);
+    }
 }

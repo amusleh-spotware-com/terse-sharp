@@ -8,3 +8,6 @@ public sealed class MtpSolutionCollection;
 
 [CollectionDefinition(nameof(PolicySolutionCollection))]
 public sealed class PolicySolutionCollection;
+
+[CollectionDefinition(nameof(MultiTargetSolutionCollection))]
+public sealed class MultiTargetSolutionCollection;

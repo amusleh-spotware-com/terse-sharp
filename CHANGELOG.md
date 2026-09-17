@@ -8,6 +8,98 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-09-17
+
+### Fixed
+
+- **`find_usages` and `resx_usages` no longer report one record per compilation.** On a multi-targeted
+  project Roslyn returns one `ReferencedSymbol` per linked symbol - one per target framework - and each
+  of them carries the same source location, so one call site was printed **twice** by `find_usages`
+  (`DesktopNLogConfigurator.cs … 29:9, 29:9`) and **four to eight times** by `resx_usages`, which also
+  collected the same member from every project compilation before searching. Both now deduplicate by
+  source position, keeping the Roslyn-resolved record over a candidate one, so `4 usages` for a single
+  call site is no longer possible.
+  `MultiTargetE2ETests.FindUsages_OverAMultiTargetedProject_ReportsOneRecordPerSourcePosition` and
+  `MultiTargetE2ETests.ResxUsages_OverAMultiTargetedProject_ReportsOneRecordPerSourcePosition` pin it
+  against the new `fixtures/MultiTargetSolution`, whose `Multi.Core` targets `netstandard2.0;net10.0` -
+  that fixture reproduced 2x and 8x before the fix.
+- **`resx_set` no longer demands a `path` it then ignores.** `files=[{path, entries}, ...]` where every
+  entry names its own file was refused with `missing path`, and adding a dummy `path=` made the call
+  succeed while that file was never written. `path` is now optional, an entry carrying neither its own
+  path nor a top-level default is refused **by index**, and a call with neither answers
+  `neither path nor files was given`.
+  `ResxToolsE2ETests.ResxSet_WithFilesThatCarryTheirOwnPath_NeedsNoTopLevelPath` and
+  `ResxToolsE2ETests.ResxSet_WithNeitherPathNorFiles_IsRefusedByName` cover both directions.
+- **`designerStale=` is reported once per call, not once per file.** A `files=` sweep across 23 culture
+  files of one family printed the same regenerate-the-designer note 23 times; the batch writer now
+  folds repeats and `Render` deduplicates its notes, pinned by
+  `ResxToolsE2ETests.ResxSet_AcrossSeveralFilesOfOneFamily_ReportsDesignerStaleOncePerCall`.
+- **The batching steer no longer fires on a call that is already batching, and names the form that
+  fits.** `resx_set`'s plural parameter was recorded as `entries` - a newline-delimited string, not an
+  array - so a `files=` call, which is exactly the batch the steer asks for, was counted as an
+  unbatched one and answered `2 resx_set calls in a row - pass entries=[...]`: a form that cannot
+  express the per-file paths, and whose shape would have silently dropped the `<comment>` a
+  localization convention requires. The steer now names `files=[{path, entries}, ...]`, and a batched
+  call **resets** the run instead of escalating against an agent that complied.
+  `RepeatSteerTests.Steer_ForARunOfResourceWrites_NamesTheCrossFileBatchRatherThanTheSameFileOne` and
+  `RepeatSteerTests.Steer_SaysNothingToAnAgentThatIsAlreadyBatching_AndForgetsTheRunItComplied` cover it.
+- **A folded untracked row can be opened.** `changed_files` folds a directory contributing more than
+  five untracked files into one `dir/** xN untracked` row, but the fold key was always the path's
+  **first** segment, so no `path=` could ever break it open - `path="cTrader.Windows/**"` answered the
+  same folded row. The fold key is now the first segment **below** the `path=` scope, so passing that
+  directory descends one level at a time until the files are listed, and a listing carrying a folded
+  row says which call opens it.
+  `GitToolsE2ETests.ChangedFiles_FoldsADirectoryContributingManyUntrackedFilesIntoOneRow` asserts both
+  the fold and the expansion.
+
+### Changed
+
+- **`cleanup` no longer reorders a file's `using` directives.** `fix=usings` (the default) and
+  `fix=all` sorted the whole using block System-first and alphabetically - a rewrite neither
+  `dotnet format style` nor `dotnet format analyzers` makes - so `gate` rewrote 11 untouched lines of a
+  file whose committed order differed. Unused directives are still removed, and a directive an edit's
+  `usings=` adds still lands at its sorted position; what is gone is the sweep over the directives
+  already there. `MultiTargetE2ETests.Cleanup_OnAFileWhoseUsingsAreNotSystemFirst_LeavesTheirOrderAlone`
+  pins it.
+- **`format`, `cleanup` and `gate` say when no `.editorconfig` governs the files they rewrote.** With
+  none, the Roslyn formatter applies its own defaults - `unchecked((int) 0x88980406)` becomes
+  `unchecked((int)0x88980406)` because the space-after-cast option defaults to false - which may not be
+  the repository's convention, and a ReSharper `*.sln.DotSettings` is not read. A run that actually
+  rewrote text now ends with `NOTE no .editorconfig governs these files ...`; a run that changed
+  nothing says nothing, and neither does a mode that never reformats -
+  `cleanup fix=style`, `fix=analyzers` and `fix=ci` apply code fixes only, so a run of theirs that
+  changed a file says nothing about whitespace. The probe asks one document per project in scope and
+  answers only when EVERY one of them is ungoverned.
+  `MultiTargetE2ETests.Cleanup_WhereNoEditorConfigGovernsTheFile_SaysSoInsteadOfRewritingSilently`,
+  `MultiTargetE2ETests.Cleanup_ThatActuallyWrites_CarriesTheSameUngovernedNoteAsItsPreview` and
+  `MultiTargetE2ETests.Cleanup_InAModeThatNeverReformats_SaysNothingAboutWhitespaceEvenWhenItChangesTheFile`
+  cover all three directions.
+- **Every advertised tool's schema now fits a token budget.** Two of them - `read_text` at 1687 tokens
+  and `write_text` at 1191 - were long enough to arrive **truncated** through a deferred-tool fetch,
+  which costs the tokens and hides a parameter. `read_text`, `edit_text`, `replace_symbol`,
+  `write_text`, `run_tests`, `add_member` and `search_text` were rewritten down to the point they make
+  - about 2900 tokens off every `tools/list` - and
+  `ToolCensusE2ETests.EveryAdvertisedTool_FitsInItsSchemaBudget` fails above
+  `ToolCensus.SchemaTokenCap`, 1024 tokens per tool over its name, description and schema. Every
+  trimmed description still names its plural parameter imperatively, which
+  `SchemaCensusE2ETests.EveryToolWithAPluralParameter_NamesItImperativelyInItsDescription` polices.
+- **`SKILL.md`'s token budget is raised from 25 200 to 25 900.** The skill grew by the contracts this
+  release adds - the usage dedupe, the `using`-order and `.editorconfig` rules, the resx batch's
+  `comment=` reach and the folded-row expansion - plus the refusal rules the schema trim moved out of
+  the tool descriptions, which had to land somewhere rather than be lost. A shipped skill that does
+  not teach a contract is worse than no skill; the additions were compressed before the ceiling moved.
+
+### Added
+
+- **A line of `resx_set`'s `entries=` can carry its own comment.** Written `Key=Value<TAB>Comment` it
+  writes that comment for that key and overrides `comment=`, so a batch of **different** keys is
+  expressible, not only one key across many locales. `comment=` still applies to the single key, to
+  every line of `entries=` and to every file of `files=` - which the schema now says, because the
+  affordance existed and nothing documented it.
+  `ResxToolsE2ETests.ResxSet_WithATabbedEntryLine_WritesThatLinesOwnCommentAndTheSharedOneElsewhere`
+  and `ResxToolsE2ETests.ResxSet_WithFilesAndAComment_WritesThatCommentIntoEveryFileOfTheBatch` cover
+  both.
+
 ## [0.62.0] - 2026-09-17
 
 ### Fixed
@@ -6011,7 +6103,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.62.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.63.0...HEAD
+[0.63.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.63.0
 [0.62.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.62.0
 [0.61.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.61.0
 [0.60.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.60.0

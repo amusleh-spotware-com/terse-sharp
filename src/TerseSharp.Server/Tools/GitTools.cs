@@ -117,7 +117,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
                 cancellationToken).ConfigureAwait(false);
 
         return untracked.IsOk
-            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen)
+            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen)
             : untracked.Error!.Render();
     }
 
@@ -126,12 +126,13 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             string nameStatus,
             string untracked,
             string? exclude,
+            string? path,
             int maxResults,
             string? outside,
             string? steer,
             bool chosen)
     {
-        var listed = Lines(numstat, nameStatus, untracked, Excluded(exclude));
+        var listed = Lines(numstat, nameStatus, untracked, Excluded(exclude), path);
         var response = new ResponseBuilder("changed_files", string.Empty).Chosen(chosen);
         var capped = ResultCap.Shown(listed.Rows.Count, maxResults);
         var shown = listed.Rows.Capped(maxResults).ToArray();
@@ -144,6 +145,9 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         if (listed.Tracked > 0 && listed.Files > listed.Tracked)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"tracked={listed.Tracked} untracked={listed.Files - listed.Tracked} - untracked=false or exclude= drops what path= cannot"));
+
+        if (Array.Exists(shown, Folded))
+            response.Note("a /** row folds the untracked files of ONE directory - pass path=<that directory> to list what it covers, one level at a time");
 
         if (outside is { Length: > 0 })
             response.Note("outside-workspace  " + outside);
@@ -271,7 +275,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         CultureInfo.InvariantCulture,
         $"{file.Path}  +{Counted(file.Added)} -{Counted(file.Deleted)}  {statuses.GetValueOrDefault(file.Path, "M")}");
 
-    private static Listed Lines(string numstat, string nameStatus, string untracked, FileGlob? exclude)
+    private static Listed Lines(string numstat, string nameStatus, string untracked, FileGlob? exclude, string? path)
     {
         var statuses = DiffParser.NameStatus(nameStatus);
         var files = DiffParser.NumStat(numstat);
@@ -286,7 +290,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         var tracked = rows.Count;
         var kept = Kept(untracked, exclude);
 
-        Untracked(kept, rows);
+        Untracked(kept, rows, path);
 
         return new Listed(rows, tracked + kept.Count, tracked);
     }
@@ -451,38 +455,24 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         return kept;
     }
 
-    private static void Untracked(List<string> kept, List<string> rows)
+    private static void Untracked(List<string> kept, List<string> rows, string? path)
     {
+        var raw = Scope(path);
+        var buffer = raw.Length <= 256 ? stackalloc char[256] : new char[raw.Length];
+        var scope = Normalized(raw, buffer);
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var byDirectory = counts.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        foreach (var path in kept)
-        {
-            var directory = TopDirectory(path);
-
-            if (!directory.IsEmpty && !byDirectory.TryAdd(directory, 1))
-                byDirectory[directory] += 1;
-        }
-
-        var folded = new HashSet<string>(StringComparer.Ordinal);
-        var seen = folded.GetAlternateLookup<ReadOnlySpan<char>>();
-
-        foreach (var path in kept)
-        {
-            var directory = TopDirectory(path);
-
-            if (directory.IsEmpty || byDirectory[directory] <= UntrackedFold)
-                rows.Add(path + "  +? -?  ?");
-            else if (seen.Add(directory))
-                rows.Add(string.Create(CultureInfo.InvariantCulture, $"{directory}/**  +? -?  ?  x{byDirectory[directory]} untracked"));
-        }
+        Tally(kept, scope, byDirectory);
+        Fold(kept, scope, byDirectory, rows);
     }
 
-    private static ReadOnlySpan<char> TopDirectory(ReadOnlySpan<char> path)
+    private static ReadOnlySpan<char> TopDirectory(ReadOnlySpan<char> path, ReadOnlySpan<char> scope)
     {
-        var separator = path.IndexOfAny('/', '\\');
+        var start = Below(path, scope);
+        var separator = path[start..].IndexOfAny('/', '\\');
 
-        return separator > 0 ? path[..separator] : default;
+        return separator > 0 ? path[..(start + separator)] : default;
     }
 
     private static bool Folded(string row)
@@ -872,4 +862,85 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             "remote=true merges the remote's tag list into the local one, so it only answers beside tags=true",
             "pass tags=true remote=true to compare the two tag lists, or drop remote= to list commits")
         : null;
+
+    private static int Below(ReadOnlySpan<char> path, ReadOnlySpan<char> scope)
+    {
+        if (scope.IsEmpty || path.Length <= scope.Length || !path.StartsWith(scope, StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        return path[scope.Length] is '/' or '\\' ? scope.Length + 1 : 0;
+    }
+
+    private static ReadOnlySpan<char> Scope(string? path)
+    {
+        if (path is not { Length: > 0 })
+            return default;
+
+        var span = Bare(path.AsSpan()).TrimEnd(Separators);
+        var wildcard = span.IndexOfAny('*', '?');
+
+        if (wildcard < 0)
+            return span;
+
+        var cut = span[..wildcard].LastIndexOfAny(Separators);
+
+        return cut > 0 ? span[..cut] : default;
+    }
+
+    private static ReadOnlySpan<char> Separators => "/\\";
+
+    private static ReadOnlySpan<char> Bare(ReadOnlySpan<char> path)
+    {
+        var span = path;
+
+        if (span.StartsWith(":(", StringComparison.Ordinal) && span.IndexOf(')') is var close and >= 0)
+            span = span[(close + 1)..];
+
+        while (span.Length > 1 && span[0] is '.' && span[1] is '/' or '\\')
+            span = span[2..];
+
+        return span;
+    }
+
+    private static void Tally(
+        List<string> kept,
+        ReadOnlySpan<char> scope,
+        Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> byDirectory)
+    {
+        foreach (var candidate in kept)
+        {
+            var directory = TopDirectory(candidate, scope);
+
+            if (!directory.IsEmpty && !byDirectory.TryAdd(directory, 1))
+                byDirectory[directory] += 1;
+        }
+    }
+
+    private static void Fold(
+        List<string> kept,
+        ReadOnlySpan<char> scope,
+        Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> byDirectory,
+        List<string> rows)
+    {
+        var folded = new HashSet<string>(StringComparer.Ordinal);
+        var seen = folded.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        foreach (var candidate in kept)
+        {
+            var directory = TopDirectory(candidate, scope);
+
+            if (directory.IsEmpty || byDirectory[directory] <= UntrackedFold)
+                rows.Add(candidate + "  +? -?  ?");
+            else if (seen.Add(directory))
+                rows.Add(string.Create(CultureInfo.InvariantCulture, $"{directory}/**  +? -?  ?  x{byDirectory[directory]} untracked"));
+        }
+    }
+
+    private static ReadOnlySpan<char> Normalized(ReadOnlySpan<char> scope, Span<char> buffer)
+    {
+        for (var index = 0; index < scope.Length; index++)
+            buffer[index] = scope[index] is '\\' ? '/' : scope[index];
+
+        return buffer[..scope.Length];
+    }
 }

@@ -17,7 +17,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Project path; empty builds the solution.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty builds every framework a multi-targeted project declares.")] string? targetFramework = null,
-        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
+        [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Return every diagnostic, warnings included, and the full report even when the build succeeds. Default false, which answers a successful build in one line and hides warnings on a failed one. The warnings= count reports what this build emitted, so a build that recompiled nothing reports 0.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Build even when this exact call already answered ok and nothing has been written since. Default false.")] bool force = false,
@@ -69,25 +69,25 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values, and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a call that already answered GREEN with nothing written since is not re-run: it answers run_tests UNCHANGED naming the previous verdict and its age, and force=true re-runs it anyway. A stopped run names the test still running, on the dotnet test path. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each built up front then run with --no-build, and a project that times out is named without stopping the rest; a duplicate is refused. parallel bounds how many run at once and defaults to one per core; parallel=1 is serial, stops at the first timeout, and keeps a solution as ONE invocation. runSettings passes VSTest RunSettings overrides, which bound parallelism INSIDE one assembly. tests=[...] runs several tests, classes or namespaces in ONE call, combined into one filter expression. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. verbose=true gives the full report on a green run and the hidden warnings on a failed build; configuration, targetFramework and properties scope the run as they scope build.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a call that already answered GREEN with nothing written since is not re-run: it answers run_tests UNCHANGED naming the previous verdict and its age, and force=true re-runs it anyway. A stopped run names the test still running. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each built up front then run with --no-build, and a project that times out is named without stopping the rest. tests=[...] runs several tests, classes or namespaces in ONE call. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test. Microsoft.Testing.Platform takes FullyQualifiedName only; anything else is refused naming test=.")] string? filter = null,
         [Description("Project path; empty runs every test project.")] string? project = null,
         [Description("Several test projects in one call, at most 10, each a name or a path to its .csproj, run concurrently under parallel. Not with project=.")] string?[]? projects = null,
-        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded; falls back to the whole solution naming the reason. Ignored when project is passed. Default false.")] bool changed = false,
+        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded; falls back to the whole solution naming the reason. Ignored with project=. Default false.")] bool changed = false,
         [Description("How many projects of a batch run at once, 0-10. 0 is one per core, 1 is serial and stops at the first timeout.")] int parallel = 0,
-        [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] - parallelism inside one assembly, which parallel does not touch. VSTest only; refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
+        [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] - parallelism INSIDE one assembly, which parallel does not touch. Refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
-        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
+        [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Run existing binaries; skip the build, including a batch's per-project build.")] bool noBuild = false,
         [Description("List passing tests too.")] bool includePassed = false,
         [Description("List the N slowest tests.")] int slowest = 0,
-        [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false, which answers a green run in one line and reports errors only.")] bool verbose = false,
-        [Description("Timeout seconds, 1-3600 (600). With projects= or a solution it is the budget for EACH project and its build; above 30s it is also a per-test ceiling 15s below it.")] int timeoutSeconds = 600,
+        [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false.")] bool verbose = false,
+        [Description("Timeout seconds, 1-3600 (600). With projects= or a solution it is the budget for EACH project and its build; above 30s also a per-test ceiling 15s below it.")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter. Replaces one call per class; a blank entry is refused by index, not with filter.")] string?[]? tests = null,
+        [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter. A blank entry is refused by index; not with filter.")] string?[]? tests = null,
         [Description("Run even when this exact call already answered green and nothing has been written since. Default false.")] bool force = false,
     CancellationToken cancellationToken = default) => Replayable(
     "run_tests",
@@ -207,7 +207,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Project name or path; empty lists every test project.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty lists every framework a multi-targeted test project declares.")] string? targetFramework = null,
-        [Description("MSBuild properties, each written Name=Value and passed to dotnet as -p:Name=Value, e.g. [\"NativeAppHostEnabled=false\"]. Applied after configuration and targetFramework.")] string[]? properties = null,
+        [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>

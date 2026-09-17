@@ -62,24 +62,24 @@ public sealed class ResxTools(ToolContext context)
             cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "resx_set")]
-    [Description("Add or update one key, many at once with entries as Key=Value lines, or a family with files=[{path, entries}, ...], since entries= is same-file only. Replaces one call per key and one per FILE: written in a single pass, and a line with no separator refuses the batch instead of being dropped. Preserves the file's schema header, ordering, indentation, line endings and byte order mark, and refuses an edit that would produce malformed XML. Use instead of Edit on a .resx file. Not covered by undo_last_change - pass dryRun first if unsure.")]
+    [Description("Add or update one key, many at once with entries as Key=Value lines, or a family with files=[{path, entries}, ...], since entries= is same-file only. Replaces one call per key and one per FILE: written in a single pass, and a line with no separator refuses the batch instead of being dropped. comment= is written into EVERY entry and EVERY file of the batch, and a line of entries= overrides it with Key=Value<TAB>Comment. Preserves the file's schema header, ordering, indentation, line endings and byte order mark, and refuses an edit that would produce malformed XML. Use instead of Edit on a .resx file. Not covered by undo_last_change - pass dryRun first if unsure.")]
     public Task<string> ResxSet(
-        [Description("Path to the .resx/.resw file, or to any file of its family when culture is given. With files=, the default target of every entry that carries no path of its own.")] string path,
+        [Description("Path to the .resx/.resw file, or to any file of its family when culture is given. With files=, the DEFAULT target of every entry that carries no path of its own, so it may be omitted entirely when every entry declares one.")] string? path = null,
         [Description("The key to add or update.")] string? key = null,
         [Description("The value for key.")] string? value = null,
-        [Description("Several entries, one Key=Value per line, written as one pass over the file. Mutually exclusive with key.")] string? entries = null,
-        [Description("Up to 10 files, each taking path and its own entries - the cross-culture sweep entries= cannot express. A blank entry, an 11th, or a top-level key/value/entries beside it is refused by index.")] ResxWrite[]? files = null,
+        [Description("Several entries, one Key=Value per line, written as one pass over the file. A line may carry its own comment as Key=Value<TAB>Comment, which overrides comment= for that key. Mutually exclusive with key.")] string? entries = null,
+        [Description("Up to 10 files, each taking path and its own entries - the cross-culture sweep entries= cannot express, and the form to use when the next call would write the same key to another culture. A blank entry, an 11th, or a top-level key/value/entries beside it is refused by index.")] ResxWrite[]? files = null,
         [Description("Target culture, e.g. fr. Omitted writes the file named by path; a missing culture file is created from the neutral header.")] string? culture = null,
-        [Description("Optional comment for the entry.")] string? comment = null,
+        [Description("Comment written beside the value. Applies to the single key, to EVERY line of entries=, and to every file of files= - so one sweep carries the same comment into all of them. A Key=Value<TAB>Comment line of entries= overrides it.")] string? comment = null,
         [Description("Return the diff without writing.")] bool dryRun = false,
         [Description("Return the full diff instead of one line per changed file. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>
-        context.RejectWrite() is { } refusal
+        (context.RejectWrite() ?? Anchorless(path, files)) is { } refusal
             ? Task.FromResult(refusal)
-            : context.WithWorkspaceAsync(workspace, path, async loaded => NavigationTools.Unwrap(
+            : context.WithWorkspaceAsync(workspace, Hint(path, files), async loaded => NavigationTools.Unwrap(
                 files is { Length: > 0 } batch
                     ? Mixed(key, value, entries) ?? await ResxEditService.SetManyAsync(loaded, path, batch, culture, comment, dryRun, verbose).ConfigureAwait(false)
-                    : await ResxEditService.Set(loaded, path, key, value, entries, culture, comment, dryRun, verbose).ConfigureAwait(false)));
+                    : await ResxEditService.Set(loaded, path ?? string.Empty, key, value, entries, culture, comment, dryRun, verbose).ConfigureAwait(false)));
 
     [McpServerTool(Name = "resx_remove", Destructive = true)]
     [Description("Remove a key from one culture, or from every file of the family when culture is omitted. Refused while the key is still referenced - by the designer property through Roslyn or by a textual lookup - unless force=true. Not covered by undo_last_change.")]
@@ -132,4 +132,14 @@ public sealed class ResxTools(ToolContext context)
                 "files= was passed together with a top-level key, value or entries, and the top-level write would have been silently dropped",
                 "put every write in files=, or send the single write without files="))
             : null;
+
+    private static string? Anchorless(string? path, ResxWrite[]? files) =>
+        path is { Length: > 0 } || files is { Length: > 0 }
+            ? null
+            : Errors.Invalid(
+                "resx_set was called with neither path nor files",
+                "pass path with key and value or entries, or files=[{path, entries}, ...] where every entry names its own file").Render();
+
+    private static string? Hint(string? path, ResxWrite[]? files) =>
+        path is { Length: > 0 } ? path : files is { Length: > 0 } ? files[0].Path : null;
 }

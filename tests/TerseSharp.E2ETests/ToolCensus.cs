@@ -335,6 +335,15 @@ internal static class ToolCensus
         line.Length is 0
         || line.StartsWith("repeat #", StringComparison.Ordinal)
         || line.Contains("calls in a row", StringComparison.Ordinal);
+
+    public const int SchemaTokenCap = 1024;
+    public const int MaxSchemaOverrides = 0;
+
+    public static readonly ToolBudget[] SchemaOverrides = [];
+
+    public static int Schema(string tool) =>
+        Array.Find(SchemaOverrides, budget => string.Equals(budget.Tool, tool, StringComparison.Ordinal))?.Tokens
+        ?? SchemaTokenCap;
 }
 
 internal sealed record ToolPair(string First, string Second, string Reason);

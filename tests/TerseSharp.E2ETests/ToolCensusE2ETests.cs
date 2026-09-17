@@ -475,4 +475,28 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
             misrouted.Length is 0,
             "the guard sends the agent to a tool other than the one whose description claims the command: " + string.Join("; ", misrouted));
     }
+
+    [Fact]
+    public async Task EveryAdvertisedTool_FitsInItsSchemaBudget()
+    {
+        var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var advertised = surface.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+        var over = surface
+            .Select(tool => (tool.Name, Tokens: ToolCensus.Tokens(Advertisement(tool))))
+            .Where(entry => entry.Tokens > ToolCensus.Schema(entry.Name))
+            .OrderByDescending(entry => entry.Tokens)
+            .Select(entry => string.Create(CultureInfo.InvariantCulture, $"{entry.Name}={entry.Tokens}"))
+            .ToArray();
+
+        Assert.True(surface.Count > 50, "the schema sweep saw too few tools to be a census");
+        Assert.True(over.Length is 0, "advertised tools costing more than their schema budget: " + string.Join(", ", over));
+        Assert.True(
+            ToolCensus.SchemaOverrides.Length <= ToolCensus.MaxSchemaOverrides,
+            "the schema budget override set may only shrink");
+        Assert.DoesNotContain(ToolCensus.SchemaOverrides, budget => budget.Reason.Length is 0);
+        Assert.DoesNotContain(ToolCensus.SchemaOverrides, budget => !advertised.Contains(budget.Tool));
+    }
+
+    private static string Advertisement(McpClientTool tool) =>
+        tool.Name + (tool.Description ?? string.Empty) + tool.JsonSchema.ToString();
 }

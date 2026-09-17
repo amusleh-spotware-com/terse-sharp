@@ -21,6 +21,8 @@ public static class ReferenceService
             .Where(location => !location.IsImplicit && !HiddenInGenerated(location))
             .OrderBy(location => location.Document.FilePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(location => location.Location.SourceSpan.Start)
+            .ThenBy(location => location.IsCandidateLocation ? 1 : 0)
+            .Distinct(SourcePosition.Instance)
             .ToArray();
 
         var razor = await RazorUsageService.MarkupAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
@@ -182,5 +184,19 @@ public static class ReferenceService
             ClassifyKind(location),
             TestScope.Of(root, location.Document),
             UsageContainer.Of(syntax, location.Location.SourceSpan));
+    }
+
+    private sealed class SourcePosition : IEqualityComparer<ReferenceLocation>
+    {
+        public static readonly SourcePosition Instance = new();
+
+        public bool Equals(ReferenceLocation left, ReferenceLocation right) =>
+            left.Location.SourceSpan == right.Location.SourceSpan
+            && string.Equals(PathOf(left), PathOf(right), StringComparison.OrdinalIgnoreCase);
+
+        public int GetHashCode(ReferenceLocation location) =>
+            HashCode.Combine(location.Location.SourceSpan, StringComparer.OrdinalIgnoreCase.GetHashCode(PathOf(location)));
+
+        private static string PathOf(ReferenceLocation location) => location.Document.FilePath ?? location.Document.Name;
     }
 }

@@ -389,7 +389,9 @@ is.
 
 `resx_files`, `resx_get`, `resx_find` and `resx_usages` read a whole resource family; `resx_set`,
 `resx_remove` and `resx_rename` edit it. `resx_validate` reports missing values and placeholder mismatches
-across the family — instead of the ~36,000 tokens it costs to read one file.
+across the family — instead of the ~36,000 tokens it costs to read one file. One key across 23 locales is
+**3 `resx_set` calls**, not 23: `files=[{path, entries}, …]` writes ten files a call, `comment=` is written
+into every one of them, and a `Key=Value⇥Comment` line overrides it per key.
 
 ### 🔁 And rename carries across all of it
 

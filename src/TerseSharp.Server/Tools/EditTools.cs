@@ -45,22 +45,22 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration including its signature, attributes and doc comment, addressed by symbol id, with usings= adding the namespaces it needs in the same compile-gated edit. An enum member id takes enum member declarations. Several declarations in one call replace the target with all of them - the way to split a member into overloads in one compile-gated edit. Pass symbolIds and declarations to replace members in several files as ONE compile-gated edit. Replaces one call per file, and is how a signature change lands together with the callers it breaks. Pass add to append the new private helpers the declaration calls, in that same edit, and addTo to name which containing type takes them - comma-separated, one per add entry, when they differ. rename=true accepts a declaration whose NAME differs from the symbol it is paired with, so a member is renamed and rewritten in one edit. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload, as is a batch refused for ONE unresolvable id; fix=[\"2=<corrected>\"] replaces only the held declarations that were wrong and fix=[\"add:1=...\"] the held add= helpers, while append=true ADDS the symbolIds= and declarations= you pass to the held batch - how a CS7036 rollback's callers land with the member. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a whole member declaration - signature, attributes and doc comment - addressed by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them, which is how a member splits into overloads. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands together with the callers it breaks. add= appends the private helpers the declaration calls. A rollback names a retryWith token holding what was rejected, so the retry costs a token instead of the payload.")]
     public Task<string> ReplaceSymbol(
                     [Description("Symbol id of the member.")] string? symbolId = null,
                     [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
                     [Description(AddHelp)] string[]? add = null,
-                    [Description("Name of the containing type that add= lands in, e.g. ToolBoundary or T:TerseSharp.Server.ToolBoundary. Only needed when the targets do not share one container, and it must name one of theirs. Comma-separated routes each add= entry to its own container, in order.")] string? addTo = null,
+                    [Description("Containing type that add= lands in, e.g. ToolBoundary. Only needed when the targets do not share one, and it must name one of theirs. Comma-separated routes each add= entry to its own.")] string? addTo = null,
                     [Description("Diff only, write nothing.")] bool dryRun = false,
                     [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
                     [Description(PolicyHelp)] bool allowPolicy = false,
                     [Description(VerboseHelp)] bool verbose = false,
                     [Description("Workspace or worktree name.")] string? workspace = null,
                     [Description("Alias for symbolId.")] string? symbol = null,
-                    [Description("Symbol ids of the members to replace together, paired positionally with declarations. Replaces one call per member. Several entries per file are allowed; two entries where one declaration contains the other are refused. Beside retryWith= it corrects the held ids.")] string[]? symbolIds = null,
-                    [Description("One complete declaration per entry of symbolIds, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
+                    [Description("Symbol ids of the members to replace together, paired positionally with declarations. Beside retryWith= it corrects the held ids.")] string[]? symbolIds = null,
+                    [Description("One complete declaration per symbolIds entry, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
                     [Description(UsingsHelp)] string[]? usings = null,
-                    [Description("Apply a declaration whose name differs from the symbol it is paired with instead of refusing the batch. References are not rewritten, so the gate rolls it back when a caller breaks; rename_symbol makes them follow. Not held by a retryWith token. Default false.")] bool rename = false,
+                    [Description("Apply a declaration whose name differs from its paired symbol. References are NOT rewritten, so the gate rolls it back when a caller breaks; rename_symbol makes them follow. Default false.")] bool rename = false,
                 [Description(FixHelp)] string[]? fix = null,
                 [Description("Beside retryWith=, ADD the pairs you pass to the held batch instead of correcting it. Refused without a token. Default false.")] bool append = false,
                 [Description(RetryHelp)] string? retryWith = null,
@@ -313,7 +313,7 @@ public sealed class EditTools(ToolContext context)
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous CompileRegression or resolution failure, e.g. r3. The rejected declaration is held with its add= and usings=, so a retry names the token instead of re-sending any of them; pass either again to override what is held, pass usings=[] to DROP the imports it holds, combine it with allowErrors=true, or send the missing callee first and then retry. The token is printed alone on the LAST line of a rejection, so reading it to the end of the line is safe. A symbolId or symbolIds you pass OUTRANKS the held one, which is how a mis-typed id is corrected. The token is bound to the workspace the edit was rejected in and to the tool that issued it: a replay that resolves to another workspace is refused instead of landing there, and a replay by the wrong edit tool is refused naming the tool that can apply it.";
+    private const string RetryHelp = "Token from a previous CompileRegression or resolution failure, e.g. r3, printed alone on the LAST line of the rejection. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; pass either again to override, usings=[] to DROP the imports it holds, or allowErrors=true beside it. A symbolId you pass OUTRANKS the held one.";
 
     private readonly record struct Carry(
         string? Tool,
@@ -352,7 +352,7 @@ public sealed class EditTools(ToolContext context)
     private static string? Slot(IReadOnlyList<string> targets, int index) =>
         index < targets.Count && targets[index] is { Length: > 0 } value ? value : null;
 
-    private const string UsingsHelp = "Pass usings to add the namespaces this declaration needs in the SAME compile-gated edit. Replaces one edit_text force=true on the file header plus one retryWith after a CS0246 rollback. Each entry is a namespace such as System.Collections.Immutable; one already present is ignored, an entry that is not a namespace is refused by name, and a new directive is inserted at its sorted position without reordering the ones already there. It is carried by a retryWith token, so a retry need not re-send it - and usings=[] on that retry drops what the token holds, which is the fix when the import this edit added is what made a name ambiguous.";
+    private const string UsingsHelp = "Namespaces this declaration needs, added in the SAME compile-gated edit - the one-call answer to a CS0246 rollback. Each entry is a namespace such as System.Collections.Immutable; one already present is ignored and a non-namespace entry is refused by name. Held by a retryWith token; usings=[] on that retry drops what it holds.";
 
     private static string? RejectedUsings(string[]? usings)
     {
@@ -372,7 +372,7 @@ public sealed class EditTools(ToolContext context)
         return null;
     }
 
-    private const string AddHelp = "New members appended to the type that contains the replaced member, in the SAME compile-gated edit - the one-call answer to the callee-after-caller rollback. Every target must share one containing type. Not held by a retryWith token; pass it again on the retry.";
+    private const string AddHelp = "New members appended to the type that contains the replaced member, in the SAME compile-gated edit - the answer to the callee-after-caller rollback. Targets not sharing one container need addTo=.";
 
     private static string? RejectedAdd(string[]? add)
     {
@@ -462,7 +462,7 @@ public sealed class EditTools(ToolContext context)
         return null;
     }
 
-    private const string FixHelp = "Correct held entries on a retryWith replay instead of re-sending the batch. Each entry is '<index>=<declaration>' for a held declaration, or 'add:<index>=<declaration>' for a held add= helper, index being the 0-based position the rejection printed; every held entry fix does not name replays unchanged. Only with retryWith, and an index the batch does not carry is refused naming the range.";
+    private const string FixHelp = "Correct held entries on a retryWith replay instead of re-sending the batch. Each entry is '<index>=<declaration>', or 'add:<index>=<declaration>' for a held helper, index being the 0-based position the rejection printed. Only with retryWith.";
 
     private static (int Index, string Text, bool Add)? Correction(string entry)
     {

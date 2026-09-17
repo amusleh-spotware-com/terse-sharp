@@ -26,7 +26,7 @@ public static class RepeatSteer
         ["get_type_outline"] = "symbolIds",
         ["write_text"] = "files",
         ["edit_text"] = "edits",
-        ["resx_set"] = "entries",
+        ["resx_set"] = "files",
         ["analyze"] = "paths",
         ["format"] = "paths",
         ["cleanup"] = "paths",
@@ -70,7 +70,7 @@ public static class RepeatSteer
 
     public static string? Steer(string tool, bool batched = false, bool unbatchable = false, string? value = null)
     {
-        if (unbatchable)
+        if (unbatchable || batched)
         {
             Forget();
 
@@ -79,12 +79,12 @@ public static class RepeatSteer
 
         var (count, seen, captured) = Counted(tool, value);
 
-        return Repeated(tool, count, seen, captured, batched);
+        return Repeated(tool, count, seen, captured);
     }
 
-    private static string? Repeated(string tool, int count, string[] seen, int captured, bool batched)
+    private static string? Repeated(string tool, int count, string[] seen, int captured)
     {
-        if (batched || count < Threshold || !Plural.TryGetValue(tool, out var plural))
+        if (count < Threshold || !Plural.TryGetValue(tool, out var plural))
             return null;
 
         if (Shape.TryGetValue(tool, out var shape))
@@ -194,5 +194,6 @@ public static class RepeatSteer
     {
         ["edit_text"] = "each entry is {path, oldText, newText} and may carry its OWN path, so a run across DIFFERENT files is one call",
         ["write_text"] = "each entry is {path, content} and carries its OWN path, and every .cs among them shares ONE compile gate",
+        ["resx_set"] = "each entry is {path, entries} and carries its OWN path, so one key across many culture files is ONE call - and comment= is written into every file of the batch",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 }

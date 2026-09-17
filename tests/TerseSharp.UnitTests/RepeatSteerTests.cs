@@ -44,7 +44,7 @@ public sealed class RepeatSteerTests
     [InlineData("run_tests", "projects")]
     [InlineData("write_text", "files")]
     [InlineData("edit_text", "edits")]
-    [InlineData("resx_set", "entries")]
+    [InlineData("resx_set", "files")]
     public void Steer_NamesThePluralParameterOfTheToolItRepeated(string tool, string plural)
     {
         RepeatSteer.Forget();
@@ -55,14 +55,29 @@ public sealed class RepeatSteerTests
     }
 
     [Fact]
-    public void Steer_SaysNothingToAnAgentThatIsAlreadyBatching()
+    public void Steer_SaysNothingToAnAgentThatIsAlreadyBatching_AndForgetsTheRunItComplied()
     {
         RepeatSteer.Forget();
 
-        Assert.Null(RepeatSteer.Steer("read_text", batched: true));
-        Assert.Null(RepeatSteer.Steer("read_text", batched: true));
-        Assert.Null(RepeatSteer.Steer("read_text", batched: true));
+        Assert.Null(RepeatSteer.Steer("read_text"));
         Assert.NotNull(RepeatSteer.Steer("read_text"));
+        Assert.Null(RepeatSteer.Steer("read_text", batched: true));
+        Assert.Null(RepeatSteer.Steer("read_text"));
+        Assert.NotNull(RepeatSteer.Steer("read_text"));
+    }
+
+    [Fact]
+    public void Steer_ForARunOfResourceWrites_NamesTheCrossFileBatchRatherThanTheSameFileOne()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("resx_set"));
+
+        var steer = RepeatSteer.Steer("resx_set");
+
+        Assert.Contains("pass files=[...]", steer, StringComparison.Ordinal);
+        Assert.Contains("{path, entries}", steer, StringComparison.Ordinal);
+        Assert.DoesNotContain("entries=[...]", steer, StringComparison.Ordinal);
     }
 
     [Fact]

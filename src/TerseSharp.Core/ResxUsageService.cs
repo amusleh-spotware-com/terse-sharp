@@ -166,6 +166,7 @@ public static class ResxUsageService
     private static IReadOnlyList<ResxUsage> Ordered(IEnumerable<ResxUsage> usages) =>
     [
         .. usages
+            .DistinctBy(usage => (usage.Relative, usage.Line, usage.Form))
             .OrderBy(usage => usage.Relative, StringComparer.Ordinal)
             .ThenBy(usage => usage.Line),
     ];

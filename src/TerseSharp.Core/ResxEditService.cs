@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace TerseSharp.Core;
 
-public readonly record struct ResxPair(string Key, string Value);
+public readonly record struct ResxPair(string Key, string Value, string? Comment = null);
 
 public static class ResxEditService
 {
@@ -374,12 +374,13 @@ public static class ResxEditService
     private static string Element(ResxPair pair, string? comment, string indent, string newLine)
     {
         var text = new StringBuilder(128);
+        var written = pair.Comment ?? comment;
 
         text.Append(CultureInfo.InvariantCulture, $"<data name=\"{Escaped(pair.Key)}\" xml:space=\"preserve\">{newLine}");
         text.Append(CultureInfo.InvariantCulture, $"{indent}  <value>{Escaped(pair.Value)}</value>{newLine}");
 
-        if (comment is { Length: > 0 })
-            text.Append(CultureInfo.InvariantCulture, $"{indent}  <comment>{Escaped(comment)}</comment>{newLine}");
+        if (written is { Length: > 0 })
+            text.Append(CultureInfo.InvariantCulture, $"{indent}  <comment>{Escaped(written)}</comment>{newLine}");
 
         return text.Append(indent).Append("</data>").ToString();
     }
@@ -485,7 +486,17 @@ public static class ResxEditService
     {
         var separator = line.IndexOf('=', StringComparison.Ordinal);
 
-        return separator <= 0 ? null : new ResxPair(line[..separator].Trim(), line[(separator + 1)..]);
+        if (separator <= 0)
+            return null;
+
+        var key = line[..separator].Trim();
+        var rest = line.AsSpan(separator + 1);
+        var tab = rest.IndexOf('\t');
+        var comment = tab < 0 ? default : rest[(tab + 1)..];
+
+        return tab < 0 || comment.IsWhiteSpace()
+            ? new ResxPair(key, new string(rest))
+            : new ResxPair(key, new string(rest[..tab]), new string(comment));
     }
 
     private static async Task<Result<string>> Apply(
@@ -581,7 +592,7 @@ public static class ResxEditService
                 $"changedLines={reports.Sum(report => report.ChangedLines)}"));
         }
 
-        foreach (var note in notes.Where(note => note.Length > 0))
+        foreach (var note in notes.Where(note => note.Length > 0).Distinct(StringComparer.Ordinal))
             response.Note(note);
 
         return response.ToString();
@@ -594,7 +605,7 @@ public static class ResxEditService
         ? string.Empty
         : string.Create(
             CultureInfo.InvariantCulture,
-            $"designerStale=true - regenerate {family.Designer} (Visual Studio custom tool, or Generator=MSBuild:Compile) before referencing the key from C#");
+            $"{DesignerStale}true - regenerate {family.Designer} (Visual Studio custom tool, or Generator=MSBuild:Compile) before referencing the key from C#");
 
     private static string Duplicate(string key, int count) => string.Create(
         CultureInfo.InvariantCulture,
@@ -701,14 +712,14 @@ public static class ResxEditService
 
     public static async Task<Result<string>> SetManyAsync(
         LoadedWorkspace workspace,
-        string path,
+        string? path,
         IReadOnlyList<ResxWrite> files,
         string? culture,
         string? comment,
         bool dryRun,
         bool verbose)
     {
-        if (Bounded(files) is { } refusal)
+        if (Bounded(path, files) is { } refusal)
             return Result.Fail<string>(refusal);
 
         var applied = new List<string>(files.Count);
@@ -716,15 +727,15 @@ public static class ResxEditService
 
         for (var index = 0; index < files.Count; index++)
         {
-            var target = files[index].Path is { Length: > 0 } named ? named : path;
+            var target = Target(files[index], path);
 
             Sorted(await Set(workspace, target, null, null, files[index].Entries, culture, comment, dryRun, verbose).ConfigureAwait(false), index, target, applied, refused);
         }
 
-        return Result.Ok(applied.Count is 0 ? string.Join('\n', refused) : string.Join('\n', applied.Concat(refused)));
+        return Result.Ok(applied.Count is 0 ? string.Join('\n', refused) : Folded(applied, refused));
     }
 
-    private static TerseError? Bounded(IReadOnlyList<ResxWrite> files)
+    private static TerseError? Bounded(string? path, IReadOnlyList<ResxWrite> files)
     {
         if (files.Count > MaxBatchedResxFiles)
         {
@@ -735,12 +746,8 @@ public static class ResxEditService
 
         for (var index = 0; index < files.Count; index++)
         {
-            if (files[index].Entries is not { Length: > 0 })
-            {
-                return Errors.Invalid(
-                    string.Create(CultureInfo.InvariantCulture, $"files[{index}] carries no entries"),
-                    "give every entry its own Key=Value lines, one per line");
-            }
+            if (Entry(path, files[index], index) is { } refusal)
+                return refusal;
         }
 
         return null;
@@ -758,6 +765,51 @@ public static class ResxEditService
         var error = answer.Error!;
 
         refused.Add(string.Create(CultureInfo.InvariantCulture, $"REFUSED files[{index}] {path}: {error.Code} - {error.Message}; remedy: {error.Remedy}"));
+    }
+
+    private const string DesignerStale = "designerStale=";
+
+    private static string Folded(List<string> applied, List<string> refused)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var lines = new List<string>((applied.Count * 2) + refused.Count);
+
+        foreach (var answer in applied)
+            Once(answer, seen, lines);
+
+        lines.AddRange(refused);
+
+        return string.Join('\n', lines);
+    }
+
+    private static void Once(string answer, HashSet<string> seen, List<string> lines)
+    {
+        foreach (var line in answer.AsSpan().EnumerateLines())
+        {
+            var text = new string(line);
+
+            if (!text.StartsWith(DesignerStale, StringComparison.Ordinal) || seen.Add(text))
+                lines.Add(text);
+        }
+    }
+
+    private static string Target(ResxWrite file, string? path) =>
+        file.Path is { Length: > 0 } named ? named : path ?? string.Empty;
+
+    private static TerseError? Entry(string? path, ResxWrite file, int index)
+    {
+        if (file.Entries is not { Length: > 0 })
+        {
+            return Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"files[{index}] carries no entries"),
+                "give every entry its own Key=Value lines, one per line");
+        }
+
+        return file.Path is { Length: > 0 } || path is { Length: > 0 }
+            ? null
+            : Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"files[{index}] carries no path, and no top-level path was given to default to"),
+                "give every entry its own path, or pass path= as the default target for the entries that carry none");
     }
 }
 

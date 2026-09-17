@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -33,18 +34,33 @@ public static class FormatService
         if (request.Verify)
             return Result.Ok(await VerifyAsync(workspace, outcome.Solution, updated, documents, options.Tool, outcome, request, cancellationToken).ConfigureAwait(false));
 
+        var reformatted = request.Reformats
+            && await RewroteAsync(outcome.Solution, updated, documents, cancellationToken).ConfigureAwait(false);
+
+        var ungoverned = await UngovernedAsync(workspace, documents, reformatted, cancellationToken).ConfigureAwait(false);
         var applied = await EditGate.ApplyAsync(workspace, updated, documents, options, cancellationToken).ConfigureAwait(false);
 
-        return Annotated(applied, outcome.Unfixed);
+        return Annotated(applied, outcome.Unfixed, ungoverned);
     }
 
     private static Func<Document, CancellationToken, Task<Document>> Rewriter(FixRequest request) =>
         request.CleansUsings ? CleanDocumentAsync : FormatOnlyAsync;
 
-    private static Result<string> Annotated(Result<string> applied, IReadOnlyList<string> unfixed) =>
-        applied.IsOk && unfixed.Count > 0
-            ? Result.Ok(applied.Value + "\n" + string.Join("\n", unfixed))
-            : applied;
+    private static Result<string> Annotated(Result<string> applied, IReadOnlyList<string> unfixed, string? note = null)
+    {
+        if (!applied.IsOk || (unfixed.Count is 0 && note is not { Length: > 0 }))
+            return applied;
+
+        var text = new StringBuilder(applied.Value);
+
+        foreach (var line in unfixed)
+            text.Append('\n').Append(line);
+
+        if (note is { Length: > 0 })
+            text.Append('\n').Append(note);
+
+        return Result.Ok(text.ToString());
+    }
 
     private static async Task<Solution> RewriteAsync(
         Solution solution,
@@ -154,9 +170,8 @@ public static class FormatService
     private static async Task<Document> CleanDocumentAsync(Document document, CancellationToken cancellationToken)
     {
         var withoutUnused = await RemoveUnusedUsingsAsync(document, cancellationToken).ConfigureAwait(false);
-        var sorted = await SortUsingsAsync(withoutUnused, cancellationToken).ConfigureAwait(false);
 
-        return await FormatOnlyAsync(sorted, cancellationToken).ConfigureAwait(false);
+        return await FormatOnlyAsync(withoutUnused, cancellationToken).ConfigureAwait(false);
     }
 
     public static async Task<Document> RemoveUnusedUsingsAsync(Document document, CancellationToken cancellationToken)
@@ -180,23 +195,6 @@ public static class FormatService
             .Where(diagnostic => diagnostic.Id is "CS8019")
             .Select(diagnostic => root.FindNode(diagnostic.Location.SourceSpan))
             .OfType<UsingDirectiveSyntax>()];
-
-    private static async Task<Document> SortUsingsAsync(Document document, CancellationToken cancellationToken)
-    {
-        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-
-        if (root is not CompilationUnitSyntax unit || unit.Usings.Count < 2)
-            return document;
-
-        var sorted = unit.Usings.OrderBy(Rank).ThenBy(Name, StringComparer.Ordinal).ToArray();
-
-        return document.WithSyntaxRoot(unit.WithUsings(SyntaxFactory.List(sorted)));
-    }
-
-    private static int Rank(UsingDirectiveSyntax directive) =>
-        Name(directive).StartsWith("System", StringComparison.Ordinal) ? 0 : 1;
-
-    private static string Name(UsingDirectiveSyntax directive) => directive.Name?.ToString() ?? string.Empty;
 
     private static DocumentId[] Scoped(LoadedWorkspace workspace, FixScope scope) =>
         DocumentScope.Select(workspace, scope.Path, scope.ChangedOnly);
@@ -365,4 +363,54 @@ public static class FormatService
 
         return response.ToString();
     }
+
+    private static async Task<bool> RewroteAsync(
+        Solution before,
+        Solution after,
+        DocumentId[] documents,
+        CancellationToken cancellationToken)
+    {
+        foreach (var id in documents)
+        {
+            if (await DiffersAsync(before, after, id, cancellationToken).ConfigureAwait(false))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static async Task<string?> UngovernedAsync(
+        LoadedWorkspace workspace,
+        DocumentId[] documents,
+        bool reformatted,
+        CancellationToken cancellationToken)
+    {
+        if (!reformatted)
+            return null;
+
+        var probed = false;
+
+        foreach (var id in documents.DistinctBy(document => document.ProjectId))
+        {
+            if (workspace.Solution.GetDocument(id) is not { } document)
+                continue;
+
+            probed = true;
+
+            if (await GovernedAsync(document, cancellationToken).ConfigureAwait(false))
+                return null;
+        }
+
+        return probed ? Ungoverned : null;
+    }
+
+    private static async Task<bool> GovernedAsync(Document document, CancellationToken cancellationToken)
+    {
+        var tree = await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
+
+        return tree is not null
+            && document.Project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GetOptions(tree).TryGetValue("indent_style", out _);
+    }
+
+    private const string Ungoverned = "NOTE no .editorconfig at or above these files sets indent_style, so whitespace followed Roslyn's own defaults - which may differ from this repository's convention; a ReSharper .sln.DotSettings is not read";
 }
