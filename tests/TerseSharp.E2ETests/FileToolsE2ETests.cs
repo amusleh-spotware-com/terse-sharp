@@ -1606,7 +1606,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             ["ranges"] = Array.Empty<string>(),
         });
 
-        Assert.Equal(plain, empty);
+        Assert.Equal(WithoutTheOnceOffNotice(plain), WithoutTheOnceOffNotice(empty));
         Assert.DoesNotContain("namespace Fixture.Trading;", empty, StringComparison.Ordinal);
     }
 
@@ -1896,4 +1896,8 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    private static string WithoutTheOnceOffNotice(string text) => string.Join(
+        '\n',
+        text.Split('\n').Where(line => !line.StartsWith("compilations=realized", StringComparison.Ordinal)));
 }

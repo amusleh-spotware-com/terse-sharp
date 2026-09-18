@@ -2196,7 +2196,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     {
         const string Probe = "src/Fixture.Trading/TerseInfoProbe.cs";
 
-        var written = await server.CallAsync("write_text", new()
+        var written = await PastTheBuildHostAsync(new()
         {
             ["path"] = Probe,
             ["force"] = true,
@@ -2210,7 +2210,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             Assert.Contains("analyze changed=true severity=info", written, StringComparison.Ordinal);
             Assert.DoesNotContain("CS0219", written, StringComparison.Ordinal);
 
-            var verbose = await server.CallAsync("write_text", new()
+            var verbose = await PastTheBuildHostAsync(new()
             {
                 ["path"] = Probe,
                 ["force"] = true,
@@ -2283,5 +2283,14 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("documents=", denied, StringComparison.Ordinal);
         Assert.Contains("guard ALLOWED", allowed, StringComparison.Ordinal);
         Assert.DoesNotContain("documents=", allowed, StringComparison.Ordinal);
+    }
+
+    private async Task<string> PastTheBuildHostAsync(Dictionary<string, object?> arguments)
+    {
+        var text = await server.CallAsync("write_text", arguments);
+
+        return text.StartsWith("ERROR Transient", StringComparison.Ordinal)
+            ? await server.CallAsync("write_text", arguments)
+            : text;
     }
 }

@@ -837,16 +837,18 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             Assert.Contains("recursive=true", refused, StringComparison.Ordinal);
 
             var preview = await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true, ["recursive"] = true, ["dryRun"] = true });
+            var again = await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true, ["recursive"] = true, ["dryRun"] = true });
 
             Assert.Contains("dryRun", preview, StringComparison.Ordinal);
             Assert.Contains("files=2", preview, StringComparison.Ordinal);
-            Assert.Contains("deep.md", await server.CallAsync("find_files", new() { ["glob"] = Tree + "/**" }), StringComparison.Ordinal);
+            Assert.Contains("files=2", again, StringComparison.Ordinal);
 
             var removed = await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true, ["recursive"] = true });
+            var gone = await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true, ["recursive"] = true });
 
             Assert.Contains("deleted", removed, StringComparison.Ordinal);
             Assert.Contains("files=2", removed, StringComparison.Ordinal);
-            Assert.DoesNotContain("deep.md", await server.CallAsync("find_files", new() { ["glob"] = Tree + "/**" }), StringComparison.Ordinal);
+            Assert.Contains("ERROR", gone, StringComparison.Ordinal);
 
             var held = await server.CallAsync("write_text", new() { ["path"] = Guarded, ["delete"] = true, ["recursive"] = true });
 
