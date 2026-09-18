@@ -19,6 +19,20 @@ public sealed class UnchangedRun
         }
     }
 
+    public string? Verbatim(string tool, string key, string stamp, long timestamp)
+    {
+        lock (gate)
+        {
+            return runs.TryGetValue(key, out var seen) && string.Equals(seen.Stamp, stamp, StringComparison.Ordinal)
+                ? Replayed(tool, seen, timestamp)
+                : null;
+        }
+    }
+
+    private static string Replayed(string tool, Seen seen, long timestamp) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{seen.Verdict}\nNOTE {tool} UNCHANGED - nothing was written since this exact call {Seconds(timestamp - seen.Timestamp)}s ago, so this is that answer replayed; force=true re-runs it");
+
     public void Remember(string key, string stamp, string verdict, long timestamp)
     {
         lock (gate)

@@ -7,8 +7,8 @@ public sealed class NewToolEdgeCaseE2ETests(TerseServerFixture server)
     private const string Nested = "src/Fixture.Trading/Views/Nested.xaml";
 
     [Theory]
-    [InlineData("explore_symbol")]
-    [InlineData("impact_of")]
+    [InlineData("get_symbol")]
+    [InlineData("find_usages")]
     public async Task ASymbolToolOnAnUnknownSymbol_FailsWithARemedy(string tool)
     {
         var text = await server.CallAsync(tool, new() { ["symbolId"] = "M:No.Such.Thing" });
@@ -18,8 +18,8 @@ public sealed class NewToolEdgeCaseE2ETests(TerseServerFixture server)
     }
 
     [Theory]
-    [InlineData("explore_symbol")]
-    [InlineData("impact_of")]
+    [InlineData("get_symbol")]
+    [InlineData("find_usages")]
     public async Task ASymbolToolOnAnAmbiguousName_ListsCandidates(string tool)
     {
         var text = await server.CallAsync(tool, new() { ["symbolId"] = "Submit" });
@@ -28,8 +28,8 @@ public sealed class NewToolEdgeCaseE2ETests(TerseServerFixture server)
     }
 
     [Theory]
-    [InlineData("explore_symbol")]
-    [InlineData("impact_of")]
+    [InlineData("get_symbol")]
+    [InlineData("find_usages")]
     public async Task ASymbolToolWithAnEmptySymbol_IsRefused(string tool)
     {
         var text = await server.CallAsync(tool, new() { ["symbolId"] = "" });
@@ -39,9 +39,9 @@ public sealed class NewToolEdgeCaseE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ExploreSymbol_OnAType_Works()
+    public async Task GetSymbol_WithUsages_OnAType_Works()
     {
-        var text = await server.CallAsync("explore_symbol", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "T:Fixture.Trading.Order", ["usages"] = true });
 
         Assert.Contains("usages=", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);

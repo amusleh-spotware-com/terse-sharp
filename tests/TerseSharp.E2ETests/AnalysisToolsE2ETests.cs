@@ -369,8 +369,11 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("unrecognized", documented, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", plain, StringComparison.Ordinal);
         Assert.Contains("analyzed=", plain, StringComparison.Ordinal);
-        Assert.Equal(WithoutTheOncePerLoadNote(plain), WithoutTheOncePerLoadNote(documented));
+        Assert.Equal(WithoutTheReplayNote(WithoutTheOncePerLoadNote(plain)), WithoutTheReplayNote(WithoutTheOncePerLoadNote(documented)));
     }
+
+    private static string[] WithoutTheReplayNote(string[] lines) =>
+        [.. lines.Where(line => !line.Contains("UNCHANGED - nothing was written", StringComparison.Ordinal))];
 
     [Fact]
     public async Task Gate_WithChangedFalse_IsRefusedNamingTheWholeDocumentModeInsteadOfListingParameters()
@@ -436,4 +439,56 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
 
     private static string[] WithoutTheOncePerLoadNote(string response) =>
         [.. response.Split('\n').Where(line => !line.StartsWith("compilations=realized", StringComparison.Ordinal))];
+
+    private static int Records(string response) =>
+        int.Parse(response.AsSpan(0, response.IndexOf(' ', StringComparison.Ordinal)), CultureInfo.InvariantCulture);
+
+    [Fact]
+    public async Task Analyze_WithBaseRef_KeepsWhatTheWorkingTreeChanged_AndCountsThePreExistingRest()
+    {
+        const string Probe = "src/Fixture.Trading/BaseRefProbe.cs";
+        const string Content = "namespace Fixture.Trading;\n\npublic sealed class BaseRefProbe\n{\n    private int Hidden() => 1;\n}\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Content, ["force"] = true, ["allowErrors"] = true });
+        try
+        {
+            var probed = await server.CallAsync("analyze", new() { ["path"] = Probe, ["minSeverity"] = "info", ["baseRef"] = "HEAD" });
+            var plain = await server.CallAsync("analyze", new() { ["minSeverity"] = "info" });
+            var narrowed = await server.CallAsync("analyze", new() { ["minSeverity"] = "info", ["baseRef"] = "HEAD" });
+
+            Assert.Contains("BaseRefProbe", probed, StringComparison.Ordinal);
+            Assert.Contains("pre-existing finding(s)", narrowed, StringComparison.Ordinal);
+            Assert.Contains("against HEAD", narrowed, StringComparison.Ordinal);
+            Assert.DoesNotContain("pre-existing finding(s)", plain, StringComparison.Ordinal);
+            Assert.True(
+                Records(narrowed) < Records(plain),
+                string.Create(CultureInfo.InvariantCulture, $"narrowed reported {Records(narrowed)} records against {Records(plain)} for the whole repository"));
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task Analyze_RepeatedWithNothingWrittenInBetween_ReplaysThePreviousAnswerInsteadOfRunningAgain()
+    {
+        const string Probe = "src/Fixture.Trading/ReplayProbe.cs";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class ReplayProbe\n{\n    private int Hidden() => 1;\n}\n", ["force"] = true, ["allowErrors"] = true });
+        try
+        {
+            var first = await server.CallAsync("analyze", new() { ["path"] = Probe, ["minSeverity"] = "info" });
+            var second = await server.CallAsync("analyze", new() { ["path"] = Probe, ["minSeverity"] = "info" });
+
+            Assert.DoesNotContain("UNCHANGED", first, StringComparison.Ordinal);
+            Assert.Contains("analyze UNCHANGED", second, StringComparison.Ordinal);
+            Assert.StartsWith(first, second, StringComparison.Ordinal);
+            Assert.Contains("force=true re-runs it", second, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

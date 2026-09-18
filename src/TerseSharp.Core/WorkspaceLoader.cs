@@ -53,13 +53,15 @@ internal static class WorkspaceLoader
         string? targetFramework)
     {
         var loaded = Loaded(solution).GetAlternateLookup<ReadOnlySpan<char>>();
+        var stopped = Messages(reported, loaded, stopped: true);
+        var empty = EmptyProjectLoad.Failures(solution);
 
         return new(
             path,
             solution.Projects.Count(),
             solution.Projects.Sum(project => project.Documents.Count()),
             elapsedMilliseconds,
-            Messages(reported, loaded, stopped: true),
+            empty.Length is 0 ? stopped : [.. stopped, .. empty],
             Messages(reported, loaded, stopped: false),
             targetFramework);
     }

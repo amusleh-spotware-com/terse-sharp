@@ -151,6 +151,15 @@ public static class Errors
         string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),
         "MSBuild's out-of-process build host dropped the call; the project file was restored, and a file the edit was adding may already be on disk. Retry the same call - and send interdependent new files as one write_text files=[...] batch, which needs only one evaluation");
 
+    public static TerseError RunInFlight(string tool, ActiveRun holder) => new(
+        TerseErrorCode.RunInFlight,
+        string.Create(
+            CultureInfo.InvariantCulture,
+            $"{holder.Tool} is already running for this solution in this process, started {ActiveRuns.Age(holder).TotalSeconds:F1}s ago{Detailed(holder.Detail)}, so {tool} would build into its file locks"),
+        "read that run's answer rather than starting a second one - this process started it, so the second can only fail on MSB3027 over the output the first is writing; a run over a DIFFERENT solution is unaffected");
+
+    private static string Detailed(string detail) => detail.Length is 0 ? string.Empty : " with " + detail;
+
     public static bool IsBuildHostFailure(Exception exception)
     {
         for (var current = exception; current is not null; current = current.InnerException)

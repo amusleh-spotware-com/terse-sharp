@@ -46,19 +46,14 @@ public static class ResxService
             : Result.Ok(Rendered(located.Value!.Index, family, selected, new Selection(prefix, key, values), maxResults));
     }
 
-    public static Result<string> Find(
-        LoadedWorkspace workspace,
-        string query,
-        string scope,
-        string? culture,
-        int maxResults)
+    public static Result<string> Find(LoadedWorkspace workspace, string query, string scope, string? culture, int maxResults, bool chosen)
     {
         var hits = Hits(workspace.Indexes.Resx(), query, scope, culture).ToArray();
-        var response = new ResponseBuilder("resx_find", query);
+        var response = new ResponseBuilder("resx_find", query).Chosen(chosen);
 
-        response.Summary(ResultCap.Shown(hits.Length, maxResults), hits.Length, "entries", "culture=");
+        response.Summary(chosen ? ResultCap.Shown(hits.Length, maxResults) : ResultCap.Whole(hits.Length, maxResults), hits.Length, "entries", "culture=");
 
-        foreach (var hit in hits.Capped(maxResults))
+        foreach (var hit in chosen ? hits.Capped(maxResults) : hits.CappedWhole(maxResults))
             response.Line(hit);
 
         return Result.Ok(response.ToString());

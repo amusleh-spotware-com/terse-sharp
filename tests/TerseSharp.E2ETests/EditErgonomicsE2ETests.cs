@@ -818,6 +818,146 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task WriteText_WithDeleteAndRecursive_RemovesTheWholeTree_AndRefusesOneHoldingADocumentThisWorkspaceCompiles()
+    {
+        const string Tree = "terse-recursive-folder";
+        const string Guarded = "src/Fixture.Trading/terse-recursive-probe";
+        var files = new List<Dictionary<string, object?>>
+    {
+        new() { ["path"] = Tree + "/notes.md", ["content"] = "probe\n" },
+        new() { ["path"] = Tree + "/nested/deep.md", ["content"] = "probe\n" },
+    };
+
+        await server.CallAsync("write_text", new() { ["files"] = files });
+        await server.CallAsync("write_text", new() { ["path"] = Guarded + "/Probe.cs", ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseRecursiveProbe;\n", ["force"] = true });
+        try
+        {
+            var refused = await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true });
+
+            Assert.Contains("recursive=true", refused, StringComparison.Ordinal);
+
+            var preview = await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true, ["recursive"] = true, ["dryRun"] = true });
+
+            Assert.Contains("dryRun", preview, StringComparison.Ordinal);
+            Assert.Contains("files=2", preview, StringComparison.Ordinal);
+            Assert.Contains("deep.md", await server.CallAsync("find_files", new() { ["glob"] = Tree + "/**" }), StringComparison.Ordinal);
+
+            var removed = await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true, ["recursive"] = true });
+
+            Assert.Contains("deleted", removed, StringComparison.Ordinal);
+            Assert.Contains("files=2", removed, StringComparison.Ordinal);
+            Assert.DoesNotContain("deep.md", await server.CallAsync("find_files", new() { ["glob"] = Tree + "/**" }), StringComparison.Ordinal);
+
+            var held = await server.CallAsync("write_text", new() { ["path"] = Guarded, ["delete"] = true, ["recursive"] = true });
+
+            Assert.Contains("this workspace compiles", held, StringComparison.Ordinal);
+            Assert.Contains("Probe.cs", held, StringComparison.Ordinal);
+            Assert.Contains("force=true", held, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Tree, ["delete"] = true, ["recursive"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Guarded, ["delete"] = true, ["recursive"] = true, ["force"] = true });
+        }
+    }
+
+    [Theory]
+    [InlineData(".")]
+    [InlineData("./")]
+    [InlineData("src/..")]
+    [InlineData("src/../")]
+    [InlineData(".git")]
+    public async Task WriteText_WithDeleteAndRecursive_RefusesTheWorkspaceRootAndGitMetadataHoweverItIsSpelled(string path)
+    {
+        var refused = await server.CallAsync("write_text", new()
+        {
+            ["path"] = path,
+            ["delete"] = true,
+            ["recursive"] = true,
+            ["force"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR", refused, StringComparison.Ordinal);
+        Assert.DoesNotContain("directory  files=", refused, StringComparison.Ordinal);
+        Assert.True(
+            refused.Contains("is the workspace root", StringComparison.Ordinal) || refused.Contains(".git", StringComparison.Ordinal),
+            refused);
+    }
+
+    [Fact]
+    public async Task EditText_WithReplaceAll_ReplacesEveryOccurrenceInOneCall_AndIsRefusedBesideAnOccurrence()
+    {
+        const string Probe = "terse-replace-all-probe.md";
+        const string Before = "# Probe\n\n- keep alpha\n- same line here\n- keep beta\n- same line here\n- keep gamma\n- same line here\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Before });
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "- same line here", ["newText"] = "- replaced", ["replaceAll"] = true, ["occurrence"] = 2 });
+
+            Assert.Contains("replaceAll=true replaces every occurrence", refused, StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "- same line here", ["newText"] = "- replaced", ["replaceAll"] = true });
+
+            Assert.Contains("changedLines=3", applied, StringComparison.Ordinal);
+
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.DoesNotContain("same line here", after, StringComparison.Ordinal);
+            Assert.Equal(3, after.Split("- replaced").Length - 1);
+            Assert.Contains("keep alpha", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_WithAPerEntryForce_LandsACSharpEntryBesideAMarkdownOneAndNamesEveryUnforcedPath()
+    {
+        const string Code = "src/Fixture.Trading/PerEntryForceProbe.cs";
+        const string Other = "src/Fixture.Trading/SecondForceProbe.cs";
+        const string Notes = "terse-per-entry-force.md";
+        const string Declaration = "namespace Fixture.Trading;\n\npublic sealed class PerEntryForceProbe;\n";
+        var refused = await server.CallAsync("write_text", new()
+        {
+            ["files"] = new List<Dictionary<string, object?>>
+        {
+            new() { ["path"] = Code, ["content"] = Declaration },
+            new() { ["path"] = Other, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class SecondForceProbe;\n" },
+            new() { ["path"] = Notes, ["content"] = "probe\n" },
+        },
+        });
+
+        Assert.Contains("PerEntryForceProbe.cs", refused, StringComparison.Ordinal);
+        Assert.Contains("SecondForceProbe.cs", refused, StringComparison.Ordinal);
+        Assert.DoesNotContain("changedLines", refused, StringComparison.Ordinal);
+
+        try
+        {
+            var applied = await server.CallAsync("write_text", new()
+            {
+                ["files"] = new List<Dictionary<string, object?>>
+            {
+                new() { ["path"] = Code, ["content"] = Declaration, ["force"] = true },
+                new() { ["path"] = Notes, ["content"] = "probe\n" },
+            },
+            });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("PerEntryForceProbe.cs", applied, StringComparison.Ordinal);
+            Assert.Contains(Notes, applied, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Code, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Notes, ["delete"] = true });
+        }
+    }
+
+    [Fact]
     public async Task EditText_ForADedentedAnchor_PreservesTheFilesOwnLineEndingsAndByteLength()
     {
         const string Probe = "terse-reindent-endings-probe.md";

@@ -5,10 +5,10 @@ using ModelContextProtocol.Server;
 namespace TerseSharp.Server.Tools;
 
 [McpServerToolType]
-public sealed class AnalysisTools(ToolContext context)
+public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
 {
     [McpServerTool(Name = "analyze")]
-    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares is named NOT_ENABLED instead of answering a silent zero. A paths= batch that saturates the 10-path cap ends with next: analyze changed=true, which answers the same end-of-task sweep over every modified file in ONE call.")]
+    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares is named NOT_ENABLED instead of answering a silent zero. baseRef=HEAD reports only the findings on lines this working tree ADDED or CHANGED against that ref - an untracked file counts whole - and folds the rest to one count, which is what makes the end-of-task verdict mean this task rather than this repository; a baseRef call always runs, because git state can move with nothing written. A paths= batch that saturates the 10-path cap ends with next: analyze changed=true, which answers the same end-of-task sweep over every modified file in ONE call.")]
     public Task<string> Analyze(
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
             [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
@@ -20,28 +20,40 @@ public sealed class AnalysisTools(ToolContext context)
             [Description("Report only diagnostics that appeared since the previous analyze of the same scope, and which ones were fixed.")] bool sinceLast = false,
             [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
             [Description("Several files, directories or globs analyzed in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
-            CancellationToken cancellationToken = default) => context.WithWorkspaceAsync(
-            workspace,
-            path ?? First(paths),
-            loaded =>
+            [Description("Report only findings on a line the working tree added or changed against this git ref, e.g. HEAD or main, folding the rest to one pre-existing count. A file git does not track counts whole. Empty reports every finding in scope.")] string? baseRef = null,
+        CancellationToken cancellationToken = default) => replay.ReplayedAsync(
+        "analyze",
+        ReplayGate.Key("analyze", path, minSeverity, severity, ids, includeDeadCode.ToString(), maxResults.ToString(CultureInfo.InvariantCulture), changed.ToString(), paths is null ? null : string.Join(',', paths), baseRef, workspace),
+        sinceLast || baseRef is { Length: > 0 },
+        () => context.WithWorkspaceAsync(
+        workspace,
+        path ?? First(paths),
+        async loaded =>
             {
                 var scope = Scoped(loaded, path, paths);
 
-                return scope.IsOk
-                    ? GateSteered(
-                        Steered(
-                            AnalysisService.AnalyzeAsync(
-                                loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, cancellationToken),
-                            path,
-                            paths,
-                            changed),
+                if (!scope.IsOk)
+                    return scope.Error!.Render();
+
+                var (Touched, Error) = await TouchedAsync(loaded.Root, baseRef, cancellationToken).ConfigureAwait(false);
+
+                if (Error is { } failure)
+                    return failure.Render();
+
+                return await GateSteered(
+                    Steered(
+                        AnalysisService.AnalyzeAsync(
+                            loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, Touched, baseRef ?? string.Empty, cancellationToken),
+                        path,
+                        paths,
+                        changed),
                     path,
                     paths,
                     changed || sinceLast || ids is { Length: > 0 },
-                    check: false)
-                : Task.FromResult(scope.Error!.Render());
+                check: false).ConfigureAwait(false);
             },
-            cancellationToken: cancellationToken);
+        cancellationToken: cancellationToken),
+        cancellationToken);
 
     [McpServerTool(Name = "format")]
     [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob, paths=[...] takes up to 10 of them in ONE pass exactly as analyze does - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded; verify=true returns a one-line verdict, replacing dotnet format --verify-no-changes. Reports one line per changed file; pass verbose=true for the diff.")]
@@ -147,7 +159,7 @@ public sealed class AnalysisTools(ToolContext context)
     }
 
     [McpServerTool(Name = "gate")]
-    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
+    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict. baseRef=HEAD keeps only the findings on lines this working tree changed against that ref, which makes the verdict mean this task rather than this repository. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
     public Task<string> Gate(
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty gates the files modified since the workspace loaded.")] string? path = null,
             [Description("Gate every document instead of only the files modified since the workspace loaded. Ignored when path is passed. Default false.")] bool solution = false,
@@ -155,13 +167,26 @@ public sealed class AnalysisTools(ToolContext context)
             [Description("Add each step's own report under the verdict line. Default false.")] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Documents gate's changed-file default. Ignored beside path= or solution=; false is refused otherwise.")] bool? changed = null,
+            [Description("Report only findings on a line the working tree added or changed against this git ref, e.g. HEAD. A file git does not track counts whole. Empty reports every finding in scope.")] string? baseRef = null,
             CancellationToken cancellationToken = default) =>
             RejectedChanged(changed, path, solution) is { } rejected
                 ? Task.FromResult(rejected)
-                : Guarded(workspace, path, loaded => GateService.RunAsync(
-                    loaded,
-                    new GateRequest(path, Changed: path is null && !solution, dryRun, verbose),
-                    cancellationToken));
+                : replay.ReplayedAsync(
+                "gate",
+                ReplayGate.Key("gate", path, solution.ToString(), dryRun.ToString(), verbose.ToString(), baseRef, workspace),
+                !dryRun || baseRef is { Length: > 0 },
+                () => Guarded(workspace, path, async Task<Result<string>> (loaded) =>
+                {
+                    var (Touched, Error) = await TouchedAsync(loaded.Root, baseRef, cancellationToken).ConfigureAwait(false);
+
+                    return Error is { } failure
+                        ? Result.Fail<string>(failure)
+                        : await GateService.RunAsync(
+                            loaded,
+                        new GateRequest(path, Changed: path is null && !solution, dryRun, verbose, Touched),
+                        cancellationToken).ConfigureAwait(false);
+                }),
+                cancellationToken);
 
     private static string? First(string?[]? paths) =>
             paths is { Length: > 0 } ? Array.Find(paths, entry => entry is { Length: > 0 }) : null;
@@ -273,5 +298,22 @@ public sealed class AnalysisTools(ToolContext context)
         return text + (check
             ? "\nnext: gate dryRun=true - the unscoped end-of-task sweep (analyze at info, format, cleanup fix=all, re-analyze), verified in ONE call"
             : "\nnext: gate - the unscoped end-of-task sweep (analyze at info, format, cleanup fix=all, re-analyze) in ONE call");
+    }
+
+    private static async Task<(TouchedLines? Touched, TerseError? Error)> TouchedAsync(string root, string? baseRef, CancellationToken cancellationToken)
+    {
+        if (baseRef is not { Length: > 0 } reference)
+            return (null, null);
+
+        var diff = await GitRunner.ReadAsync(root, ["diff", "--unified=0", "--no-color", "--relative", reference], cancellationToken).ConfigureAwait(false);
+
+        if (!diff.IsOk)
+            return (null, diff.Error!);
+
+        var untracked = await GitRunner.ReadAsync(root, ["--no-optional-locks", "ls-files", "--others", "--exclude-standard"], cancellationToken).ConfigureAwait(false);
+
+        return untracked.IsOk
+            ? (TouchedLines.From(diff.Value!, untracked.Value!.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), root), null)
+            : (null, untracked.Error!);
     }
 }

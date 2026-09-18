@@ -25,8 +25,27 @@ public sealed class ResultCapTests
     public void Capped_ReturnsTheWholeCollectionWhenTheOverflowFitsTheSlack() =>
         Assert.Equal(11, Enumerable.Range(0, 11).ToArray().Capped(10).Count());
 
-
     [Fact]
     public void Capped_TruncatesToTheCapWhenTheOverflowExceedsTheSlack() =>
         Assert.Equal(10, Enumerable.Range(0, 40).ToArray().Capped(10).Count());
+
+    [Theory]
+    [InlineData(100, 100, 100)]
+    [InlineData(150, 100, 150)]
+    [InlineData(200, 100, 200)]
+    [InlineData(201, 100, 100)]
+    public void Whole_KeepsTheWholeListUpToTwiceTheCap(int total, int cap, int expected) =>
+        Assert.Equal(expected, ResultCap.Whole(total, cap));
+
+    [Fact]
+    public void Whole_WithANonPositiveCap_FallsBackToTheCapExactlyAsShownDoes() =>
+        Assert.Equal(0, ResultCap.Whole(42, 0));
+
+    [Fact]
+    public void CappedWhole_TakesEverythingWithinTwiceTheCap() =>
+        Assert.Equal(6, Enumerable.Range(0, 6).ToArray().CappedWhole(4).Count());
+
+    [Fact]
+    public void CappedWhole_PastTwiceTheCap_TakesTheCap() =>
+        Assert.Equal(4, Enumerable.Range(0, 40).ToArray().CappedWhole(4).Count());
 }

@@ -8,7 +8,87 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.66.0] - 2026-09-19
+
+> **Tool removal and response-format changes (MAJOR under this project's rules; on 0.x the MINOR
+> segment carries it).** `explore_symbol` and `impact_of` are GONE - both measured at 0 calls in
+> 10 118 across 115 sessions for the third consecutive scan - and their behaviour now rides on
+> `get_symbol usages=true` and `find_usages impact=true`. The advertised surface is 86 tools. Three
+> response formats also moved: a clipped listing gains `- M NOT shown`, a collapsed wide type answers
+> its member NAMES instead of only a count, and `analyze`, `get_diagnostics`, `gate dryRun=true` and
+> `load_workspace` may replay a previous identical answer under a `NOTE <tool> UNCHANGED` line.
+
+### Removed
+
+- **`explore_symbol` and `impact_of` are gone; `get_symbol usages=true` and `find_usages impact=true`
+  answer exactly what they answered.** Both were called **0 times in 10 118 terse calls across 115
+  sessions** - the third consecutive zero, and the closing condition **I259** ("a rate still at zero
+  deletes them") and **I323** each wrote for themselves - while 52 of 88 tools were called at all and the
+  vendor's own tool-search guidance puts selection accuracy in decline past 30-50 tools. The two
+  behaviours were not dropped, only moved onto tools an agent already reaches for, where they need no
+  discovery of their own; the `explore_symbol` steer and its `ExploreSteer` tracker went with them. The
+  advertised surface is **86 tools**. Covered by the reworked `ExploreToolsE2ETests`,
+  `NewToolEdgeCaseE2ETests` and
+  `TokenBudgetE2ETests.GetSymbolWithUsages_OnTheWidestSymbol_StaysUnderItsBudget`.
+
 ### Added
+
+- **`get_symbol usages=true` and `find_usages impact=true` answer what a symbol IS and what changing it
+  would reach.** They are exactly what `explore_symbol` and `impact_of` answered, moved onto the two
+  tools an agent already reaches for - so the capability needs no discovery of its own. `find_usages
+  impact=true tests=true` still names the test classes as ready `run_tests test=` arguments, and a
+  `get_symbol` carrying `symbolIds=` keeps describing every id rather than exploring one. Covered by the
+  reworked `ExploreToolsE2ETests`.
+
+
+- **A rolled-back `write_text` holds its content under a `retryWith` token, and the retry takes
+  `usings=`.** 77 of 79 `write_text` rejections offered no token, and `write_text` re-paid **465 401
+  characters (~116 350 tokens)** of rejected payload in one week - a mean 7 382 characters per
+  `CompileRegression` over 39 of them, the largest single re-paid class in the corpus. The rejection now
+  ends with the same `retryWith=rN` line the symbol editors print, and `write_text retryWith="r3"
+  usings=[...]` replays the held content with those directives added - so the `CS0246` rollback that
+  motivated the row is one token instead of one whole file. A path passed on the retry outranks the held
+  one, and a token issued in another workspace is still refused by root. Covered by
+  `FileToolsE2ETests.WriteText_WhenTheCompileGateRollsItBack_HoldsTheContentSoTheRetryIsATokenAndAUsing`.
+
+- **`analyze baseRef=` and `gate baseRef=` report only what the working tree changed against that ref.**
+  `analyze changed=true severity=info` answered 43 records of which 42 were pre-existing findings on files
+  the task had only appended to, and `gate changed=true` answered `remaining=226` the same way - so two
+  ~2 500-token responses were paid to find one 40-token finding, and a `FAILED` verdict meant nothing.
+  A finding is now kept when its line falls inside a hunk `git diff --unified=0 <ref>` reports, a file git
+  does not track counts WHOLE so a brand-new file is never mistaken for pre-existing work, a record whose
+  position cannot be located is kept rather than hidden, and the rest fold to one
+  `N pre-existing finding(s) ... against <ref>` line that is printed only when there are any. It is opt-in,
+  so no existing call changes. Covered by
+  `AnalysisToolsE2ETests.Analyze_WithBaseRef_KeepsWhatTheWorkingTreeChanged_AndCountsThePreExistingRest`
+  and the `TouchedLinesTests` set.
+
+- **`workspace_status guard="<command>"` answers what the `PreToolUse` guard would do with a shell
+  command, executing nothing.** Settling whether the guard still denies a piped `grep` took two `Bash`
+  calls that actually RAN the command, because `ToolGuard.Inspect` was reachable only from a unit test
+  and `doctor` probes a fixed six-command set. Running a command to find out whether it is allowed is
+  the one experiment that cannot be run on a command with side effects. The answer is `guard ALLOWED`
+  or `guard DENIED` with the reason, the replacing call and any rewrite, judged in the workspace's own
+  directory so the cwd-scoped rows resolve the way they do in a real hook. Covered by
+  `BacklogClosureE2ETests.WorkspaceStatus_WithGuard_JudgesAShellCommandWithoutRunningIt`.
+
+- **`edit_text replaceAll=true` replaces every occurrence of one anchor in a single pass.** An anchor
+  that repeats N times cost N sequential calls, each re-sending the whole before-and-after pair, because
+  `edits=` refuses two entries addressing occurrence 1 and 2 of the same anchor - and it refuses them for
+  a good reason, since entries apply against the text the previous one produced. One pass does not have
+  that problem: the replacement is built in ONE forward pass over the matches, so a file is copied once
+  however many land, and an anchor matching more than 500 times is refused rather than replaced. Refused
+  beside `occurrence=` or `section=`, each naming which to drop. Covered by
+  `EditText_WithReplaceAll_ReplacesEveryOccurrenceInOneCall_AndIsRefusedBesideAnOccurrence`.
+
+- **`write_text delete=true recursive=true` removes a directory and everything under it.** A non-empty
+  directory was refused and nothing else here removed one, so cleaning up a fixture or scratch folder
+  fell back to `Bash rm -rf` - a built-in fallback a tool could have served. The delete stays inside
+  the workspace root - and the root ITSELF, or anything inside a `.git` directory, is refused whatever
+  `force=true` says - a tree holding a file this workspace compiles is refused naming those documents
+  unless `force=true`, the verdict counts what went as `files=N`, and `dryRun=true` previews it without
+  removing anything. Covered by
+  `WriteText_WithDeleteAndRecursive_RemovesTheWholeTree_AndRefusesOneHoldingADocumentThisWorkspaceCompiles`.
 
 - **`add_member typeSymbolIds=[...]` paired with `declarations=[...]` adds a member to SEVERAL types as
   ONE compile-gated edit.** Adding a member to an interface and its implementers was four calls - the
@@ -32,6 +112,95 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `WorkspaceStatus_WithoutTools_PricesNothingPerTool`.
 
 ### Changed
+
+- **Three constants repeated on the success path are shorter or gone.** Measured with `tiktoken` over
+  360 014 characters of the 15 widest real responses: the `.cs` outline NOTE cost ~69 tokens on 60 calls,
+  the `tools=<family> hidden ...` clause ~37 tokens on 71, and `analyze`'s `one record per id and
+  message` 9 tokens on 109 calls - 42 of which had nothing to fold. The outline note now names the two
+  calls and nothing else, the hidden-tools clause keeps only the part that changes what an agent does,
+  and `analyze` drops the folding explainer when it folded nothing.
+
+- **A clipped listing says how many records are MISSING, and the three fact-listing tools come back
+  whole up to twice their cap.** 968 truncation steers were measured, and the agent's next call was a
+  DIFFERENT tool 820 times (84.7%) against 131 narrowed re-queries - worst exactly where the record is a
+  fact rather than a sample: `find_usages` 19 moved on and **0** re-queried, `resx_find` 17/**0**,
+  `changed_files` 118/6. So a clipped list was being read as the whole answer. Every clipped summary now
+  reads `N/T unit truncated - M NOT shown - narrow with ...`, and `find_usages`, `resx_find` and
+  `changed_files` use a new `ResultCap.Whole` band that returns the list entire up to 2x the cap instead
+  of the flat 10% slack - but only where the cap is the tool's own default, so a `maxResults=` you pass
+  is still exactly your bound. Covered by `ResultCapTests.Whole_KeepsTheWholeListUpToTwiceTheCap` and its
+  `CappedWhole` cases.
+
+- **Where no `.editorconfig` sets `indent_style`, `format` and `cleanup` follow a ReSharper
+  `*.sln.DotSettings` instead of Roslyn's defaults.** A repository whose convention lives only in
+  DotSettings had its whitespace rewritten against the wrong convention, and the note only said so after
+  the diff existed. The nearest `*.sln.DotSettings` at or above the file is read for `USE_TABS_ONLY` /
+  `USE_TABS` and `INDENT_SIZE` - matched by key suffix, so the section path a ReSharper version chooses
+  does not matter - and those become the formatter's `UseTabs`, `IndentationSize` and `TabSize`. The note
+  now names the file that governed instead of saying DotSettings is not read. Line endings needed nothing:
+  every writer already adopts the file's own dominant ending. Covered by `DotSettingsFormatTests`.
+
+- **The unchanged-run memo reaches past the build family: `analyze`, `get_diagnostics`,
+  `gate dryRun=true` and `load_workspace` now replay their previous answer.** `UnchangedRun.Replay` had
+  exactly one call site, so `analyze` 42, `gate` 37, `load_workspace` 22 and `get_diagnostics` 17
+  byte-identical duplicates all re-ran in full - and `load_workspace` was re-issued with identical
+  arguments 17 times in ONE session at a p50 of 48 236 ms. The read-only family replays the payload
+  VERBATIM with a `NOTE <tool> UNCHANGED` line under it, so the answer an agent acts on is unchanged and
+  only the wall clock goes; the memo is keyed on the same "nothing written and no watcher event since"
+  stamp the build family uses, taken again after the run so a first load memoizes the state it produced.
+  Only read-only modes are enrolled - `gate` without `dryRun`, `format`, `cleanup` and a
+  `load_workspace reload=true` write, so they always run; `analyze sinceLast=true` is stateful and always
+  runs, and so is any `analyze`/`gate` carrying `baseRef=`, because a commit moves git state with nothing
+  written and the stamp cannot see it. `RunStamp` and `ReplayGate` now hold what `BuildTools` used to hold privately. Covered by
+  `AnalysisToolsE2ETests.Analyze_RepeatedWithNothingWrittenInBetween_ReplaysThePreviousAnswerInsteadOfRunningAgain`.
+
+- **A verbose whole-file `.cs` read ends with what it cost against what the outline would have cost.**
+  `read_text verbose=true` was 872 of 1 511 calls (57.7%) and `read_text` remains the largest payload
+  tool at 4 931 characters per call, while `verbose=true` is the documented opt-out of the `.cs` outline
+  default - so the choice was being made 872 times a week with the price of the alternative invisible.
+  Both numbers are now measured on the actual payloads, never estimated, and the note rides only on a
+  read that asked for the whole file. Covered by
+  `FileToolsE2ETests.ReadText_ForAWholeVerboseCSharpFile_PricesTheOutlineItOptedOutOf`, which asserts a
+  line-ranged read is not priced and that the outline's number is the smaller one.
+
+- **A type wider than the 40-member cap answers its grouped member NAMES instead of only a count.**
+  `get_file_outline` said `51 members - contains= or all=true`, which is a refusal without a suggestion:
+  the caller does not yet know what to contain-match on - that is the question they came to ask - so
+  learning the shape of one 660-line file cost five calls and ~6 000 tokens of line ranges and symbol
+  batches. The collapsed form now prints one line per accessibility carrying the member names, no
+  signatures and no positions, which is a fraction of the full outline and enough to choose `contains=`
+  or a `symbolIds=` batch in ONE more call. Covered by
+  `NavigationToolsE2ETests.GetFileOutline_ForATypeWiderThanTheMemberCap_AnswersGroupedNamesInsteadOfOnlyACount`,
+  which also asserts the grouped outline costs under a third of the full one.
+
+- **A `write_text files=` entry carries its own `force`, and the refusal names every C# path in the
+  batch rather than the first.** `force` was top-level only, so a batch carrying two `.cs` files was
+  refused `'...EditPulse.cs' is a C# file` and the whole batch - file bodies included - was re-sent with
+  `force=true` for the sake of a flag. `edit_text edits=[...]` entries already carried their own `force`;
+  the two batch writers now agree. Covered by
+  `WriteText_WithAPerEntryForce_LandsACSharpEntryBesideAMarkdownOneAndNamesEveryUnforcedPath`.
+
+- **A build or test call issued while this process is already running one for the same solution answers
+  `ERROR RunInFlight` immediately, naming that run, its scope and its age.** A scoped `run_tests` issued
+  beside a whole-solution one used to spend 14.2 s building into its own file locks and then answer
+  `MSB3027 ... locked by .NET Host` plus five candidate holder processes - every one of them its own run.
+  The server started that run, so the caller never had to go process-hunting: `build`, `run_tests`,
+  `rerun_failed`, `list_tests` and `clean` now register with `ActiveRuns` for the solution they target
+  and release it in a `finally`. A run over a DIFFERENT solution is unaffected, and the holder scan
+  remains the right answer for a holder this process did not start. Covered by
+  `ActiveRunsTests.TryEnter_WhileARunIsStillInFlightForTheSameSolution_RefusesAndNamesTheRunThatHoldsIt`,
+  `TryEnter_ForAnotherSolution_IsUnaffectedByTheRunInFlightOverTheFirst` and
+  `ChangedTestSelectionE2ETests.ASecondRunIssuedWhileOneIsStillInFlight_NamesTheRunThisProcessStarted_InsteadOfBuildingIntoItsLocks`.
+
+- **A project that loads with zero documents AND globs its sources is now a load failure, not a silent
+  empty project.** The glob test is what keeps a resources-only or `EnableDefaultCompileItems=false`
+  project - empty on purpose - out of the failure channel. A
+  contended design-time build on a two-core CI runner produced a project with no syntax trees, and the
+  only symptom three asserts later was an analyzer that "found nothing" - which reads as a regression in
+  the shadow-copy loader rather than as a failed load. `failures=` now counts it and names the project,
+  so the load says what happened where it happened. Covered by
+  `Failures_NamesTheProjectThatLoadedWithNoDocuments_AndLeavesThePopulatedOneAlone` and
+  `Failures_WhenEveryProjectCarriesADocument_ReportsNothing`.
 
 - **An `add_member` anchor resolves the spelling a read tool prints, and adjacent overloads need no
   parameter list at all.** `before=`/`after=` are matched through four tiers - exact ordinal, then
@@ -76,6 +245,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Steer_ForARunOfResourceWrites_NamesTheTenFileCapSoALongRunIsCostedBeforeItStarts`.
 
 ### Fixed
+
+- **A UTF-16 file carrying NO byte order mark is decoded instead of being refused as binary.** 0.65.0
+  fixed only the mark-carrying case, which is what the field report happened to carry; a hand-authored
+  UTF-16 template or resource file without one still had no tool to read it and still forced a shell
+  round trip. When a probe has no mark, every zero byte sits at the same offset of a pair and the other
+  half of every pair is printable, the file is read as UTF-16 of that endianness and the response ends
+  with `HEURISTIC decoded as utf-16...`. The test is strict on purpose - one non-printable pair and the
+  file is still refused - so a real binary is never served as mojibake, and nothing about writing
+  changed. Covered by `Utf16WithoutMarkTests` and
+  `FileToolsE2ETests.ReadText_ForAUtf16FileWithNoByteOrderMark_DecodesItInsteadOfRefusingItAsBinary`.
 
 - **`cleanup fix=all` no longer withholds `CA1822` on a `protected` member of a `sealed` or `static`
   type.** `VisibleShapeFixes.Visible` treated `protected` as externally visible at every level, so a
@@ -6339,7 +6518,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.65.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.66.0...HEAD
+[0.66.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.66.0
 [0.65.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.65.0
 [0.64.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.64.0
 [0.63.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.63.0

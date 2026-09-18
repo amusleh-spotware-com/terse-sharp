@@ -112,6 +112,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         Func<WorkspaceTarget, Task<string>> action,
         bool changed = false,
         bool tests = false,
+        string spawns = "",
         CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
@@ -120,7 +121,9 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         {
             var target = await TargetAsync(workspace, pathHint, changed, tests, cancellationToken).ConfigureAwait(false);
 
-            return target.IsOk ? await action(target.Value!).ConfigureAwait(false) : target.Error!.Render();
+            return target.IsOk
+                ? await SpawnedAsync(target.Value!, spawns, pathHint, action).ConfigureAwait(false)
+                : target.Error!.Render();
         }).ConfigureAwait(false);
     }
 
@@ -361,6 +364,24 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
     private static ImmutableArray<string> TestProjectsOf(LoadedWorkspace loaded) => loaded.Load.Failures.Count is 0
         ? TestScope.TestProjectsOf(loaded.Solution, loaded.Load.TargetFramework is null or { Length: 0 })
         : default;
+
+    private static async Task<string> SpawnedAsync(WorkspaceTarget target, string spawns, string? detail, Func<WorkspaceTarget, Task<string>> action)
+    {
+        if (spawns.Length is 0)
+            return await action(target).ConfigureAwait(false);
+
+        if (!ActiveRuns.TryEnter(target.SolutionPath, spawns, detail ?? string.Empty, out var holder))
+            return Errors.RunInFlight(spawns, holder).Render();
+
+        try
+        {
+            return await action(target).ConfigureAwait(false);
+        }
+        finally
+        {
+            ActiveRuns.Leave(target.SolutionPath);
+        }
+    }
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

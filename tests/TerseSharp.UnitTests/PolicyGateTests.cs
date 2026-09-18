@@ -147,7 +147,7 @@ public sealed class PolicyGateTests
             maxResults: 200,
             sinceLast: false,
             changed: false,
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Contains("TERSE105 warning Policy", report, StringComparison.Ordinal);
         Assert.Contains("OrderService.Go", report, StringComparison.Ordinal);
@@ -170,7 +170,7 @@ public sealed class PolicyGateTests
             maxResults: 200,
             sinceLast: false,
             changed: false,
-            TestContext.Current.CancellationToken);
+            cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain("TERSE1", report, StringComparison.Ordinal);
     }

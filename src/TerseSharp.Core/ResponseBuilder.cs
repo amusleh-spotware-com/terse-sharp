@@ -75,7 +75,7 @@ public sealed class ResponseBuilder(string tool, string argument)
     }
 
     private string Brief(Counted count) => count.Total > count.Shown
-        ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit} truncated{Steer(count)}")
+        ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit} truncated - {count.Total - count.Shown} NOT shown{Steer(count)}")
         : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit}{Advertised(count)}");
 
     private string Advertised(Counted count) =>

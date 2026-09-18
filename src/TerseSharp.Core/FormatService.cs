@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Formatting;
+using Microsoft.CodeAnalysis.Options;
 
 namespace TerseSharp.Core;
 
@@ -162,7 +163,10 @@ public static class FormatService
     private static async Task<Document> FormatOnlyAsync(Document document, CancellationToken cancellationToken)
     {
         var options = await document.GetOptionsAsync(cancellationToken).ConfigureAwait(false);
-        var formatted = await Formatter.FormatAsync(document, options, cancellationToken).ConfigureAwait(false);
+        var convention = await GovernedAsync(document, cancellationToken).ConfigureAwait(false)
+            ? default
+            : await DotSettingsFormat.FoundAsync(document.FilePath, cancellationToken).ConfigureAwait(false);
+        var formatted = await Formatter.FormatAsync(document, Applied(options, convention), cancellationToken).ConfigureAwait(false);
 
         return await CollapsedAsync(formatted, cancellationToken).ConfigureAwait(false);
     }
@@ -399,6 +403,9 @@ public static class FormatService
 
             if (await GovernedAsync(document, cancellationToken).ConfigureAwait(false))
                 return null;
+
+            if (await DotSettingsFormat.FoundAsync(document.FilePath, cancellationToken).ConfigureAwait(false) is { Governs: true } convention)
+                return Followed(convention);
         }
 
         return probed ? Ungoverned : null;
@@ -413,4 +420,21 @@ public static class FormatService
     }
 
     private const string Ungoverned = "NOTE no .editorconfig at or above these files sets indent_style, so whitespace followed Roslyn's own defaults - which may differ from this repository's convention; a ReSharper .sln.DotSettings is not read";
+
+    private static OptionSet Applied(OptionSet options, DotSettingsConvention convention)
+    {
+        var applied = convention.UseTabs is { } tabs
+            ? options.WithChangedOption(FormattingOptions.UseTabs, LanguageNames.CSharp, tabs)
+            : options;
+
+        return convention.IndentSize is { } size
+            ? applied
+                .WithChangedOption(FormattingOptions.IndentationSize, LanguageNames.CSharp, size)
+                .WithChangedOption(FormattingOptions.TabSize, LanguageNames.CSharp, size)
+            : applied;
+    }
+
+    private static string Followed(DotSettingsConvention convention) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"NOTE no .editorconfig at or above these files sets indent_style, so whitespace followed the ReSharper {Path.GetFileName(convention.Path.AsSpan())} beside them instead of Roslyn's own defaults");
 }

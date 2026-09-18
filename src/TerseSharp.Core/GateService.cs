@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
 
-public readonly record struct GateRequest(string? Path, bool Changed, bool DryRun, bool Verbose);
+public readonly record struct GateRequest(string? Path, bool Changed, bool DryRun, bool Verbose, TouchedLines? Touched = null);
 
 public static class GateService
 {
@@ -35,6 +35,7 @@ public static class GateService
         DiagnosticSeverity.Info,
         includeDeadCode: true,
         request.Changed,
+        request.Touched,
         cancellationToken);
 
     private static Task<Result<string>> StepAsync(

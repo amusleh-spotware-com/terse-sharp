@@ -952,7 +952,7 @@ public sealed class ToolGuardTests
     [Fact]
     public void Inspect_WithASettingsFileThatHidesNothing_DeniesExactlyAsBefore()
     {
-        var overrides = ToolSettings.Parse("""{"tools":{"names":{"impact_of":true}}}""", ToolSettings.FileName);
+        var overrides = ToolSettings.Parse("""{"tools":{"names":{"find_registrations":true}}}""", ToolSettings.FileName);
 
         Assert.True(ToolGuard.Inspect("Read", new JsonObject { ["file_path"] = "src/App/OrderService.cs" }, null, overrides).Denied);
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build" }, null, overrides).Denied);

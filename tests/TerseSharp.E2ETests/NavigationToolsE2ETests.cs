@@ -570,7 +570,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/ProbeSaturation.cs" });
 
         Assert.DoesNotContain("truncated", text, StringComparison.Ordinal);
-        Assert.Contains(" members - contains= or all=true", text, StringComparison.Ordinal);
+        Assert.Contains(" members, names only - contains= or all=true for signatures", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -694,7 +694,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         var whole = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["all"] = true });
         var filtered = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["contains"] = "Slot4" });
 
-        Assert.Contains("45 members - contains= or all=true", capped, StringComparison.Ordinal);
+        Assert.Contains("45 members, names only - contains= or all=true for signatures", capped, StringComparison.Ordinal);
         Assert.DoesNotContain("WideSurface.Slot1", capped, StringComparison.Ordinal);
         Assert.DoesNotContain("WideSurface.Slot40", capped, StringComparison.Ordinal);
 
@@ -709,7 +709,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         var capped = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs" });
         var whole = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["all"] = true });
 
-        Assert.Contains("45 members - contains= or all=true", capped, StringComparison.Ordinal);
+        Assert.Contains("45 members, names only - contains= or all=true for signatures", capped, StringComparison.Ordinal);
         Assert.DoesNotContain("45 members - narrow with contains=", capped, StringComparison.Ordinal);
         Assert.Contains("45 members - narrow with contains=", whole, StringComparison.Ordinal);
     }
@@ -800,7 +800,23 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("WideSurface.Slot40", typeOutline, StringComparison.Ordinal);
         Assert.Contains("40 of 45 members - contains= or all=true", typeOutline, StringComparison.Ordinal);
-        Assert.Contains("45 members - contains= or all=true", fileOutline, StringComparison.Ordinal);
+        Assert.Contains("45 members, names only - contains= or all=true for signatures", fileOutline, StringComparison.Ordinal);
         Assert.DoesNotContain("WideSurface.Slot40", fileOutline, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_ForATypeWiderThanTheMemberCap_AnswersGroupedNamesInsteadOfOnlyACount()
+    {
+        var grouped = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs" });
+        var full = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["all"] = true });
+
+        Assert.Contains("45 members, names only", grouped, StringComparison.Ordinal);
+        Assert.Contains("public: Slot01, Slot02,", grouped, StringComparison.Ordinal);
+        Assert.Contains("Slot45", grouped, StringComparison.Ordinal);
+        Assert.DoesNotContain("public int Slot01()", grouped, StringComparison.Ordinal);
+        Assert.Contains("public int Slot01()", full, StringComparison.Ordinal);
+        Assert.True(
+            grouped.Length * 3 < full.Length,
+            string.Create(CultureInfo.InvariantCulture, $"the grouped outline costs {grouped.Length} characters against {full.Length} for the full one"));
     }
 }

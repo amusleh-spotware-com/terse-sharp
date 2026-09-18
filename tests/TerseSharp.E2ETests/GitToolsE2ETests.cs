@@ -408,25 +408,29 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
     {
         var first = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i278a");
         var second = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i278b");
+        var third = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-i278c");
 
         Directory.CreateDirectory(first);
         Directory.CreateDirectory(second);
+        Directory.CreateDirectory(third);
 
         try
         {
             await FillAsync(first, 8);
             await FillAsync(second, 7);
+            await FillAsync(third, 5);
 
             var whole = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i278*" });
             var capped = await server.CallAsync("changed_files", new() { ["path"] = "scratch-i278*", ["maxResults"] = 1 });
 
-            Assert.StartsWith("15 files", whole, StringComparison.Ordinal);
-            Assert.StartsWith("8/15 files truncated", capped, StringComparison.Ordinal);
+            Assert.StartsWith("20 files", whole, StringComparison.Ordinal);
+            Assert.StartsWith("8/20 files truncated - 12 NOT shown", capped, StringComparison.Ordinal);
         }
         finally
         {
             Directory.Delete(first, recursive: true);
             Directory.Delete(second, recursive: true);
+            Directory.Delete(third, recursive: true);
         }
     }
 

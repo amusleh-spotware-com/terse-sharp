@@ -10,6 +10,7 @@ public static class ReferenceService
         ISymbol symbol,
         int maxResults,
         bool containers,
+        bool chosen,
         CancellationToken cancellationToken)
     {
         var references = await SymbolFinder
@@ -27,7 +28,7 @@ public static class ReferenceService
 
         var razor = await RazorUsageService.MarkupAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
-        return await RenderAsync(workspace, symbol, locations, razor, maxResults, containers, cancellationToken)
+        return await RenderAsync(workspace, symbol, locations, razor, maxResults, containers, chosen, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -74,15 +75,16 @@ public static class ReferenceService
             IReadOnlyList<RazorUsage> razor,
             int maxResults,
             bool containers,
+            bool chosen,
             CancellationToken cancellationToken)
     {
-        var shown = ResultCap.Shown(locations.Length, maxResults);
+        var shown = chosen ? ResultCap.Shown(locations.Length, maxResults) : ResultCap.Whole(locations.Length, maxResults);
         var files = locations
             .Select(location => PositionFormat.Source(location.Location).Path)
             .Concat(razor.Select(usage => usage.Path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
-        var response = new ResponseBuilder("find_usages", SymbolId.From(symbol).Value);
+        var response = new ResponseBuilder("find_usages", SymbolId.From(symbol).Value).Chosen(chosen);
         var records = new List<string>();
 
         response.Summary(

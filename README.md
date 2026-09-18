@@ -1,7 +1,7 @@
 <h1 align="center">TerseSharp</h1>
 
 <p align="center">
-  <b>Roslyn for your coding agent. 88 tools over MCP.</b><br/>
+  <b>Roslyn for your coding agent. 86 tools over MCP.</b><br/>
   Your agent stops reading whole files, stops grepping for symbols, and stops turning the loop three
   times to learn one thing — so it finishes sooner, costs less, and can only emit code you would merge.
 </p>
@@ -12,7 +12,7 @@
   <a href="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml"><img src="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT"/></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 10"/>
-  <img src="https://img.shields.io/badge/tools-88-26C281.svg" alt="88 tools"/>
+  <img src="https://img.shields.io/badge/tools-86-26C281.svg" alt="86 tools"/>
   <img src="https://img.shields.io/badge/tokens-10--30×_fewer-26C281.svg" alt="10-30x fewer tokens"/>
 </p>
 
@@ -23,7 +23,7 @@
   <a href="#-control--what-your-agent-may-and-may-not-emit">Control</a> ·
   <a href="#-your-stack--blazor-xaml-minimal-apis-localization">Your stack</a> ·
   <a href="#-install">Install</a> ·
-  <a href="#-all-88-tools">Tools</a>
+  <a href="#-all-86-tools">Tools</a>
 </p>
 
 ```diff
@@ -122,13 +122,13 @@ that merely shortens a response, and both beat a faster server.
 | read the file to find the member, then read the member | `get_file_outline` → paste the id straight into `get_symbol_source` |
 | one search per identifier | `search_text queries=[…]` — 8 literals, one pass, records tagged `q1`..`qN` |
 | a text hit, an outline, then a ranged read to find the method it sits in | `search_text containers=true` — the declaration on the record itself |
-| trace a symbol by hand across the solution | `explore_symbol` · `impact_of` — definition, usages, implementations, blast radius |
+| trace a symbol by hand across the solution | `get_symbol usages=true` · `find_usages impact=true` — definition, usages, implementations, blast radius |
 | `git describe` to find where HEAD sits before a release | `history describe=true` — nearest tag, commits since it, short sha, dirty flag, one line |
 | one read per file | `read_text paths=[…]` — up to 10 files, one answer |
 | one ranged read per anchor in the same file | `read_text ranges=["42", "101-102"]` — discontinuous ranges, one answer |
 | one edit call per site | `edit_text edits=[…]` — 25 edits across files, one write |
 | edit, build, find you broke a caller, edit again | `replace_symbol symbolIds=[…]` — the member and its callers land in **one** compile gate |
-| grep the test tree and guess what to run | `impact_of tests=true` — ready-made `run_tests test=` arguments |
+| grep the test tree and guess what to run | `find_usages impact=true tests=true` — ready-made `run_tests test=` arguments |
 | `dotnet test` per project, serially | `run_tests projects=[…]` — concurrent, one process per core |
 
 **And the waiting itself is shorter.** A bare `run_tests` over a solution builds **once**, then runs each
@@ -322,7 +322,7 @@ running server rather than estimated. The surface shrinks three ways, all option
 advertises everything.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤25,700 tokens**. Load one that does and they come back, announced with
+  **55 tools, ≤25,700 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
 - **Per project, and per directory.** The same `.terse.json`. Every one from your home directory
   (`$TERSE_HOME`, else the user profile) down through the repository root to the server's directory is
@@ -339,7 +339,7 @@ advertises everything.
 
   Twelve groups — `analysis` `build` `edit` `file` `git` `navigation` `project` `razor` `refactor` `resx`
   `workspace` `xaml` — plus any tool name under `names`, which outranks its group. That file measures
-  **64 tools, ≤26,450 tokens**. An unknown key is reported rather than silently dropped, and the guard
+  **62 tools, ≤26,450 tokens**. An unknown key is reported rather than silently dropped, and the guard
   follows the file: a built-in whose every replacement you disabled is allowed again. Read once at
   startup, so restart your agent after changing it.
 - **By profile.** `--tools core`, or `TERSE_TOOLS=core`; `--tools all` opts out of every narrowing.
@@ -469,7 +469,7 @@ adds one line to the next tool response. `TERSE_UPDATE=0` turns it off.
 
 ---
 
-## 🧰 All 88 tools
+## 🧰 All 86 tools
 
 One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a success that costs
 nothing.
@@ -477,7 +477,7 @@ nothing.
 | Group | Tools |
 |---|---|
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
-| **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
+| **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` (`get_symbol usages=true` and `find_usages impact=true` answer what a symbol IS and what a change would reach) |
 | **What grep can't reach** | `find_registrations` (DI: open generics, factories, `Add*` extensions) · `list_endpoints` (ASP.NET Core `Map*` + Blazor `@page`) |
 | **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` (`fix=ci` runs both CI rule sets in ONE pass and tags each named file with the one that would change it) · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
 | **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` (`before=` / `after=` / `position=` to place it, not append it) · `delete_symbol` · `rename_symbol` |

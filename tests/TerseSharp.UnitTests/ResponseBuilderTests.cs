@@ -9,7 +9,7 @@ public sealed class ResponseBuilderTests
     {
         var text = new ResponseBuilder("search_text", "Order").Summary(2, 9, "matches", "glob=").ToString();
 
-        Assert.Equal("2/9 matches truncated - narrow with glob=", text);
+        Assert.Equal("2/9 matches truncated - 7 NOT shown - narrow with glob=", text);
     }
 
     [Fact]
@@ -25,7 +25,7 @@ public sealed class ResponseBuilderTests
     {
         var text = new ResponseBuilder("find_usages", "M:A.B").Summary(2, 9, "usages").ToString();
 
-        Assert.Equal("2/9 usages truncated", text);
+        Assert.Equal("2/9 usages truncated - 7 NOT shown", text);
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class ResponseBuilderTests
     {
         var text = new ResponseBuilder("search_text", "Order").Summary(2, 9, "matches", "glob= or maxResults=").ToString();
 
-        Assert.Equal("2/9 matches truncated - narrow with glob= or maxResults=9", text);
+        Assert.Equal("2/9 matches truncated - 7 NOT shown - narrow with glob= or maxResults=9", text);
     }
 
     [Fact]
@@ -132,6 +132,6 @@ public sealed class ResponseBuilderTests
     {
         var text = new ResponseBuilder("search_text", "Order").Chosen(true).Summary(2, 9, "matches", "glob= or maxResults=").ToString();
 
-        Assert.Equal("2/9 matches truncated - narrow with glob=", text);
+        Assert.Equal("2/9 matches truncated - 7 NOT shown - narrow with glob=", text);
     }
 }

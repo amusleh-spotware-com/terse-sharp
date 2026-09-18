@@ -86,8 +86,8 @@ public sealed class ChangedTestSelectionE2ETests
 
             Assert.DoesNotContain("ERROR", reloaded, StringComparison.Ordinal);
 
-            var without = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add" });
-            var with = await CallAsync(server, "impact_of", new() { ["symbolId"] = "Adder.Add", ["tests"] = true });
+            var without = await CallAsync(server, "find_usages", new() { ["symbolId"] = "Adder.Add", ["impact"] = true });
+            var with = await CallAsync(server, "find_usages", new() { ["symbolId"] = "Adder.Add", ["impact"] = true, ["tests"] = true });
 
             Assert.Contains("(test=2)", without, StringComparison.Ordinal);
             Assert.DoesNotContain("run_tests test=", without, StringComparison.Ordinal);
@@ -164,6 +164,54 @@ public sealed class ChangedTestSelectionE2ETests
         {
             await server.StopAsync();
         }
+    }
+
+    [Fact]
+    public async Task ASecondRunIssuedWhileOneIsStillInFlight_NamesTheRunThisProcessStarted_InsteadOfBuildingIntoItsLocks()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var collided = string.Empty;
+
+            for (var attempt = 0; attempt < 3 && !collided.Contains("RunInFlight", StringComparison.Ordinal); attempt++)
+            {
+                var stalling = CallAsync(server, "run_tests", new()
+                {
+                    ["projects"] = new[] { "Selection.Core.Tests", "Selection.Other.Tests" },
+                    ["timeoutSeconds"] = 10,
+                    ["properties"] = new[] { "TerseStallBuild=true" },
+                });
+
+                collided = await CollidedAsync(server, stalling);
+
+                await stalling;
+            }
+
+            Assert.Contains("RunInFlight", collided, StringComparison.Ordinal);
+            Assert.Contains("is already running", collided, StringComparison.Ordinal);
+            Assert.Contains("remedy:", collided, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    private static async Task<string> CollidedAsync(TerseServerProcess server, Task<string> running)
+    {
+        for (var attempt = 0; attempt < 60 && !running.IsCompleted; attempt++)
+        {
+            var text = await CallAsync(server, "build", []);
+
+            if (text.Contains("RunInFlight", StringComparison.Ordinal))
+                return text;
+
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+
+        return "the first run answered before a second call could collide with it: " + await running;
     }
 
     [Fact]

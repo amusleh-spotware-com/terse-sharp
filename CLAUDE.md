@@ -156,7 +156,7 @@ until it passes.
 Two projects, one rule between them: **`TerseSharp.Core` holds all logic, `TerseSharp.Server` holds
 only MCP plumbing.**
 
-The tool surface is **88 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
+The tool surface is **86 tools**. `src/TerseSharp.Core` — Roslyn services, each a static class returning `Result<string>` or a
 formatted string: `OutlineService`, `SourceService`, `SymbolSearch`, `ReferenceService`,
 `ExploreService`, `RegistrationService`, `RenameService`, `RefactorService`, `SymbolEditService`,
 `AnalysisService`, `DeadCodeService`, `CodeFixService`, `DiagnosticsService`, `FormatService`,

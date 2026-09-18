@@ -46,7 +46,7 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
         var withSymbolIds = surface.Where(tool => SymbolIdNames(tool).Length > 0).ToArray();
 
         Assert.Equal(ToolCoverageE2ETests.ExercisedCount, surface.Count);
-        Assert.True(withSymbolIds.Length >= 15, $"only {withSymbolIds.Length} tools were seen to take a symbol id");
+        Assert.True(withSymbolIds.Length >= 14, $"only {withSymbolIds.Length} tools were seen to take a symbol id");
         Assert.Contains(surface, tool => Has(tool, "dryRun"));
     }
 

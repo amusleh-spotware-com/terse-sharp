@@ -6,9 +6,9 @@ public sealed class ExploreToolsE2ETests(TerseServerFixture server)
     private const string Submit = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)";
 
     [Fact]
-    public async Task ExploreSymbol_AnswersSignatureLocationAndReachInOneCall()
+    public async Task GetSymbol_WithUsages_AnswersSignatureLocationAndReachInOneCall()
     {
-        var text = await server.CallAsync("explore_symbol", new() { ["symbolId"] = Submit });
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = Submit, ["usages"] = true });
 
         Assert.Contains("method public", text, StringComparison.Ordinal);
         Assert.Contains("usages=4", text, StringComparison.Ordinal);
@@ -16,26 +16,39 @@ public sealed class ExploreToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ExploreSymbol_SeparatesTestUsagesFromProductionOnes()
+    public async Task GetSymbol_WithUsages_SeparatesTestUsagesFromProductionOnes()
     {
-        var text = await server.CallAsync("explore_symbol", new() { ["symbolId"] = Submit });
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = Submit, ["usages"] = true });
 
         Assert.Contains("(test=0)", text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ImpactOf_NamesEveryProjectThatWouldRecompile()
+    public async Task GetSymbol_WithUsagesAndABatch_StillDescribesEveryIdRatherThanExploringOne()
     {
-        var text = await server.CallAsync("impact_of", new() { ["symbolId"] = Submit });
+        var text = await server.CallAsync("get_symbol", new()
+        {
+            ["symbolIds"] = new[] { Submit, "T:Fixture.Trading.Order" },
+            ["usages"] = true,
+        });
+
+        Assert.Contains("2 symbols", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("usages=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindUsages_WithImpact_NamesEveryProjectThatWouldRecompile()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = Submit, ["impact"] = true });
 
         Assert.Contains("projects that would recompile: 1", text, StringComparison.Ordinal);
         Assert.Contains("Fixture.Trading", text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ImpactOf_OnABoundProperty_IncludesTheXamlSites()
+    public async Task FindUsages_WithImpact_OnABoundProperty_IncludesTheXamlSites()
     {
-        var text = await server.CallAsync("impact_of", new() { ["symbolId"] = "OrderViewModel.Symbol" });
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderViewModel.Symbol", ["impact"] = true });
 
         Assert.Contains("xaml binding", text, StringComparison.Ordinal);
     }
@@ -71,10 +84,10 @@ public sealed class ExploreToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ImpactOf_WithTests_OverASolutionWithNoTestProject_SaysSoRatherThanAnsweringNothing()
+    public async Task FindUsages_WithImpactAndTests_OverASolutionWithNoTestProject_SaysSoRatherThanAnsweringNothing()
     {
-        var without = await server.CallAsync("impact_of", new() { ["symbolId"] = "OrderService.Submit" });
-        var with = await server.CallAsync("impact_of", new() { ["symbolId"] = "OrderService.Submit", ["tests"] = true });
+        var without = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderService.Submit", ["impact"] = true });
+        var with = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderService.Submit", ["impact"] = true, ["tests"] = true });
 
         Assert.DoesNotContain("no test declaration references this symbol directly", without, StringComparison.Ordinal);
         Assert.Contains("no test declaration references this symbol directly", with, StringComparison.Ordinal);
@@ -82,20 +95,11 @@ public sealed class ExploreToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ImpactOf_WithTests_ForASymbolNoTestNames_SaysSoRatherThanAnsweringNothing()
+    public async Task FindUsages_WithImpactAndTests_ForASymbolNoTestNames_SaysSoRatherThanAnsweringNothing()
     {
-        var text = await server.CallAsync("impact_of", new() { ["symbolId"] = "T:Fixture.Trading.Awkward", ["tests"] = true });
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "T:Fixture.Trading.Awkward", ["impact"] = true, ["tests"] = true });
 
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
         Assert.Contains("test", text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task FindUsages_AfterASourceReadOfTheSameSymbol_SteersToExploreSymbol()
-    {
-        await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Trading.OrderService.Submit" });
-        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "Trading.OrderService.Submit" });
-
-        Assert.Contains("explore_symbol symbolId=\"Trading.OrderService.Submit\"", text, StringComparison.Ordinal);
     }
 }

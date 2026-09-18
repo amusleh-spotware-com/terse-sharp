@@ -15,7 +15,9 @@ public static class AnalysisService
         int maxResults,
         bool sinceLast,
         bool changed,
-        CancellationToken cancellationToken)
+        TouchedLines? touched = null,
+        string baseRef = "",
+        CancellationToken cancellationToken = default)
     {
         var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ids, cancellationToken).ConfigureAwait(false);
 
@@ -23,7 +25,8 @@ public static class AnalysisService
             return collected.Error!.Render();
 
         var value = collected.Value;
-        var found = Filter(value.Found, value.Scope, minimum, ids);
+        var all = Filter(value.Found, value.Scope, minimum, ids);
+        var found = Introduced(all, touched);
         var declaration = await DiagnosticDeclarations.ResolverAsync(found, cancellationToken).ConfigureAwait(false);
 
         return Render(
@@ -37,7 +40,8 @@ public static class AnalysisService
             minimum,
             ids,
             includeDeadCode,
-            changed);
+            changed,
+            new Narrowed(touched, baseRef, all.Length - found.Length));
     }
 
     public static async Task<Result<string[]>> FindingsAsync(
@@ -46,6 +50,7 @@ public static class AnalysisService
         DiagnosticSeverity minimum,
         bool includeDeadCode,
         bool changed,
+        TouchedLines? touched,
         CancellationToken cancellationToken)
     {
         var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], cancellationToken).ConfigureAwait(false);
@@ -53,12 +58,12 @@ public static class AnalysisService
         if (!collected.IsOk)
             return Result.Fail<string[]>(collected.Error!);
 
-        var found = Filter(collected.Value.Found, collected.Value.Scope, minimum, []);
+        var found = Introduced(Filter(collected.Value.Found, collected.Value.Scope, minimum, []), touched);
         var declaration = await DiagnosticDeclarations.ResolverAsync(found, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(Grouped(
             DiagnosticFold.Findings(workspace.Root, found, DiagnosticFormat.Head, declaration),
-            collected.Value.Extra));
+            Introduced([.. collected.Value.Extra], touched)));
     }
 
     private static async Task<Result<Collected>> CollectedAsync(
@@ -185,12 +190,14 @@ public static class AnalysisService
         DiagnosticSeverity minimum,
         IReadOnlyList<string> ids,
         bool includeDeadCode,
-        bool changed)
+        bool changed,
+        Narrowed narrowed)
     {
-        var extra = Keep(collected.Extra, ids);
+        var kept = Keep(collected.Extra, ids);
+        var extra = Introduced(kept, narrowed.Touched);
         var findings = DiagnosticFold.Findings(root, found, DiagnosticFormat.Head, declaration);
         var occurrences = Occurrences(findings, extra);
-        var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{changed}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}");
+        var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{changed}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}|{narrowed.BaseRef}");
         var delta = DiagnosticHistory.Record(scope, occurrences);
         var shown = sinceLast ? delta.Appeared : Grouped(findings, extra);
 
@@ -199,9 +206,16 @@ public static class AnalysisService
         response.Summary(
             ResultCap.Shown(shown.Count, maxResults),
             shown.Count,
-            sinceLast ? "new diagnostics, one record per occurrence" : "diagnostics, one record per id and message",
+            Unit(sinceLast, shown.Count),
             "minSeverity=, ids= or path=");
         response.Note("engines=" + string.Join("+", Engines(collected.Analyzed, includeDeadCode)));
+
+        if (narrowed.Touched is not null && narrowed.PreExisting + kept.Length - extra.Length > 0)
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{narrowed.PreExisting + kept.Length - extra.Length} pre-existing finding(s) on these files were not reported - they sit outside every line the working tree changed against {narrowed.BaseRef}"));
+        }
 
         if (!sinceLast && occurrences.Length != shown.Count)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"total={occurrences.Length} occurrence(s) folded onto {shown.Count} record(s)"));
@@ -231,6 +245,13 @@ public static class AnalysisService
 
         return response.ToString();
     }
+
+    private static string Unit(bool sinceLast, int shown) => (sinceLast, shown) switch
+    {
+        (true, _) => "new diagnostics, one record per occurrence",
+        (false, 0) => "diagnostics",
+        _ => "diagnostics, one record per id and message",
+    };
 
     private static DiagnosticScope Scope(LoadedWorkspace workspace, DocumentId[] documents, bool unscoped) =>
             unscoped
@@ -264,6 +285,14 @@ public static class AnalysisService
 
         return [.. found.Select(finding => finding.Diagnostic())];
     }
+
+    private readonly record struct Narrowed(TouchedLines? Touched, string BaseRef, int PreExisting);
+
+    private static Diagnostic[] Introduced(Diagnostic[] found, TouchedLines? touched) =>
+        touched is null ? found : [.. found.Where(touched.Covers)];
+
+    private static string[] Introduced(string[] extra, TouchedLines? touched) =>
+        touched is null ? extra : [.. extra.Where(touched.CoversRecord)];
 }
 
 public static class DiagnosticFormat

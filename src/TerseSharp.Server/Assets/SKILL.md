@@ -1,6 +1,6 @@
 ---
 name: terse-sharp
-description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 88 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
+description: Use when reading, searching, navigating, editing, refactoring, building or testing C#/.NET, XAML, .resx localization or Razor/Blazor in a solution served by the TerseSharp MCP server. Teaches which TerseSharp tool replaces which built-in, and how to drive all 86 of them, so a .cs file is never read whole, a symbol is never found by text search, and a .xaml, .resx or .razor file is never edited by line number.
 ---
 
 # TerseSharp
@@ -31,6 +31,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 |---|---|---|
 | **Workspace** | — | `workspace_status` |
 | **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` |
+| **Workspace** | running a command to find out whether the guard allows it | `workspace_status(guard: "<command>")` — the verdict, the reason and the replacing call, executing nothing |
 | **Workspace** | what one tool's schema costs | `workspace_status(tools: true)` — one line per tool, tokens descending |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` |
 | **Workspace** | — | `load_workspace` |
@@ -43,7 +44,8 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` — parsed from its own text, tagged `HEURISTIC` |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` |
 | **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` |
-| **Navigate** | `read_text` a whole `.cs` file | it already answers the outline; `verbose: true` or a line range for the text |
+| **Navigate** | a type wider than the 40-member cap | `get_file_outline(path)` — answers the grouped member NAMES per accessibility, which is what `contains=` or a `symbolIds=` batch is chosen from |
+| **Navigate** | `read_text` a whole `.cs` file | it already answers the outline; `verbose: true` or a line range for the text — and a verbose whole-file read prices itself against the outline it skipped |
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId, verbose: true)` on a **type** id — the default answers its member outline |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` |
 | **Navigate** | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` |
@@ -58,9 +60,9 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Navigate** | a common name that buries the one declaration you meant | `search_symbols(query, path: "src/Trading/OrderBook.cs")` |
 | **Navigate** | `Grep` to find callers | `find_usages(symbolId)` |
 | **Navigate** | `Grep` for implementers | `find_implementations(symbolId)` |
-| **Navigate** | the outline → source → usages chain, when learning what a symbol IS | `explore_symbol(symbolId)` — ONE call |
-| **Navigate** | judging a rename before doing it | `impact_of(symbolId)` |
-| **Navigate** | searching for the tests a change can break | `impact_of(symbolId, tests: true)` |
+| **Navigate** | the outline → source → usages chain, when learning what a symbol IS | `get_symbol(symbolId, usages: true)` — ONE call |
+| **Navigate** | judging a rename before doing it | `find_usages(symbolId, impact: true)` |
+| **Navigate** | searching for the tests a change can break | `find_usages(symbolId, impact: true, tests: true)` |
 | **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` |
@@ -97,6 +99,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` |
 | **Files** | a scratch `.cs` probe outside every workspace root | `write_text(path, content, force: true)` |
 | **Files** | `Bash: rm file` · `Bash: rmdir` | `write_text(path, delete: true)` — an EMPTY directory is removed too |
+| **Files** | `Bash: rm -r folder` | `write_text(path, delete: true, recursive: true)` — refused when the tree holds a file this workspace compiles, unless `force: true`; the workspace root and any `.git` are refused outright |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` — no `oldText` needed |
 | **Edit text** | re-reading a file to see what an edit landed | `edit_text(path, oldText, newText, context: 2)` — POST-edit lines, not a diff |
 | **Edit text** | reading a section out of one file and writing it into another | `edit_text(path, section: "## Open", toPath: "other.md")` |
@@ -105,12 +108,14 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit text** | cutting one table row out of one markdown file and appending it to another | `edit_text(path, row: "I286", toPath: "IMPROVEMENTS-ARCHIVE.md", newText: "\| … \|")` — matched by its first cell |
 | **Edit text** | three or more `edit_text` calls on the **same** file | `edit_text(path, edits: [{oldText, newText}, …])` |
 | **Edit text** | one `edit_text` call per file across **several** files | `edit_text(edits: [{oldText, newText, path}, …])` — an entry carries its own `path` and `force` |
-| **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content}, …])` — every `.cs` among them shares ONE compile gate |
+| **Edit text** | one `write_text` call per new file | `write_text(files: [{path, content, force}, …])` — an entry carries its own `force`, and every `.cs` among them shares ONE compile gate |
 | **Edit text** | two entries of one `edits=` batch addressing occurrence 1 and 2 of the SAME anchor | `edit_text(path, edits: [...])` — ordinals resolve against the ORIGINAL text |
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` |
+| **Edit text** | N sequential calls to replace the SAME anchor N times — three identical `[Description]` strings in one file | `edit_text(path, oldText, newText, replaceAll: true)` — one pass, applied by descending offset |
 | **Edit text** | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` |
 | **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` already handles it — dedented payloads still match |
 | **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` |
+| **Edit text** | re-sending a whole file after a `CS0246` rollback | `write_text(retryWith: "r3", usings: ["System.Collections.Immutable"], force: true)` — the content is held |
 | **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` — compile-gated when a project compiles it |
 | **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` |
 | **Edit code** | a new body that calls a private helper you have not written yet | `replace_symbol(symbolId, declaration, add: [...])` |
@@ -153,6 +158,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Analyse** | one `analyze` call per touched file | `analyze(paths: [...])` |
 | **Analyse** | `dotnet format whitespace` / an IDE inspection | `analyze` — compiler + analyzers + dead code, down to `info` |
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` — one verdict line |
+| **Analyse** | an end-of-task sweep buried in findings this task did not author | `analyze baseRef="HEAD"` · `gate baseRef="HEAD"` — only the lines the working tree changed; the rest is one count |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` |
 | **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` |
 | **Analyse** | one `cleanup` call per touched file | `cleanup(paths: [...])` |
@@ -317,8 +323,8 @@ reloads it. The user can change the limit with `terse serve --max-workspaces N` 
 loaded workspace costs roughly 3 GB on a 148-project tree.
 **The advertised surface is derived from what the solution holds** — no `.xaml`/`.axaml` hides the 13
 `xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*` — and so does one whose Razor generator did not
-run — no `.resx`/`.resw` the 8 `resx_*`: 57 tools
-instead of 88 on a plain C# solution, because the full catalogue costs tokens on every request and
+run — no `.resx`/`.resw` the 8 `resx_*`: 55 tools
+instead of 86 on a plain C# solution, because the full catalogue costs tokens on every request and
 measurably lowers selection accuracy. Loading a second solution that does hold them re-advertises
 those families through `notifications/tools/list_changed`; `--tools all` (or `TERSE_TOOLS=all`)
 advertises everything regardless and `--tools core` narrows to about twenty. A hidden tool still
@@ -431,7 +437,7 @@ edit, climb only as high as the edit reaches:
 | 4 | `run_tests` over the whole solution | 85 s+, p99 **16 min** | ONCE, at the end of the task |
 | — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
 
-A tier is never dropped; only how often it is re-run. A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` - read that as the answer you already have. Banned: a full-suite run between two edits of one
+A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call - the payload is repeated verbatim with a `NOTE <tool> UNCHANGED` line under it, and `reload=true` (or `sinceLast=true`, or any different argument) re-runs. A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` - read that as the answer you already have. Banned: a full-suite run between two edits of one
 slice · re-issuing `build` or `run_tests` with identical arguments when nothing was written in between - neither lets you any more: a repeat of a call that already answered GREEN (`run_tests PASSED`, `build ok`), with no edit and no watcher event on any loaded workspace since, answers `run_tests UNCHANGED` / `build UNCHANGED` naming the previous verdict and its age instead of running, and `force=true` opts out. `rerun_failed` is never memoized and always runs, because the failure list it replays is not named by any of its arguments · a
 run to "confirm" one that already passed · reading a test result before the build result.
 
@@ -605,18 +611,18 @@ is also a property name — `Errors`, `Report`, `Tally` — resolves to the type
 `AmbiguousSymbol`. A name matching no type at all says so and counts the non-type matches rather than
 hiding them.
 
-**A symbol asked about by a second navigation tool steers to the composite.** When `get_symbol_source`
-or `find_usages` answers about a symbol id another of `get_symbol` / `get_symbol_source` /
-`get_type_outline` / `find_usages` / `find_implementations` already asked about this session, the
-response ends with `explore_symbol symbolId="<that id>" answers signature, usages and implementations
-in ONE call` — once per id. Take it: the chain you are walking is the composite's payload.
+**Learning what a symbol IS is one call, not a chain.** `get_symbol(symbolId, usages: true)` answers
+the signature, the usage counts split src/test, the implementations, the XAML sites and the files it is
+used in; `find_usages(symbolId, impact: true)` answers the blast radius of changing it, and `tests: true`
+beside it names the test classes as ready `run_tests test=` arguments.
 
 **When the second consecutive call of one tool lands, the response gains one line - once per run, not
 on every call after it** —
 `2 read_text calls in a row - these are ONE call: paths=["src/A.cs", "src/B.cs"]` — the run's own
 DISTINCT arguments, already filled in, whenever every call of the run carried a short identifier one;
 otherwise `pass paths=[...]`, naming the plural parameter that tool declares. It is framing, never payload, it says nothing when the call already
-used the plural parameter, and the counter resets on any different tool - and on a `read_text` that
+used the plural parameter, and the counter
+resets on any different tool - and on a `read_text` that
 carried `startLine`, `endLine`, `tail` or `section`, because `paths=` cannot express a per-entry
 range and a steer that asks for the wrong lines is worse than none. Obey it literally: 571 runs
 of exactly **two** consecutive calls stay unreachable, because a steer can only ride on a response, and
@@ -692,12 +698,18 @@ refused.
 
 0. **A response carries no ceremony.** There is **no header echoing the tool name or your arguments**
    — you know what you called. The first line is the count (`4 usages in 2 files`), and when a result
-   was clipped it reads `4/17 usages truncated - narrow with <parameter>`. Nothing else is added:
+   was clipped it reads `4/17 usages truncated - 13 NOT shown - narrow with <parameter>`, because a
+   clipped list read as a whole answer is the confident wrong answer this server exists to prevent.
+   Nothing else is added:
    no "pass verbose=true" hint, no counter that reports a non-event. `verbose=true` restores the old
    shape verbatim — header and `(truncated=…, total=…)` — on every tool that takes it.
    **A `truncated` count is always real.** When the total lands within 10 % of the cap the whole list
    is returned instead — `108 files`, never `100/108 files truncated` — so a listing that says it
-   truncated is worth a second, narrower call, and one that does not never is.
+   truncated is worth a second, narrower call, and one that does not never is. **`find_usages`,
+   `resx_find` and `changed_files` widen that band to TWICE the cap when you did NOT pass a
+   `maxResults=` of your own** - a cap you chose is still exactly your bound - because their records are
+   facts rather than a sample: the blast radius, the key set and the change set are answers you act on whole,
+   and the measured re-query rate after their steer was 0, 0 and 6 of 118.
 1. **Address a symbol by the name a response printed.** An outline prints `OrderService.Submit`, and
    adds the parameter list (`Reconcile(Order, decimal)`) only where the type overloads that name;
    every tool taking a `symbolId` accepts that, the full documentation id
@@ -851,7 +863,7 @@ refused.
     The exception, so you can plan around it: `xaml_find` and `xaml_validate includeUnused=true` need
     the parsed document of every file, because they answer about arbitrary attribute content — beyond
     128 cached documents they re-parse. Those two are worth asking once and keeping; the rest are free
-    to repeat. `find_usages`, `rename_symbol` and `explore_symbol` filter by index record first and
+    to repeat. `find_usages` and `rename_symbol` filter by index record first and
     parse only the files that could match, so they are cheap even on a large XAML tree.
 
 12. **A hit list ends with the argument its consumer takes — lift it, do not retype it.**
@@ -1220,7 +1232,7 @@ and quotes the ~80 characters around the offending byte, so a 9 000-character `d
 located without re-sending it - and a declaration that reaches the parser and fails there is answered
 the same way, `at offset 27 of 28: public int Unused() => 7 + ;`, prefixed with `declarations[1]:`
 when the call was batched;
-`ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
+`RunInFlight` means this process is ALREADY running a build or test call for that solution - read that run's answer instead of starting a second one, which could only fail on its file locks; `ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
 host dropped the call - the project file was restored, a file the edit was adding may already be on
 disk, and the answer is to retry the same call rather than to report a defect.
 

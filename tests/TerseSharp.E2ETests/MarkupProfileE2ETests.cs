@@ -43,7 +43,7 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
         var tokens = (narrowed.Sum(tool => tool.Name.Length + (tool.Description?.Length ?? 0) + tool.JsonSchema.GetRawText().Length) + 3) / 4;
 
         Assert.True(hidden >= 30, string.Create(CultureInfo.InvariantCulture, $"only {hidden} tools were hidden"));
-        Assert.True(tokens <= 25700, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
+        Assert.True(tokens <= ToolCensus.MarkupNarrowedSurfaceBudget, string.Create(CultureInfo.InvariantCulture, $"the narrowed surface still costs {tokens} tokens over {narrowed.Count} tools"));
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
         Assert.Contains("xaml_*, razor_*, resx_* hidden", alone, StringComparison.Ordinal);
         Assert.Contains("still answers when called by name", alone, StringComparison.Ordinal);
         Assert.Contains("razor_* hidden", beside, StringComparison.Ordinal);
-        Assert.Contains("cannot answer for the ones it holds", beside, StringComparison.Ordinal);
+        Assert.Contains("no such file here", beside, StringComparison.Ordinal);
         Assert.DoesNotContain("xaml_*", beside, StringComparison.Ordinal);
     }
 

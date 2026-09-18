@@ -1,6 +1,6 @@
 # TerseSharp
 
-**Roslyn for your coding agent. 88 tools over MCP.**
+**Roslyn for your coding agent. 86 tools over MCP.**
 
 Your agent stops reading whole files, stops grepping for symbols, and stops turning the loop three times
 to learn one thing — so it finishes sooner, costs less, and can only emit code you would merge.
@@ -80,13 +80,13 @@ merely shortens a response.
 | read the file to find the member, then read the member | `get_file_outline` → paste the id straight into `get_symbol_source` |
 | one search per identifier | `search_text queries=[…]` — 8 literals, one pass, records tagged `q1`..`qN` |
 | a text hit, an outline, then a ranged read to find the method it sits in | `search_text containers=true` — the declaration on the record itself |
-| trace a symbol by hand across the solution | `explore_symbol` · `impact_of` — definition, usages, implementations, blast radius |
+| trace a symbol by hand across the solution | `get_symbol usages=true` · `find_usages impact=true` — definition, usages, implementations, blast radius |
 | `git describe` to find where HEAD sits before a release | `history describe=true` — nearest tag, commits since it, short sha, dirty flag, one line |
 | one read per file | `read_text paths=[…]` — up to 10 files, one answer |
 | one ranged read per anchor in the same file | `read_text ranges=["42", "101-102"]` — discontinuous ranges, one answer |
 | one edit call per site | `edit_text edits=[…]` — 25 edits across files, one write |
 | edit, build, find you broke a caller, edit again | `replace_symbol symbolIds=[…]` — the member and its callers land in **one** compile gate |
-| grep the test tree and guess what to run | `impact_of tests=true` — ready-made `run_tests test=` arguments |
+| grep the test tree and guess what to run | `find_usages impact=true tests=true` — ready-made `run_tests test=` arguments |
 | `dotnet test` per project, serially | `run_tests projects=[…]` — concurrent, one process per core |
 
 **And the waiting itself is shorter.** A bare `run_tests` over a solution builds **once**, then runs each
@@ -257,13 +257,13 @@ the whole surface beside it under `verbose=true`, so what a narrowing saves is r
 rather than estimated. The surface shrinks three ways, all optional.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
-  **57 tools, ≤25,700 tokens**. Load one that does and they come back, announced with
+  **55 tools, ≤25,700 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
 - **Per project, and per directory.** The same `.terse.json` — every one from your home directory
   (`$TERSE_HOME`, else the user profile) down through the repository root to the server's directory, the
   nearer file winning per setting and the walk never climbing above the repository root — disables whole groups (`analysis` `build` `edit` `file` `git`
   `navigation` `project` `razor` `refactor` `resx` `workspace` `xaml`) or individual `names`, which outrank
-  their group. That file measures **64 tools, ≤26,450 tokens**. The guard follows it: a built-in whose
+  their group. That file measures **62 tools, ≤26,450 tokens**. The guard follows it: a built-in whose
   every replacement you disabled is allowed again. An unknown key is reported rather than silently
   dropped, and the file is read once at startup, so restart your agent after changing it.
 - **By profile.** `--tools core`, or `TERSE_TOOLS=core`; `--tools all` opts out of every narrowing.
@@ -366,7 +366,7 @@ Claude Code reads `~/.claude.json`, or `$CLAUDE_CONFIG_DIR/.claude.json` when th
 `terse doctor` prints the path it read. **Updates** are one `HEAD` request to GitHub at most once a day, on
 a background task; `TERSE_UPDATE=0` turns it off.
 
-## All 88 tools
+## All 86 tools
 
 One record per line, workspace-relative paths, an explicit `truncated`/`total`, and a success that costs
 nothing.
@@ -374,7 +374,7 @@ nothing.
 | Group | Tools |
 |---|---|
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
-| **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` · `explore_symbol` · `impact_of` |
+| **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` (`get_symbol usages=true` and `find_usages impact=true` answer what a symbol IS and what a change would reach) |
 | **What grep can't reach** | `find_registrations` (DI: open generics, factories, `Add*` extensions) · `list_endpoints` (ASP.NET Core `Map*` + Blazor `@page`) |
 | **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` (`fix=ci` runs both CI rule sets in ONE pass and tags each named file with the one that would change it) · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
 | **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` · `add_member` (`before=` / `after=` / `position=` to place it, not append it) · `delete_symbol` · `rename_symbol` |

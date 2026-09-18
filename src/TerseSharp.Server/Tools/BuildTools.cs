@@ -38,7 +38,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     target, resolved, scope.Value, verbose, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
         },
-        cancellationToken: cancellationToken), Roots),
+        cancellationToken: cancellationToken,
+        spawns: "build"), Roots),
         cancellationToken);
 
     [McpServerTool(Name = "clean", Destructive = true)]
@@ -65,7 +66,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 target => SelfBuilt(target, !dryRun && project is not { Length: > 0 }) is { } refused
                     ? Task.FromResult(refused)
                     : CleanWithRecoveryAsync(target, project, includeIntermediate, dryRun, verbose, cancellationToken),
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                spawns: "clean");
     }
 
     [McpServerTool(Name = "run_tests")]
@@ -144,6 +146,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             },
             changed && WholeSolution(project, projects),
             WholeSolution(project, projects),
+            "run_tests",
             cancellationToken), Roots),
         cancellationToken);
 
@@ -198,7 +201,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     Partial(chosen.Value.Length, memory.FailedTests.Length))
                 : Task.FromResult(scope.Error!.Render());
         },
-        cancellationToken: cancellationToken);
+        cancellationToken: cancellationToken,
+        spawns: "rerun_failed");
 
     [McpServerTool(Name = "list_tests")]
     [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build.")]
@@ -233,7 +237,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 }, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
         },
-        cancellationToken: cancellationToken);
+        cancellationToken: cancellationToken,
+        spawns: "list_tests");
 
     private Task<string> BuildWithRecoveryAsync(
         WorkspaceTarget target,
@@ -679,46 +684,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         return Traced(text, miss, refusal);
     }
 
-    private string? Stamp(out string? unavailable)
-    {
-        var loaded = context.Registry.All();
-        var stamp = new StringBuilder(128);
+    private string? Stamp(out string? unavailable) => RunStamp.Taken(context.Registry, out unavailable);
 
-        stamp.Append(CultureInfo.InvariantCulture, $"pulse={EditPulse.Changed} loaded={loaded.Count}");
-
-        foreach (var workspace in loaded.OrderBy(entry => entry.Root, StringComparer.Ordinal))
-        {
-            var sync = workspace.Sync;
-
-            if (sync.State is not WatchState.Active || sync.Gaps > 0)
-            {
-                unavailable = string.Create(CultureInfo.InvariantCulture, $"{workspace.Root} watch={sync.State} gaps={sync.Gaps}");
-
-                return null;
-            }
-
-            stamp.Append(' ')
-                .Append(workspace.Root)
-                .Append('@')
-                .Append(workspace.LoadedUtc.ToString("O", CultureInfo.InvariantCulture))
-                .Append('=')
-                .Append(sync.Generations.ToString());
-        }
-
-        unavailable = null;
-
-        return stamp.ToString();
-    }
-
-    private static string Key(string tool, params ReadOnlySpan<string?> parts)
-    {
-        var key = new StringBuilder(tool, 128);
-
-        foreach (var part in parts)
-            key.Append(KeySeparator).Append(part);
-
-        return key.ToString();
-    }
+    private static string Key(string tool, params ReadOnlySpan<string?> parts) => ReplayGate.Key(tool, parts);
 
     private static string Flag(bool value) => value ? "1" : "0";
 
@@ -726,8 +694,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     private static string Joined(IReadOnlyList<string?>? values) =>
         values is { Count: > 0 } ? string.Join(',', values) : string.Empty;
-
-    private static readonly string KeySeparator = new((char)31, 1);
 
     private static string Guidance(int named, int holders, bool scanned) => (named, holders, scanned) switch
     {
@@ -759,20 +725,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             : force ? "force=true"
             : unchanged.MissReason(key, stamp);
 
-    private async Task<bool> SyncedAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            foreach (var workspace in context.Registry.All())
-                await workspace.Sync.SyncAsync(workspace, null, cancellationToken).ConfigureAwait(false);
-
-            return true;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return false;
-        }
-    }
+    private Task<bool> SyncedAsync(CancellationToken cancellationToken) => RunStamp.SyncedAsync(context.Registry, cancellationToken);
 
     private IReadOnlyList<string> Roots() => [.. context.Registry.All().Select(loaded => loaded.Root)];
 }

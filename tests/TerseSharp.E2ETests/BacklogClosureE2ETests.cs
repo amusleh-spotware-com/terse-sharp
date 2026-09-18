@@ -1061,7 +1061,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/ProbeSaturation.cs" });
 
-        Assert.Contains(" members - contains= or all=true", text, StringComparison.Ordinal);
+        Assert.Contains(" members, names only - contains= or all=true for signatures", text, StringComparison.Ordinal);
         Assert.DoesNotContain("symbolIds=[", text, StringComparison.Ordinal);
     }
 
@@ -2160,8 +2160,12 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain("unrecognized severity", aliased, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR InvalidArgument", aliased, StringComparison.Ordinal);
-        Assert.Equal(canonical, aliased);
+        Assert.Equal(WithoutTheReplayNote(canonical), WithoutTheReplayNote(aliased));
     }
+
+    private static string WithoutTheReplayNote(string text) => string.Join(
+        '\n',
+        text.Split('\n').Where(line => !line.Contains("UNCHANGED - nothing was written", StringComparison.Ordinal)));
 
     [Fact]
     public async Task ATool_RefusingAnUnrecognizedParameter_NamesTheRunningVersionSoSkillDriftIsLegible()
@@ -2266,5 +2270,18 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.Contains("next: gate dryRun=true", format, StringComparison.Ordinal);
         Assert.Contains("next: gate dryRun=true", cleanup, StringComparison.Ordinal);
         Assert.DoesNotContain("next: gate", scoped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WorkspaceStatus_WithGuard_JudgesAShellCommandWithoutRunningIt()
+    {
+        var denied = await server.CallAsync("workspace_status", new() { ["guard"] = "grep -rn Submit src/Fixture.Trading/OrderService.cs" });
+        var allowed = await server.CallAsync("workspace_status", new() { ["guard"] = "git commit -m \"probe\"" });
+
+        Assert.Contains("guard DENIED", denied, StringComparison.Ordinal);
+        Assert.Contains("get_file_outline", denied, StringComparison.Ordinal);
+        Assert.DoesNotContain("documents=", denied, StringComparison.Ordinal);
+        Assert.Contains("guard ALLOWED", allowed, StringComparison.Ordinal);
+        Assert.DoesNotContain("documents=", allowed, StringComparison.Ordinal);
     }
 }

@@ -13,13 +13,13 @@ public static class ExploreService
         CancellationToken cancellationToken)
     {
         var reach = await ReachAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
-        var response = new ResponseBuilder("explore_symbol", SymbolReference.Brief(symbol));
+        var response = new ResponseBuilder("get_symbol", SymbolReference.Brief(symbol));
 
         response.Summary(
             Math.Min(ExploreFiles, reach.Files.Count),
             reach.Files.Count,
             "files using it",
-            "impact_of for the full list");
+            "find_usages impact=true for the full list");
         response.Note(Signature(workspace.Root, symbol));
         Documentation(response, symbol);
         response.Note(Counts(reach));
@@ -40,7 +40,7 @@ public static class ExploreService
         var reach = await ReachAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
         var projects = Dependents(workspace, symbol);
         var records = reach.Files.Concat(reach.Xaml).ToArray();
-        var response = new ResponseBuilder("impact_of", SymbolReference.Brief(symbol));
+        var response = new ResponseBuilder("find_usages", SymbolReference.Brief(symbol));
         var named = string.Join(", ", projects.Take(8));
 
         response.Summary(ResultCap.Shown(records.Length, maxResults), records.Length, "affected files", "maxResults=");

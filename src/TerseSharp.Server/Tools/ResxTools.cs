@@ -46,7 +46,8 @@ public sealed class ResxTools(ToolContext context)
             query,
             scope ?? "key",
             culture,
-            NavigationTools.Cap(maxResults, 100))));
+            NavigationTools.Cap(maxResults, 100),
+            maxResults > 0)));
 
     [McpServerTool(Name = "resx_usages", ReadOnly = true)]
     [Description("Every reference to a resource key: the generated designer property resolved through Roslyn (EXACT), plus GetString, localizer indexers, x:Uid and Razor literals (HEURISTIC). Reports composedLookups so 'no usages' is never claimed as proof when keys are built at runtime.")]

@@ -7,7 +7,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no startLine, endLine, ranges or tail - answers that file's OUTLINE plus a steer, because the text is about three times the tokens; verbose=true or any line range returns the text. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N is how a long log is read, and a clipped read names the line to continue from. ref= reads the file at a git ref instead of shelling out.")]
+    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no startLine, endLine, ranges or tail - answers that file's OUTLINE plus a steer, because the text is about three times the tokens; verbose=true or any line range returns the text, and a verbose whole-file read ends with what it cost against the outline it skipped. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N is how a long log is read, and a clipped read names the line to continue from. ref= reads the file at a git ref instead of shelling out.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
                 [Description("Several files answered in one response, at most 10. Combines with path, which is taken first; a blank or 11th entry is refused by name rather than dropped.")] string?[]? paths = null,
@@ -116,12 +116,13 @@ bool verbose) =>
                 cancellationToken);
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD - the way back from a bad write to a file undo_last_change cannot cover. files=[{path,content}, ...] writes up to 10 files in ONE call, and every .cs document among them shares ONE compile gate, so a type and the consumer it breaks land together and a rollback names which file introduced the error and writes nothing at all. A .cs file needs force=true and is compile-gated exactly like replace_symbol when a project already compiles it, or globs it as a NEW file - rolled back on a new error unless allowErrors=true; one no project globs stays ungated. force=true also lets a SINGLE write land outside every workspace root, tagged outside-workspace and never gated. delete=true on an EMPTY DIRECTORY removes that directory; a non-empty one is refused naming what it still holds. Missing directories are created, the file's line endings are kept, and the new or changed file is visible to every semantic tool on the next call with no reload.")]
+    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 10 files in ONE call under ONE compile gate, so a type and the consumer it breaks land together and a rollback writes nothing at all. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true, and the rejection ends with a retryWith token HOLDING the content, so the retry is that token plus usings= or allowErrors=true rather than the whole file again; one no project globs stays ungated. force=true also lets a SINGLE write land outside every workspace root. delete=true on an EMPTY DIRECTORY removes it, and recursive=true removes the whole tree instead - replacing a shell rm -r, refused when the tree holds a file this workspace compiles unless force=true. Missing directories are created, line endings are kept, and the new file is visible to every semantic tool on the next call with no reload.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative. An absolute path outside every workspace root is written only with force=true.")] string? path = null,
-        [Description("Full new content. Omit only with delete=true or ref=; an empty write needs allowEmpty=true.")] string? content = null,
-        [Description("Several files written in one call, at most 10, each taking path and content; the top-level force= covers every entry. An entry outside the workspace root, or empty without allowEmpty=true, is refused. Not with a top-level path, content, ref or delete=true.")] FileService.FileWrite[]? files = null,
+        [Description("Full new content. Omit only with delete=true, ref= or retryWith=; an empty write needs allowEmpty=true.")] string? content = null,
+        [Description("Several files in one call, at most 10, each taking path, content and optionally its own force, so one C# file among markdown ones needs no second batch; the top-level force= covers every entry. Not with a top-level path, content, ref or delete=true.")] FileService.FileWrite[]? files = null,
         [Description("Delete the file instead of writing it. Refused on a path outside the workspace root, and on a .cs file without force=true.")] bool delete = false,
+        [Description("With delete=true on a DIRECTORY, remove it and everything under it. Refused when the tree holds a file this workspace compiles unless force=true. Default false.")] bool recursive = false,
         [Description("Git ref to restore the file's content from, e.g. HEAD. Not with content, files or delete; the restored write is gated like any other.")] string? @ref = null,
         [Description("Permit writing empty content, which truncates the file. Default false.")] bool allowEmpty = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
@@ -131,6 +132,8 @@ bool verbose) =>
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Apply a write the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
+        [Description("Token from a previous rejected write, e.g. r3, printed alone on the LAST line of the rejection. It holds the content, so the retry names the token instead of re-sending the file - add usings= for a CS0246 rollback, or allowErrors=true. A path you pass outranks the held one.")] string? retryWith = null,
+        [Description("Namespaces added to the content this retry replays, e.g. System.Collections.Immutable. Ignored without retryWith=.")] string[]? usings = null,
         CancellationToken cancellationToken = default)
     {
         if (@ref is { Length: > 0 } && (delete || content is not null || files is { Length: > 0 }))
@@ -140,18 +143,24 @@ bool verbose) =>
                 "pass ref with path alone to restore, or content alone to write new text").Render());
         }
 
+        var options = new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince);
+
+        if (retryWith is { Length: > 0 } token)
+            return Replayed(token, workspace, path, usings, options, cancellationToken);
+
         return files is { Length: > 0 } batch
-            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince), cancellationToken)
-            : WrittenOne(workspace, path, content, delete, @ref, allowEmpty, new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince), cancellationToken);
+            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, options, cancellationToken)
+            : WrittenOne(workspace, path, content, delete, recursive, @ref, allowEmpty, usings, options, cancellationToken);
     }
 
     private Task<string> Written(
-    string? workspace,
-    string path,
-    string? content,
-    bool allowEmpty,
-    WriteOptions options,
-    CancellationToken cancellationToken)
+        string? workspace,
+        string path,
+        string? content,
+        bool allowEmpty,
+        WriteOptions options,
+        string[]? usings,
+        CancellationToken cancellationToken)
     {
         if (content is null || (content.Length is 0 && !allowEmpty))
         {
@@ -165,30 +174,34 @@ bool verbose) =>
 
         return Guarded(workspace, path, async loaded => Raced(loaded, [path], options.IfUnchangedSince) is { } raced
             ? await raced.ConfigureAwait(false)
-            : NavigationTools.Unwrap(await FileService.WriteTextAsync(
-                loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken);
+            : EditTools.Carried(
+                await FileService.WriteTextAsync(
+                    loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false),
+                new EditTools.Carry("write_text", [path], [content], Usings: usings),
+                loaded.Root), cancellationToken: cancellationToken);
     }
 
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - with place=append or prepend, write INSIDE it instead of replacing it. With toPath=, section= MOVES the section into another markdown file, row=\"I286\" moves ONE table row matched by its first cell, and rows= moves up to 25. edits=[{oldText,newText}, ...] applies several edits in one call, grouped by file. Replaces one call per edit and, with rows=, one per row: an entry may carry its own path to edit ANOTHER file, and one whose anchor fails is reported on its own line while the rest still land. Line endings are normalized before matching, so a CRLF file accepts an LF oldText. A match that is not unique is refused naming the closest lines; occurrence=N picks the Nth. On a .cs file force=true is the sanctioned way to amend a declaration's ATTRIBUTES; it is NOT compile-gated, so analyze the file after.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. With toPath=, section= MOVES the section into another markdown file, row=\"I286\" moves ONE table row, and rows= moves up to 25. edits=[{oldText,newText}, ...] applies several edits in one call. Replaces one call per edit and, with rows=, one per row: an entry may carry its own path to edit ANOTHER file, and one whose anchor fails is reported on its own line while the rest land. Line endings are normalized first, so a CRLF file accepts an LF oldText. A match that is not unique is refused naming the closest lines; occurrence=N picks the Nth and replaceAll=true replaces EVERY one in a single pass - up to 500 - so an anchor that deliberately repeats costs one call instead of N. On a .cs file force=true amends a declaration's ATTRIBUTES; it is NOT compile-gated, so analyze after.")]
     public Task<string> EditText(
-        [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry carrying no path of its own, and omittable when every entry declares one.")] string? path = null,
-        [Description("Replacement text. With section=, the whole new section including its heading, unless place= writes inside it. With row=, the row as it should read in the target. Omit when edits= carries the edits.")] string? newText = null,
-        [Description("Exact text to replace; must occur exactly once unless occurrence= picks one. Omit when section= is passed.")] string? oldText = null,
-        [Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed. With place=, written inside; with toPath=, moved into that file.")] string? section = null,
+    [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry carrying no path of its own.")] string? path = null,
+    [Description("Replacement text. With section=, the whole new section including its heading, unless place= writes inside it. With row=, the row as it should read in the target.")] string? newText = null,
+        [Description("Exact text to replace; must occur exactly once unless occurrence= picks one.")] string? oldText = null,
+        [Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed. With place=, written inside; with toPath=, moved there.")] string? section = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Allow editing a .cs file, bypassing the compile-gated symbol tools. Default false.")] bool force = false,
+        [Description("Allow editing a .cs file, bypassing the compile-gated symbol tools.")] bool force = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("1-based index of the match to replace when it deliberately repeats - the oldText match, or beside section= that heading. Default 0 requires one.")] int occurrence = 0,
-        [Description("With section=, lowercase: append writes after its last non-blank line, prepend directly under its heading. Empty replaces the section.")] string? place = null,
-        [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE them into, cut from path. Not with oldText.")] string? toPath = null,
-        [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched against each row's first cell - e.g. row=\"I286\".")] string? row = null,
-        [Description("Several edits in one call: each takes oldText, newText and optionally section, occurrence, place, path and force. Entries sharing a path apply in order as one write. Not with a top-level oldText, newText or section. Max 10 per file, 25 in total.")] FileService.TextEdit[]? edits = null,
-        [Description("Markdown only, with toPath=: several table rows moved in ONE call, at most 25, each taking row and optionally newText.")] FileService.TextRow[]? rows = null,
-        [Description("Return the N lines around each applied change in their POST-edit state, numbered. 1-10; 0 (default) adds nothing.")] int context = 0,
+        [Description("1-based index of the match to replace when it repeats - the oldText match, or beside section= that heading. Default 0 requires one.")] int occurrence = 0,
+        [Description("Replace EVERY occurrence of oldText in one pass, by descending offset so no ordinal moves. Refused beside occurrence= or section=. Default false.")] bool replaceAll = false,
+        [Description("With section=, lowercase: append writes after its last non-blank line, prepend under its heading. Empty replaces it.")] string? place = null,
+        [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE them into.")] string? toPath = null,
+        [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched on its first cell - e.g. row=\"I286\".")] string? row = null,
+        [Description("Several edits in one call: each takes oldText, newText and optionally section, occurrence, replaceAll, place, path and force. Entries sharing a path apply in order. Max 10 per file, 25 total.")] FileService.TextEdit[]? edits = null,
+        [Description("Markdown only, with toPath=: several rows moved in ONE call, at most 25, each taking row and optionally newText.")] FileService.TextRow[]? rows = null,
+        [Description("Return the N lines around each change in POST-edit state, numbered. 1-10; 0 adds nothing.")] int context = 0,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
         CancellationToken cancellationToken = default)
     {
@@ -210,7 +223,7 @@ bool verbose) =>
             loaded => Raced(loaded, targets, ifUnchangedSince) ?? EditedAsync(
                 loaded,
                 path ?? target,
-                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context),
+                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context, replaceAll),
                 newText,
                 edits,
                 rows,
@@ -730,8 +743,10 @@ context.RejectWrite() is { } rejection
         string? path,
         string? content,
         bool delete,
+        bool recursive,
         string? reference,
         bool allowEmpty,
+        string[]? usings,
         WriteOptions options,
         CancellationToken cancellationToken)
     {
@@ -745,8 +760,8 @@ context.RejectWrite() is { } rejection
             ? Guarded(workspace, target, async loaded => Raced(loaded, [target], options.IfUnchangedSince) is { } raced
                 ? await raced.ConfigureAwait(false)
                 : NavigationTools.Unwrap(
-                    await FileService.DeleteAsync(loaded, target, options.DryRun, options.Force, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken)
-            : Written(workspace, target, content, allowEmpty, options, cancellationToken);
+                    await FileService.DeleteAsync(loaded, target, options.DryRun, options.Force, recursive, cancellationToken).ConfigureAwait(false)), cancellationToken: cancellationToken)
+            : Written(workspace, target, content, allowEmpty, options, usings, cancellationToken);
     }
 
     private Task<string> WrittenMany(
@@ -1129,4 +1144,25 @@ context.RejectWrite() is { } rejection
 
     private static FileService.EditRequest WithoutMove(FileService.EditRequest request) =>
         request with { OldText = string.Empty, NewText = string.Empty, Row = null, ToPath = null };
+
+    private Task<string> Replayed(string token, string? workspace, string? path, string[]? usings, WriteOptions options, CancellationToken cancellationToken)
+    {
+        if (EditTools.Held(token, "write_text") is not { } held)
+            return Task.FromResult(EditTools.Unknown(token, "write_text"));
+
+        var target = path is { Length: > 0 } named ? named : Entry(held.Targets);
+        var content = WriteRetry.WithUsings(Entry(held.Payloads), usings is { Length: > 0 } ? usings : [.. held.Usings]);
+
+        if (target.Length is 0)
+            return Task.FromResult(Errors.Blank("path").Render());
+
+        return Guarded(workspace, target, async loaded => EditTools.Elsewhere(held.Root, loaded.Root)
+            ?? EditTools.Carried(
+                await FileService.WriteTextAsync(loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false),
+                new EditTools.Carry("write_text", [target], [content], Usings: usings),
+                loaded.Root),
+            cancellationToken: cancellationToken);
+    }
+
+    private static string Entry(IReadOnlyList<string> values) => values is [var only, ..] ? only : string.Empty;
 }

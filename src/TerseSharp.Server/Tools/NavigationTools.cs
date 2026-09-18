@@ -5,7 +5,7 @@ using ModelContextProtocol.Server;
 namespace TerseSharp.Server.Tools;
 
 [McpServerToolType]
-public sealed class NavigationTools(ToolContext context)
+public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 {
     [McpServerTool(Name = "search_symbols", ReadOnly = true)]
     [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none. Use instead of Grep for anything that is a type or member.")]
@@ -32,7 +32,7 @@ public sealed class NavigationTools(ToolContext context)
     }
 
     [McpServerTool(Name = "get_file_outline", ReadOnly = true)]
-    [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. Pass paths to outline up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line and a path that does not resolve is reported inline as NOT_FOUND instead of failing the call. ref= outlines the file as it was at a git ref instead of in the working tree, so the pre-change shape of a file costs an outline rather than the whole text a git show returns; it takes one path. An unfiltered outline of a type over 40 members answers its member COUNT; contains= or all=true opens it. parameterNames=false prints parameter types without their names, which is about an eighth of the response.")]
+    [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. Pass paths to outline up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line and a path that does not resolve is reported inline as NOT_FOUND instead of failing the call. ref= outlines the file as it was at a git ref instead of in the working tree, so the pre-change shape of a file costs an outline rather than the whole text a git show returns; it takes one path. An unfiltered outline of a type over 40 members answers its member NAMES grouped by accessibility - no signatures, no positions - which is what contains= or a symbolIds= batch is chosen from; contains= or all=true opens it. parameterNames=false prints parameter types without their names, which is about an eighth of the response.")]
     public Task<string> GetFileOutline(
         [Description("Path to the .cs file.")] string? path = null,
         [Description("Several .cs files outlined in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
@@ -91,16 +91,20 @@ public sealed class NavigationTools(ToolContext context)
             cancellationToken);
 
     [McpServerTool(Name = "get_symbol", ReadOnly = true)]
-    [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response. Replaces one call per symbol: each under its own block, an id that does not resolve reported inline as NOT_RESOLVED, and a summary counting the ids that RESOLVED. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
+    [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response. Replaces one call per symbol: each under its own block, an id that does not resolve reported inline as NOT_RESOLVED, and a summary counting the ids that RESOLVED. usages=true answers what the symbol IS in one call instead of an outline-then-source-then-usages chain: the signature plus how many usages it has in src and in tests, how many implementations and XAML sites, and the files it is used in. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetSymbol(
-    [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
-    [Description("Workspace or worktree name.")] string? workspace = null,
-    [Description("Return the XML documentation verbatim and echo the request. Default false.")] bool verbose = false,
-    [Description("Alias for symbolId.")] string? symbol = null,
-    [Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
-    [Description("Several symbol ids described in one response. Replaces one call per symbol; an id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call.")] string[]? symbolIds = null,
-    CancellationToken cancellationToken = default) =>
-    Described(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, verbose, path, cancellationToken);
+        [Description("Symbol id, e.g. M:Trading.OrderService.Submit(Trading.Order).")] string? symbolId = null,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Return the XML documentation verbatim and echo the request. Default false.")] bool verbose = false,
+        [Description("Alias for symbolId.")] string? symbol = null,
+        [Description("File the name lives in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
+        [Description("Several symbol ids described in one response. Replaces one call per symbol; an id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call.")] string[]? symbolIds = null,
+        [Description("Answer what this symbol IS rather than only its signature: usage counts in src and tests, implementations, XAML sites and the files it is used in. One symbol at a time. Default false.")] bool usages = false,
+        CancellationToken cancellationToken = default) =>
+        usages && symbolIds is not { Length: > 0 }
+            ? context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+                ExploreService.ExploreAsync(loaded, resolved, cancellationToken), cancellationToken)
+            : Described(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, verbose, path, cancellationToken);
 
     [McpServerTool(Name = "get_symbol_source", ReadOnly = true)]
     [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. ref= returns the member as it was at a git ref; it takes one id and requires path=, so a pre-change body needs no line range that can clip it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
@@ -156,16 +160,19 @@ public sealed class NavigationTools(ToolContext context)
     ];
 
     [McpServerTool(Name = "find_usages", ReadOnly = true)]
-    [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded.")]
+    [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded. impact=true answers the blast radius of a rename or a signature change instead: every referencing file with its src/test marker, every XAML site, and every project that would recompile - and with tests=true the test classes that reference it, each as a ready run_tests test= argument.")]
     public Task<string> FindUsages(
         [Description("Symbol id to find references for.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (100).")] int maxResults = 0,
+        [Description("Max results (100, or 200 with impact=true). A cap you pass is taken as your bound; the default one is widened to twice it when that returns the list whole.")] int maxResults = 0,
         [Description("Also name the member each usage sits in, one line per member instead of per file (default false).")] bool containers = false,
         [Description("Alias for symbolId.")] string? symbol = null,
+        [Description("Answer the blast radius instead of the reference list: referencing files, XAML sites and every project that would recompile. Default false.")] bool impact = false,
+        [Description("With impact=true, also list the test classes that reference this symbol, each as a ready run_tests test= argument. They are the DIRECT references only, so they narrow a run rather than replacing one. Default false.")] bool tests = false,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-            ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, cancellationToken), cancellationToken);
+        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => impact
+            ? ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
+            : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
     [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered. symbol= and name= are aliases for query=; an empty query lists every registration, and a call carrying none of the three is refused naming all three.")]
@@ -192,28 +199,6 @@ public sealed class NavigationTools(ToolContext context)
             RegistrationService.EndpointsAsync(loaded, Cap(maxResults, 200), cancellationToken),
             cancellationToken: cancellationToken);
 
-    [McpServerTool(Name = "explore_symbol", ReadOnly = true)]
-    [Description("Replaces the get_file_outline then get_symbol_source pair, and the search_symbols then get_symbol_source pair, when you are learning what a symbol IS rather than editing it: one call gives its signature, XML doc and location, how many usages it has in src and in tests, how many implementations and XAML sites, and the files it is used in.")]
-    public Task<string> ExploreSymbol(
-        [Description("Symbol id or name.")] string? symbolId = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Alias for symbolId.")] string? symbol = null,
-        CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-            ExploreService.ExploreAsync(loaded, resolved, cancellationToken), cancellationToken);
-
-    [McpServerTool(Name = "impact_of", ReadOnly = true)]
-    [Description("Replaces find_usages then find_implementations then reading the project graph, before a rename or a signature change: one call gives every file that references the symbol with a src/test marker, every XAML site, and every project that would recompile. tests=true adds the test classes that reference it, each as a ready run_tests test= argument, so a targeted suite run needs no second search.")]
-    public Task<string> ImpactOf(
-        [Description("Symbol id or name.")] string? symbolId = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max records (200).")] int maxResults = 0,
-        [Description("Alias for symbolId.")] string? symbol = null,
-        [Description("Also list the test classes that reference this symbol, each as a ready run_tests test= argument. They are the DIRECT references only, so they narrow a run rather than replacing one. Default false.")] bool tests = false,
-        CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-            ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken), cancellationToken);
-
     [McpServerTool(Name = "find_implementations", ReadOnly = true)]
     [Description("Implementations of an interface or abstract member, and derived types of a base type.")]
     public Task<string> FindImplementations(
@@ -234,9 +219,14 @@ public sealed class NavigationTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0,
         CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(workspace, path, loaded =>
-            DiagnosticsService.CollectAsync(loaded, path, Severity(minSeverity ?? severity), Cap(maxResults, 100), cancellationToken),
-            cancellationToken: cancellationToken);
+        replay.ReplayedAsync(
+            "get_diagnostics",
+            ReplayGate.Key("get_diagnostics", path, minSeverity, severity, workspace, maxResults.ToString(CultureInfo.InvariantCulture)),
+            force: false,
+            () => context.WithWorkspaceAsync(workspace, path, loaded =>
+                DiagnosticsService.CollectAsync(loaded, path, Severity(minSeverity ?? severity), Cap(maxResults, 100), cancellationToken),
+                cancellationToken: cancellationToken),
+            cancellationToken);
 
     private static async Task<string> SearchAsync(
             LoadedWorkspace workspace,

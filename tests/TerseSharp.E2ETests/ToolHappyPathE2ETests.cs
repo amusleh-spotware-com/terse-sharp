@@ -136,8 +136,6 @@ public sealed class ToolHappyPathE2ETests(TerseServerFixture server)
         ("xaml_validate", new() { ["path"] = View }, "dialect=wpf"),
         ("xaml_find", new() { ["query"] = "Button" }, "OrderView.xaml"),
         ("xaml_resolve", new() { ["key"] = "AccentBrush" }, "scope="),
-        ("explore_symbol", new() { ["symbolId"] = SubmitMethod }, "usages="),
-        ("impact_of", new() { ["symbolId"] = SubmitMethod }, "projects that would recompile"),
         ("find_registrations", new() { ["query"] = "IOrderRepository" }, "AddSingleton"),
         ("list_endpoints", [], "MapGet"),
         ("xaml_styles", new() { ["typeName"] = "Button" }, "targets=Button"),

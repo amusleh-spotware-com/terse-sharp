@@ -39,19 +39,19 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ExploreSymbol_OnTheWidestSymbol_StaysUnderItsBudget()
+    public async Task GetSymbolWithUsages_OnTheWidestSymbol_StaysUnderItsBudget()
     {
-        var text = await server.CallAsync("explore_symbol", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+        var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "T:Fixture.Trading.Order", ["usages"] = true });
 
-        Assert.True(Tokens(text) <= 400, Report("explore_symbol", text));
+        Assert.True(Tokens(text) <= 400, Report("get_symbol usages=true", text));
     }
 
     [Fact]
-    public async Task ImpactOf_OnTheWidestSymbol_StaysUnderItsBudget()
+    public async Task FindUsagesWithImpact_OnTheWidestSymbol_StaysUnderItsBudget()
     {
-        var text = await server.CallAsync("impact_of", new() { ["symbolId"] = "T:Fixture.Trading.Order" });
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = "T:Fixture.Trading.Order", ["impact"] = true });
 
-        Assert.True(Tokens(text) <= 400, Report("impact_of", text));
+        Assert.True(Tokens(text) <= 400, Report("find_usages impact=true", text));
     }
 
     [Fact]
@@ -557,7 +557,7 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         return int.Parse(tokens[(tokens.LastIndexOf(' ') + 1)..], CultureInfo.InvariantCulture);
     }
 
-    private const int AdvertisedPayloadBudget = 30900;
+    private const int AdvertisedPayloadBudget = ToolCensus.AdvertisedSurfaceBudget;
 
     [Fact]
     public async Task WorkspaceStatus_ReportsTheAdvertisedPayloadTheClientActuallyReceived()

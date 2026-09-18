@@ -207,7 +207,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
 
         Assert.Contains("OrderService.Submit", text, StringComparison.Ordinal);
-        Assert.Contains("read_text verbose=true for the raw text", text, StringComparison.Ordinal);
+        Assert.Contains("read_text verbose=true for the text", text, StringComparison.Ordinal);
         Assert.DoesNotContain("repository.Submit(order)", text, StringComparison.Ordinal);
     }
 
@@ -561,7 +561,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("read_text", new() { ["path"] = SourcePath, ["bytes"] = true });
         var length = stamped.Split("  ", StringSplitOptions.RemoveEmptyEntries)[^1].Trim();
 
-        Assert.Contains("this is the outline", text, StringComparison.Ordinal);
+        Assert.Contains("outline, not file text", text, StringComparison.Ordinal);
         Assert.Contains("\nbytes=" + length, text, StringComparison.Ordinal);
     }
 
@@ -617,7 +617,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         {
             var text = await server.CallAsync("read_text", new() { ["path"] = Probe, ["bytes"] = true });
 
-            Assert.Contains("this is the outline", text, StringComparison.Ordinal);
+            Assert.Contains("outline, not file text", text, StringComparison.Ordinal);
             Assert.Contains("\nbytes=0", text, StringComparison.Ordinal);
         }
         finally
@@ -1807,6 +1807,93 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         finally
         {
             directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_ForAWholeVerboseCSharpFile_PricesTheOutlineItOptedOutOf()
+    {
+        var whole = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["verbose"] = true });
+        var ranged = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs", ["startLine"] = 1, ["endLine"] = 10 });
+
+        Assert.Contains("this read cost", whole, StringComparison.Ordinal);
+        Assert.Contains("get_file_outline path=src/Fixture.Trading/WideSurface.cs", whole, StringComparison.Ordinal);
+        Assert.DoesNotContain("this read cost", ranged, StringComparison.Ordinal);
+
+        var read = Priced(whole, "this read cost ");
+        var outline = Priced(whole, " costs ");
+
+        Assert.True(
+            outline < read,
+            string.Create(CultureInfo.InvariantCulture, $"the outline is priced at {outline} tokens against {read} for the whole read"));
+    }
+
+    private static int Priced(string text, string marker)
+    {
+        var at = text.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        var end = at;
+
+        while (end < text.Length && char.IsDigit(text[end]))
+            end++;
+
+        return int.Parse(text.AsSpan(at, end - at), CultureInfo.InvariantCulture);
+    }
+
+    [Fact]
+    public async Task ReadText_ForAUtf16FileWithNoByteOrderMark_DecodesItInsteadOfRefusingItAsBinary()
+    {
+        var path = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "FixtureSolution", "terse-utf16-probe.txt");
+
+        await File.WriteAllBytesAsync(path, Encoding.Unicode.GetBytes("alpha\r\nbeta\r\n"), TestContext.Current.CancellationToken);
+        try
+        {
+            var text = await server.CallAsync("read_text", new() { ["path"] = "terse-utf16-probe.txt" });
+
+            Assert.Contains("alpha", text, StringComparison.Ordinal);
+            Assert.Contains("beta", text, StringComparison.Ordinal);
+            Assert.Contains("HEURISTIC decoded as utf-16", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("looks binary", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_WhenTheCompileGateRollsItBack_HoldsTheContentSoTheRetryIsATokenAndAUsing()
+    {
+        const string Probe = "src/Fixture.Trading/RetryProbe.cs";
+        const string Seed = "namespace Fixture.Trading;\n\npublic sealed class RetryProbe\n{\n    public int Values => 0;\n}\n";
+        const string Content = "namespace Fixture.Trading;\n\npublic sealed class RetryProbe\n{\n    public ImmutableArray<int> Values => [];\n}\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Seed, ["force"] = true });
+        try
+        {
+            var rejected = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Content, ["force"] = true });
+
+            Assert.Contains("CompileRegression", rejected, StringComparison.Ordinal);
+            Assert.Contains("retryWith=", rejected, StringComparison.Ordinal);
+
+            var tail = rejected[(rejected.LastIndexOf("retryWith=", StringComparison.Ordinal) + "retryWith=".Length)..];
+            var applied = await server.CallAsync("write_text", new()
+            {
+                ["retryWith"] = tail.Split('\n')[0].Trim(),
+                ["usings"] = new[] { "System.Collections.Immutable" },
+                ["force"] = true,
+            });
+
+            Assert.False(applied.Contains("ERROR", StringComparison.Ordinal), applied);
+            Assert.Contains("RetryProbe.cs", applied, StringComparison.Ordinal);
+
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("using System.Collections.Immutable;", after, StringComparison.Ordinal);
+            Assert.Contains("ImmutableArray<int>", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
 }

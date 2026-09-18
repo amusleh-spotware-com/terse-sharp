@@ -134,8 +134,8 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     {
         var listed = Lines(numstat, nameStatus, untracked, Excluded(exclude), path);
         var response = new ResponseBuilder("changed_files", string.Empty).Chosen(chosen);
-        var capped = ResultCap.Shown(listed.Rows.Count, maxResults);
-        var shown = listed.Rows.Capped(maxResults).ToArray();
+        var capped = chosen ? ResultCap.Shown(listed.Rows.Count, maxResults) : ResultCap.Whole(listed.Rows.Count, maxResults);
+        var shown = (chosen ? listed.Rows.Capped(maxResults) : listed.Rows.CappedWhole(maxResults)).ToArray();
 
         response.Summary(
             capped < listed.Rows.Count ? Covered(shown) : listed.Files,

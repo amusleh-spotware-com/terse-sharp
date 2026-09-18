@@ -158,13 +158,20 @@ internal static class ToolCensus
 
     public static int Tokens(string text) => (text.Length + 3) / 4;
 
+    public const int AdvertisedSurfaceBudget = 30900;
+    public const int ShippedSkillBudget = 27200;
+    public const int MarkupNarrowedSurfaceBudget = 25700;
+    public const int SettingsNarrowedSurfaceBudget = 26450;
+
+    public static int[] DeclaredBudgets => [AdvertisedSurfaceBudget, ShippedSkillBudget, MarkupNarrowedSurfaceBudget, SettingsNarrowedSurfaceBudget];
+
     public const int MinShellReplacements = 10;
     public static readonly string[] ReadOnlyTools =
     [
         "changed_files", "diff_symbols", "diff_text", "history",
-    "explore_symbol", "find_files", "find_implementations", "find_registrations", "find_usages",
+    "find_files", "find_implementations", "find_registrations", "find_usages",
     "get_diagnostics", "get_file_outline", "get_symbol", "get_symbol_source", "get_type_outline",
-    "impact_of", "list_endpoints", "list_projects", "list_workspaces",
+    "list_endpoints", "list_projects", "list_workspaces",
     "package_list", "project_properties", "solution_projects",
     "razor_bindings", "razor_codebehind", "razor_component", "razor_find", "razor_outline", "razor_validate",
     "read_text", "resx_files", "resx_find", "resx_get", "resx_usages", "resx_validate",

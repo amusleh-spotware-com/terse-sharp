@@ -130,7 +130,7 @@ public static class ToolProfile
         return surface.MarkupDerived && !markup.Complete
             ? string.Create(
                 CultureInfo.InvariantCulture,
-                $"tools={markup.Hidden()} hidden - this workspace holds no such file, or cannot answer for the ones it holds")
+                $"tools={markup.Hidden()} hidden - no such file here; each still answers when called by name")
             : null;
     }
 

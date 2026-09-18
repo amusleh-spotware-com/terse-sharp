@@ -90,8 +90,11 @@ public static class FileService
         if (Misplaced(request) is { } misplaced)
             return Result.Fail<string>(misplaced);
 
-        return request.Section is { Length: > 0 } section
-            ? Section(before, section, request.NewText, request.Place, request.Occurrence)
+        if (request.Section is { Length: > 0 } section)
+            return Section(before, section, request.NewText, request.Place, request.Occurrence);
+
+        return request.ReplaceAll
+            ? Every(before, request.OldText, request.NewText, notes)
             : Snippet(before, request.OldText, request.NewText, request.Occurrence, notes);
     }
 
@@ -304,6 +307,7 @@ public static class FileService
 
         AppendContinuation(response, path, selection);
         AppendSections(response, path, text, request, selection);
+        AppendOutlinePrice(response, path, text, request, selection);
         AppendMemberBatch(response, path, text, selection);
 
         return response.ToString();
@@ -413,7 +417,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0, int CellChars = 0, bool Stamp = false, long Ticks = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters, IReadOnlyList<LineSpan>? Spans = null)
     {
@@ -521,22 +525,30 @@ public static class FileService
         if (!file.Exists)
             return Result.Fail<string>(Errors.DocumentNotFound(label));
 
-        if (BinaryContent.Reject(full, label) is { } binary)
+        var probe = await BinaryContent.ProbeAsync(full, label, cancellationToken).ConfigureAwait(false);
+
+        if (probe.Refusal is { } binary)
             return binary;
 
-        var text = await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false);
+        var text = probe.Utf16 is null
+            ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false)
+            : await File.ReadAllTextAsync(full, probe.Utf16, cancellationToken).ConfigureAwait(false);
+        var presented = Present(full, label, text, request with { Length = file.Length, Characters = text.Length, Ticks = file.LastWriteTimeUtc.Ticks });
 
-        return Present(full, label, text, request with { Length = file.Length, Characters = text.Length, Ticks = file.LastWriteTimeUtc.Ticks });
+        return probe.Utf16 is null || !presented.IsOk
+            ? presented
+            : Result.Ok(presented.Value! + "\nHEURISTIC decoded as " + probe.Utf16.WebName + " - this file carries no byte order mark, and every zero byte of the probe sat at the same offset of a printable pair");
     }
 
     private const string OutsideSuffix = "  " + OutsideMarker;
 
     public static async Task<Result<string>> DeleteAsync(
-            LoadedWorkspace workspace,
-            string path,
-            bool dryRun,
-            bool force,
-            CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        string path,
+        bool dryRun,
+        bool force,
+        bool recursive,
+        CancellationToken cancellationToken)
     {
         var resolved = PathGuard.Resolve(workspace, path);
 
@@ -546,7 +558,7 @@ public static class FileService
         var full = resolved.Value!;
 
         if (!File.Exists(full) && Directory.Exists(full))
-            return RemovedDirectory(path, full, dryRun);
+            return RemovedDirectory(workspace, path, full, dryRun, recursive, force);
 
         if (SourceFile.Reject(path, full, force) is { } refusal)
             return refusal;
@@ -628,7 +640,7 @@ public static class FileService
         return needle.Length is not 0 && Dedented(before).Contains(needle, StringComparison.Ordinal);
     }
 
-    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0, string? Path = null, string? Place = null, bool Force = false);
+    public readonly record struct TextEdit(string? OldText = null, string? NewText = null, string? Section = null, int Occurrence = 0, string? Path = null, string? Place = null, bool Force = false, bool ReplaceAll = false);
 
     public readonly record struct TextEditGroup(string Path, IReadOnlyList<TextEdit> Edits);
 
@@ -666,7 +678,8 @@ public static class FileService
         request.Force,
         request.Verbose,
         edit.Occurrence,
-        edit.Place);
+        edit.Place,
+        ReplaceAll: edit.ReplaceAll);
 
     private static string BatchResponse(
         string path,
@@ -771,7 +784,7 @@ public static class FileService
             : string.Join('\n', applied.Concat(refused)));
     }
 
-    public readonly record struct FileWrite(string Path, string Content);
+    public readonly record struct FileWrite(string Path, string Content, bool Force = false);
 
     private readonly record struct PendingWrite(
         string Path,
@@ -794,7 +807,7 @@ public static class FileService
 
         var full = resolved.Value!;
 
-        if (SourceFile.Reject(file.Path, full, force) is { } refusal)
+        if (SourceFile.Reject(file.Path, full, force || file.Force) is { } refusal)
             return Result.Fail<PendingWrite>(refusal.Error!);
 
         var exists = File.Exists(full);
@@ -837,6 +850,9 @@ public static class FileService
         bool allowPolicy,
         CancellationToken cancellationToken)
     {
+        if (Unforced(files, force) is { } unforced)
+            return Result.Fail<string>(unforced);
+
         var pending = new List<PendingWrite>(files.Count);
 
         foreach (var file in files)
@@ -916,17 +932,34 @@ public static class FileService
         return (last, last);
     }
 
-    private static TerseError? Misplaced(EditRequest request) => (request.Place, request.Section) switch
+    private static TerseError? Misplaced(EditRequest request)
     {
-        (null or "", _) => null,
-        (not (Append or Prepend), _) => Errors.Invalid(
-            "place=" + request.Place + " is not a placement",
-            "pass place=append or place=prepend, or omit place to replace the whole section"),
-        (_, { Length: > 0 }) => null,
-        _ => Errors.Invalid(
-            "place was passed without a section, so there is no section to write inside",
-            "pass the section too, e.g. section=\"## Commands\" place=append, or anchor the edit with oldText"),
-    };
+        if (request.ReplaceAll && request.Occurrence > 0)
+        {
+            return Errors.Invalid(
+                "replaceAll=true replaces every occurrence, so occurrence= has nothing left to pick",
+                "drop occurrence= to replace them all, or drop replaceAll=true to replace the one you counted");
+        }
+
+        if (request.ReplaceAll && request.Section is { Length: > 0 })
+        {
+            return Errors.Invalid(
+                "replaceAll=true addresses an oldText anchor, and a section is addressed by its heading",
+                "pass oldText with replaceAll=true, or section= alone to replace that section");
+        }
+
+        return (request.Place, request.Section) switch
+        {
+            (null or "", _) => null,
+            (not (Append or Prepend), _) => Errors.Invalid(
+                "place=" + request.Place + " is not a placement",
+                "pass place=append or place=prepend, or omit place to replace the whole section"),
+            (_, { Length: > 0 }) => null,
+            _ => Errors.Invalid(
+                "place was passed without a section, so there is no section to write inside",
+                "pass the section too, e.g. section=\"## Commands\" place=append, or anchor the edit with oldText"),
+        };
+    }
 
     private const string Append = "append";
     private const string Prepend = "prepend";
@@ -1364,6 +1397,21 @@ public static class FileService
             $"sections={sections.Count} - address one with read_text or edit_text section=\"{sections[0].Title}\" instead of an oldText anchor{Named(sections)}"));
     }
 
+    private static void AppendOutlinePrice(ResponseBuilder response, string path, string text, ReadRequest request, LineSelection selection)
+    {
+        if (!request.Verbose || selection.NextLine is not 0 || !Whole(request) || !SourceFile.IsCSharp(Located(path)))
+            return;
+
+        var outline = OutlineService.FromText(new string(Located(path)), text, signatures: true, ids: "short", usings: false);
+
+        if (!outline.IsOk)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"this read cost {(text.Length + 3) / 4} tokens; get_file_outline path={Located(path)} costs {(outline.Value!.Length + 3) / 4}"));
+    }
+
     private static bool Whole(ReadRequest request) => !request.Headings
     && request.Section is not { Length: > 0 }
     && request.Columns is not { Count: > 0 }
@@ -1574,8 +1622,11 @@ public static class FileService
 
     private const int MaxDirectoryEntries = 4;
 
-    private static Result<string> RemovedDirectory(string path, string full, bool dryRun)
+    private static Result<string> RemovedDirectory(LoadedWorkspace workspace, string path, string full, bool dryRun, bool recursive, bool force)
     {
+        if (recursive)
+            return RemovedTree(workspace, path, full, dryRun, force);
+
         var held = new List<string>(MaxDirectoryEntries + 1);
 
         foreach (var entry in Directory.EnumerateFileSystemEntries(full))
@@ -1590,7 +1641,7 @@ public static class FileService
         {
             return Result.Fail<string>(Errors.Invalid(
                 "'" + path + "' is a directory and it is not empty: " + Listed(held),
-                "only an EMPTY directory is removed - delete the files inside it first with write_text delete=true; no tool here removes more than it was pointed at"));
+                "pass recursive=true to remove the directory and everything under it - it stays inside the workspace root, and is refused when the tree holds a file this workspace compiles unless force=true"));
         }
 
         if (!dryRun)
@@ -2000,4 +2051,131 @@ public static class FileService
         : "send the second in its own call - the first entry adds or drops a heading, so the ordinals move under it";
 
     private static int Ordinal(TextEdit edit) => edit.Occurrence > 0 ? edit.Occurrence : 1;
+
+    private static Result<string> RemovedTree(LoadedWorkspace workspace, string path, string full, bool dryRun, bool force)
+    {
+        var target = Path.TrimEndingDirectorySeparator(full);
+
+        if (PathBoundary.SameFile(target, Path.TrimEndingDirectorySeparator(workspace.Root)))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "'" + path + "' is the workspace root",
+                "name a directory INSIDE the workspace; no tool here removes the tree it is serving, and force=true does not change that"));
+        }
+
+        if (Repository(target))
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                "'" + path + "' is inside a .git directory",
+                "git metadata is never removed through this tool - use git itself"));
+        }
+
+        var files = Directory.GetFiles(full, "*", SearchOption.AllDirectories);
+        var compiled = Compiled(workspace, files);
+
+        if (compiled.Count > 0 && !force)
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{path}' holds {compiled.Count} file(s) this workspace compiles: {Listed(compiled)}"),
+                "delete those documents first, or pass force=true to remove them with the tree"));
+        }
+
+        if (!dryRun)
+            Directory.Delete(full, recursive: true);
+
+        return Result.Ok(string.Create(
+            CultureInfo.InvariantCulture,
+            $"write_text {(dryRun ? "dryRun" : "deleted")}  {path}  directory  files={files.Length}"));
+    }
+
+    private static List<string> Compiled(LoadedWorkspace workspace, string[] files)
+    {
+        var compiled = new List<string>();
+
+        foreach (var file in files)
+        {
+            if (DocumentLookup.Find(workspace, file) is not null)
+                compiled.Add(new string(Path.GetFileName(file.AsSpan())));
+
+            if (compiled.Count > MaxDirectoryEntries)
+                break;
+        }
+
+        return compiled;
+    }
+
+    private static Result<string> Every(string before, string oldText, string newText, List<string> notes)
+    {
+        if (oldText.Length is 0)
+            return Result.Fail<string>(Errors.Blank("oldText"));
+
+        var first = SnippetSearch.Find(before, oldText, 1);
+
+        if (first.Occurrences is 0)
+            return Result.Fail<string>(NoMatch(before, oldText, first, 0));
+
+        if (first.Occurrences > MaxReplaceAll)
+        {
+            return Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"oldText matches {first.Occurrences} times, past the {MaxReplaceAll} replaceAll=true applies in one pass"),
+                "narrow oldText so it matches fewer times, or replace them in scoped batches with occurrence="));
+        }
+
+        var ending = LineEndings.Dominant(before);
+        var seen = new List<string>();
+        var built = new StringBuilder(before.Length + (first.Occurrences * Math.Max(0, newText.Length - oldText.Length)));
+        var at = 0;
+
+        for (var index = 1; index <= first.Occurrences; index++)
+        {
+            var match = SnippetSearch.Find(before, oldText, index);
+            var head = Math.Max(at, SplitCarriageReturn(before, match.Start) ? match.Start - 1 : match.Start);
+
+            built.Append(before, at, head - at).Append(LineEndings.Adopt(Reindented(newText, match.Indent, seen), ending));
+            at = match.Start + match.Length;
+        }
+
+        Noted(notes, seen);
+
+        return Result.Ok(built.Append(before, at, before.Length - at).ToString());
+    }
+
+    private static void Noted(List<string> notes, List<string> seen)
+    {
+        foreach (var note in seen)
+        {
+            if (!notes.Contains(note, StringComparer.Ordinal))
+                notes.Add(note);
+        }
+    }
+
+    private static TerseError? Unforced(IReadOnlyList<FileWrite> files, bool force)
+    {
+        var guarded = new List<string>();
+
+        foreach (var file in files)
+        {
+            if (!force && !file.Force && SourceFile.IsCSharp(file.Path))
+                guarded.Add(file.Path);
+        }
+
+        return guarded.Count is 0
+            ? null
+            : Errors.Invalid(
+                "C# file(s) in this batch are written only with force: " + string.Join(", ", guarded),
+                "pass force=true for the whole batch, or force on each C# entry - files=[{path, content, force: true}] - so the write stays compile-gated the way replace_symbol is");
+    }
+
+    private static bool Repository(string full)
+    {
+        foreach (var segment in full.AsSpan().Split(Path.DirectorySeparatorChar))
+        {
+            if (full.AsSpan(segment).Trim().Equals(".git", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private const int MaxReplaceAll = 500;
 }

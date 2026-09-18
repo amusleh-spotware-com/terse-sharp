@@ -323,7 +323,7 @@ public sealed class EditTools(ToolContext context)
 
     private const string RetryHelp = "Token from a previous CompileRegression or resolution failure, e.g. r3, printed alone on the LAST line of the rejection. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; pass either again to override, usings=[] to DROP the imports it holds, or allowErrors=true beside it. A symbolId you pass OUTRANKS the held one.";
 
-    private readonly record struct Carry(
+    internal readonly record struct Carry(
         string? Tool,
         string[]? Targets,
         string[]? Payloads,
@@ -331,16 +331,16 @@ public sealed class EditTools(ToolContext context)
         string? AddTo = null,
         string[]? Usings = null);
 
-    private static string Carried(Result<string> result, Carry carry, string root) =>
+    internal static string Carried(Result<string> result, Carry carry, string root) =>
         result.IsOk ? result.Value! : Rejected(result.Error!, carry, root);
 
-    private static string? Elsewhere(string? held, string root) => held is { Length: > 0 } origin && !PathBoundary.SameFile(origin, root)
+    internal static string? Elsewhere(string? held, string root) => held is { Length: > 0 } origin && !PathBoundary.SameFile(origin, root)
         ? Errors.Invalid(
             string.Create(CultureInfo.InvariantCulture, $"the held rejection belongs to {origin}, and this call resolved to {root}"),
             "replay the token against the workspace it was rejected in, or re-send the declaration to edit this one").Render()
         : null;
 
-    private static string Unknown(string token, string tool) => Errors.Invalid(
+    internal static string Unknown(string token, string tool) => Errors.Invalid(
         RejectedEdits.Recall(token) is { } issued
             ? string.Create(CultureInfo.InvariantCulture, $"retryWith={token} was issued by {issued.Tool}, not by {tool}")
             : string.Create(CultureInfo.InvariantCulture, $"retryWith={token} names no held rejection of {tool}"),
@@ -348,7 +348,7 @@ public sealed class EditTools(ToolContext context)
             ? string.Create(CultureInfo.InvariantCulture, $"replay it with {held.Tool}, which is the tool that can apply what it holds")
             : "re-send the text; the server holds only the last 8 rejected edits of this process").Render();
 
-    private static RejectedEdit? Held(string? retryWith, string tool) =>
+    internal static RejectedEdit? Held(string? retryWith, string tool) =>
         retryWith is { Length: > 0 } token && RejectedEdits.Recall(token) is { } edit
         && string.Equals(edit.Tool, tool, StringComparison.Ordinal)
             ? edit

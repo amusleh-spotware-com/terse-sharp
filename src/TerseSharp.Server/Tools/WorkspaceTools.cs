@@ -1,42 +1,48 @@
+using System.Text.Json.Nodes;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
 
 [McpServerToolType]
-public sealed class WorkspaceTools(ToolContext context)
+public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
 {
     [McpServerTool(Name = "load_workspace")]
-    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it. It also warns when the PreToolUse guard or the skill is not installed.")]
+    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see - and it is also the way to re-run a load this process has already answered, because an identical load with nothing written and no watcher event since replays that answer instead of paying for it again. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it. It also warns when the PreToolUse guard or the skill is not installed.")]
     public Task<string> LoadWorkspace(
-    [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
-    [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared.")] bool reload = false,
-    [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
-    [Description("List the MSBuild messages the load reported, not just their count. Default false.")] bool verbose = false,
-    [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
-    [Description("Max candidates when discover=true (100).")] int maxResults = 0,
-    CancellationToken cancellationToken = default) =>
-    ToolBoundary.RunAsync(async () =>
-    {
-        if (discover)
-            return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
+        [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
+        [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared. It always runs, so it is also the escape from a replayed answer.")] bool reload = false,
+        [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
+        [Description("List the MSBuild messages the load reported, not just their count. Default false.")] bool verbose = false,
+        [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
+        [Description("Max candidates when discover=true (100).")] int maxResults = 0,
+        CancellationToken cancellationToken = default) =>
+        replay.ReplayedAsync(
+            "load_workspace",
+            ReplayGate.Key("load_workspace", path, targetFramework, verbose.ToString(), discover.ToString(), maxResults.ToString(CultureInfo.InvariantCulture)),
+            reload,
+            () => ToolBoundary.RunAsync(async () =>
+            {
+                if (discover)
+                    return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
 
-        var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
+                var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
 
-        if (target is null)
-            return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
+                if (target is null)
+                    return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
 
-        var before = context.Served();
+                var before = context.Served();
 
-        var result = reload
-            ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
-            : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
+                var result = reload
+                    ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
+                    : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
 
-        var rendered = AssetBanner.Appended(Render(context.Registry, result, verbose));
+                var rendered = AssetBanner.Appended(Render(context.Registry, result, verbose));
 
-        await context.AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
+                await context.AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
 
-        return rendered;
-    });
+                return rendered;
+            }),
+            cancellationToken);
 
     [McpServerTool(Name = "list_workspaces", ReadOnly = true)]
     [Description("List loaded workspaces with their git branch and worktree, so you can disambiguate several checkouts of one repo. The solution path is absolute here, because it is what unload_workspace takes.")]
@@ -115,16 +121,19 @@ CancellationToken cancellationToken = default) =>
     }
 
     [McpServerTool(Name = "workspace_status", ReadOnly = true)]
-    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round.")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round. guard=\"<command>\" answers what the PreToolUse guard would do with that shell command, executing NOTHING.")]
     public Task<string> WorkspaceStatus(
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
             [Description("Price every advertised tool's whole schema - name, description and parameters - one line per tool in tokens, descending. Default false.")] bool tools = false,
+            [Description("A shell command to judge against the PreToolUse guard, e.g. \"grep -rn TODO src\". Answers ALLOWED or DENIED with the reason and the call that replaces it, and NOTHING is executed - which is the only way to triage a destructive command. Answered alone, in the workspace's own directory.")] string? guard = null,
             CancellationToken cancellationToken = default) =>
             context.WithWorkspaceAsync(
                 workspace,
                 null,
-                async loaded => AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
+                async loaded => guard is { Length: > 0 } command
+                    ? GuardAnswer(command, loaded.Root)
+                    : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
                 cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]
@@ -499,4 +508,23 @@ CancellationToken cancellationToken = default) =>
     }
 
     private static string Shown(string value) => value is { Length: > 0 } ? value : "(unset)";
+
+    private static string GuardAnswer(string command, string root)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+        var response = new ResponseBuilder("workspace_status", "guard");
+
+        response.Line((verdict.Denied ? "guard DENIED  " : "guard ALLOWED  ") + command);
+
+        if (verdict.Reason is { Length: > 0 } reason)
+            response.Line("reason: " + reason);
+
+        if (verdict.Routing is { Length: > 0 } routing)
+            response.Line("call: " + routing);
+
+        if (verdict.Rewrite is { Length: > 0 } rewrite)
+            response.Line("rewrite: " + rewrite);
+
+        return response.ToString();
+    }
 }

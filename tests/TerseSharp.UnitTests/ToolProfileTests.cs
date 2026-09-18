@@ -101,10 +101,10 @@ public sealed class ToolProfileTests
     [Fact]
     public void Advertises_WithAToolEnabledInTheFile_ShowsItEvenUnderTheCoreProfile()
     {
-        var surface = new ToolSurface(ToolProfile.CoreTools, MarkupDerived: false, ToolSettings.Parse("""{"tools":{"names":{"impact_of":true}}}""", ToolSettings.FileName));
+        var surface = new ToolSurface(ToolProfile.CoreTools, MarkupDerived: false, ToolSettings.Parse("""{"tools":{"names":{"find_registrations":true}}}""", ToolSettings.FileName));
 
-        Assert.True(ToolProfile.Advertises(surface, WorkspaceMarkup.Every, "impact_of"));
-        Assert.False(ToolProfile.Advertises(surface, WorkspaceMarkup.Every, "explore_symbol"));
+        Assert.True(ToolProfile.Advertises(surface, WorkspaceMarkup.Every, "find_registrations"));
+        Assert.False(ToolProfile.Advertises(surface, WorkspaceMarkup.Every, "list_endpoints"));
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class ToolProfileTests
     public void Describe_ForASettingsFileBesideTheCoreProfile_KeepsBothNotes()
     {
         var described = ToolProfile.Describe(
-            new ToolSurface(ToolProfile.CoreTools, MarkupDerived: false, ToolSettings.Parse("""{"tools":{"names":{"impact_of":true}}}""", ToolSettings.FileName)),
+            new ToolSurface(ToolProfile.CoreTools, MarkupDerived: false, ToolSettings.Parse("""{"tools":{"names":{"find_registrations":true}}}""", ToolSettings.FileName)),
             WorkspaceMarkup.Every);
 
         Assert.NotNull(described);

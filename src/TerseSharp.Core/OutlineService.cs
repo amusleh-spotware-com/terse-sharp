@@ -143,9 +143,7 @@ public static class OutlineService
         if (!format.Collapse || format.All || format.Contains is { Length: > 0 } || total <= MaxListedMembers)
             return Listed(response, declaration, model, format, references, total);
 
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"  {total} members - contains= or all=true"));
-
-        return new MemberTally(total, total);
+        return Grouped(response, symbol, total);
     }
 
     private static readonly IReadOnlySet<string> Never = new HashSet<string>(StringComparer.Ordinal);
@@ -252,8 +250,7 @@ public static class OutlineService
     private readonly record struct OutlineFormat(bool Signatures, string Ids, string? Usings, bool ParameterNames = true, string? Contains = null, bool Batchable = true, bool All = false, bool Collapse = false);
 
     private const string TextSteer =
-        "NOTE this is the outline, not the file text - a whole-file .cs read costs about three times as much and is almost never the question."
-        + " get_symbol_source symbolId=<an id above> for one member, get_symbol_source symbolIds=[...] for several, read_text verbose=true for the raw text.";
+        "NOTE outline, not file text - get_symbol_source symbolId=<an id above> or symbolIds=[...] for members, read_text verbose=true for the text.";
 
     public static async Task<Result<string>> SteeredAsync(
             LoadedWorkspace workspace,
@@ -515,5 +512,48 @@ public static class OutlineService
             response.Line(string.Create(CultureInfo.InvariantCulture, $"  {shown} of {total} members"));
         else if (omitted > 0)
             response.Line(string.Create(CultureInfo.InvariantCulture, $"  {total - omitted} of {total} members - contains= or all=true"));
+    }
+
+    private static MemberTally Grouped(ResponseBuilder response, ISymbol symbol, int total)
+    {
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"  {total} members, names only - contains= or all=true for signatures"));
+
+        foreach (var group in Names(symbol))
+            response.Line("  " + group.Key + ": " + string.Join(", ", group.Value));
+
+        return new MemberTally(total, total);
+    }
+
+    private static List<KeyValuePair<string, List<string>>> Names(ISymbol symbol)
+    {
+        var groups = new List<KeyValuePair<string, List<string>>>();
+
+        if (symbol is not INamedTypeSymbol type)
+            return groups;
+
+        foreach (var member in type.GetMembers())
+        {
+            if (member.IsImplicitlyDeclared || member is IMethodSymbol { MethodKind: not (MethodKind.Ordinary or MethodKind.Constructor) })
+                continue;
+
+            Bucket(groups, SymbolFormat.Accessibility(member)).Add(member.Name);
+        }
+
+        return groups;
+    }
+
+    private static List<string> Bucket(List<KeyValuePair<string, List<string>>> groups, string access)
+    {
+        foreach (var group in groups)
+        {
+            if (string.Equals(group.Key, access, StringComparison.Ordinal))
+                return group.Value;
+        }
+
+        var created = new List<string>();
+
+        groups.Add(new KeyValuePair<string, List<string>>(access, created));
+
+        return created;
     }
 }

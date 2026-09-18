@@ -47,9 +47,6 @@ public static class RepeatSteer
     if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
         result.Content.Add(new TextContentBlock { Text = repeat });
 
-    if (result.IsError is not true && ExploreSteer.Note(parameters.Name, ExploreSteer.Argument(parameters)) is { } explore)
-        result.Content.Add(new TextContentBlock { Text = explore });
-
     if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name)) is { } note)
         result.Content.Add(new TextContentBlock { Text = note });
 
@@ -72,7 +69,7 @@ public static class RepeatSteer
     {
         if (unbatchable || batched)
         {
-            Forget();
+            Reset();
 
             return null;
         }
@@ -97,16 +94,7 @@ public static class RepeatSteer
 
     private const int MaxBatch = 10;
 
-    public static void Forget()
-    {
-        lock (Gate)
-        {
-            last = string.Empty;
-            run = 0;
-            captured = 0;
-            Values.Clear();
-        }
-    }
+    public static void Forget() => Reset();
 
     private static (int Count, string[] Seen, int Captured) Counted(string tool, string? value)
     {
@@ -196,4 +184,15 @@ public static class RepeatSteer
         ["write_text"] = "each entry is {path, content} and carries its OWN path, and every .cs among them shares ONE compile gate",
         ["resx_set"] = "each entry is {path, entries} and carries its OWN path, so one key across many culture files is ONE call - comment= is written into every file of the batch, and the cap is 10 files per call, so 46 cultures is 5 calls, not 46",
     }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    private static void Reset()
+    {
+        lock (Gate)
+        {
+            last = string.Empty;
+            run = 0;
+            captured = 0;
+            Values.Clear();
+        }
+    }
 }

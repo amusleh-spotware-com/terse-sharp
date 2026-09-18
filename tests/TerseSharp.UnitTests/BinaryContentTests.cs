@@ -20,7 +20,7 @@ public sealed class BinaryContentTests : IDisposable
     {
         var path = await WrittenAsync(Named(encoding), "@Model.BalanceString\n", encoding + ".cshtml");
 
-        Assert.Null(BinaryContent.Reject(path, "TransactionsReport.cshtml"));
+        Assert.Null((await BinaryContent.ProbeAsync(path, "TransactionsReport.cshtml", TestContext.Current.CancellationToken)).Refusal);
     }
 
     [Fact]
@@ -30,7 +30,7 @@ public sealed class BinaryContentTests : IDisposable
 
         await File.WriteAllBytesAsync(path, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x00, 0x1A], TestContext.Current.CancellationToken);
 
-        var rejected = BinaryContent.Reject(path, "image.png");
+        var rejected = (await BinaryContent.ProbeAsync(path, "image.png", TestContext.Current.CancellationToken)).Refusal;
 
         Assert.NotNull(rejected);
         Assert.Contains("looks binary", rejected?.Error?.Message ?? string.Empty, StringComparison.Ordinal);
@@ -41,7 +41,7 @@ public sealed class BinaryContentTests : IDisposable
     {
         var path = await WrittenAsync(Encoding.Unicode, "ab\0cd", "nulled.txt");
 
-        Assert.NotNull(BinaryContent.Reject(path, "nulled.txt"));
+        Assert.NotNull((await BinaryContent.ProbeAsync(path, "nulled.txt", TestContext.Current.CancellationToken)).Refusal);
     }
 
     [Fact]
