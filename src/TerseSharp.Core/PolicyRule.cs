@@ -21,7 +21,8 @@ public enum PolicyRule
     ComplexCondition,
     ChainedReferences,
     NestingDepth,
-    Comments
+    Comments,
+    XmlDocs
 }
 
 public sealed record PolicyLimit(PolicyAction Action, int Value);
@@ -32,32 +33,34 @@ public static class PolicyRules
 {
     public static IReadOnlyList<PolicyRuleInfo> All { get; } =
         [
-            new(PolicyRule.CognitiveComplexity, "TERSE100", "cognitiveComplexity", 150, PolicyAction.Reject,
+            new(PolicyRule.CognitiveComplexity, "TERSE100", "cognitiveComplexity", 150, PolicyAction.Warn,
                 "split the member - each extracted part must be a real concept with a domain name, not DoThingPart1"),
             new(PolicyRule.MethodStatements, "TERSE101", "methodStatements", 10, PolicyAction.Warn,
                 "extract a well-named helper; the statement count is what ReSharper's MaximumMethodStatements counts"),
-            new(PolicyRule.TypeMethods, "TERSE102", "typeMethods", 10, PolicyAction.Reject,
+            new(PolicyRule.TypeMethods, "TERSE102", "typeMethods", 10, PolicyAction.Warn,
                 "the type has more than one reason to change - split it"),
-            new(PolicyRule.ConstructorDependencies, "TERSE103", "constructorDependencies", 5, PolicyAction.Reject,
+            new(PolicyRule.ConstructorDependencies, "TERSE103", "constructorDependencies", 5, PolicyAction.Warn,
                 "group the dependencies behind one collaborator, or split the type"),
             new(PolicyRule.ParameterCount, "TERSE104", "parameterCount", 5, PolicyAction.Warn,
                 "introduce a parameter object naming the concept the arguments share"),
-            new(PolicyRule.MethodNameLength, "TERSE105", "methodNameLength", 3, PolicyAction.Reject,
+            new(PolicyRule.MethodNameLength, "TERSE105", "methodNameLength", 3, PolicyAction.Warn,
                 "name the method for what it does in the domain language"),
-            new(PolicyRule.MeaninglessSuffix, "TERSE106", "meaninglessSuffix", 0, PolicyAction.Reject,
+            new(PolicyRule.MeaninglessSuffix, "TERSE106", "meaninglessSuffix", 0, PolicyAction.Warn,
                 "rename to state the responsibility instead of the suffix"),
-            new(PolicyRule.Naming, "TERSE107", "naming", 0, PolicyAction.Reject,
+            new(PolicyRule.Naming, "TERSE107", "naming", 0, PolicyAction.Warn,
                 "rename to match the configured pattern for that declaration kind"),
-            new(PolicyRule.AsyncVoid, "TERSE108", "asyncVoid", 0, PolicyAction.Reject,
+            new(PolicyRule.AsyncVoid, "TERSE108", "asyncVoid", 0, PolicyAction.Warn,
                 "return Task so the caller can await it and observe its exceptions"),
             new(PolicyRule.ComplexCondition, "TERSE109", "complexCondition", 3, PolicyAction.Warn,
                 "name the condition - extract it into a predicate whose name says what it tests"),
             new(PolicyRule.ChainedReferences, "TERSE110", "chainedReferences", 3, PolicyAction.Off,
                 "ask the collaborator for what you need instead of reaching through it"),
-            new(PolicyRule.NestingDepth, "TERSE111", "nestingDepth", 4, PolicyAction.Reject,
+            new(PolicyRule.NestingDepth, "TERSE111", "nestingDepth", 4, PolicyAction.Warn,
                 "invert the condition and return early, or extract the inner block"),
             new(PolicyRule.Comments, "TERSE112", "comments", 0, PolicyAction.Warn,
-                "make the code say it - rename, extract a method, or split the type; /// XML doc comments are never flagged, and {\"policy\":{\"enabled\":false}} turns the whole policy, this rule included, off")
+                "make the code say it - rename, extract a method, or split the type; /// XML doc comments are TERSE113 rather than this rule, and {\"policy\":{\"enabled\":false}} turns the whole policy, this rule included, off"),
+            new(PolicyRule.XmlDocs, "TERSE113", "xmlDocs", 0, PolicyAction.Warn,
+                "delete the /// block and let the signature say it; a public API that genuinely ships documentation sets {\"policy\":{\"rules\":{\"xmlDocs\":false}}}")
         ];
 
     public const int CognitiveThreshold = 10;

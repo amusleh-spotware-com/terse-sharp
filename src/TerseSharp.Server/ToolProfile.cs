@@ -107,7 +107,7 @@ public static class ToolProfile
     {
         { Failure: { } failure } => string.Create(
             CultureInfo.InvariantCulture,
-            $"tools={Located(overrides)} could not be read - {failure}; it narrows nothing"),
+            $"tools={Located(overrides)} could not be read - {failure}; {ToolSettings.Surviving(overrides)}"),
         { Hidden: 0 } => "tools=" + Located(overrides) + " hides nothing",
         _ => string.Create(
             CultureInfo.InvariantCulture,

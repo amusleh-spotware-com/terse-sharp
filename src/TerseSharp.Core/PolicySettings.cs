@@ -7,66 +7,41 @@ namespace TerseSharp.Core;
 
 public static class PolicySettings
 {
-    public static async Task<PolicyOptions> LoadAsync(string directory, CancellationToken cancellationToken)
-    {
-        if (TerseConfigFile.Find(directory) is not { } path)
-            return PolicyOptions.Off;
+    public static Task<PolicyOptions> LoadAsync(string directory, CancellationToken cancellationToken) =>
+        LoadAsync(TerseConfigFile.Chain(directory), cancellationToken);
 
-        try
-        {
-            var file = new FileInfo(path);
-
-            if (file.Length > TerseConfigFile.MaxBytes)
-                return PolicyOptions.Off with { Configured = true, Path = path, Failure = TerseConfigFile.Oversized(file.Length) };
-
-            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-
-            return Parse(json) with { Path = path };
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return PolicyOptions.Off with { Configured = true, Path = path, Failure = exception.Message };
-        }
-    }
-
-    public static PolicyOptions Parse(string json)
-    {
-        try
-        {
-            return Read(JsonNode.Parse(json) as JsonObject);
-        }
-        catch (JsonException exception)
-        {
-            return PolicyOptions.Off with { Configured = true, Failure = exception.Message };
-        }
-    }
+    public static PolicyOptions Parse(string json) => Parse(json, PolicyOptions.Off);
 
     public static string? Notice(PolicyOptions options) => options switch
     {
         { Failure: { } failure } => string.Create(
             CultureInfo.InvariantCulture,
-            $"terse: {options.Path} policy could not be read - {failure}; policy is off"),
+            $"terse: {options.Path} policy could not be read - {failure}; {(options.Effective.Active && options.Configured ? "the rules already in force still apply" : "policy is off")}"),
         { Ignored: [_, ..] ignored } => string.Create(
             CultureInfo.InvariantCulture,
-            $"terse: {options.Path} policy ignored {string.Join(", ", ignored)} - rules are {PolicyRules.Keys()}, naming kinds are {NamingDefaults.Keys()}"),
+            $"terse: policy ignored {string.Join(", ", ignored)} - rules are {PolicyRules.Keys()}, naming kinds are {NamingDefaults.Keys()}"),
         _ => null,
     };
 
-    private static PolicyOptions Read(JsonObject? root)
+    private static PolicyOptions Read(JsonObject? root, PolicyOptions seed)
     {
         if (root?["policy"] is not JsonObject policy)
-            return PolicyOptions.Off;
+            return seed;
 
         if (Flag(policy, "enabled") is false)
             return PolicyOptions.Off with { Configured = true };
 
         var ignored = ImmutableArray.CreateBuilder<string>();
 
-        var options = PolicyOptions.Defaults with
+        ignored.AddRange(seed.Ignored);
+
+        var inherited = Seeded(seed, policy);
+
+        var options = inherited with
         {
             Configured = true,
-            AllowOverride = Flag(policy, "allowOverride") ?? true,
-            CognitiveThreshold = Number(policy, "cognitiveThreshold") ?? PolicyRules.CognitiveThreshold,
+            AllowOverride = Flag(policy, "allowOverride") ?? inherited.AllowOverride,
+            CognitiveThreshold = Number(policy, "cognitiveThreshold") ?? inherited.CognitiveThreshold,
         };
 
         return Sections(Uniform(options, policy, ignored), policy, ignored) with { Ignored = ignored.ToImmutable() };
@@ -235,4 +210,66 @@ public static class PolicySettings
         declared[key] is { } node && node.GetValueKind() is JsonValueKind.Number && node.AsValue().TryGetValue<int>(out var value) && value >= 0
             ? value
             : null;
+
+    public static PolicyOptions Parse(string json, PolicyOptions seed)
+    {
+        try
+        {
+            return Read(JsonNode.Parse(json) as JsonObject, seed);
+        }
+        catch (JsonException exception)
+        {
+            return PolicyOptions.Off with { Configured = true, Failure = exception.Message };
+        }
+    }
+
+    private static async Task<PolicyOptions> ApplyAsync(PolicyOptions seed, string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+
+            if (file.Length > TerseConfigFile.MaxBytes)
+                return Failed(seed, path, TerseConfigFile.Oversized(file.Length));
+
+            var parsed = Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), seed);
+
+            if (parsed.Failure is { } failure)
+                return Failed(seed, path, failure);
+
+            return ReferenceEquals(parsed, seed) ? seed : parsed with { Path = path, Ignored = Qualified(seed, parsed, path) };
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Failed(seed, path, exception.Message);
+        }
+    }
+
+    private static PolicyOptions Seeded(PolicyOptions seed, JsonObject policy) => seed switch
+    {
+        { Configured: true, Enabled: true } => seed,
+        { Configured: true } when Flag(policy, "enabled") is not true => seed,
+        _ => PolicyOptions.Defaults,
+    };
+
+    public static async Task<PolicyOptions> LoadAsync(IReadOnlyList<string> chain, CancellationToken cancellationToken)
+    {
+        var options = PolicyOptions.Off;
+
+        foreach (var path in chain)
+        {
+            options = await ApplyAsync(options, path, cancellationToken).ConfigureAwait(false);
+
+            if (options.Failure is not null)
+                return options;
+        }
+
+        return options;
+    }
+
+    private static PolicyOptions Failed(PolicyOptions seed, string path, string failure) =>
+        seed with { Configured = true, Path = path, Failure = failure };
+
+    private static ImmutableArray<string> Qualified(PolicyOptions seed, PolicyOptions parsed, string path) =>
+        [.. seed.Ignored, .. parsed.Ignored.Skip(seed.Ignored.Length).Select(key => path + ": " + key)];
 }

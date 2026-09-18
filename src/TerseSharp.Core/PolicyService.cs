@@ -320,34 +320,50 @@ public static class PolicyService
 
     private static void Comments(SyntaxNode root, Scope scope)
     {
-        if (!scope.Options.Enforces(PolicyRule.Comments))
+        var comments = scope.Options.Enforces(PolicyRule.Comments);
+        var docs = scope.Options.Enforces(PolicyRule.XmlDocs);
+
+        if (!comments && !docs)
             return;
 
-        var allowed = scope.Limit(PolicyRule.Comments);
-        var seen = new HashSet<SyntaxNode>();
+        var seen = new HashSet<(PolicyRule Rule, SyntaxNode Owner)>();
 
         foreach (var trivia in root.DescendantTrivia())
-        {
-            if (IsComment(trivia)
-                && Over(Lines(trivia), allowed, "comment line(s)") is { } measure
-                && trivia.Token.Parent is { } node
-                && seen.Add(Owner(node)))
-            {
-                scope.Check(PolicyRule.Comments, node, measure);
-            }
-        }
+            Trivia(trivia, scope, seen, comments, docs);
     }
-
-    private static bool IsComment(SyntaxTrivia trivia) =>
-        trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) || trivia.IsKind(SyntaxKind.MultiLineCommentTrivia);
 
     private static int Lines(SyntaxTrivia trivia)
     {
         var span = trivia.GetLocation().GetLineSpan();
+        var spanned = span.EndLinePosition.Line - span.StartLinePosition.Line + 1;
 
-        return span.EndLinePosition.Line - span.StartLinePosition.Line + 1;
+        return span.EndLinePosition.Character is 0 && spanned > 1 ? spanned - 1 : spanned;
     }
 
     private static SyntaxNode Owner(SyntaxNode node) =>
         node.AncestorsAndSelf().FirstOrDefault(ancestor => ancestor is MemberDeclarationSyntax or BaseTypeDeclarationSyntax) ?? node;
+
+    private static void Trivia(
+        SyntaxTrivia trivia,
+        Scope scope,
+        HashSet<(PolicyRule Rule, SyntaxNode Owner)> seen,
+        bool comments,
+        bool docs)
+    {
+        if (Rule(trivia, comments, docs) is not { } rule || trivia.Token.Parent is not { } node)
+            return;
+
+        if (Over(Lines(trivia), scope.Limit(rule), Unit(rule)) is { } measure && seen.Add((rule, Owner(node))))
+            scope.Check(rule, node, measure);
+    }
+
+    private static PolicyRule? Rule(SyntaxTrivia trivia, bool comments, bool docs) => trivia.Kind() switch
+    {
+        SyntaxKind.SingleLineCommentTrivia or SyntaxKind.MultiLineCommentTrivia when comments => PolicyRule.Comments,
+        SyntaxKind.SingleLineDocumentationCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia when docs =>
+            PolicyRule.XmlDocs,
+        _ => null,
+    };
+
+    private static string Unit(PolicyRule rule) => rule is PolicyRule.XmlDocs ? "XML doc line(s)" : "comment line(s)";
 }

@@ -24,6 +24,8 @@ public sealed class TemporarySolution : IDisposable
 
         Copy(Path.Combine(Fixtures.RepositoryRoot, "fixtures", "FixtureSolution"), root);
 
+        File.WriteAllText(Path.Combine(root, ".git"), "gitdir: none");
+
         return new TemporarySolution(root);
     }
 

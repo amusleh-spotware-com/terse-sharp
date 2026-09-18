@@ -36,14 +36,13 @@ public sealed class PolicySettingsTests
     }
 
     [Fact]
-    public void Parse_WithNoUniformAction_KeepsTheSeverityEachRiderInspectionCarried()
+    public void Parse_WithNoUniformAction_KeepsTheSeverityEachRuleDeclares()
     {
         var options = PolicySettings.Parse("""{"policy":{}}""");
 
-        Assert.Equal(PolicyAction.Reject, options.Limit(PolicyRule.CognitiveComplexity).Action);
+        Assert.All(PolicyRules.All, info => Assert.Equal(info.Action, options.Limit(info.Rule).Action));
+        Assert.Equal(PolicyAction.Off, options.Limit(PolicyRule.ChainedReferences).Action);
         Assert.Equal(PolicyAction.Warn, options.Limit(PolicyRule.MethodStatements).Action);
-        Assert.Equal(PolicyAction.Warn, options.Limit(PolicyRule.ParameterCount).Action);
-        Assert.Equal(PolicyAction.Reject, options.Limit(PolicyRule.Naming).Action);
     }
 
     [Fact]
@@ -140,6 +139,59 @@ public sealed class PolicySettingsTests
         var options = PolicySettings.Parse("""{"policy":{"action":"block"}}""");
 
         Assert.Contains("action", options.Ignored);
-        Assert.Equal(PolicyAction.Reject, options.Limit(PolicyRule.CognitiveComplexity).Action);
+        Assert.Equal(PolicyRules.Of(PolicyRule.CognitiveComplexity).Action, options.Limit(PolicyRule.CognitiveComplexity).Action);
     }
+
+    [Fact]
+    public void Parse_WithAParentThatSetTheThreshold_KeepsItWhereTheNearerFileDoesNotDeclareIt()
+    {
+        var parent = PolicySettings.Parse("""{"policy":{"cognitiveThreshold":25}}""");
+        var child = PolicySettings.Parse("""{"policy":{"rules":{"comments":false}}}""", parent);
+
+        Assert.Equal(25, child.CognitiveThreshold);
+        Assert.False(child.Enforces(PolicyRule.Comments));
+        Assert.True(child.Enforces(PolicyRule.XmlDocs));
+    }
+
+    [Fact]
+    public void Parse_WhereBothFilesDeclareASetting_TakesTheNearerOne()
+    {
+        var parent = PolicySettings.Parse("""{"policy":{"cognitiveThreshold":25}}""");
+        var child = PolicySettings.Parse("""{"policy":{"cognitiveThreshold":40}}""", parent);
+
+        Assert.Equal(40, child.CognitiveThreshold);
+    }
+
+    [Fact]
+    public void Parse_ForANearerFileWithNoPolicySection_KeepsTheParentPolicyUntouched()
+    {
+        var parent = PolicySettings.Parse("""{"policy":{"rules":{"comments":{"action":"reject"}}}}""");
+        var child = PolicySettings.Parse("""{"tools":{"groups":{"xaml":false}}}""", parent);
+
+        Assert.Equal(PolicyAction.Reject, child.Limit(PolicyRule.Comments).Action);
+        Assert.True(child.Configured);
+    }
+
+    [Fact]
+    public void Parse_ForAParentThatDisabledThePolicy_StaysOffWhenTheNearerFileOnlyTweaksARule()
+    {
+        var parent = PolicySettings.Parse("""{"policy":{"enabled":false}}""");
+        var child = PolicySettings.Parse("""{"policy":{"rules":{"nestingDepth":6}}}""", parent);
+
+        Assert.False(child.Effective.Active);
+    }
+
+    [Fact]
+    public void Parse_ForAParentThatDisabledThePolicy_ComesBackWhenTheNearerFileSaysEnabledTrue()
+    {
+        var parent = PolicySettings.Parse("""{"policy":{"enabled":false}}""");
+        var child = PolicySettings.Parse("""{"policy":{"enabled":true}}""", parent);
+
+        Assert.True(child.Active);
+        Assert.Equal(PolicyRules.Of(PolicyRule.NestingDepth).Action, child.Limit(PolicyRule.NestingDepth).Action);
+    }
+
+    [Fact]
+    public void All_CarriesNoRuleThatRejectsByDefault() =>
+        Assert.DoesNotContain(PolicyRules.All, info => info.Action is PolicyAction.Reject);
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 
 namespace TerseSharp.Core;
 
@@ -8,28 +9,37 @@ public static class PolicyCache
 
     public static async Task<PolicyOptions> ForAsync(string root, CancellationToken cancellationToken)
     {
-        var path = TerseConfigFile.Find(root);
-        var stamp = Stamp(path);
+        var chain = TerseConfigFile.Chain(root);
+        var key = Key(chain);
 
-        if (Entries.TryGetValue(root, out var cached) && cached.Matches(path, stamp))
+        if (Entries.TryGetValue(root, out var cached) && cached.Matches(key))
             return cached.Options;
 
-        var options = await PolicySettings.LoadAsync(root, cancellationToken).ConfigureAwait(false);
+        var options = await PolicySettings.LoadAsync(chain, cancellationToken).ConfigureAwait(false);
 
-        Entries[root] = new Entry(path, stamp, options);
+        Entries[root] = new Entry(key, options);
 
         return options;
     }
 
     public static void Forget() => Entries.Clear();
 
-    private static DateTime Stamp(string? path) => path is null || !File.Exists(path)
-        ? default
-        : File.GetLastWriteTimeUtc(path);
-
-    private sealed record Entry(string? Path, DateTime Stamp, PolicyOptions Options)
+    private static string Key(IReadOnlyList<string> chain)
     {
-        public bool Matches(string? path, DateTime stamp) =>
-            string.Equals(Path, path, StringComparison.OrdinalIgnoreCase) && Stamp == stamp;
+        var builder = new StringBuilder();
+
+        foreach (var path in chain)
+        {
+            var stamp = File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0L;
+
+            builder.Append(path).Append('|').Append(stamp.ToString(CultureInfo.InvariantCulture)).Append(';');
+        }
+
+        return builder.ToString();
+    }
+
+    private sealed record Entry(string Key, PolicyOptions Options)
+    {
+        public bool Matches(string key) => string.Equals(Key, key, StringComparison.Ordinal);
     }
 }

@@ -38,6 +38,42 @@ public static class ClientRegistrar
         return "installed skill -> " + target;
     }
 
+    public static async Task<string> InstallConfig(CancellationToken cancellationToken = default)
+    {
+        var target = ConfigPath();
+        var existing = File.Exists(target)
+            ? await File.ReadAllTextAsync(target, cancellationToken).ConfigureAwait(false)
+            : null;
+
+        var text = existing is null ? PolicyDocument.Render() : PolicyDocument.TopUp(existing);
+
+        if (text is null)
+            return "policy config already current -> " + target;
+
+        await AtomicWrite.TextAsync(target, text, workspaceDocument: false, cancellationToken).ConfigureAwait(false);
+
+        return (existing is null ? "installed policy config -> " : "added the new policy rules -> ") + target;
+    }
+
+    internal static async Task<string?> TopUpConfigAsync(CancellationToken cancellationToken)
+    {
+        var target = ConfigPath();
+
+        if (!File.Exists(target))
+            return null;
+
+        var text = PolicyDocument.TopUp(await File.ReadAllTextAsync(target, cancellationToken).ConfigureAwait(false));
+
+        if (text is null)
+            return null;
+
+        await AtomicWrite.TextAsync(target, text, workspaceDocument: false, cancellationToken).ConfigureAwait(false);
+
+        return "added the new policy rules -> " + target;
+    }
+
+    internal static string ConfigPath() => Path.Combine(Home(), TerseConfigFile.FileName);
+
     public static async Task<string> InstallGuard()
     {
         var target = SettingsPath();
@@ -215,10 +251,7 @@ public static class ClientRegistrar
         await AtomicWrite.TextAsync(path, root.ToJsonString(Indented), workspaceDocument: false).ConfigureAwait(false);
     }
 
-    internal static string Home() =>
-        Environment.GetEnvironmentVariable("TERSE_HOME") is { Length: > 0 } overridden
-            ? overridden
-            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    internal static string Home() => TerseConfigFile.Home();
 
     private static string ClaudeSkillsDirectory() =>
         Path.Combine(ClaudeConfigDirectory() ?? Path.Combine(Home(), ".claude"), "skills");
@@ -282,15 +315,18 @@ public static class ClientRegistrar
             GuardIsCurrent(root));
     }
 
-    private static async Task<string?> RewriteAsync(AssetState state)
+    private static async Task<string?> RewriteAsync(AssetState state, CancellationToken cancellationToken)
     {
-        var refreshed = new List<string>(2);
+        var refreshed = new List<string>(3);
 
         if (state is { SkillInstalled: true, SkillCurrent: false })
             refreshed.Add(await InstallSkill().ConfigureAwait(false));
 
         if (state is { GuardInstalled: true, GuardCurrent: false })
             refreshed.Add(await InstallGuard().ConfigureAwait(false));
+
+        if (await TopUpConfigAsync(cancellationToken).ConfigureAwait(false) is { } topped)
+            refreshed.Add(topped);
 
         return refreshed.Count is 0 ? null : string.Join("\n", refreshed);
     }
@@ -303,7 +339,7 @@ public static class ClientRegistrar
 
             AssetBanner.Publish(state);
 
-            return await RewriteAsync(state).ConfigureAwait(false);
+            return await RewriteAsync(state, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {

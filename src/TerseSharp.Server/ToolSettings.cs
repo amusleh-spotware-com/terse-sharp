@@ -23,77 +23,48 @@ public sealed record ToolOverrides(
 
 public static class ToolSettings
 {
-    public const string FileName = ".terse.json";
+    public const string FileName = TerseConfigFile.FileName;
 
     public static async Task<ToolOverrides> LoadAsync(string directory, CancellationToken cancellationToken)
     {
-        if (Find(directory) is not { } path)
-            return ToolOverrides.None;
+        var overrides = ToolOverrides.None;
 
-        try
+        foreach (var path in TerseConfigFile.Chain(directory))
         {
-            var file = new FileInfo(path);
+            overrides = await ApplyAsync(overrides, path, cancellationToken).ConfigureAwait(false);
 
-            return file.Length > MaxBytes
-                ? ToolOverrides.None with { Path = path, Failure = Oversized(file.Length) }
-                : Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), path);
+            if (overrides.Failure is not null)
+                return overrides;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return ToolOverrides.None with { Path = path, Failure = exception.Message };
-        }
+
+        return overrides;
     }
 
-    public static string? Find(string directory)
-    {
-        var current = Directory.Exists(directory) ? new DirectoryInfo(directory) : null;
-
-        while (current is not null)
-        {
-            var candidate = System.IO.Path.Combine(current.FullName, FileName);
-
-            if (File.Exists(candidate))
-                return candidate;
-
-            current = AtRepositoryRoot(current) ? null : current.Parent;
-        }
-
-        return null;
-    }
-
-    private static bool AtRepositoryRoot(DirectoryInfo directory) =>
-        Directory.Exists(System.IO.Path.Combine(directory.FullName, ".git"))
-            || File.Exists(System.IO.Path.Combine(directory.FullName, ".git"));
-
-    public static ToolOverrides Parse(string json, string? path)
-    {
-        try
-        {
-            return Read(JsonNode.Parse(json) as JsonObject, path);
-        }
-        catch (JsonException exception)
-        {
-            return ToolOverrides.None with { Path = path, Failure = exception.Message };
-        }
-    }
+    public static ToolOverrides Parse(string json, string? path) => Parse(json, path, ToolOverrides.None);
 
     public static string? Notice(ToolOverrides overrides) => overrides switch
     {
         { Failure: { } failure } => string.Create(
             CultureInfo.InvariantCulture,
-            $"terse: {overrides.Path} could not be read - {failure}; advertising every tool"),
+            $"terse: {overrides.Path} could not be read - {failure}; {Surviving(overrides)}"),
         { Ignored: [_, ..] ignored } => string.Create(
             CultureInfo.InvariantCulture,
-            $"terse: {overrides.Path} ignored {string.Join(", ", ignored)} - each must be a true/false value under 'groups' ({ToolGroups.Names()}) or under 'names' (an advertised tool name)"),
+            $"terse: ignored {string.Join(", ", ignored)} - each must be a true/false value under 'groups' ({ToolGroups.Names()}) or under 'names' (an advertised tool name)"),
         _ => null,
     };
 
-    private static ToolOverrides Read(JsonObject? root, string? path)
+    private static ToolOverrides Read(JsonObject? root, string? path, ToolOverrides seed)
     {
         if (root?["tools"] is not { } tools)
-            return ToolOverrides.None with { Path = path };
+            return seed;
 
-        var rules = new ToolRules([], ImmutableArray.CreateBuilder<string>(), ImmutableArray.CreateBuilder<string>());
+        var rules = new ToolRules(
+            new Dictionary<string, bool>(seed.Tools, StringComparer.Ordinal),
+            ImmutableArray.CreateBuilder<string>(),
+            ImmutableArray.CreateBuilder<string>());
+
+        rules.Off.AddRange(seed.Off);
+        rules.Ignored.AddRange(seed.Ignored);
 
         if (tools is JsonObject requested)
             Sections(requested, rules);
@@ -103,7 +74,7 @@ public static class ToolSettings
         return new(
             path,
             rules.Decisions.ToFrozenDictionary(StringComparer.Ordinal),
-            rules.Off.ToImmutable(),
+            Hidden(rules),
             rules.Ignored.ToImmutable(),
             null);
     }
@@ -148,7 +119,7 @@ public static class ToolSettings
         foreach (var tool in tools)
             rules.Decisions[tool] = advertised;
 
-        if (!advertised)
+        if (!advertised && !rules.Off.Contains(entry.Key, StringComparer.OrdinalIgnoreCase))
             rules.Off.Add(entry.Key);
     }
 
@@ -163,12 +134,52 @@ public static class ToolSettings
         ImmutableArray<string>.Builder Off,
         ImmutableArray<string>.Builder Ignored);
 
-    private const int MaxBytes = 64 * 1024;
-
-    private static string Oversized(long length) => string.Create(
-            CultureInfo.InvariantCulture,
-            $"it is {length} bytes, past the {MaxBytes}-byte ceiling");
-
     private const string Groups = "groups";
     private const string Names = "names";
+
+    public static ToolOverrides Parse(string json, string? path, ToolOverrides seed)
+    {
+        try
+        {
+            return Read(JsonNode.Parse(json) as JsonObject, path, seed);
+        }
+        catch (JsonException exception)
+        {
+            return ToolOverrides.None with { Path = path, Failure = exception.Message };
+        }
+    }
+
+    private static async Task<ToolOverrides> ApplyAsync(ToolOverrides seed, string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var file = new FileInfo(path);
+
+            if (file.Length > TerseConfigFile.MaxBytes)
+                return seed with { Path = path, Failure = TerseConfigFile.Oversized(file.Length) };
+
+            var parsed = Parse(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false), path, seed);
+
+            if (parsed.Failure is { } failure)
+                return seed with { Path = path, Failure = failure };
+
+            return ReferenceEquals(parsed, seed) ? seed : parsed with { Ignored = Qualified(seed, parsed, path) };
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return seed with { Path = path, Failure = exception.Message };
+        }
+    }
+
+    private static ImmutableArray<string> Hidden(ToolRules rules) =>
+        [.. rules.Off.Where(key => Named(key).Any(tool => rules.Decisions.TryGetValue(tool, out var advertised) && !advertised))];
+
+    private static ImmutableArray<string> Named(string key) =>
+        Expand(key) is [_, ..] group ? group : Single(key);
+
+    private static ImmutableArray<string> Qualified(ToolOverrides seed, ToolOverrides parsed, string path) =>
+        [.. seed.Ignored, .. parsed.Ignored.Skip(seed.Ignored.Length).Select(key => path + ": " + key)];
+
+    internal static string Surviving(ToolOverrides overrides) =>
+        overrides.Hidden is 0 ? "it narrows nothing" : "the narrowing already in force still applies";
 }

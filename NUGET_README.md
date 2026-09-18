@@ -17,7 +17,7 @@ find_usages OrderService.Submit   ->  6 real references, each tagged EXACT, ~200
 | **Token saving** | Answers semantically instead of dumping text — outlines, symbol ids, one record per line | **4.56M tokens** never sent in one measured week — **2.9× the entire bill** |
 | **Speed** | Deletes round trips: batched reads, batched edits, one compile gate, concurrent test projects | a round trip costs **6.1 s** of model latency before the tool runs; `run_tests` **38 % faster** |
 | **Code quality** | Every edit is compile-gated and rolled back if it breaks; `gate` runs analyze → format → cleanup → analyze again in one call | a broken edit never reaches your branch |
-| **Control** | `.terse.json` policy rejects code that compiles but isn't mergeable; the guard denies `Read`/`Grep`/`dotnet build`; `--read-only` freezes everything | **13 rules**, `TERSE100`–`TERSE112`, ReSharper's own defaults |
+| **Control** | `.terse.json` policy can reject code that compiles but isn't mergeable; the guard denies `Read`/`Grep`/`dotnet build`; `--read-only` freezes everything | **14 rules**, `TERSE100`–`TERSE113`, ReSharper's own defaults |
 | **Your stack** | Blazor/Razor, XAML for MAUI · WPF · WinUI · Avalonia, ASP.NET Core Minimal APIs, `.resx` localization, DI containers | answers **what the compiler itself cannot check** |
 
 ## Token saving — 4.6M tokens in one week, measured
@@ -143,7 +143,14 @@ Three independent layers, each off or on as you choose.
 ### 1. Reject code that compiles and still isn't code you'd merge
 
 A 40-branch method, an `OrderManager`, an `async void`. A `policy` section in a `.terse.json` beside your
-solution makes TerseSharp **reject the edit and say why** — off entirely unless you add it.
+solution makes TerseSharp **reject the edit and say why** — off entirely unless you add it. The file
+cascades like `.editorconfig`: every `.terse.json` from your home directory (`$TERSE_HOME`, else the
+user profile) down to the server's own is read and the nearer one wins **per setting**, so one file in
+your home sets your standards in every repository and a project overrides only what it disagrees with.
+`terse install` writes that home file for you with **every rule at its own default**, and each later
+`terse serve` tops it up with the rules a new version added — never changing a value you set yourself.
+The walk stops at the repository root, so a sibling project's file is never read, and **every rule
+defaults to `warn`**: nothing refuses an edit until you set it to `reject`.
 
 ```json
 {
@@ -163,13 +170,15 @@ TERSE100  src/Trading/OrderService.cs:41  OrderService.Reconcile  cognitive comp
 remedy: fix the code above, or pass allowPolicy=true to apply it anyway; the response then names every rule it bypassed
 ```
 
-Thirteen rules, `TERSE100`–`TERSE112`: cognitive complexity, method statements, methods per type,
+Fourteen rules, `TERSE100`–`TERSE113`: cognitive complexity, method statements, methods per type,
 constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
 declaration kind, `async void`, condition operands, chained references, nesting depth, and **comments
-(`TERSE112`) — the one rule enforced at `warn` with no `.terse.json` at all, because an agent writes
-38.7 comment lines per 1000 it emits and every one of them is a line the next agent re-reads. `///`
-XML docs are never flagged; `{"policy": {"enabled": false}}` turns it off — declaring a `policy`
-section instead turns the other twelve rules ON at their defaults.** **Every default is
+(`TERSE112`) plus XML doc comments (`TERSE113`) — the two rules enforced at `warn` with no
+`.terse.json` at all, because an agent writes 38.7 comment lines per 1000 it emits and every one of
+them is a line the next agent re-reads. A `///` block is `TERSE113` and never `TERSE112`, so the two
+are set separately — `{"policy": {"rules": {"comments": {"action": "reject"}}}}` refuses prose
+comments while documented APIs still land; `{"policy": {"enabled": false}}` turns both off — declaring
+a `policy` section instead turns the other twelve rules ON at their defaults.** **Every default is
 ReSharper's** — the limits mirror `MaximumMethodStatements`, `MaximumMethodsInClass`,
 `MaximumConstructorDependencies`, `MinimumMeaningfulMethodNameLength` and `MeaninglessClassNameSuffixes` —
 and cognitive complexity is a **percentage of a threshold**, exactly as the JetBrains CognitiveComplexity
@@ -247,8 +256,9 @@ rather than estimated. The surface shrinks three ways, all optional.
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
   **57 tools, ≤25,700 tokens**. Load one that does and they come back, announced with
   `notifications/tools/list_changed`.
-- **Per project.** The same `.terse.json`, found by walking up from the server's directory and never above
-  the repository root, disables whole groups (`analysis` `build` `edit` `file` `git`
+- **Per project, and per directory.** The same `.terse.json` — every one from your home directory
+  (`$TERSE_HOME`, else the user profile) down through the repository root to the server's directory, the
+  nearer file winning per setting and the walk never climbing above the repository root — disables whole groups (`analysis` `build` `edit` `file` `git`
   `navigation` `project` `razor` `refactor` `resx` `workspace` `xaml`) or individual `names`, which outrank
   their group. That file measures **64 tools, ≤26,450 tokens**. The guard follows it: a built-in whose
   every replacement you disabled is allowed again. An unknown key is reported rather than silently

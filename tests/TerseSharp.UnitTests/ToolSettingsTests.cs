@@ -271,4 +271,45 @@ public sealed class ToolSettingsTests
             root.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void Parse_WithAParentThatHidAGroup_KeepsItHiddenWhereTheNearerFileDoesNotRedeclareIt()
+    {
+        var parent = ToolSettings.Parse("""{"tools":{"groups":{"xaml":false}}}""", "parent");
+        var child = ToolSettings.Parse("""{"tools":{"names":{"search_regex":false}}}""", "child", parent);
+
+        Assert.False(child.Decision("xaml_outline"));
+        Assert.False(child.Decision("search_regex"));
+    }
+
+    [Fact]
+    public void Parse_WithANearerFileThatReAdvertisesAToolTheParentHid_TakesTheNearerOne()
+    {
+        var parent = ToolSettings.Parse("""{"tools":{"names":{"search_regex":false}}}""", "parent");
+        var child = ToolSettings.Parse("""{"tools":{"names":{"search_regex":true}}}""", "child", parent);
+
+        Assert.True(child.Decision("search_regex"));
+        Assert.Empty(child.Off);
+    }
+
+    [Fact]
+    public void Parse_WhereANearerGroupReAdvertisesAToolTheParentHidByName_LeavesOnlyTheStillHiddenOneListed()
+    {
+        var parent = ToolSettings.Parse("""{"tools":{"names":{"xaml_outline":false,"resx_get":false}}}""", "parent");
+        var child = ToolSettings.Parse("""{"tools":{"groups":{"xaml":true}}}""", "child", parent);
+
+        Assert.True(child.Decision("xaml_outline"));
+        Assert.Equal(["resx_get"], child.Off);
+        Assert.Equal(1, child.Hidden);
+    }
+
+    [Fact]
+    public void Parse_ForANearerFileWithNoToolsSection_KeepsTheParentAndTheFileThatDeclaredIt()
+    {
+        var parent = ToolSettings.Parse("""{"tools":{"groups":{"xaml":false}}}""", "parent");
+        var child = ToolSettings.Parse("""{"policy":{"rules":{"comments":false}}}""", "child", parent);
+
+        Assert.Equal("parent", child.Path);
+        Assert.False(child.Decision("xaml_outline"));
+    }
 }

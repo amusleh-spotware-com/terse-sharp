@@ -58,9 +58,13 @@ public sealed record PolicyOptions(
         Enabled = true,
         Rules = new Dictionary<PolicyRule, PolicyLimit>
         {
-            [PolicyRule.Comments] = new(PolicyRules.Of(PolicyRule.Comments).Action, PolicyRules.Of(PolicyRule.Comments).Default),
+            [PolicyRule.Comments] = Defaulted(PolicyRule.Comments),
+            [PolicyRule.XmlDocs] = Defaulted(PolicyRule.XmlDocs),
         }.ToFrozenDictionary(),
     };
 
     public PolicyOptions Effective => Configured ? this : Ambient;
+
+    private static PolicyLimit Defaulted(PolicyRule rule) =>
+        new(PolicyRules.Of(rule).Action, PolicyRules.Of(rule).Default);
 }

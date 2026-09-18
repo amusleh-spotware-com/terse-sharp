@@ -96,6 +96,7 @@ internal sealed class TerseServerProcess
             start.ArgumentList.Add(argument);
 
         start.Environment["TERSE_UPDATE"] = "0";
+        start.Environment["TERSE_HOME"] = IsolatedHome;
 
         foreach (var (name, value) in environment)
             start.Environment[name] = value;
@@ -162,4 +163,15 @@ internal sealed class TerseServerProcess
         IEnumerable<string> arguments,
         CancellationToken cancellationToken) =>
         StartAsync(workingDirectory, arguments, new Dictionary<string, string>(StringComparer.Ordinal), cancellationToken);
+
+    private static readonly string IsolatedHome = CreateIsolatedHome();
+
+    private static string CreateIsolatedHome()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "terse-e2e-home", Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(path);
+
+        return path;
+    }
 }

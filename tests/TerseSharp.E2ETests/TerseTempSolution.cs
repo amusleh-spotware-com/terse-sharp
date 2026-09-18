@@ -26,6 +26,8 @@ internal sealed class TerseTempSolution : IAsyncDisposable
 
         Copy(Path.Combine(TerseServerFixture.FixtureRoot), root);
 
+        Directory.CreateDirectory(Path.Combine(root, ".git"));
+
         if (prepare is not null)
             await prepare(root);
 

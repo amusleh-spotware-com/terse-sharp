@@ -21,7 +21,7 @@ public sealed class PolicyGateTests
     {
         using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
 
-        await ConfigureAsync(workspace, """{"policy":{}}""");
+        await ConfigureAsync(workspace, """{"policy":{"action":"reject"}}""");
 
         var result = await AddAsync(workspace, "public int Go() => 1;", allowPolicy: false);
 
@@ -38,7 +38,7 @@ public sealed class PolicyGateTests
     {
         using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
 
-        await ConfigureAsync(workspace, """{"policy":{}}""");
+        await ConfigureAsync(workspace, """{"policy":{"action":"reject"}}""");
 
         var result = await AddAsync(workspace, "public int Go() => 1;", allowPolicy: true);
 
@@ -52,7 +52,7 @@ public sealed class PolicyGateTests
     {
         using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
 
-        await ConfigureAsync(workspace, """{"policy":{"allowOverride":false}}""");
+        await ConfigureAsync(workspace, """{"policy":{"action":"reject","allowOverride":false}}""");
 
         var result = await AddAsync(workspace, "public int Go() => 1;", allowPolicy: true);
 
@@ -78,7 +78,7 @@ public sealed class PolicyGateTests
     {
         using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
 
-        await ConfigureAsync(workspace, """{"policy":{}}""");
+        await ConfigureAsync(workspace, """{"policy":{"action":"reject"}}""");
         Assert.True((await AddAsync(workspace, "public int Go() => 1;", allowPolicy: true)).IsOk);
 
         var result = await AddAsync(workspace, "public int SecondMember() => 2;", allowPolicy: false);
@@ -135,7 +135,7 @@ public sealed class PolicyGateTests
     {
         using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
 
-        await ConfigureAsync(workspace, """{"policy":{}}""");
+        await ConfigureAsync(workspace, """{"policy":{"action":"reject"}}""");
         Assert.True((await AddAsync(workspace, "public int Go() => 1;", allowPolicy: true)).IsOk);
 
         var report = await AnalysisService.AnalyzeAsync(

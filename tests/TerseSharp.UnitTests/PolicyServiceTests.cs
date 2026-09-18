@@ -35,7 +35,7 @@ public sealed class PolicyServiceTests
         Assert.Contains("cognitive complexity 21", finding.Measured, StringComparison.Ordinal);
         Assert.Contains("210% of threshold 10", finding.Measured, StringComparison.Ordinal);
         Assert.Equal("150% (15)", finding.Allowed);
-        Assert.Equal(PolicyAction.Reject, finding.Action);
+        Assert.Equal(PolicyRules.Of(PolicyRule.CognitiveComplexity).Action, finding.Action);
     }
 
     [Fact]
@@ -373,6 +373,66 @@ public sealed class PolicyServiceTests
         """);
 
         Assert.Equal("Sample.Work", Assert.Single(found).Declaration);
+    }
+
+    [Fact]
+    public void Inspect_ForAnXmlDocBlock_ReportsItUnderTheXmlDocsRule()
+    {
+        var found = Findings(PolicyRule.XmlDocs, """
+    class Sample
+    {
+        /// <summary>Documents a public API.</summary>
+        public void Work()
+        {
+        }
+    }
+    """);
+
+        var finding = Assert.Single(found);
+
+        Assert.Equal("Sample.Work", finding.Declaration);
+        Assert.Equal("1 XML doc line(s)", finding.Measured);
+        Assert.Equal(PolicyAction.Warn, finding.Action);
+        Assert.StartsWith("TERSE113", finding.Render(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAPlainCommentUnderTheXmlDocsRule_ReportsNothing()
+    {
+        var found = Findings(PolicyRule.XmlDocs, """
+    class Sample
+    {
+        void Work()
+        {
+            // explain the obvious
+            var count = 1;
+        }
+    }
+    """);
+
+        Assert.Empty(found);
+    }
+
+    [Fact]
+    public void Inspect_WithNoCheckedInPolicy_ReportsAnXmlDocTheSameWayAsAComment()
+    {
+        var found = PolicyService.Inspect(
+            Root("""
+        class Sample
+        {
+            /// <summary>Documented.</summary>
+            public void Work()
+            {
+            }
+        }
+        """),
+            "Sample.cs",
+            PolicyOptions.Off.Effective);
+
+        var finding = Assert.Single(found);
+
+        Assert.Equal(PolicyRule.XmlDocs, finding.Rule);
+        Assert.Equal(PolicyAction.Warn, finding.Action);
     }
 
     [Fact]

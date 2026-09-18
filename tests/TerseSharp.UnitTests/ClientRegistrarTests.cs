@@ -9,6 +9,7 @@ public sealed class ClientRegistrarTests : IDisposable
 
     private readonly string home = Path.Combine(Path.GetTempPath(), "terse-tests", Guid.NewGuid().ToString());
     private readonly string? previousConfigDirectory = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+    private readonly string? previousHome = Environment.GetEnvironmentVariable("TERSE_HOME");
 
     public ClientRegistrarTests()
     {
@@ -184,7 +185,7 @@ public sealed class ClientRegistrarTests : IDisposable
     }
     public void Dispose()
     {
-        Environment.SetEnvironmentVariable("TERSE_HOME", null);
+        Environment.SetEnvironmentVariable("TERSE_HOME", previousHome);
         Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", previousConfigDirectory);
         Directory.Delete(home, recursive: true);
     }

@@ -27,6 +27,38 @@ public sealed class InstallCommandE2ETests : IDisposable
     }
 
     [Fact]
+    public async Task Install_WritesAHomePolicyConfigCarryingEveryRuleAtItsDefault()
+    {
+        var output = await RunAsync("install", "--client", "claude-code");
+
+        var written = await File.ReadAllTextAsync(Path.Combine(home, ".terse.json"), TestContext.Current.CancellationToken);
+
+        Assert.Contains("installed policy config -> ", output, StringComparison.Ordinal);
+        Assert.Contains("\"comments\"", written, StringComparison.Ordinal);
+        Assert.Contains("\"xmlDocs\"", written, StringComparison.Ordinal);
+        Assert.Contains("\"cognitiveThreshold\"", written, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Install_ForAHomeConfigThatAlreadyDeclaresARule_KeepsTheDeclaredValueAndAddsTheRest()
+    {
+        var target = Path.Combine(home, ".terse.json");
+
+        await File.WriteAllTextAsync(
+            target,
+            """{"policy":{"rules":{"comments":{"action":"reject"}}}}""",
+            TestContext.Current.CancellationToken);
+
+        await RunAsync("install", "--client", "claude-code");
+
+        var written = await File.ReadAllTextAsync(target, TestContext.Current.CancellationToken);
+
+        Assert.Contains("\"reject\"", written, StringComparison.Ordinal);
+        Assert.Contains("\"xmlDocs\"", written, StringComparison.Ordinal);
+        Assert.Contains("\"nestingDepth\"", written, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Doctor_ReportsRegistrationAgainstTheConfigDirectoryInUse()
     {
         var workspace = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");

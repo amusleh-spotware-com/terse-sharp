@@ -8,6 +8,82 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.64.0] - 2026-09-18
+
+### Added
+
+- **`.terse.json` is a cascade now, with a user-wide file at the top of it.** The server reads every
+  `.terse.json` from the home directory (`$TERSE_HOME`, else the user profile) down through the
+  repository root to the directory it runs in, and the **nearer file wins per setting** - the way
+  `.editorconfig` cascades - so a setting a project does not declare keeps the value the file above it
+  gave it. Both halves cascade: the `policy` rules, and the `tools` narrowing the `PreToolUse` guard
+  reads. Previously only the single nearest file was read and the walk never left the repository, so
+  there was no way to state a standard once for every repository. Resolution is `TerseConfigFile.Chain`,
+  the two parsers take the accumulated options as a seed, and the policy cache keys on every file of the
+  chain and its timestamp, so editing any of them is picked up with no reload. Covered by
+  `Chain_ListsTheHomeFileFirstAndTheNearestFileLast`,
+  `Chain_WithAFileAboveTheRepositoryRoot_LeavesItOutAndKeepsTheHomeFile`,
+  `Chain_WithNoFileUnderTheRepository_StillCarriesTheHomeFile`,
+  `Parse_WithAParentThatSetTheThreshold_KeepsItWhereTheNearerFileDoesNotDeclareIt`,
+  `Parse_ForANearerFileWithNoPolicySection_KeepsTheParentPolicyUntouched`,
+  `Parse_WithANearerFileThatReAdvertisesAToolTheParentHid_TakesTheNearerOne`,
+  `AddMember_WithACommentWhereTheHomeConfigRejectsThem_IsRolledBackInASolutionCarryingNoConfigOfItsOwn`
+  and `AddMember_WithASuffixOnlyTheHomeFileDeclares_IsRejectedBecauseTheProjectFileInheritsIt`.
+- **`TERSE113 xmlDocs` - the code policy's second rule that is ON with no `.terse.json` at all.**
+  `TERSE112` deliberately never flags a `///` block, so an agent told to stop writing comments writes
+  XML documentation instead and the noise lands anyway. The new rule counts the doc block the same way
+  `TERSE112` counts a comment, and carries the same `warn` default: the edit lands and answers
+  `WARNING policy  TERSE113 ...`. They are separate keys, so
+  `{"policy":{"rules":{"comments":{"action":"reject"},"xmlDocs":false}}}` is a documented public API
+  with no prose comments, and `"xmlDocs":{"action":"reject"}` is the opposite. Covered by
+  `Inspect_ForAnXmlDocBlock_ReportsItUnderTheXmlDocsRule`,
+  `Inspect_ForAPlainCommentUnderTheXmlDocsRule_ReportsNothing` and
+  `Inspect_WithNoCheckedInPolicy_ReportsAnXmlDocTheSameWayAsAComment`.
+- **`terse install` writes the home `.terse.json`, and every later `terse serve` tops it up.** The
+  installed file declares **every** rule at its own default action and limit, plus `cognitiveThreshold`
+  and `allowOverride`, so the policy a user gets is visible and editable rather than implied. A file
+  that already exists is never rewritten wholesale: only the rules it does not declare are added, which
+  is how a rule a new version introduces - `TERSE113` being the first - reaches an existing user at its
+  default instead of silently missing. A file that is not JSON, or whose `policy` is not an object, is
+  left alone. `serve` only tops up a file that exists; it never creates one. Covered by
+  `Render_DeclaresEveryRuleAtTheDefaultItsOwnCatalogueCarries`,
+  `TopUp_ForAFileMissingARule_AddsItWithoutTouchingWhatIsAlreadyDeclared`,
+  `TopUp_ForAFileThatAlreadyDeclaresEveryRule_ChangesNothing`,
+  `TopUp_ForAPolicyThatIsNotAnObject_LeavesItAlone`,
+  `Install_WritesAHomePolicyConfigCarryingEveryRuleAtItsDefault` and
+  `Install_ForAHomeConfigThatAlreadyDeclaresARule_KeepsTheDeclaredValueAndAddsTheRest`.
+
+
+### Changed
+
+- **Every policy rule now defaults to `warn`; none rejects out of the box.** Eight of the fourteen
+  carried `reject` as their default action, so declaring a `policy` section - or letting `terse install`
+  write the home file - turned eight refusing rules on at once. A rule that refuses an edit is now
+  always something the user asked for: `"rules":{"methodNameLength":{"action":"reject"}}`, or
+  `"action":"reject"` for the lot. `chainedReferences` stays off. Covered by
+  `All_CarriesNoRuleThatRejectsByDefault`.
+- One token ratchet moved: `SKILL.md` 25 900 -> 26 200 (**measured 26 029**), for the cascade, the
+  install top-up and `TERSE113`. The budget exists to stop SILENT growth, not a measured one.
+- **A config file that cannot be read no longer claims to have turned everything off.** With a cascade
+  a broken nearer file leaves the files above it in force, so `policy could not be read - ...; policy is
+  off` and `could not be read - ...; it narrows nothing` were both false whenever a parent had already
+  configured something. Each now says which it is - `the rules already in force still apply` /
+  `the narrowing already in force still applies` - and a failure no longer resets the accumulated
+  options to nothing.
+- **An ignored key names the file that declared it.** With several files in the chain the notice used
+  to prefix every ignored key with the NEAREST file's path, sending the user to edit a file that did
+  not contain the key. Each key is now recorded as `<path>: <key>` where it was read, and the notice no
+  longer prefixes a path of its own.
+
+
+### Fixed
+
+
+- **A one-line trivia block no longer measures two lines.** A `///` block's span includes the line
+  break that ends it, so the first `TERSE113` finding read `2 XML doc line(s)` for a single line. A
+  span ending at column 0 of the following line no longer counts that line.
+
+
 ## [0.63.0] - 2026-09-17
 
 ### Fixed
@@ -6103,7 +6179,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.63.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.64.0...HEAD
+[0.64.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.64.0
 [0.63.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.63.0
 [0.62.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.62.0
 [0.61.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.61.0

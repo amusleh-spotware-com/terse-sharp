@@ -41,6 +41,7 @@ static bool Watching(bool disabled) =>
 install.SetAction(async result =>
 {
     Console.WriteLine(await ClientRegistrar.Register(result.GetValue(clientOption), result.GetValue(workspaceOption)).ConfigureAwait(false));
+    Console.WriteLine(await ClientRegistrar.InstallConfig().ConfigureAwait(false));
 
     if (result.GetValue(skillOption))
         Console.WriteLine(await ClientRegistrar.InstallSkill().ConfigureAwait(false));
