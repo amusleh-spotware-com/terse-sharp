@@ -36,12 +36,12 @@ public static class CodeFixService
             .OfType<string>()];
 
     private static async Task<Solution> FixProjectAsync(
-        Solution solution,
-        ProjectId projectId,
-        HashSet<string> scope,
-        FixRequest request,
-        List<string> unfixed,
-        CancellationToken cancellationToken)
+            Solution solution,
+            ProjectId projectId,
+            HashSet<string> scope,
+            FixRequest request,
+            List<string> unfixed,
+            CancellationToken cancellationToken)
     {
         var attempted = new HashSet<string>(StringComparer.Ordinal);
 
@@ -56,7 +56,11 @@ public static class CodeFixService
             var reported = unfixed.Count;
 
             attempted.Add(identifier);
-            solution = await FixAsync(solution, projectId, pending, unfixed, cancellationToken).ConfigureAwait(false);
+
+            var allowed = await AllowedAsync(solution, projectId, request, pending, unfixed, cancellationToken).ConfigureAwait(false);
+
+            if (!allowed.IsEmpty)
+                solution = await FixAsync(solution, projectId, allowed, unfixed, cancellationToken).ConfigureAwait(false);
 
             if (unfixed.Count == reported)
                 await ReportResidueAsync(solution, projectId, scope, request, identifier, unfixed, cancellationToken).ConfigureAwait(false);
@@ -268,6 +272,25 @@ public static class CodeFixService
 
         if (StyleUnavailable(request.Mode, FixerCatalog.For(project).HasStyleFixers, project.Name) is { } note)
             unfixed.Add(note);
+    }
+
+    private static async Task<ImmutableArray<Diagnostic>> AllowedAsync(
+            Solution solution,
+            ProjectId projectId,
+            FixRequest request,
+            ImmutableArray<Diagnostic> pending,
+            List<string> unfixed,
+            CancellationToken cancellationToken)
+    {
+        if (!request.WithholdsVisibleShapeFixes || solution.GetProject(projectId) is not { } project)
+            return pending;
+
+        var allowed = await VisibleShapeFixes.FixableAsync(project, pending, cancellationToken).ConfigureAwait(false);
+
+        if (allowed.Length < pending.Length)
+            unfixed.Add(Line(pending[0].Id, pending.Length - allowed.Length, VisibleShapeFixes.Reason));
+
+        return allowed;
     }
 }
 

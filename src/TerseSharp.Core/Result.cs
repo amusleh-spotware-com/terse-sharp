@@ -66,27 +66,30 @@ public static class Errors
         "pass a path inside the loaded workspace");
 
     public static TerseError CompileRegression(
-            IReadOnlyList<string> diagnostics,
-            IReadOnlyList<string>? imports = null,
-            IReadOnlyList<string>? callers = null,
-            IReadOnlyList<string>? collisions = null,
-            string? tool = null) => new(
-            TerseErrorCode.CompileRegression,
-            "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
-            Rollback(imports, callers, collisions, tool));
+                IReadOnlyList<string> diagnostics,
+                IReadOnlyList<string>? imports = null,
+                IReadOnlyList<string>? callers = null,
+                IReadOnlyList<string>? collisions = null,
+                string? tool = null,
+                IReadOnlyList<string>? implementers = null) => new(
+                TerseErrorCode.CompileRegression,
+                "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
+                Rollback(imports, callers, collisions, implementers, tool));
 
     private static string Rollback(
-        IReadOnlyList<string>? imports,
-        IReadOnlyList<string>? callers,
-        IReadOnlyList<string>? collisions,
-        string? tool) => (imports, callers, collisions) switch
-        {
-            (_, _, { Count: > 0 }) => Ambiguity(collisions, tool),
-            ({ Count: > 0 }, _, _) => Missing(imports, tool),
-            (_, { Count: > 0 }, _) => Broken(callers, tool),
-            _ when HoldsUsings(tool) => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
-            _ => "fix the edit in the content you send, or pass allowErrors=true to apply it anyway",
-        };
+            IReadOnlyList<string>? imports,
+            IReadOnlyList<string>? callers,
+            IReadOnlyList<string>? collisions,
+            IReadOnlyList<string>? implementers,
+            string? tool) => (imports, callers, collisions, implementers) switch
+            {
+                (_, _, { Count: > 0 }, _) => Ambiguity(collisions, tool),
+                ({ Count: > 0 }, _, _, _) => Missing(imports, tool),
+                (_, { Count: > 0 }, _, _) => Broken(callers, tool),
+                (_, _, _, { Count: > 0 }) => Unimplemented(implementers, tool),
+                _ when HoldsUsings(tool) => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
+                _ => "fix the edit in the content you send, or pass allowErrors=true to apply it anyway",
+            };
 
     internal static string CallerBatch(IReadOnlyList<string> callers) =>
         "send these callers in the same replace_symbol symbolIds/declarations batch: " + string.Join(", ", callers);
@@ -223,4 +226,11 @@ public static class Errors
     private static string Qualifying(string name) => name.Contains('.', StringComparison.Ordinal)
         ? string.Create(CultureInfo.InvariantCulture, $"'{name}' is already qualified, so qualifying it further will not help: pass its documentation id - symbolId=\"T:{name}\" when it names a type, or take the id from search_symbols")
         : "qualify the name with its containing type, or pass the documentation id from search_symbols";
+
+    internal static string Unimplemented(IReadOnlyList<string> implementers, string? tool) => Declared(implementers) + (HoldsUsings(tool)
+            ? " - the sanctioned sequence is one call per type: retry with allowErrors=true and the retryWith token below to land this declaration, then add_member on each of those types; the tree does not compile between those calls, so make them the next ones"
+            : " - add the member to each of those types in the same edit, or pass allowErrors=true to apply it anyway");
+
+    private static string Declared(IReadOnlyList<string> implementers) =>
+            "the new member is declared in no implementation: " + string.Join(", ", implementers);
 }

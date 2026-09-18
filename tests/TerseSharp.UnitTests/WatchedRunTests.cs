@@ -4,6 +4,7 @@ using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
 
+[Collection(nameof(EditPulseCollection))]
 public sealed class WatchedRunTests
 {
     private const string Green = "build ok  errors=0 warnings=0  elapsedMs=1";

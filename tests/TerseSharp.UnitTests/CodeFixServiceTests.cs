@@ -17,6 +17,57 @@ public sealed class CodeFixServiceTests
     }
 
     [Fact]
+    public async Task Cleanup_WithAllFixes_WithholdsTheStaticFlipOnAnExternallyVisibleMember()
+    {
+        var text = await CleanupAsync(FixMode.All, ["CA1822"]);
+
+        Assert.DoesNotContain("public static int Doubled", text, StringComparison.Ordinal);
+        Assert.Contains("UNFIXED CA1822 x1", text, StringComparison.Ordinal);
+        Assert.Contains("externally visible member", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cleanup_WithAllFixes_StillFlipsAMemberNothingOutsideTheAssemblyCanReach()
+    {
+        var text = await CleanupAsync(FixMode.All, ["CA1822"]);
+
+        Assert.Contains("+    internal static int Tripled(int quantity) => quantity * 3;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cleanup_WithAnalyzerFixes_MirrorsCiAndStillFlipsTheExternallyVisibleMember()
+    {
+        var text = await CleanupAsync(FixMode.Analyzers, ["CA1822"]);
+
+        Assert.Contains("+    public static int Doubled(int quantity) => quantity * 2;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNFIXED CA1822", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cleanup_WithAllFixesUnderVerify_WithholdsNothingSoItCannotHideARedCiLeg()
+    {
+        var text = await CleanupAsync(FixMode.All, ["CA1822"], verify: true);
+
+        Assert.DoesNotContain("UNFIXED CA1822", text, StringComparison.Ordinal);
+        Assert.Contains("StyleSample.cs", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(FixMode.All, false, true)]
+    [InlineData(FixMode.All, true, false)]
+    [InlineData(FixMode.Analyzers, false, false)]
+    [InlineData(FixMode.Style, false, false)]
+    [InlineData(FixMode.Ci, false, false)]
+    [InlineData(FixMode.Usings, false, false)]
+    [InlineData(FixMode.None, false, false)]
+    public void WithholdsVisibleShapeFixes_IsOnOnlyWhereTheModeWritesAndDoesNotMirrorCi(FixMode mode, bool mirrorsCi, bool withholds) =>
+            Assert.Equal(withholds, new FixRequest(mode, [], DiagnosticSeverity.Info, mirrorsCi) { MirrorsCi = mirrorsCi }.WithholdsVisibleShapeFixes);
+
+    [Fact]
+    public void WithholdsVisibleShapeFixes_ForTheRequestGateBuildsUnderDryRun_StaysOnSoThePreviewMatchesTheWrite() =>
+            Assert.True(new FixRequest(FixMode.All, [], DiagnosticSeverity.Info, Verify: true).WithholdsVisibleShapeFixes);
+
+    [Fact]
     public async Task Cleanup_WithStyleFixes_AppliesTheIdeCodeFix()
     {
         var text = await CleanupAsync(FixMode.Style, ["IDE0028"]);
@@ -68,7 +119,7 @@ public sealed class CodeFixServiceTests
         return FixerCatalog.For(lease.Workspace.Solution.Projects.First());
     }
 
-    private static async Task<string> CleanupAsync(FixMode mode, string[] ids)
+    private static async Task<string> CleanupAsync(FixMode mode, string[] ids, bool verify = false)
     {
         using var registry = new WorkspaceRegistry();
 
@@ -79,7 +130,7 @@ public sealed class CodeFixServiceTests
         var result = await FormatService.RunAsync(
             lease.Workspace,
             new FixScope(StyleSample, ChangedOnly: false),
-            new FixRequest(mode, ids, DiagnosticSeverity.Info, Verify: false),
+            new FixRequest(mode, ids, DiagnosticSeverity.Info, verify) { MirrorsCi = verify },
             new EditOptions("cleanup", DryRun: true, AllowErrors: false),
             TestContext.Current.CancellationToken);
 

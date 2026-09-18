@@ -132,7 +132,10 @@ Before every push, in this order, reading each result before trusting the next:
    the default `fix=usings` still reformat, so they stay **supersets**: measured at `b3c381e`,
    `fix=all` named four files (`ReleaseVersion.cs`, `ResponseBuilderTests.cs`, `UnifiedDiffTests.cs`,
    `WorkspaceRegistryTests.cs`) that both CI commands accept, and `format verify=true` is that same
-   whitespace formatter, which CI does not run at all. So a `VERIFY_FAILED` from one of those two
+   whitespace formatter, which CI does not run at all. **Since 0.65.0 `cleanup fix=all` withholds a
+   fix that would rewrite the shape of an externally visible member (`CA1822`) and reports it
+   `UNFIXED`** - `gate` inherits it in both its modes, but `cleanup verify=true` never withholds, so
+   the verify modes stay exactly as comparable to CI as they were. So a `VERIFY_FAILED` from one of those two
    naming a file you did not touch is a prompt to look, not proof CI is red. The two
    `dotnet format … --verify-no-changes --severity info` commands are what **the ubuntu runner**
    executes — that is a statement about CI, **not a licence to run them here**. There is no legitimate

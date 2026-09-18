@@ -481,6 +481,14 @@ sorted. **And a run that REFORMATTED text where no `.editorconfig` at or above t
 convention, and a ReSharper `*.sln.DotSettings` is **not** read. `fix=style`, `fix=analyzers` and
 `fix=ci` never reformat, so they never say it, and a run that changed nothing says nothing.
 
+**`fix=all` withholds a fix that would rewrite the shape of an externally visible member** - today
+`CA1822`, whose instance-to-static flip a Razor template, a binding, a serializer or reflection
+breaks on while every compiler gate stays green. Withheld occurrences answer `UNFIXED CA1822 xN`
+with the reason; a `private` or `internal` member - or one inside such a type - is still flipped, and
+`gate` inherits this in BOTH its modes, dry run included, so its preview matches what it writes.
+**`cleanup verify=true` never withholds**, so a verify can never hide a red CI leg, and
+`fix=analyzers` and `fix=ci` never withhold at all.
+
 **`format verify` and `cleanup verify` are not the same gate.** `format` compares against the Roslyn
 whitespace formatter, which `dotnet format style` and `dotnet format analyzers` do not run — a
 `VERIFY_FAILED` there can still be a green CI leg. `cleanup verify=true fix=style` and
@@ -601,7 +609,8 @@ or `find_usages` answers about a symbol id another of `get_symbol` / `get_symbol
 response ends with `explore_symbol symbolId="<that id>" answers signature, usages and implementations
 in ONE call` — once per id. Take it: the chain you are walking is the composite's payload.
 
-**From the second consecutive call of one tool the response gains one line** —
+**When the second consecutive call of one tool lands, the response gains one line - once per run, not
+on every call after it** —
 `2 read_text calls in a row - these are ONE call: paths=["src/A.cs", "src/B.cs"]` — the run's own
 DISTINCT arguments, already filled in, whenever every call of the run carried a short identifier one;
 otherwise `pass paths=[...]`, naming the plural parameter that tool declares. It is framing, never payload, it says nothing when the call already
@@ -672,7 +681,10 @@ workspace root**, tagged `outside-workspace`, so comparing a file against anothe
 `load_workspace` and no `workspace=` even with several loaded; every writer still refuses to leave the
 workspace. It clips at **40 960** characters unless `maxChars` says otherwise (ceiling 131 072): the
 default is set so a whole-file read stays inline in your client rather than being spilled to a file
-that answers nothing, and the clip always names `next: startLine=`.
+that answers nothing, and the clip always names `next: startLine=`. A file whose bytes open with a
+Unicode byte order mark - UTF-16 LE or BE, UTF-32, UTF-8 - is decoded and served, not refused as
+binary, and a write back to it keeps that encoding; only a file carrying a real NUL code unit is
+refused.
 
 ## Working rules
 
@@ -775,6 +787,12 @@ that answers nothing, and the clip always names `next: startLine=`.
    batch: OrderRouter.Route(Order)`. Paste them into `replace_symbol symbolIds=` beside the member you
    changed: that is the only ordering that works when the callee is what moved. `dryRun` prints it
    too, and nothing is named when a caller cannot be proven.
+   **When every new error is a missing implementation (`CS0535`/`CS0534`) the remedy names the types
+   that owe it** — `the new member is declared in no implementation: Fixture.Trading.NullOrderRepository`
+   — and the sanctioned sequence, which is the one shape that works when the member cannot exist on
+   both sides at once: retry with `allowErrors=true` and the token to land the interface or abstract
+   declaration, then one `add_member` per named type. The tree does not compile between those calls,
+   so make them the next ones.
    **A token belongs to the workspace it was rejected in, and to the tool that issued it**: replaying
    it against another workspace - a sibling worktree where the same symbol id resolves - is refused
    naming both roots, instead of landing the held declaration in the wrong tree, and replaying it with
@@ -1127,7 +1145,9 @@ produced no results says so, and never `0 failures`.
 the payload is otherwise empty. `verbose=true` echoes it on any run.
 
 **`STALE n document(s) changed after this run started`** ends a `build`/`run_tests` verdict when an
-edit landed mid-run: the answer is about the tree as it WAS - re-run it.
+edit landed mid-run: the answer is about the tree as it WAS - re-run it. It counts only documents a
+build or a test run can read, so a markdown working note written beside the run never makes a verdict
+stale; a `.cs`, `.razor`, `.resx`, `.csproj`, `.props`, `.targets` or `.txt` write does.
 
 **A stopped run says why.** Above 30 s, `timeoutSeconds` arms VSTest's blame collector 15 s below it,
 so a *hung* test is named in

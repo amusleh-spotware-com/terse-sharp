@@ -453,7 +453,9 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         var everything = await server.CallAsync("changed_files", []);
         var scoped = await server.CallAsync("changed_files", new() { ["path"] = "src" });
 
-        Assert.True(Tokens(scoped) <= Tokens(everything), Report("changed_files path", scoped, everything));
+        Assert.True(
+            Tokens(Listed(scoped)) <= Tokens(Listed(everything)),
+            Report("changed_files path", Listed(scoped), Listed(everything)));
     }
 
     [Fact]
@@ -602,4 +604,8 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", counts, StringComparison.Ordinal);
         Assert.True(Tokens(counts) * 3 < Tokens(lines), Report("search_text countOnly", counts, lines));
     }
+
+    private static string Listed(string text) => string.Join(
+            '\n',
+            text.Split('\n').Where(line => !line.StartsWith("next:", StringComparison.Ordinal) && !ToolCensus.IsFraming(line)));
 }

@@ -109,6 +109,23 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task Cleanup_WithFixAll_WithholdsTheStaticFlipOnAPublicMemberButNotOnAnInternalOne()
+    {
+        var text = await server.CallAsync("cleanup", new()
+        {
+            ["path"] = StyleSample,
+            ["fix"] = "all",
+            ["ids"] = "CA1822",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("public static int Doubled", text, StringComparison.Ordinal);
+        Assert.Contains("UNFIXED CA1822 x1", text, StringComparison.Ordinal);
+        Assert.Contains("externally visible member", text, StringComparison.Ordinal);
+        Assert.Contains("+    internal static int Tripled(int quantity) => quantity * 3;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Cleanup_WithAnUnknownFixMode_RefusesAndNamesTheModes()
     {
         var text = await server.CallAsync("cleanup", new() { ["fix"] = "everything" });

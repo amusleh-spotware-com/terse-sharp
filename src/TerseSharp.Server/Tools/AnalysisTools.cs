@@ -102,7 +102,7 @@ public sealed class AnalysisTools(ToolContext context)
                     ? FormatService.RunAsync(
                         loaded,
                         new FixScope(scope.Value, changed),
-                        new FixRequest(mode.Value, Split(ids), Severity(severity), verify),
+                        new FixRequest(mode.Value, Split(ids), Severity(severity), verify) { MirrorsCi = verify },
                         new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
                         cancellationToken)
                     : Task.FromResult(Result.Fail<string>(scope.Error!));

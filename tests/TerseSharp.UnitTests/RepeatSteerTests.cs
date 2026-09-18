@@ -6,13 +6,29 @@ namespace TerseSharp.UnitTests;
 public sealed class RepeatSteerTests
 {
     [Fact]
-    public void Steer_SaysNothingUntilTheSecondCallOfTheSameTool()
+    public void Steer_SaysNothingUntilTheSecondCallOfTheSameTool_AndNothingAgainAfterIt()
     {
         RepeatSteer.Forget();
 
         Assert.Null(RepeatSteer.Steer("read_text"));
         Assert.Equal("2 read_text calls in a row - pass paths=[...] with the next 2+ in ONE call", RepeatSteer.Steer("read_text"));
-        Assert.Equal("3 read_text calls in a row - pass paths=[...] with the next 3+ in ONE call", RepeatSteer.Steer("read_text"));
+        Assert.Null(RepeatSteer.Steer("read_text"));
+    }
+
+    [Fact]
+    public void Steer_ForARunFarLongerThanTheThreshold_SteersOnceRatherThanOnEveryCall()
+    {
+        RepeatSteer.Forget();
+
+        var steered = 0;
+
+        for (var call = 0; call < 8; call++)
+        {
+            if (RepeatSteer.Steer("read_text") is not null)
+                steered++;
+        }
+
+        Assert.Equal(1, steered);
     }
 
     [Fact]

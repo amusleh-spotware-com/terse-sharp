@@ -3,6 +3,7 @@ using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
 
+[Collection(nameof(EditPulseCollection))]
 public sealed class AtomicWriteTests : IDisposable
 {
     private readonly DirectoryInfo directory = Directory.CreateTempSubdirectory("terse-atomic-");

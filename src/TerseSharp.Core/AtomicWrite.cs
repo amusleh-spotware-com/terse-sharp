@@ -7,7 +7,12 @@ public static class AtomicWrite
     public static Task TextAsync(string path, string content, bool workspaceDocument, CancellationToken cancellationToken = default) =>
         PersistAsync(path, content, workspaceDocument, cancellationToken);
 
-    public static Encoding EncodingOf(string path) => new UTF8Encoding(HasByteOrderMark(path));
+    public static Encoding EncodingOf(string path)
+    {
+        Span<byte> head = stackalloc byte[4];
+
+        return ByteOrderMark.EncodingOf(head[..Head(path, head)]);
+    }
 
     private static async Task PersistAsync(string path, string content, bool workspaceDocument, CancellationToken cancellationToken)
     {
@@ -21,7 +26,7 @@ public static class AtomicWrite
             await MoveAsync(temporary, path, cancellationToken).ConfigureAwait(false);
 
             if (workspaceDocument)
-                EditPulse.Bump(1);
+                EditPulse.Bump(path);
         }
         finally
         {
@@ -35,25 +40,21 @@ public static class AtomicWrite
             Directory.CreateDirectory(directory);
     }
 
-    private static bool HasByteOrderMark(string path)
+    private static int Head(string path, Span<byte> head)
     {
         try
         {
             using var stream = File.OpenRead(path);
-            var head = new byte[3];
 
-            return stream.ReadAtLeast(head, 3, throwOnEndOfStream: false) is 3
-                && head[0] is 0xEF
-                && head[1] is 0xBB
-                && head[2] is 0xBF;
+            return stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
         }
         catch (IOException)
         {
-            return false;
+            return 0;
         }
         catch (UnauthorizedAccessException)
         {
-            return false;
+            return 0;
         }
     }
 

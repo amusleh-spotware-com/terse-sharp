@@ -17,6 +17,25 @@ public static class BinaryContent
         Span<byte> probe = stackalloc byte[ProbeBytes];
         var read = stream.ReadAtLeast(probe, ProbeBytes, throwOnEndOfStream: false);
 
-        return probe[..read].Contains((byte)0);
+        return HasNullCodeUnit(probe[..read]);
+    }
+
+    private static bool HasNullCodeUnit(ReadOnlySpan<byte> probe)
+    {
+        var mark = ByteOrderMark.Detect(probe);
+        var units = probe[Math.Min(mark.Length, probe.Length)..];
+
+        return mark.CodeUnit is 1 ? units.Contains((byte)0) : HasZeroUnit(units, mark.CodeUnit);
+    }
+
+    private static bool HasZeroUnit(ReadOnlySpan<byte> units, int size)
+    {
+        for (var offset = 0; offset + size <= units.Length; offset += size)
+        {
+            if (!units.Slice(offset, size).ContainsAnyExcept((byte)0))
+                return true;
+        }
+
+        return false;
     }
 }

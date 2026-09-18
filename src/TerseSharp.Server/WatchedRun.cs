@@ -7,9 +7,9 @@ public readonly record struct WatchedRun(Func<Task<string>> Run)
 
     public async Task<string> InvokeAsync()
     {
-        var before = EditPulse.Changed;
+        var before = EditPulse.Material;
         var verdict = await Run().ConfigureAwait(false);
 
-        return StaleRun.Annotated(verdict, before, EditPulse.Changed);
+        return StaleRun.Annotated(verdict, before, EditPulse.Material);
     }
 }

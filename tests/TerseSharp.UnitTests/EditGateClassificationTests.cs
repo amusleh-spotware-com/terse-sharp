@@ -45,4 +45,23 @@ public sealed class EditGateClassificationTests
 
         Assert.True(EditGate.Unresolvable(MissingNamespace, [], baseline));
     }
+
+    [Fact]
+    public void Unimplemented_ForAToolThatHoldsARetryToken_NamesTheTypesAndTheSanctionedSequence()
+    {
+        var remedy = Errors.Unimplemented(["Fixture.Trading.NullOrderRepository"], "add_member");
+
+        Assert.StartsWith("the new member is declared in no implementation: Fixture.Trading.NullOrderRepository", remedy, StringComparison.Ordinal);
+        Assert.Contains("allowErrors=true and the retryWith token below", remedy, StringComparison.Ordinal);
+        Assert.Contains("then add_member on each of those types", remedy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unimplemented_ForAToolThatCannotHoldOne_TellsItToSendTheMembersInTheSameEdit()
+    {
+        var remedy = Errors.Unimplemented(["Fixture.Trading.NullOrderRepository"], "write_text");
+
+        Assert.DoesNotContain("retryWith", remedy, StringComparison.Ordinal);
+        Assert.Contains("add the member to each of those types in the same edit", remedy, StringComparison.Ordinal);
+    }
 }

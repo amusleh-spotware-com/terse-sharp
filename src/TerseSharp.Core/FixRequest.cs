@@ -16,7 +16,11 @@ public readonly record struct FixScope(string? Path, bool ChangedOnly);
 
 public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, DiagnosticSeverity Severity, bool Verify)
 {
+    public bool MirrorsCi { get; init; }
+
     public bool AppliesCodeFixes => Mode is FixMode.Style or FixMode.Analyzers or FixMode.All or FixMode.Ci;
+
+    public bool WithholdsVisibleShapeFixes => Mode is FixMode.All && !MirrorsCi;
 
     public bool CleansUsings => Mode is FixMode.Usings or FixMode.All;
 

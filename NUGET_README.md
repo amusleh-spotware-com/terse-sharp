@@ -132,7 +132,10 @@ cleanup verify=true fix=ci
 
 `analyze` reaches the info-severity CA/IDE rules a build never prints — `CA1822`, `CA1859`, `CA1806`,
 `CA1865` — `format` and `cleanup` apply the fixable set through the same compile-gated path, and
-`get_diagnostics` sweeps the whole solution for the consumer you broke. `build` answers a green build in
+`get_diagnostics` sweeps the whole solution for the consumer you broke. `cleanup fix=all` **withholds
+a fix that would rewrite the shape of an externally visible member** — `CA1822`'s instance-to-static
+flip breaks a Razor template or a data binding while every compiler gate stays green — and reports it
+`UNFIXED` instead. `cleanup verify=true` never withholds, so a verify cannot hide a red CI leg. `build` answers a green build in
 one line and a red one with **error-severity diagnostics only**; the warnings are a count until you ask
 for them.
 

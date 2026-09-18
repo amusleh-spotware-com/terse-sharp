@@ -84,7 +84,7 @@ public static class RepeatSteer
 
     private static string? Repeated(string tool, int count, string[] seen, int captured)
     {
-        if (count < Threshold || !Plural.TryGetValue(tool, out var plural))
+        if (count != Threshold || !Plural.TryGetValue(tool, out var plural))
             return null;
 
         if (Shape.TryGetValue(tool, out var shape))

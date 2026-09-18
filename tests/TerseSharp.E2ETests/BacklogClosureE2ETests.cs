@@ -962,7 +962,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         var steered = string.Empty;
 
-        for (var call = 0; call < 3; call++)
+        for (var call = 0; call < 2; call++)
             steered = await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
 
         var bare = ToolCensus.WithoutSteer(steered);

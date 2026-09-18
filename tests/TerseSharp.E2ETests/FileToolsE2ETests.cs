@@ -1784,4 +1784,29 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("the name= filter is applied after the glob", filtered, StringComparison.Ordinal);
         Assert.DoesNotContain("symlink", filtered, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_ForAFileCarryingAUtf16ByteOrderMark_ServesItInsteadOfCallingItBinary()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-utf16");
+
+        try
+        {
+            var path = Path.Combine(directory.FullName, "TransactionsReport.cshtml");
+
+            await File.WriteAllBytesAsync(
+                path,
+                [.. System.Text.Encoding.Unicode.GetPreamble(), .. System.Text.Encoding.Unicode.GetBytes("@Model.BalanceString\n")],
+                TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("read_text", new() { ["path"] = path });
+
+            Assert.Contains("@Model.BalanceString", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("looks binary", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
 }

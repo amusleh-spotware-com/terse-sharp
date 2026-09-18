@@ -119,6 +119,9 @@ public static class EditGate
 
         if (report.Callers is { Length: > 0 } callers)
             response.Note(Errors.CallerBatch(callers));
+
+        if (report.Implementers is { Length: > 0 } implementers)
+            response.Note(Errors.Unimplemented(implementers, tool));
     }
 
     private static string Describe(GateReport report, bool verbose) => verbose
@@ -145,12 +148,12 @@ public static class EditGate
     }
 
     private static async Task<GateReport> AnalyseAsync(
-        Solution before,
-        Solution after,
-        IReadOnlyList<DocumentId> changed,
-        string root,
-        ImmutableArray<string> usings,
-        CancellationToken cancellationToken)
+            Solution before,
+            Solution after,
+            IReadOnlyList<DocumentId> changed,
+            string root,
+            ImmutableArray<string> usings,
+            CancellationToken cancellationToken)
     {
         var projects = Affected(before, changed);
         var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
@@ -170,7 +173,8 @@ public static class EditGate
             await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
             [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
             Collided(regressions, usings),
-            [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)]);
+            [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
+            ImplementerHint(regressions));
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -280,17 +284,18 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-        string[] NewErrors,
-        string[] Unresolved,
-        int Errors,
-        int ErrorDelta,
-        int Warnings,
-        int WarningDelta,
-        string[]? Imports,
-        string[]? Callers,
-        string[] NewWarnings,
-        string[]? Collisions,
-        string[] NewInfos);
+            string[] NewErrors,
+            string[] Unresolved,
+            int Errors,
+            int ErrorDelta,
+            int Warnings,
+            int WarningDelta,
+            string[]? Imports,
+            string[]? Callers,
+            string[] NewWarnings,
+            string[]? Collisions,
+            string[] NewInfos,
+            string[]? Implementers);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,
@@ -571,7 +576,7 @@ public static class EditGate
 
     private static TerseError? Blocked(GateReport? report, PolicyVerdict policy, string tool) => report switch
     {
-        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers, report.Collisions, tool),
+        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers, report.Collisions, tool, report.Implementers),
         _ => policy.Blocks ? Errors.PolicyViolation(policy) : null,
     };
 
@@ -631,4 +636,25 @@ public static class EditGate
     }
 
     private const string Separator = ", ";
+
+    private static bool IsUnimplemented(string key) =>
+            key.StartsWith("CS0535 ", StringComparison.Ordinal) || key.StartsWith("CS0534 ", StringComparison.Ordinal);
+
+    private static string[]? ImplementerHint(string[] errors)
+    {
+        if (errors.Length is 0)
+            return null;
+
+        var types = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var error in errors)
+        {
+            if (!IsUnimplemented(error) || Quoted(error) is not { Length: > 0 } type)
+                return null;
+
+            types.Add(type);
+        }
+
+        return types.Count is 0 ? null : [.. types];
+    }
 }

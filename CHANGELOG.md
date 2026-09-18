@@ -8,6 +8,84 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-09-18
+
+### Fixed
+
+- **`cleanup fix=all` no longer flips an externally visible instance member to `static`.** Reported
+  against 0.63.0 from a 149-project solution: `gate changed=true` applied `CA1822` to
+  `public string BalanceString => ...` on a Razor report model, the gate's own verdict stayed clean,
+  and the statement export then failed at RazorEngineCore template-compile time - on the user's export
+  click. The C# compiler, the build, the analyzers and this server's compile gate are all blind to it,
+  because the only consumer is `@Model.BalanceString` in a `.cshtml`. `fix=all` now withholds a fix
+  whose id is in `VisibleShapeFixes` (today `CA1822`) on a member that is externally visible - the
+  member and every containing type `public`, `protected` or `protected internal` - and reports the
+  withheld occurrences as `UNFIXED CA1822 xN` with the reason instead of applying them silently. A
+  `private` or `internal` member is still flipped, and `gate` inherits the behaviour because it runs
+  `cleanup fix=all`. Two modes never withhold: `fix=analyzers` and `fix=ci`, which exist to mirror
+  `dotnet format analyzers` byte for byte, and **`cleanup verify=true`**, so a verify can never answer
+  clean where the ubuntu format leg would go red. `gate` withholds under `dryRun=true` as well, so its
+  preview is exactly what it writes. Covered by
+  `Cleanup_WithAllFixes_WithholdsTheStaticFlipOnAnExternallyVisibleMember`,
+  `Cleanup_WithAllFixes_StillFlipsAMemberNothingOutsideTheAssemblyCanReach`,
+  `Cleanup_WithAnalyzerFixes_MirrorsCiAndStillFlipsTheExternallyVisibleMember`,
+  `Cleanup_WithAllFixesUnderVerify_WithholdsNothingSoItCannotHideARedCiLeg`,
+  `WithholdsVisibleShapeFixes_IsOnOnlyWhereTheModeWritesAndDoesNotMirrorCi`,
+  `WithholdsVisibleShapeFixes_ForTheRequestGateBuildsUnderDryRun_StaysOnSoThePreviewMatchesTheWrite` and
+  `Cleanup_WithFixAll_WithholdsTheStaticFlipOnAPublicMemberButNotOnAnInternalOne`.
+- **`read_text` served a UTF-16 file as `ERROR InvalidArgument: ... looks binary`.** The binary probe
+  looked for a zero *byte*, which every UTF-16 or UTF-32 encoding of ASCII text carries, so a
+  legacy-encoded `.cshtml` - 17 820 bytes of pure text - was unreadable and editing it fell back to
+  shell round trips with no `.cshtml`-capable tool to route to. The probe now reads the byte order
+  mark first and looks for a zero *code unit* of that encoding, so UTF-16 LE/BE, UTF-32 and UTF-8-BOM
+  text is served while a real NUL still refuses. A BOM-less UTF-16 file is still refused, because
+  nothing distinguishes it from binary. Covered by
+  `Reject_ForTextCarryingAByteOrderMark_ServesItInsteadOfCallingItBinary`,
+  `Reject_ForUtf16TextHoldingARealNullCharacter_RefusesIt`,
+  `Reject_ForBytesWithNoByteOrderMarkAndANullByte_StillRefusesThem` and
+  `ReadText_ForAFileCarryingAUtf16ByteOrderMark_ServesItInsteadOfCallingItBinary`.
+- **The `STALE n document(s) changed after this run started` marker counted documents no build reads.**
+  A `SolutionTests` run came back `STALE 1` where the only concurrent edit was a repo-root markdown
+  working note, and re-running that verdict cost about four minutes of solution build. `EditPulse`
+  now keeps two counters: `Changed` still counts **every** write, so the `build UNCHANGED` /
+  `run_tests UNCHANGED` memo and the build cache key cannot go stale on a markdown file a project
+  embeds; `Material` skips `.md`/`.markdown` and is what the STALE marker reads. Covered by
+  `ChangesABuild_TreatsOnlyAMarkdownWorkingNoteAsImmaterial`,
+  `Bump_ForAMarkdownWorkingNote_MovesTheWriteCounterButNotTheOneStaleReads` and
+  `Bump_ForADocumentABuildReads_MovesBothCounters`.
+
+### Added
+
+- **A rollback whose every new error is a missing implementation (`CS0535`/`CS0534`) names the types
+  that owe it, and the sanctioned sequence.** `add_member` on an interface with two implementers cost
+  a rejected call plus three more to recover, and the generic remedy named none of it. The remedy now
+  reads `the new member is declared in no implementation: <types>` followed by the one shape that
+  works when the member cannot exist on both sides at once - retry with `allowErrors=true` and the
+  `retryWith` token to land the declaration, then one `add_member` per named type - and the
+  `add_member` description says the same thing. It rides on the `dryRun=true` preview as well as on
+  the real rollback, so the cheap call is the one that answers. This joins the `CS0246` → `usings=`
+  and `CS7036` → callers remedies. Covered by
+  `AddMember_OnAnInterfaceWithImplementations_NamesThemAndTheSanctionedSequence`,
+  `AddMember_OnAnInterfaceWithImplementations_NamesThemInTheDryRunPreviewToo`,
+  `Unimplemented_ForAToolThatHoldsARetryToken_NamesTheTypesAndTheSanctionedSequence` and
+  `Unimplemented_ForAToolThatCannotHoldOne_TellsItToSendTheMembersInTheSameEdit`.
+
+### Changed
+
+- **Every writer round-trips a file's byte order mark instead of re-encoding it as UTF-8.**
+  `AtomicWrite.EncodingOf` read three bytes and answered UTF-8 with or without a BOM; it now reads
+  four and answers UTF-16 LE/BE, UTF-32 LE/BE or UTF-8 as the file itself is encoded. A `.resx`,
+  `.csproj`, `.xaml` or `.cshtml` that was UTF-16 stays UTF-16 where it previously became UTF-8. A
+  file that does not exist yet still answers UTF-8 with no BOM, so no write stamps a mark onto a file
+  that had none. Covered by
+  `EncodingOf_ForAFileWithAUtf16ByteOrderMark_RoundTripsItInsteadOfRewritingItAsUtf8`.
+- **The batch steer fires once per run, not on every call after the second.** A run of six
+  `add_member` calls printed five `N add_member calls in a row` lines; the advice is worth reading
+  once. It now rides only on the call that reaches the threshold, and the run still resets on a
+  different tool or on a call that already batched. Covered by
+  `Steer_SaysNothingUntilTheSecondCallOfTheSameTool_AndNothingAgainAfterIt` and
+  `Steer_ForARunFarLongerThanTheThreshold_SteersOnceRatherThanOnEveryCall`.
+
 ## [0.64.0] - 2026-09-18
 
 ### Added
@@ -6179,7 +6257,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.64.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.65.0...HEAD
+[0.65.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.65.0
 [0.64.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.64.0
 [0.63.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.63.0
 [0.62.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.62.0

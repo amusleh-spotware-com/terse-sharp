@@ -1160,4 +1160,34 @@ public sealed class RegionTail
 
     private static string Ended(string body, string ending) =>
         ending is "\n" ? body : body.Replace("\n", ending, StringComparison.Ordinal);
+
+    [Fact]
+    public async Task AddMember_OnAnInterfaceWithImplementations_NamesThemAndTheSanctionedSequence()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.IOrderRepository",
+            ["declaration"] = "string Label { get; }",
+        });
+
+        Assert.StartsWith("ERROR CompileRegression", text, StringComparison.Ordinal);
+        Assert.Contains("CS0535", text, StringComparison.Ordinal);
+        Assert.Contains("the new member is declared in no implementation", text, StringComparison.Ordinal);
+        Assert.Contains("InMemoryOrderRepository, NullOrderRepository", text, StringComparison.Ordinal);
+        Assert.Contains("retryWith=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_OnAnInterfaceWithImplementations_NamesThemInTheDryRunPreviewToo()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.IOrderRepository",
+            ["declaration"] = "string Caption { get; }",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("the new member is declared in no implementation: InMemoryOrderRepository, NullOrderRepository", text, StringComparison.Ordinal);
+    }
 }
