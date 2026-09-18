@@ -1796,4 +1796,21 @@ public sealed class ToolGuardTests
             || (verdict.Routing ?? string.Empty).StartsWith("list_tests", StringComparison.Ordinal),
             command + " routed to " + verdict.Routing);
     }
+
+    [Fact]
+    public async Task Inspect_ForATextCommandFedByAPipeWithNoPathOperand_AllowsItInsideADotNetTree()
+    {
+        var (dotnet, _) = await TreesAsync();
+
+        foreach (var command in new[]
+        {
+            "gh run view 42 --log 2>&1 | grep -iE \"error|failed\" | head -15",
+            "gh run view 42 --log | grep -i failure",
+        })
+        {
+            var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, dotnet);
+
+            Assert.False(verdict.Denied, NotHermetic(dotnet, verdict.Reason));
+        }
+    }
 }

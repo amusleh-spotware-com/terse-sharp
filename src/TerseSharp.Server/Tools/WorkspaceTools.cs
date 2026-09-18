@@ -115,16 +115,17 @@ CancellationToken cancellationToken = default) =>
     }
 
     [McpServerTool(Name = "workspace_status", ReadOnly = true)]
-    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out.")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round.")]
     public Task<string> WorkspaceStatus(
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
-        CancellationToken cancellationToken = default) =>
-        context.WithWorkspaceAsync(
-            workspace,
-            null,
-            async loaded => AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
-            cancellationToken: cancellationToken);
+            [Description("Workspace or worktree name.")] string? workspace = null,
+            [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
+            [Description("Price every advertised tool's whole schema - name, description and parameters - one line per tool in tokens, descending. Default false.")] bool tools = false,
+            CancellationToken cancellationToken = default) =>
+            context.WithWorkspaceAsync(
+                workspace,
+                null,
+                async loaded => AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
+                cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]
     [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. properties=\"IsTestProject,TargetFramework\" adds each project's EVALUATED value to its line, so 'which projects set X' is ONE call, a Directory.Build.props value is answered rather than missed, and an undefined one reads (unset). path=<file> answers the opposite question - which project compiles that file, and whether an edit to it would be compile-gated; the two are refused together. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
@@ -148,11 +149,12 @@ CancellationToken cancellationToken = default) =>
         WorkspaceDiscovery.Find(Directory.GetCurrentDirectory()) is [var first, ..] ? first : null;
 
     private static async Task<string> RenderStatusAsync(
-            LoadedWorkspace workspace,
-            bool verbose,
-            ToolSurface surface,
-            WorkspaceMarkup served,
-            CancellationToken cancellationToken)
+                LoadedWorkspace workspace,
+                bool verbose,
+                bool tools,
+                ToolSurface surface,
+                WorkspaceMarkup served,
+                CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("workspace_status", workspace.SolutionPath).Verbose(verbose);
         var divergence = await WorkspaceDivergence.FindAsync(workspace, cancellationToken).ConfigureAwait(false);
@@ -172,6 +174,9 @@ CancellationToken cancellationToken = default) =>
 
         if (AdvertisedCost.Describe(verbose) is { } cost)
             response.Note(cost);
+
+        if (tools && AdvertisedCost.PerTool() is { } priced)
+            response.Note(priced);
 
         if (verbose)
             response.Note(workspace.Indexes.Describe());

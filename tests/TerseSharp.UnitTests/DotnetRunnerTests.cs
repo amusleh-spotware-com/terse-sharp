@@ -930,4 +930,16 @@ public sealed class DotnetRunnerTests
         Assert.Contains("slowAssembly=TerseSharp.E2ETests", text, StringComparison.Ordinal);
         Assert.Contains("6000ms/test", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void RenderTest_ForARedRun_EndsWithTheRerunFailedCallForTheTestsItJustNamed()
+    {
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(1, string.Empty, 3000),
+            new TestRunReport(1, 2, 0, 3, 120, [new("Ns.A.Fails", "boom", null, 10), new("Ns.B.AlsoFails", "boom", null, 12)], []),
+            new TestRunRequest("sln", null, false, false, 0, TimeSpan.FromSeconds(600)),
+            "C:/repo");
+
+        Assert.Contains("next: rerun_failed tests=[\"Ns.A.Fails\", \"Ns.B.AlsoFails\"]", text, StringComparison.Ordinal);
+    }
 }

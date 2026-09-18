@@ -194,6 +194,6 @@ public static class RepeatSteer
     {
         ["edit_text"] = "each entry is {path, oldText, newText} and may carry its OWN path, so a run across DIFFERENT files is one call",
         ["write_text"] = "each entry is {path, content} and carries its OWN path, and every .cs among them shares ONE compile gate",
-        ["resx_set"] = "each entry is {path, entries} and carries its OWN path, so one key across many culture files is ONE call - and comment= is written into every file of the batch",
+        ["resx_set"] = "each entry is {path, entries} and carries its OWN path, so one key across many culture files is ONE call - comment= is written into every file of the batch, and the cap is 10 files per call, so 46 cultures is 5 calls, not 46",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 }

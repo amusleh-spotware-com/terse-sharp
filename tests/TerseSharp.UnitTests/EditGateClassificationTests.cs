@@ -47,13 +47,23 @@ public sealed class EditGateClassificationTests
     }
 
     [Fact]
-    public void Unimplemented_ForAToolThatHoldsARetryToken_NamesTheTypesAndTheSanctionedSequence()
+    public void Unimplemented_ForAddMember_NamesTheOneCallThatLandsTheInterfaceMemberAndEveryImplementation()
     {
         var remedy = Errors.Unimplemented(["Fixture.Trading.NullOrderRepository"], "add_member");
 
         Assert.StartsWith("the new member is declared in no implementation: Fixture.Trading.NullOrderRepository", remedy, StringComparison.Ordinal);
+        Assert.Contains("add_member typeSymbolIds=[", remedy, StringComparison.Ordinal);
+        Assert.Contains("\"Fixture.Trading.NullOrderRepository\"", remedy, StringComparison.Ordinal);
+        Assert.DoesNotContain("allowErrors=true", remedy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unimplemented_ForAToolThatHoldsARetryToken_NamesTheTokenAndThenTheBatchThatLandsTheImplementations()
+    {
+        var remedy = Errors.Unimplemented(["Fixture.Trading.NullOrderRepository"], "replace_symbol");
+
         Assert.Contains("allowErrors=true and the retryWith token below", remedy, StringComparison.Ordinal);
-        Assert.Contains("then add_member on each of those types", remedy, StringComparison.Ordinal);
+        Assert.Contains("add_member typeSymbolIds=[", remedy, StringComparison.Ordinal);
     }
 
     [Fact]

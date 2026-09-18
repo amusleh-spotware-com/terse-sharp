@@ -8,6 +8,88 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`add_member typeSymbolIds=[...]` paired with `declarations=[...]` adds a member to SEVERAL types as
+  ONE compile-gated edit.** Adding a member to an interface and its implementers was four calls - the
+  rejected `add_member`, a retry with `allowErrors=true`, then one `add_member` per implementer - and
+  the tree did not compile in between, so any concurrent build was red for the whole window. The pair
+  is positional, at most 20 entries, applied across every file the types live in as one edit, so the
+  intermediate state never exists. `declaration=` or `path=` beside it is refused rather than silently
+  dropped, unpaired arrays are refused naming both counts, and a blank id is refused by name. The
+  `CS0535`/`CS0534` rollback now names this call instead of the old four-step sequence. Covered by
+  `AddMember_WithTypeSymbolIdsPairedWithDeclarations_LandsInEveryTypeAsOneEdit`,
+  `AddMember_WithUnpairedTypeSymbolIdsAndDeclarations_IsRefusedNamingBothCounts`,
+  `AddMember_WithTypeSymbolIdsBesideASingularDeclaration_IsRefusedRatherThanDroppingIt`,
+  `Unimplemented_ForAddMember_NamesTheOneCallThatLandsTheInterfaceMemberAndEveryImplementation` and
+  `Unimplemented_ForAToolThatHoldsARetryToken_NamesTheTokenAndThenTheBatchThatLandsTheImplementations`.
+- **`workspace_status tools=true` prices every advertised tool's schema.** One line per tool -
+  `perTool=<n> advertised, schema tokens descending`, then `  <tool> <tokens>` - measured over the
+  whole schema, name, description and every parameter description. Trimming descriptions under a token
+  cap previously ran as a binary search of eight edits and four whole build-and-test rounds, because
+  the only instrument was a census test that had to be written first. Covered by
+  `WorkspaceStatus_WithTools_PricesEveryAdvertisedToolSoADescriptionEditNeedsNoBuildRound` and
+  `WorkspaceStatus_WithoutTools_PricesNothingPerTool`.
+
+### Changed
+
+- **An `add_member` anchor resolves the spelling a read tool prints, and adjacent overloads need no
+  parameter list at all.** `before=`/`after=` are matched through four tiers - exact ordinal, then
+  whitespace-insensitive, then structural with parameter names and nullable annotations dropped, then
+  the bare name - and a tier wins only when its matches form a contiguous run. So
+  `after="Reconcile"` places the member below the last of three adjacent overloads instead of refusing,
+  and `after="Reconcile(Order, decimal)"` - the spelling `get_file_outline` prints - resolves without
+  the exact signature. Overloads that sit apart in the file are still refused, and the refusal now says
+  so. New span-based `AnchorSignature` canonicaliser. Covered by
+  `AddMember_AnchoredOnAnOverloadedNameWhoseOverloadsSitTogether_PlacesItInsteadOfRefusing`,
+  `AddMember_AnchoredOnTheSpellingAnOutlinePrints_ResolvesTheOverloadWithoutTheExactSignature`,
+  `AddMember_AnchoredOnANameTheTypeDoesNotDeclare_IsStillRefusedByName`,
+  `Canonical_Structurally_ResolvesTheSpellingAnOutlinePrints`,
+  `Canonical_Structurally_StillSeparatesDifferentParameterLists` and
+  `Canonical_AtTheSpacingTier_KeepsTheNullableAnnotationThatPicksAnOverload`.
+- **A red `run_tests` verdict ends with the `rerun_failed` call for the failures it just named** -
+  `next: rerun_failed tests=["A", "B"]` up to ten names, and the bare `rerun_failed` past that.
+  `rerun_failed` was called **0 times in 10 118 terse calls across 115 sessions** while `run_tests`
+  answered red 529 times at a mean 57.0 s; this is the response-side hand-over that moved
+  `diff_symbols` off zero. A green run offers nothing. Covered by
+  `RenderTest_ForARedRun_EndsWithTheRerunFailedCallForTheTestsItJustNamed`.
+- **The `STALE` marker names the documents that moved**, up to three, workspace-relative, in
+  parentheses after the count. `EditPulse` remembers the last eight material writes with their
+  counter position, `EditGate` bumps per changed document rather than by count, and `StaleRun`
+  relativises against the loaded workspace roots. A count alone left the caller re-running a build
+  measured at ~4 minutes, or ignoring the marker. Covered by
+  `Since_NamesTheDocumentsWrittenAfterTheWatermark_SoTheStaleLineIsActionable`.
+- **A rollback whose every new error is an unassigned new field names the one call that lands both** -
+  `the new field is never assigned: <field> - send it in the SAME edit as the member that writes it:
+  replace_symbol symbolId="<that member>" add=["<this field's declaration>"]`. `CS0649` and `CS0169`
+  on a field the edit itself introduces used to fall through to the generic remedy, costing two
+  rejected calls and two re-sent declarations for every counter, cache or memo added to an existing
+  type. The four rollback hint kinds moved into one `RollbackHints` record, so
+  `Errors.CompileRegression` takes it instead of five nullable lists. Covered by
+  `CompileRegression_ForAFieldThisEditAddsWithNoWriter_NamesTheOneCallThatLandsBoth`,
+  `CompileRegression_ForAFieldRejectedByAToolThatCannotBatchASymbolEdit_DoesNotNameReplaceSymbol`,
+  `CompileRegression_WithNoHint_KeepsTheGenericRemedy` and
+  `CompileRegression_WhenSeveralHintsAreSet_PrefersTheMoreSpecificOne`.
+- **The `resx_set` batch steer names the 10-file cap and costs the run** - `the cap is 10 files per
+  call, so 46 cultures is 5 calls, not 46`. It is the one tool whose measured run length (46
+  consecutive calls, `files=` unused on 99 of 106) exceeds its own cap. Covered by
+  `Steer_ForARunOfResourceWrites_NamesTheTenFileCapSoALongRunIsCostedBeforeItStarts`.
+
+### Fixed
+
+- **`cleanup fix=all` no longer withholds `CA1822` on a `protected` member of a `sealed` or `static`
+  type.** `VisibleShapeFixes.Visible` treated `protected` as externally visible at every level, so a
+  member nothing can derive from - and therefore nothing outside can reach - was reported `UNFIXED`
+  for no benefit, leaving the user to apply the fix by hand. Reachability is now decided per symbol:
+  `Public` always, `Protected` and `ProtectedOrInternal` only when the containing type is neither
+  sealed nor static. The fail-safe direction is unchanged. Covered by
+  `Visible_FollowsWhetherAnythingOutsideTheAssemblyCanActuallyReachTheMember`.
+- **`changed_files` derives each untracked file's top directory once instead of twice.** `Tally`
+  counted per directory and `Fold` then re-derived the same directory per file, so the prefix walk ran
+  `2N` times for `N` untracked files - 560 comparisons on a 280-file working tree, on the tool's
+  most-called path. `Tally` now returns the per-file prefix lengths it already computed and `Fold`
+  slices with them. Behaviour is unchanged.
+
 ## [0.65.0] - 2026-09-18
 
 ### Fixed
@@ -67,7 +149,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   and `CS7036` → callers remedies. Covered by
   `AddMember_OnAnInterfaceWithImplementations_NamesThemAndTheSanctionedSequence`,
   `AddMember_OnAnInterfaceWithImplementations_NamesThemInTheDryRunPreviewToo`,
-  `Unimplemented_ForAToolThatHoldsARetryToken_NamesTheTypesAndTheSanctionedSequence` and
+  `Unimplemented_ForAToolThatHoldsARetryToken_NamesTheTokenAndThenTheBatchThatLandsTheImplementations` and
   `Unimplemented_ForAToolThatCannotHoldOne_TellsItToSendTheMembersInTheSameEdit`.
 
 ### Changed

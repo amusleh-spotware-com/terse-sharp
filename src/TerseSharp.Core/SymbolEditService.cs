@@ -428,9 +428,9 @@ public static class SymbolEditService
             : Result.Fail<PlannedEdit>(parsed.Error!);
     }
 
-    private static TerseError Mismatched(int symbolIds, int declarations) => Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"symbolIds has {symbolIds} entries and declarations has {declarations}, so they cannot be paired"),
-        "pass one declaration per symbolId, in the same order");
+    private static TerseError Mismatched(int symbolIds, int declarations, string ids = "symbolIds") => Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"{ids} has {symbolIds} entries and declarations has {declarations}, so they cannot be paired"),
+            "pass one declaration per id, in the same order");
 
     private static TerseError TooMany(int requested) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"a batch carries at most {MaxBatchedEdits} edits and {requested} were passed"),
@@ -762,11 +762,11 @@ public static class SymbolEditService
             ? "addTo=" + wanted + " names none of the containing types of these targets: " + string.Join(", ", types.Select(Named))
             : "add= appends to the type that contains the replaced member, and these targets do not share one: " + string.Join(", ", types.Select(Named));
 
-    private static TerseError Attributed(TerseError error, int index) => error with
+    private static TerseError Attributed(TerseError error, int index, string ids = "symbolIds") => error with
     {
         Message = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{(error.Code is TerseErrorCode.InvalidArgument ? "declarations" : "symbolIds")}[{index}]: {error.Message}"),
+                CultureInfo.InvariantCulture,
+                $"{(error.Code is TerseErrorCode.InvalidArgument ? "declarations" : ids)}[{index}]: {error.Message}"),
     };
 
     private static Result<string> Warned(Result<string> applied, string warning) =>
@@ -1095,11 +1095,13 @@ public static class SymbolEditService
         return dot < 0 ? head : head[(dot + 1)..];
     }
 
-    private static bool Names(MemberDeclarationSyntax member, string reference, bool whole) =>
-        Signature(member) is { } signature
-        && (whole
-            ? signature.AsSpan().Equals(reference, StringComparison.Ordinal)
-            : Plain(signature).Equals(Plain(reference), StringComparison.Ordinal));
+    private static bool Names(MemberDeclarationSyntax member, string reference, AnchorTier tier) =>
+            Signature(member) is { } signature && tier switch
+            {
+                AnchorTier.Exact => signature.AsSpan().Equals(reference, StringComparison.Ordinal),
+                AnchorTier.Name => Plain(signature).Equals(Plain(reference), StringComparison.Ordinal),
+                _ => string.Equals(AnchorSignature.Canonical(signature, tier), AnchorSignature.Canonical(reference, tier), StringComparison.Ordinal),
+            };
 
     private static string PlacementCandidates(TypeDeclarationSyntax type)
     {
@@ -1131,19 +1133,19 @@ public static class SymbolEditService
     private static Result<int> Indexed(TypeDeclarationSyntax type, string wanted, int offset, string parameter)
     {
         var reference = Reference(wanted);
-        var exact = Anchored(type, reference, whole: true);
+        var widest = new AnchorMatch(-1, -1, 0);
 
-        if (exact.Count is 1)
-            return Result.Ok(exact.First + offset);
-
-        var loose = Anchored(type, reference, whole: false);
-
-        return loose.Count switch
+        foreach (var tier in AnchorTiers)
         {
-            1 => Result.Ok(loose.First + offset),
-            0 => Result.Fail<int>(PlacementNotFound(type, wanted, parameter)),
-            _ => Result.Fail<int>(PlacementAmbiguous(type, wanted, parameter, reference)),
-        };
+            widest = Anchored(type, reference, tier);
+
+            if (widest.Adjacent)
+                return Result.Ok(offset is 0 ? widest.First : widest.Last + 1);
+        }
+
+        return Result.Fail<int>(widest.Count is 0
+            ? PlacementNotFound(type, wanted, parameter)
+            : PlacementAmbiguous(type, wanted, parameter, reference));
     }
 
     private static int Positioned(TypeDeclarationSyntax type, MemberPosition position) => position switch
@@ -1187,23 +1189,25 @@ public static class SymbolEditService
     private static readonly SearchValues<char> NameMarkers = SearchValues.Create("(<`~");
 
     private static TerseError PlacementAmbiguous(TypeDeclarationSyntax type, string wanted, string parameter, string reference) => Errors.Invalid(
-        string.Create(
-            CultureInfo.InvariantCulture,
-            $"{parameter}={wanted} names {AmbiguousAnchors(type, reference)}, so the insertion point is not decided"),
-        "pass one of those exactly as written - a parameter list picks one overload, and a bare name cannot");
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"{parameter}={wanted} names {AmbiguousAnchors(type, reference)}, which do not sit next to each other, so the insertion point is not decided"),
+            "pass one of those, or any spelling of its parameter list - whitespace, parameter names and nullable annotations are ignored; adjacent overloads need no parameter list at all");
 
-    private readonly record struct AnchorMatch(int First, int Count)
+    private readonly record struct AnchorMatch(int First, int Last, int Count)
     {
-        public AnchorMatch With(int index) => Count is 0 ? new AnchorMatch(index, 1) : this with { Count = Count + 1 };
+        public AnchorMatch With(int index) => Count is 0 ? new AnchorMatch(index, index, 1) : new AnchorMatch(First, index, Count + 1);
+
+        public bool Adjacent => Count > 0 && Last - First + 1 == Count;
     }
 
-    private static AnchorMatch Anchored(TypeDeclarationSyntax type, string reference, bool whole)
+    private static AnchorMatch Anchored(TypeDeclarationSyntax type, string reference, AnchorTier tier)
     {
-        var match = new AnchorMatch(-1, 0);
+        var match = new AnchorMatch(-1, -1, 0);
 
         for (var index = 0; index < type.Members.Count; index++)
         {
-            if (Names(type.Members[index], reference, whole))
+            if (Names(type.Members[index], reference, tier))
                 match = match.With(index);
         }
 
@@ -1216,7 +1220,7 @@ public static class SymbolEditService
 
         foreach (var member in type.Members)
         {
-            if (Names(member, reference, whole: false) && Signature(member) is { } signature)
+            if (Names(member, reference, AnchorTier.Name) && Signature(member) is { } signature)
                 names.Add(signature);
         }
 
@@ -1237,6 +1241,88 @@ public static class SymbolEditService
     private static bool StartsALine(SyntaxToken closeBrace) =>
         closeBrace.LeadingTrivia.Any(SyntaxKind.EndOfLineTrivia)
         || closeBrace.GetPreviousToken().TrailingTrivia.Any(SyntaxKind.EndOfLineTrivia);
+
+    private static readonly AnchorTier[] AnchorTiers = [AnchorTier.Exact, AnchorTier.Spacing, AnchorTier.Structural, AnchorTier.Name];
+
+    public static async Task<Result<string>> AddMembersAsync(
+            LoadedWorkspace workspace,
+            IReadOnlyList<string> typeSymbolIds,
+            IReadOnlyList<string> declarations,
+            EditOptions options,
+            CancellationToken cancellationToken)
+    {
+        if (typeSymbolIds.Count != declarations.Count)
+            return Result.Fail<string>(Mismatched(typeSymbolIds.Count, declarations.Count, "typeSymbolIds"));
+
+        if (typeSymbolIds.Count is 0 or > MaxBatchedEdits)
+            return Result.Fail<string>(TooMany(typeSymbolIds.Count));
+
+        var planned = await AdditionsAsync(workspace, typeSymbolIds, declarations, options, cancellationToken).ConfigureAwait(false);
+
+        return planned.IsOk
+            ? await SwappedManyAsync(workspace, planned.Value!, options, [], cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(planned.Error!);
+    }
+
+    private static async Task<Result<PlannedEdit[]>> AdditionsAsync(
+            LoadedWorkspace workspace,
+            IReadOnlyList<string> typeSymbolIds,
+            IReadOnlyList<string> declarations,
+            EditOptions options,
+            CancellationToken cancellationToken)
+    {
+        var planned = new PlannedEdit[typeSymbolIds.Count];
+
+        for (var index = 0; index < planned.Length; index++)
+        {
+            var one = await AdditionAsync(workspace, typeSymbolIds[index], declarations[index], options, cancellationToken).ConfigureAwait(false);
+
+            if (!one.IsOk)
+                return Result.Fail<PlannedEdit[]>(Attributed(one.Error!, index, "typeSymbolIds"));
+
+            planned[index] = one.Value;
+        }
+
+        return Result.Ok(planned);
+    }
+
+    private static async Task<Result<PlannedEdit>> AdditionAsync(
+            LoadedWorkspace workspace,
+            string typeSymbolId,
+            string declaration,
+            EditOptions options,
+            CancellationToken cancellationToken)
+    {
+        var symbol = await SymbolLookup.ResolveAsync(workspace, typeSymbolId, null, cancellationToken, typesOnly: true).ConfigureAwait(false);
+
+        if (!symbol.IsOk)
+            return Result.Fail<PlannedEdit>(symbol.Error!);
+
+        var target = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
+
+        return target?.Node is TypeDeclarationSyntax type
+            ? Insertion(target, type, declaration, options)
+            : Result.Fail<PlannedEdit>(Errors.Invalid(
+                "the target is not a type declaration",
+                "pass a type symbol id - an enum container and a path= file take one add_member call each"));
+    }
+
+    private static Result<PlannedEdit> Insertion(EditTarget target, TypeDeclarationSyntax type, string declaration, EditOptions options)
+    {
+        var members = MemberDeclaration.ParseAll(MemberDeclaration.Reindented(declaration, type.GetLocation().GetLineSpan().StartLinePosition.Character));
+
+        if (!members.IsOk)
+            return Result.Fail<PlannedEdit>(members.Error!);
+
+        if (NameTaken(type, members.Value!) is { } taken)
+            return Result.Fail<PlannedEdit>(taken);
+
+        var at = Placed(type, options.Placement);
+
+        return at.IsOk
+            ? Result.Ok(new PlannedEdit(target, [Appended(type, Formattable(members.Value!), at.Value)], false))
+            : Result.Fail<PlannedEdit>(at.Error!);
+    }
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

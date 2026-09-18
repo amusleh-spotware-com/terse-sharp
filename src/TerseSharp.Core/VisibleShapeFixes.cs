@@ -59,10 +59,19 @@ public static class VisibleShapeFixes
     {
         for (var current = symbol; current is not null and not INamespaceSymbol; current = current.ContainingSymbol)
         {
-            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Protected or Accessibility.ProtectedOrInternal))
+            if (!Reachable(current))
                 return false;
         }
 
         return true;
     }
+
+    private static bool Reachable(ISymbol symbol) => symbol.DeclaredAccessibility switch
+    {
+        Accessibility.Public => true,
+        Accessibility.Protected or Accessibility.ProtectedOrInternal => Derivable(symbol.ContainingType),
+        _ => false,
+    };
+
+    private static bool Derivable(INamedTypeSymbol? type) => type is not null && !type.IsSealed && !type.IsStatic;
 }

@@ -463,8 +463,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var byDirectory = counts.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        Tally(kept, scope, byDirectory);
-        Fold(kept, scope, byDirectory, rows);
+        Fold(kept, Tally(kept, scope, byDirectory), byDirectory, rows);
     }
 
     private static ReadOnlySpan<char> TopDirectory(ReadOnlySpan<char> path, ReadOnlySpan<char> scope)
@@ -902,35 +901,41 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         return span;
     }
 
-    private static void Tally(
-        List<string> kept,
-        ReadOnlySpan<char> scope,
-        Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> byDirectory)
+    private static int[] Tally(
+            List<string> kept,
+            ReadOnlySpan<char> scope,
+            Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> byDirectory)
     {
-        foreach (var candidate in kept)
+        var lengths = new int[kept.Count];
+
+        for (var index = 0; index < lengths.Length; index++)
         {
-            var directory = TopDirectory(candidate, scope);
+            var directory = TopDirectory(kept[index], scope);
+
+            lengths[index] = directory.Length;
 
             if (!directory.IsEmpty && !byDirectory.TryAdd(directory, 1))
                 byDirectory[directory] += 1;
         }
+
+        return lengths;
     }
 
     private static void Fold(
-        List<string> kept,
-        ReadOnlySpan<char> scope,
-        Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> byDirectory,
-        List<string> rows)
+            List<string> kept,
+            int[] lengths,
+            Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> byDirectory,
+            List<string> rows)
     {
         var folded = new HashSet<string>(StringComparer.Ordinal);
         var seen = folded.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        foreach (var candidate in kept)
+        for (var index = 0; index < kept.Count; index++)
         {
-            var directory = TopDirectory(candidate, scope);
+            var directory = kept[index].AsSpan(0, lengths[index]);
 
             if (directory.IsEmpty || byDirectory[directory] <= UntrackedFold)
-                rows.Add(candidate + "  +? -?  ?");
+                rows.Add(kept[index] + "  +? -?  ?");
             else if (seen.Add(directory))
                 rows.Add(string.Create(CultureInfo.InvariantCulture, $"{directory}/**  +? -?  ?  x{byDirectory[directory]} untracked"));
         }

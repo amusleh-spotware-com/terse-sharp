@@ -38,7 +38,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     target, resolved, scope.Value, verbose, cancellationToken))
                 : Task.FromResult(scope.Error!.Render());
         },
-        cancellationToken: cancellationToken)),
+        cancellationToken: cancellationToken), Roots),
         cancellationToken);
 
     [McpServerTool(Name = "clean", Destructive = true)]
@@ -144,7 +144,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             },
             changed && WholeSolution(project, projects),
             WholeSolution(project, projects),
-            cancellationToken)),
+            cancellationToken), Roots),
         cancellationToken);
 
     [McpServerTool(Name = "rerun_failed")]
@@ -773,4 +773,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             return false;
         }
     }
+
+    private IReadOnlyList<string> Roots() => [.. context.Registry.All().Select(loaded => loaded.Root)];
 }

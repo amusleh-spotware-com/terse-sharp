@@ -40,6 +40,21 @@ public sealed class EditPulseTests
         Assert.Equal(changed + 1, EditPulse.Changed);
         Assert.Equal(material + 1, EditPulse.Material);
     }
+
+    [Fact]
+    public void Since_NamesTheDocumentsWrittenAfterTheWatermark_SoTheStaleLineIsActionable()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-stale-root");
+        var before = EditPulse.Material;
+
+        EditPulse.Bump(Path.Combine(root, "src", "OrderService.cs"));
+
+        var note = TerseSharp.Server.StaleRun.Note(before, EditPulse.Material, [root]);
+
+        Assert.NotNull(note);
+        Assert.Contains("OrderService.cs)", note, StringComparison.Ordinal);
+        Assert.DoesNotContain(root, note, StringComparison.Ordinal);
+    }
 }
 
 [CollectionDefinition(nameof(EditPulseCollection), DisableParallelization = true)]

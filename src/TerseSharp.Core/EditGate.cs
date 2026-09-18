@@ -33,7 +33,8 @@ public static class EditGate
         if (!await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false))
             return Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
 
-        EditPulse.Bump(diff.Length);
+        foreach (var written in diff)
+            EditPulse.Bump(written.Path);
 
         return Result.Ok(Render(options, diff, "applied", report, workspace.Root, policy));
     }
@@ -111,17 +112,7 @@ public static class EditGate
         foreach (var error in report.NewErrors)
             response.Note(error);
 
-        if (report.Collisions is { Length: > 0 } collisions)
-            response.Note(Errors.Ambiguity(collisions, tool));
-
-        if (report.Imports is { Length: > 0 } imports)
-            response.Note(Errors.Missing(imports, tool));
-
-        if (report.Callers is { Length: > 0 } callers)
-            response.Note(Errors.CallerBatch(callers));
-
-        if (report.Implementers is { Length: > 0 } implementers)
-            response.Note(Errors.Unimplemented(implementers, tool));
+        Advice(response, report.Hints, tool);
     }
 
     private static string Describe(GateReport report, bool verbose) => verbose
@@ -148,12 +139,12 @@ public static class EditGate
     }
 
     private static async Task<GateReport> AnalyseAsync(
-            Solution before,
-            Solution after,
-            IReadOnlyList<DocumentId> changed,
-            string root,
-            ImmutableArray<string> usings,
-            CancellationToken cancellationToken)
+                Solution before,
+                Solution after,
+                IReadOnlyList<DocumentId> changed,
+                string root,
+                ImmutableArray<string> usings,
+                CancellationToken cancellationToken)
     {
         var projects = Affected(before, changed);
         var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
@@ -169,12 +160,14 @@ public static class EditGate
             current.ErrorCount - baseline.ErrorCount,
             current.WarningCount,
             current.WarningCount - baseline.WarningCount,
-            await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
-            await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
+            new RollbackHints(
+                await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
+                await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
+                Collided(regressions, usings),
+                ImplementerHint(regressions),
+                FieldHint(regressions)),
             [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
-            Collided(regressions, usings),
-            [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
-            ImplementerHint(regressions));
+            [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)]);
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -284,18 +277,15 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-            string[] NewErrors,
-            string[] Unresolved,
-            int Errors,
-            int ErrorDelta,
-            int Warnings,
-            int WarningDelta,
-            string[]? Imports,
-            string[]? Callers,
-            string[] NewWarnings,
-            string[]? Collisions,
-            string[] NewInfos,
-            string[]? Implementers);
+                string[] NewErrors,
+                string[] Unresolved,
+                int Errors,
+                int ErrorDelta,
+                int Warnings,
+                int WarningDelta,
+                RollbackHints Hints,
+                string[] NewWarnings,
+                string[] NewInfos);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,
@@ -576,7 +566,7 @@ public static class EditGate
 
     private static TerseError? Blocked(GateReport? report, PolicyVerdict policy, string tool) => report switch
     {
-        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Imports, report.Callers, report.Collisions, tool, report.Implementers),
+        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Hints, tool),
         _ => policy.Blocks ? Errors.PolicyViolation(policy) : null,
     };
 
@@ -656,5 +646,44 @@ public static class EditGate
         }
 
         return types.Count is 0 ? null : [.. types];
+    }
+
+    private static bool IsUnwrittenField(string key) =>
+            key.StartsWith("CS0649 ", StringComparison.Ordinal) || key.StartsWith("CS0169 ", StringComparison.Ordinal);
+
+    private static string[]? FieldHint(string[] errors)
+    {
+        if (errors.Length is 0)
+            return null;
+
+        var fields = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var error in errors)
+        {
+            if (!IsUnwrittenField(error) || Quoted(error) is not { Length: > 0 } field)
+                return null;
+
+            fields.Add(field);
+        }
+
+        return fields.Count is 0 ? null : [.. fields];
+    }
+
+    private static void Advice(ResponseBuilder response, RollbackHints hints, string tool)
+    {
+        if (hints.Collisions is { Count: > 0 } collisions)
+            response.Note(Errors.Ambiguity(collisions, tool));
+
+        if (hints.Imports is { Count: > 0 } imports)
+            response.Note(Errors.Missing(imports, tool));
+
+        if (hints.Callers is { Count: > 0 } callers)
+            response.Note(Errors.CallerBatch(callers));
+
+        if (hints.Implementers is { Count: > 0 } implementers)
+            response.Note(Errors.Unimplemented(implementers, tool));
+
+        if (hints.Fields is { Count: > 0 } fields)
+            response.Note(Errors.Unassigned(fields, tool));
     }
 }

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -42,15 +43,18 @@ public static class AdvertisedCost
         {
             var schema = tool.InputSchema.GetRawText();
             var described = Described(tool.InputSchema);
+            var whole = tool.Name.Length + (tool.Description?.Length ?? 0) + schema.Length;
 
             names += tool.Name.Length;
             descriptions += tool.Description?.Length ?? 0;
             parameters += described;
             frame += schema.Length - described;
-            costs.Add(new ToolCost(tool.Name, described));
+            costs.Add(new ToolCost(tool.Name, described, whole));
         }
 
-        return new Reading(tools.Count, Tokens(names + descriptions + parameters + frame), names, descriptions, parameters, frame, Costliest(costs));
+        var every = Ordered(costs);
+
+        return new Reading(tools.Count, Tokens(names + descriptions + parameters + frame), names, descriptions, parameters, frame, Costliest(costs), every);
     }
 
     private static int Described(JsonElement schema)
@@ -82,7 +86,7 @@ public static class AdvertisedCost
         }
     }
 
-    private sealed record Reading(int Tools, int Tokens, int Names, int Descriptions, int Parameters, int Frame, IReadOnlyList<ToolCost> Worst);
+    private sealed record Reading(int Tools, int Tokens, int Names, int Descriptions, int Parameters, int Frame, IReadOnlyList<ToolCost> Worst, IReadOnlyList<ToolCost> Every);
 
     private static Reading? unnarrowed;
 
@@ -108,7 +112,7 @@ public static class AdvertisedCost
 
     private const int MaxCostliest = 10;
 
-    public readonly record struct ToolCost(string Name, int Parameters);
+    public readonly record struct ToolCost(string Name, int Parameters, int Total = 0);
 
     private static List<ToolCost> Costliest(List<ToolCost> costs)
     {
@@ -128,5 +132,29 @@ public static class AdvertisedCost
             parts[index] = string.Create(CultureInfo.InvariantCulture, $"{worst[index].Name}={Tokens(worst[index].Parameters)}");
 
         return "\n  parameterDescriptions, costliest first: " + string.Join(' ', parts);
+    }
+
+    private static List<ToolCost> Ordered(List<ToolCost> costs)
+    {
+        var every = new List<ToolCost>(costs);
+
+        every.Sort(static (left, right) => right.Total.CompareTo(left.Total));
+
+        return every;
+    }
+
+    public static string? PerTool()
+    {
+        if (Volatile.Read(ref last) is not { Every.Count: > 0 } reading)
+            return null;
+
+        var builder = new StringBuilder(reading.Every.Count * 24);
+
+        builder.Append(CultureInfo.InvariantCulture, $"perTool={reading.Every.Count} advertised, schema tokens descending");
+
+        foreach (var cost in reading.Every)
+            builder.Append(CultureInfo.InvariantCulture, $"\n  {cost.Name} {Tokens(cost.Total)}");
+
+        return builder.ToString();
     }
 }

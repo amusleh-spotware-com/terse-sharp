@@ -129,31 +129,29 @@ public sealed class EditTools(ToolContext context)
             held?.Root);
     }
     [McpServerTool(Name = "add_member")]
-    [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. before= and after= place the new members above or below a member the type declares, and position=first|afterFields|last picks a coarse slot; the default appends at the end, above a trailing #region the type closes. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. Replaces one call per missing import. Adding a member to an interface or abstract type rolls back until its implementations declare it too: the sanctioned sequence is allowErrors=true with the retryWith token to land the declaration, then one add_member per implementer, which the rollback names. A rollback names a retryWith token that holds the rejected declarations, so the retry costs a token instead of the whole payload; an unresolved typeSymbolId is held the same way. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. typeSymbolIds= paired with declarations= adds a member to SEVERAL types as ONE compile-gated edit - an interface member and every implementation, with no uncompilable step. Replaces one call per implementation. before= and after= place the new members above or below a member the type declares, and position=first|afterFields|last picks a coarse slot; the default appends at the end, above a trailing #region the type closes. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. A rollback names a retryWith token holding the rejected declarations, so the retry costs a token, not the payload; an unresolved typeSymbolId too. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> AddMember(
-            [Description("Symbol id of the containing type, or of an enum when adding enum members. Cannot be combined with path.")] string? typeSymbolId = null,
-            [Description("One complete member declaration, or several in sequence; they are added together as one edit. With an enum container, one or more enum member names.")] string declaration = "",
-            [Description("Path of a .cs file to append namespace-level type declarations to, instead of a type symbol id.")] string? path = null,
-            [Description("Diff only, write nothing.")] bool dryRun = false,
-            [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
-            [Description(PolicyHelp)] bool allowPolicy = false,
-            [Description(VerboseHelp)] bool verbose = false,
-            [Description("Workspace or worktree name.")] string? workspace = null,
-            [Description("Alias for typeSymbolId.")] string? symbol = null,
-            [Description("Alias for typeSymbolId, so the name every other symbol-addressed tool takes resolves here too.")] string? symbolId = null,
-            [Description(UsingsHelp)] string[]? usings = null,
-            [Description(RetryHelp)] string? retryWith = null,
-            [Description("Alias for declaration; entries join into the one edit.")] string[]? declarations = null,
-            [Description("Member of this type to land the new members ABOVE, by short name or documentation id. Not with after= or position=, and not held by a retryWith token.")] string? before = null,
-            [Description("Member of this type to land the new members BELOW, addressed as before= is. Not with before= or position=.")] string? after = null,
-            [Description("Coarse slot instead of an anchor: first, afterFields (after the last field) or last. Default last. Not with before= or after=.")] string? position = null,
-            CancellationToken cancellationToken = default)
+                [Description("Symbol id of the containing type, or of an enum when adding enum members. Cannot be combined with path.")] string? typeSymbolId = null,
+                [Description("One complete member declaration, or several in sequence; they are added together as one edit. With an enum container, one or more enum member names.")] string declaration = "",
+                [Description("Path of a .cs file to append namespace-level type declarations to, instead of a type symbol id.")] string? path = null,
+                [Description("Diff only, write nothing.")] bool dryRun = false,
+                [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+                [Description(PolicyHelp)] bool allowPolicy = false,
+                [Description(VerboseHelp)] bool verbose = false,
+                [Description("Workspace or worktree name.")] string? workspace = null,
+                [Description("Alias for typeSymbolId.")] string? symbol = null,
+                [Description("Alias for typeSymbolId, so the name every other symbol-addressed tool takes resolves here too.")] string? symbolId = null,
+                [Description(UsingsHelp)] string[]? usings = null,
+                [Description(RetryHelp)] string? retryWith = null,
+                [Description("Alias for declaration; entries join into the one edit - or, beside typeSymbolIds, one per id in order.")] string[]? declarations = null,
+                [Description("Type ids to add to together, paired positionally with declarations and applied as ONE compile-gated edit across their files. Not with declaration= or path=.")] string[]? typeSymbolIds = null,
+                [Description("Member of this type to land the new members ABOVE, by short name or documentation id. Not with after= or position=, and not held by a retryWith token.")] string? before = null,
+                [Description("Member of this type to land the new members BELOW, addressed as before= is. Not with before= or position=.")] string? after = null,
+                [Description("Coarse slot instead of an anchor: first, afterFields (after the last field) or last. Default last. Not with before= or after=.")] string? position = null,
+                CancellationToken cancellationToken = default)
     {
-        if (RejectedUsings(usings) is { } rejected)
-            return Task.FromResult(rejected);
-
-        if (RejectedDeclarations(declarations) is { } malformed)
-            return Task.FromResult(malformed);
+        if (Malformed(usings, declarations, typeSymbolIds, declaration, path) is { } refusal)
+            return Task.FromResult(refusal);
 
         var placement = Placement(before, after, position);
 
@@ -165,14 +163,24 @@ public sealed class EditTools(ToolContext context)
         if (retryWith is { Length: > 0 } token && held is null)
             return Task.FromResult(Unknown(token, "add_member"));
 
-        var container = typeSymbolId ?? symbol ?? symbolId ?? (held is null ? null : Slot(held.Targets, 0));
-        var file = path ?? (held is null ? null : Slot(held.Targets, 1));
-        var sent = Merged(declaration, declarations);
-        var text = held is null ? sent : First(held.Payloads, sent);
         var imports = Kept(usings, held?.Usings);
         var options = Options("add_member", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy, placement: placement.Value);
+        var ids = PairedIds(typeSymbolIds, held);
 
-        return Added(workspace, container, file, text, options, cancellationToken, held?.Root, imports);
+        if (ids.Length > 0)
+            return Paired(workspace, ids, PairedDeclarations(declarations, held), options, cancellationToken, held?.Root, imports);
+
+        var sent = Merged(declaration, declarations);
+
+        return Added(
+            workspace,
+            typeSymbolId ?? symbol ?? symbolId ?? (held is null ? null : Slot(held.Targets, 0)),
+            path ?? (held is null ? null : Slot(held.Targets, 1)),
+            held is null ? sent : First(held.Payloads, sent),
+            options,
+            cancellationToken,
+            held?.Root,
+            imports);
     }
 
     private Task<string> Added(
@@ -584,4 +592,68 @@ public sealed class EditTools(ToolContext context)
         (null or "", null or "", null or "") => Result.Ok<MemberPlacement?>(null),
         _ => Anchored(before, after, position),
     };
+
+    private Task<string> Paired(
+            string? workspace,
+            string[] typeSymbolIds,
+            string[] declarations,
+            EditOptions options,
+            CancellationToken cancellationToken,
+            string? heldRoot = null,
+            string[]? usings = null)
+    {
+        var rejection = context.RejectWrite();
+        var carry = new Carry("add_member", typeSymbolIds, declarations, Usings: usings);
+
+        return rejection is not null
+            ? Task.FromResult(rejection)
+            : context.WithWorkspaceAsync(
+                workspace,
+                null,
+                async loaded => Elsewhere(heldRoot, loaded.Root) ?? Carried(await SymbolEditService.AddMembersAsync(
+                    loaded, typeSymbolIds, declarations, options, cancellationToken).ConfigureAwait(false), carry, loaded.Root),
+                cancellationToken: cancellationToken);
+    }
+
+    private static string? Malformed(string[]? usings, string[]? declarations, string[]? typeSymbolIds, string declaration, string? path) =>
+            RejectedUsings(usings)
+            ?? RejectedDeclarations(declarations)
+            ?? RejectedIds(typeSymbolIds)
+            ?? PairedRefusal(typeSymbolIds, declaration, path);
+
+    private static string? RejectedIds(string[]? typeSymbolIds)
+    {
+        foreach (var id in typeSymbolIds ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return Errors.Blank("typeSymbolIds").Render();
+        }
+
+        return null;
+    }
+
+    private static string? PairedRefusal(string[]? typeSymbolIds, string declaration, string? path)
+    {
+        if (typeSymbolIds is not { Length: > 0 })
+            return null;
+
+        if (declaration is { Length: > 0 })
+        {
+            return Errors.Invalid(
+                "typeSymbolIds pairs each id with the declarations entry at the same index, and a singular declaration= was passed beside it - it would be silently dropped",
+                "send every member as declarations=[...], one per typeSymbolIds entry, in the same order").Render();
+        }
+
+        return path is { Length: > 0 }
+            ? Errors.Invalid(
+                "typeSymbolIds addresses types and path= appends namespace-level types to a file, so the two name different containers",
+                "pass typeSymbolIds with declarations to add members to several types, or path to append types to one file - not both").Render()
+            : null;
+    }
+
+    private static string[] PairedIds(string[]? typeSymbolIds, RejectedEdit? held) =>
+            typeSymbolIds ?? (held is { Payloads.Count: > 1 } ? [.. held.Targets] : []);
+
+    private static string[] PairedDeclarations(string[]? declarations, RejectedEdit? held) =>
+            declarations ?? (held is { Payloads.Count: > 1 } ? [.. held.Payloads] : []);
 }

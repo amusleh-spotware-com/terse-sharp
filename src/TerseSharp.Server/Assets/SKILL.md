@@ -31,6 +31,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 |---|---|---|
 | **Workspace** | — | `workspace_status` |
 | **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` |
+| **Workspace** | what one tool's schema costs | `workspace_status(tools: true)` — one line per tool, tokens descending |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` |
 | **Workspace** | — | `load_workspace` |
 | **Workspace** | — | `list_workspaces` |
@@ -117,7 +118,8 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | renaming a member and rewriting its body in one edit | `replace_symbol(symbolIds: [...], declarations: [...], rename: true)` |
 | **Edit code** | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` |
 | **Edit code** | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` |
-| **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"` |
+| **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"`; the anchor takes any spelling of the parameter list |
+| **Edit code** | an interface member and every implementation | `add_member(typeSymbolIds: [...], declarations: [...])` — ONE compile-gated edit |
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
 | **Refactor** | hand-writing an interface from a class | `extract_interface(symbolId)` |
@@ -1127,7 +1129,7 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 | only the test projects your change can reach | `run_tests(changed: true)` — the test projects that transitively reference a project you changed since the workspace loaded, at **assembly** granularity, naming both what it ran and what it skipped. Falls back to one whole-solution run, saying why, whenever it cannot reason (nothing changed, a changed file belongs to no project, no test project depends on it) or the change reaches more than 10 test projects. It never silently runs less than it should. Ignored when `project=` is passed |
 | several projects at once | `run_tests(projects: [...], parallel: N)` — concurrent; `1` is serial |
 | skip the rebuild | `run_tests(noBuild: true)` |
-| only what just failed | `rerun_failed` |
+| only what just failed | `rerun_failed` — a red `run_tests` verdict ends with that exact call |
 | only some of what just failed | `rerun_failed(tests: [...], exclude: [...])` - the answer names how many remembered failures it skipped |
 | the slowest N | `run_tests(slowest: 10)` |
 | names without running | `list_tests(contains)` |
@@ -1147,7 +1149,8 @@ the payload is otherwise empty. `verbose=true` echoes it on any run.
 **`STALE n document(s) changed after this run started`** ends a `build`/`run_tests` verdict when an
 edit landed mid-run: the answer is about the tree as it WAS - re-run it. It counts only documents a
 build or a test run can read, so a markdown working note written beside the run never makes a verdict
-stale; a `.cs`, `.razor`, `.resx`, `.csproj`, `.props`, `.targets` or `.txt` write does.
+stale; a `.cs`, `.razor`, `.resx`, `.csproj`, `.props`, `.targets` or `.txt` write does. It **names
+up to three of them**, workspace-relative, in parentheses after the count.
 
 **A stopped run says why.** Above 30 s, `timeoutSeconds` arms VSTest's blame collector 15 s below it,
 so a *hung* test is named in

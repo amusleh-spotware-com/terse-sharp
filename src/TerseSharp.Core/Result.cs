@@ -67,29 +67,22 @@ public static class Errors
 
     public static TerseError CompileRegression(
                 IReadOnlyList<string> diagnostics,
-                IReadOnlyList<string>? imports = null,
-                IReadOnlyList<string>? callers = null,
-                IReadOnlyList<string>? collisions = null,
-                string? tool = null,
-                IReadOnlyList<string>? implementers = null) => new(
+                RollbackHints hints = default,
+                string? tool = null) => new(
                 TerseErrorCode.CompileRegression,
                 "the edit introduced compile errors and was rolled back:\n" + string.Join("\n", diagnostics),
-                Rollback(imports, callers, collisions, implementers, tool));
+                Rollback(hints, tool));
 
-    private static string Rollback(
-            IReadOnlyList<string>? imports,
-            IReadOnlyList<string>? callers,
-            IReadOnlyList<string>? collisions,
-            IReadOnlyList<string>? implementers,
-            string? tool) => (imports, callers, collisions, implementers) switch
-            {
-                (_, _, { Count: > 0 }, _) => Ambiguity(collisions, tool),
-                ({ Count: > 0 }, _, _, _) => Missing(imports, tool),
-                (_, { Count: > 0 }, _, _) => Broken(callers, tool),
-                (_, _, _, { Count: > 0 }) => Unimplemented(implementers, tool),
-                _ when HoldsUsings(tool) => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
-                _ => "fix the edit in the content you send, or pass allowErrors=true to apply it anyway",
-            };
+    private static string Rollback(RollbackHints hints, string? tool) => hints switch
+    {
+        { Collisions: { Count: > 0 } collisions } => Ambiguity(collisions, tool),
+        { Imports: { Count: > 0 } imports } => Missing(imports, tool),
+        { Callers: { Count: > 0 } callers } => Broken(callers, tool),
+        { Implementers: { Count: > 0 } implementers } => Unimplemented(implementers, tool),
+        { Fields: { Count: > 0 } fields } => Unassigned(fields, tool),
+        _ when HoldsUsings(tool) => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
+        _ => "fix the edit in the content you send, or pass allowErrors=true to apply it anyway",
+    };
 
     internal static string CallerBatch(IReadOnlyList<string> callers) =>
         "send these callers in the same replace_symbol symbolIds/declarations batch: " + string.Join(", ", callers);
@@ -227,10 +220,25 @@ public static class Errors
         ? string.Create(CultureInfo.InvariantCulture, $"'{name}' is already qualified, so qualifying it further will not help: pass its documentation id - symbolId=\"T:{name}\" when it names a type, or take the id from search_symbols")
         : "qualify the name with its containing type, or pass the documentation id from search_symbols";
 
-    internal static string Unimplemented(IReadOnlyList<string> implementers, string? tool) => Declared(implementers) + (HoldsUsings(tool)
-            ? " - the sanctioned sequence is one call per type: retry with allowErrors=true and the retryWith token below to land this declaration, then add_member on each of those types; the tree does not compile between those calls, so make them the next ones"
-            : " - add the member to each of those types in the same edit, or pass allowErrors=true to apply it anyway");
+    internal static string Unimplemented(IReadOnlyList<string> implementers, string? tool) => Declared(implementers) + tool switch
+    {
+        null or "add_member" => " - land them all in ONE compile-gated edit: add_member typeSymbolIds=[\"<the type you are editing>\", " + QuotedList(implementers) + "] declarations=[...], one declaration per type in the same order",
+        "replace_symbol" or "replace_symbol_body" => " - retry with allowErrors=true and the retryWith token below to land this declaration, then add_member typeSymbolIds=[" + QuotedList(implementers) + "] declarations=[...] to land every implementation in ONE edit",
+        _ => " - add the member to each of those types in the same edit, or pass allowErrors=true to apply it anyway",
+    };
 
     private static string Declared(IReadOnlyList<string> implementers) =>
             "the new member is declared in no implementation: " + string.Join(", ", implementers);
+
+    internal static string Unassigned(IReadOnlyList<string> fields, string? tool) =>
+            "the new field is never assigned: " + string.Join(", ", fields) + (HoldsUsings(tool)
+                ? " - send it in the SAME edit as the member that writes it: replace_symbol symbolId=\"<that member>\" add=[\"<this field's declaration>\"], which lands both as one compile-gated edit, or pass allowErrors=true to apply it anyway"
+                : " - add the member that writes it in the content you send, or pass allowErrors=true to apply it anyway");
 }
+
+public readonly record struct RollbackHints(
+    IReadOnlyList<string>? Imports = null,
+    IReadOnlyList<string>? Callers = null,
+    IReadOnlyList<string>? Collisions = null,
+    IReadOnlyList<string>? Implementers = null,
+    IReadOnlyList<string>? Fields = null);

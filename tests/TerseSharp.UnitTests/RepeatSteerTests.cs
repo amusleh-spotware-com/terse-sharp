@@ -223,6 +223,18 @@ public sealed class RepeatSteerTests
         Assert.Contains(shape, note, StringComparison.Ordinal);
         Assert.Contains("OWN path", note, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Steer_ForARunOfResourceWrites_NamesTheTenFileCapSoALongRunIsCostedBeforeItStarts()
+    {
+        RepeatSteer.Forget();
+        RepeatSteer.Steer("resx_set");
+
+        var steer = RepeatSteer.Steer("resx_set");
+
+        Assert.Contains("10 files per call", steer, StringComparison.Ordinal);
+        Assert.Contains("46 cultures is 5 calls", steer, StringComparison.Ordinal);
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

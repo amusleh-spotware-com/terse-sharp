@@ -36,3 +36,12 @@ public sealed class Boxed<TValue>
 
     public TValue Unwrap() => Value;
 }
+
+public sealed class Scattered(int offset)
+{
+    public int Pick(int value) => value + offset;
+
+    public int Between() => offset;
+
+    public int Pick(string value) => value.Length + offset;
+}

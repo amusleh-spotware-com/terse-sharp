@@ -230,6 +230,7 @@ public static partial class DotnetRunner
         AppendWarnings(response, run, report, request.Filter);
         AppendFailures(response, report, shown);
         AppendTimings(response, report, request);
+        AppendRerun(response, report);
 
         return response.ToString();
     }
@@ -1181,6 +1182,19 @@ public static partial class DotnetRunner
         }
 
         return worst;
+    }
+
+    private const int MaxRerunNames = 10;
+
+    private static void AppendRerun(ResponseBuilder response, TestRunReport report)
+    {
+        if (report.Failures.Length is 0)
+            return;
+
+        response.Note(string.Empty);
+        response.Note(report.Failures.Length <= MaxRerunNames
+            ? "next: rerun_failed tests=[" + string.Join(", ", report.Failures.Select(failure => "\"" + failure.Name + "\"")) + "] - a mean 20 s against this run's, and it rebuilds nothing the failures do not reach"
+            : string.Create(CultureInfo.InvariantCulture, $"next: rerun_failed - replays all {report.Failures.Length} remembered failures, a mean 20 s against this run's"));
     }
 }
 

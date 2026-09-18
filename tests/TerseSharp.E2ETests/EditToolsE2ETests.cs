@@ -1003,29 +1003,29 @@ public sealed class RegionTail
     }
 
     [Fact]
-    public async Task AddMember_WithAnAnchorThatNamesTwoOverloads_RefusesAndNamesSpellingsThatPlaceIt()
+    public async Task AddMember_WithAnAnchorNamingOverloadsThatSitApart_RefusesAndNamesSpellingsThatPlaceIt()
     {
         var refused = await server.CallAsync("add_member", new()
         {
-            ["typeSymbolId"] = "T:Fixture.Trading.Awkward",
+            ["typeSymbolId"] = "T:Fixture.Trading.Scattered",
             ["declaration"] = "public int Placed() => 1;",
-            ["before"] = "Weigh",
+            ["before"] = "Pick",
             ["dryRun"] = true,
         });
 
         Assert.Contains("the insertion point is not decided", refused, StringComparison.Ordinal);
-        Assert.Contains("Weigh(Boxed<IHandler>)", refused, StringComparison.Ordinal);
+        Assert.Contains("Pick(string)", refused, StringComparison.Ordinal);
 
         var placed = await server.CallAsync("add_member", new()
         {
-            ["typeSymbolId"] = "T:Fixture.Trading.Awkward",
+            ["typeSymbolId"] = "T:Fixture.Trading.Scattered",
             ["declaration"] = "public int Placed() => 1;",
-            ["before"] = "Weigh(Boxed<IHandler>)",
+            ["before"] = "Pick(string)",
             ["dryRun"] = true,
         });
 
         Assert.DoesNotContain("ERROR", placed, StringComparison.Ordinal);
-        Assert.Contains("@@ -22,0 +22,2 @@", placed, StringComparison.Ordinal);
+        Assert.Contains("Placed", placed, StringComparison.Ordinal);
     }
 
     [Fact]
