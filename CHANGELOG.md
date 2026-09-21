@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.67.0] - 2026-09-21
+
+> **Response-format changes (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> Four responses moved: `find_implementations` now answers derived classes and overrides as well as
+> interface implementations and carries a reason when it finds none, an outline keeps a parameter's
+> attributes, the sentence above a `retryWith` token is written per tool, and `workspace_status` /
+> `load_workspace` report `analyzers=N unresolved in M project(s)`. `replace_symbol` also gains
+> `addBefore=`, `addAfter=` and `addPosition=`. Every change answers a defect reported from the field
+> against 0.66.0 on a 148-project WPF solution.
+
 ### Fixed
 
 - **An unresolved analyzer reference no longer breaks every `SymbolFinder` call.** A project whose
@@ -6586,7 +6596,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.66.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.67.0...HEAD
+[0.67.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.67.0
 [0.66.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.66.0
 [0.65.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.65.0
 [0.64.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.64.0
