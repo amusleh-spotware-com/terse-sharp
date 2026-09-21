@@ -8,6 +8,74 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **An unresolved analyzer reference no longer breaks every `SymbolFinder` call.** A project whose
+  `<Analyzer>` item names an assembly that is not on disk loads with a reference Roslyn cannot
+  checksum, and one of them made `find_usages` - and `find_usages impact=true`, `get_symbol
+  usages=true` and `find_implementations` with it - answer `ERROR InvalidArgument:
+  InvalidOperationException: Unexpected value '...UnresolvedAnalyzerReference'` on a symbol id that
+  `get_symbol_source` and `rename_symbol` resolved in the same session. Reported from a 148-project
+  WPF solution, where it forced a fallback to `search_text` for the one job no text search replaces.
+  `AnalyzerRebind` now drops any reference that names a file that is not on disk - they contribute no
+  analyzers - and `workspace_status` reports the degradation instead of leaving it to be guessed.
+  Covered by `AnalyzerGapE2ETests` against the new `fixtures/AnalyzerGapSolution` and by
+  `AnalyzerRebindTests.Rebound_ForAReferenceThatNamesAFileThatIsNotOnDisk_DropsIt`.
+- **`find_implementations` no longer answers `0` for a base class.** Roslyn's
+  `FindImplementationsAsync` finds implementers of an *interface* only, so a class with three derived
+  types answered a bare `0 implementations` - indistinguishable from "nothing derives from this", and
+  a confident wrong answer of exactly the kind this project refuses to give. It now unions derived
+  classes (transitively) and member overrides with the interface implementations, which is what its
+  own description always claimed. Covered by
+  `NavigationToolsE2ETests.FindImplementations_ForABaseClass_NamesEveryDerivedTypeTransitively` and
+  `NavigationToolsE2ETests.FindImplementations_ForAnAbstractMember_NamesTheOverride`.
+- **A rollback no longer advertises a retry parameter the rejecting tool refuses.** An `add_member`
+  `CompileRegression` printed `fix=["<index>=<corrected declaration>"]`, which only `replace_symbol`
+  accepts, so the advertised retry answered `unrecognized fix` and cost a full re-send of the
+  payload; `add_member`'s two-slot target list also made a single-declaration call take the plural
+  wording. The note is now written per tool by `RetryNote` and keyed on the held payload count, and
+  the new census `RetryNoteTests.EveryRetryNote_NamesOnlyParametersItsToolDeclares` fails on any note
+  that names a parameter its tool does not declare, with
+  `EveryToolThatCanHoldARejection_HasItsOwnRetryNote` closing the other direction.
+- **An outline no longer drops a parameter's attributes.** `get_type_outline` printed
+  `TryGetCachedTitle(AlgoId id, out string? title)` for a member declared with
+  `[NotNullWhen(true)] out string? title`, and an outline signature is what gets re-typed into
+  `replace_symbol` - so the loss silently changed nullable flow at every call site. `SymbolFormat`
+  now rebuilds the parameter list when a parameter carries an attribute the display format does not
+  already imply. The arguments are **elided past 40 characters** (`[Description(...)]`) so restoring
+  them cannot multiply an outline of a file whose every parameter carries a long attribute, and every
+  literal goes through `SymbolDisplay.FormatLiteral`, so a quote or a newline inside an attribute
+  argument can neither break re-typing the signature nor split one outline record across two lines.
+  Covered by `NavigationToolsE2ETests.GetTypeOutline_ForAParameterCarryingAnAttribute_KeepsTheAttribute`,
+  `NavigationToolsE2ETests.GetTypeOutline_ForAParameterAttributeWithALongArgument_ElidesTheArgumentInsteadOfInliningIt`,
+  `NavigationToolsE2ETests.GetTypeOutline_ForAParameterAttributeCarryingAQuote_EscapesItAndKeepsOneRecordPerLine`
+  and the no-attribute control
+  `NavigationToolsE2ETests.GetFileOutline_ForAParameterWithoutAttributes_LeavesTheSignatureUnchanged`.
+
+### Added
+
+- **`replace_symbol` takes `addBefore=`, `addAfter=` and `addPosition=`** to place the members `add=`
+  adds, instead of always appending them to the end of the containing type - reported after two
+  helpers landed below `OnDispose` at the tail of a 450-line class and were flagged in review. The
+  names are spelled apart from `add_member`'s `before=`/`after=`/`position=` so every refusal names a
+  parameter the tool actually declares, and a placement passed without `add=` is refused rather than
+  silently ignored. An anchor that resolved before the replacement and no longer does after it -
+  because the replacement renamed the member it named - is **refused**, not quietly appended at the
+  end of the type, which would have reproduced the very placement the feature exists to prevent.
+  Covered by `CompileGateE2ETests.ReplaceSymbolWithAddAfter_LandsTheHelperBelowTheNamedMember`, its
+  no-placement control, and
+  `CompileGateE2ETests.ReplaceSymbolWhoseAddAnchorTheReplacementRenamesAway_IsRefusedInsteadOfAppendingAtTheEnd`.
+- **`replace_symbol`'s advertised schema, the shared `usings=`/`retryWith=`/`fix=` help and `SKILL.md`
+  were compressed to pay for all of the above.** Three new parameters and four new behaviours to teach
+  put `replace_symbol` at 1 200 tokens against its 1 024 cap and the skill at 27 714 against 27 200;
+  both budgets are enforced, neither was raised. The wording is terser and no capability, default or
+  caveat was dropped - `ToolCensusE2ETests.EveryAdvertisedTool_FitsInItsSchemaBudget` and
+  `DocsCoverageE2ETests.TheShippedSkill_StaysWithinItsTokenBudget` hold the line at the old numbers.
+- **`workspace_status` and `load_workspace` report unresolved analyzer references.**
+  `analyzers=N unresolved in M project(s)` plus up to five workspace-relative paths, so a degraded
+  workspace is legible rather than guessable. Covered by
+  `AnalyzerGapE2ETests.WorkspaceStatus_WithAnUnresolvedAnalyzerReference_SaysHowManyWereDropped`.
+
 ## [0.66.0] - 2026-09-19
 
 > **Tool removal and response-format changes (MAJOR under this project's rules; on 0.x the MINOR

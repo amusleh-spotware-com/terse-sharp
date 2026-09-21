@@ -45,32 +45,34 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration - signature, attributes and doc comment - addressed by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them, which is how a member splits into overloads. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands together with the callers it breaks. add= appends the private helpers the declaration calls. A rollback names a retryWith token holding what was rejected, so the retry costs a token instead of the payload.")]
+    [Description("Replace a whole member declaration - signature, attributes and doc comment - by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them - how a member splits into overloads. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands with the callers it breaks. add= adds the private helpers the declaration calls, placed by addBefore=/addAfter=/addPosition=. A rollback names a retryWith token holding what was rejected, so the retry costs a token, not the payload.")]
     public Task<string> ReplaceSymbol(
-                    [Description("Symbol id of the member.")] string? symbolId = null,
-                    [Description("One complete member declaration, or several in sequence to replace the target with all of them.")] string declaration = "",
-                    [Description(AddHelp)] string[]? add = null,
-                    [Description("Containing type that add= lands in, e.g. ToolBoundary. Only needed when the targets do not share one, and it must name one of theirs. Comma-separated routes each add= entry to its own.")] string? addTo = null,
-                    [Description("Diff only, write nothing.")] bool dryRun = false,
-                    [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
-                    [Description(PolicyHelp)] bool allowPolicy = false,
-                    [Description(VerboseHelp)] bool verbose = false,
-                    [Description("Workspace or worktree name.")] string? workspace = null,
-                    [Description("Alias for symbolId.")] string? symbol = null,
-                    [Description("Symbol ids of the members to replace together, paired positionally with declarations. Beside retryWith= it corrects the held ids.")] string[]? symbolIds = null,
-                    [Description("One complete declaration per symbolIds entry, in the same order, applied as a single compile-gated edit across every file they live in.")] string[]? declarations = null,
-                    [Description(UsingsHelp)] string[]? usings = null,
-                    [Description("Apply a declaration whose name differs from its paired symbol. References are NOT rewritten, so the gate rolls it back when a caller breaks; rename_symbol makes them follow. Default false.")] bool rename = false,
-                [Description(FixHelp)] string[]? fix = null,
-                [Description("Beside retryWith=, ADD the pairs you pass to the held batch instead of correcting it. Refused without a token. Default false.")] bool append = false,
-                [Description(RetryHelp)] string? retryWith = null,
-                    CancellationToken cancellationToken = default)
+                        [Description("Symbol id of the member.")] string? symbolId = null,
+                        [Description("One complete member declaration, or several in sequence.")] string declaration = "",
+                        [Description(AddHelp)] string[]? add = null,
+                        [Description("Containing type that add= lands in, e.g. ToolBoundary. Needed only when the targets do not share one; comma-separated routes each add= entry to its own.")] string? addTo = null,
+                        [Description("Diff only, write nothing.")] bool dryRun = false,
+                        [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
+                        [Description(PolicyHelp)] bool allowPolicy = false,
+                        [Description(VerboseHelp)] bool verbose = false,
+                        [Description("Workspace or worktree name.")] string? workspace = null,
+                        [Description("Alias for symbolId.")] string? symbol = null,
+                        [Description("Symbol ids to replace together, paired positionally with declarations. Beside retryWith= it corrects the held ids.")] string[]? symbolIds = null,
+                        [Description("One complete declaration per symbolIds entry, in order, applied as ONE compile-gated edit across their files.")] string[]? declarations = null,
+                        [Description(UsingsHelp)] string[]? usings = null,
+                        [Description("Apply a declaration whose name differs from its paired symbol. References are NOT rewritten, so the gate rolls it back when a caller breaks; rename_symbol makes them follow.")] bool rename = false,
+                    [Description(FixHelp)] string[]? fix = null,
+                    [Description("Beside retryWith=, ADD the pairs you pass to the held batch instead of correcting it. Refused without a token.")] bool append = false,
+                    [Description(RetryHelp)] string? retryWith = null,
+                [Description("Member to land the add= helpers ABOVE, by short name or documentation id. Only with add=.")] string? addBefore = null,
+                [Description("Member to land them BELOW, addressed as addBefore= is.")] string? addAfter = null,
+                [Description("Coarse slot instead of an anchor: first, afterFields or last. Default last.")] string? addPosition = null,
+                        CancellationToken cancellationToken = default)
     {
-        if (RejectedUsings(usings) is { } rejected)
-            return Task.FromResult(rejected);
+        var placement = Placement(addBefore, addAfter, addPosition, PlacementNames.Added);
 
-        if (RejectedAdd(add) is { } blank)
-            return Task.FromResult(blank);
+        if (Refused(usings, add, placement) is { } refusal)
+            return Task.FromResult(refusal);
 
         var held = Held(retryWith, "replace_symbol");
 
@@ -80,24 +82,17 @@ public sealed class EditTools(ToolContext context)
         if (RejectedFix(fix, retryWith, held?.Payloads.Count ?? 0, held?.Add.Count ?? 0) is { } misfit)
             return Task.FromResult(misfit);
 
-        if (append && held is null)
-        {
-            return Task.FromResult(Errors.Invalid(
-                "'append' adds to the batch a retryWith token holds, and no token was passed",
-                "pass the retryWith token the rejection printed beside it, or send the whole batch as symbolIds= and declarations=").Render());
-        }
-
-        if (append && (declaration is { Length: > 0 } || symbolId is { Length: > 0 } || symbol is { Length: > 0 }))
-        {
-            return Task.FromResult(Errors.Invalid(
-                "'append' adds symbolIds= and declarations= pairs to the held batch, and a singular symbolId= or declaration= was passed beside it - it would be silently dropped",
-                "send the pair you are adding as symbolIds=[...] and declarations=[...], or drop append= to correct the held batch instead").Render());
-        }
+        if (RejectedAppend(append, held, declaration, symbolId ?? symbol) is { } misused)
+            return Task.FromResult(misused);
 
         var imports = Kept(usings, held?.Usings);
         var helpers = Kept(add, held is null ? null : Patched(held.Add, fix, add: true));
         var container = addTo ?? held?.AddTo;
-        var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename, allowPolicy);
+
+        if (RejectedPlacement(placement.Value, helpers) is { } misplaced)
+            return Task.FromResult(misplaced);
+
+        var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename, allowPolicy, placement.Value);
 
         if (held is not null && append)
         {
@@ -321,7 +316,7 @@ public sealed class EditTools(ToolContext context)
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous CompileRegression or resolution failure, e.g. r3, printed alone on the LAST line of the rejection. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; pass either again to override, usings=[] to DROP the imports it holds, or allowErrors=true beside it. A symbolId you pass OUTRANKS the held one.";
+    private const string RetryHelp = "Token from a previous rejection, e.g. r3, printed alone on its LAST line. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; pass either again to override, or allowErrors=true beside it. A symbolId you pass OUTRANKS the held one.";
 
     internal readonly record struct Carry(
         string? Tool,
@@ -360,7 +355,7 @@ public sealed class EditTools(ToolContext context)
     private static string? Slot(IReadOnlyList<string> targets, int index) =>
         index < targets.Count && targets[index] is { Length: > 0 } value ? value : null;
 
-    private const string UsingsHelp = "Namespaces this declaration needs, added in the SAME compile-gated edit - the one-call answer to a CS0246 rollback. Each entry is a namespace such as System.Collections.Immutable; one already present is ignored and a non-namespace entry is refused by name. Held by a retryWith token; usings=[] on that retry drops what it holds.";
+    private const string UsingsHelp = "Namespaces this declaration needs, added in the SAME compile-gated edit - the one-call answer to a CS0246 rollback. One already present is ignored, a non-namespace entry is refused by name, and usings=[] on a retryWith replay DROPS what the token holds.";
 
     private static string? RejectedUsings(string[]? usings)
     {
@@ -380,7 +375,7 @@ public sealed class EditTools(ToolContext context)
         return null;
     }
 
-    private const string AddHelp = "New members appended to the type that contains the replaced member, in the SAME compile-gated edit - the answer to the callee-after-caller rollback. Targets not sharing one container need addTo=.";
+    private const string AddHelp = "New members added to the replaced member's type in the SAME compile-gated edit - the answer to the callee-after-caller rollback. They land at the END unless addBefore=/addAfter=/addPosition= places them; targets not sharing one container need addTo=.";
 
     private static string? RejectedAdd(string[]? add)
     {
@@ -401,21 +396,13 @@ public sealed class EditTools(ToolContext context)
         : held is { Count: > 0 } ? [.. held] : null;
 
     private static string Rejected(TerseError error, Carry carry, string root) =>
-        carry.Tool is { Length: > 0 } tool && Holdable(error.Code) && Worth(carry)
-            ? error.Render() + "\n" + Note(error.Code, carry) + "\nretryWith=" + RejectedEdits.Remember(
-                root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings)
-            : error.Render();
+            carry.Tool is { Length: > 0 } tool && Holdable(error.Code) && Worth(carry)
+                ? error.Render() + "\n" + RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0) + "\nretryWith=" + RejectedEdits.Remember(
+                    root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings)
+                : error.Render();
 
     private static bool Holdable(TerseErrorCode code) =>
             code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol or TerseErrorCode.InvalidArgument;
-
-    private static string Note(TerseErrorCode code, Carry carry) => (code, carry.Targets) switch
-    {
-        (TerseErrorCode.CompileRegression, { Length: > 1 }) => "the rejected declarations, their add= and their usings= are held, so the retry names the token, and fix=[\"<index>=<corrected declaration>\"] replaces only the entries that were wrong",
-        (TerseErrorCode.CompileRegression, _) => "the rejected text, its add= and its usings= are held, so the retry names the token instead of re-sending them",
-        (_, { Length: > 1 }) => "the declarations are held, so the retry is the token plus a corrected symbolIds= - one entry per held declaration - or fix=[\"<index>=<corrected declaration>\"] to replace only the entries that were wrong",
-        _ => "the declaration is held, so the retry is the token plus a corrected symbolId= and nothing else",
-    };
 
     private static string[] Corrected(string[]? supplied, IReadOnlyList<string> held) =>
         supplied is { Length: > 0 } ? supplied : [.. held];
@@ -470,7 +457,7 @@ public sealed class EditTools(ToolContext context)
         return null;
     }
 
-    private const string FixHelp = "Correct held entries on a retryWith replay instead of re-sending the batch. Each entry is '<index>=<declaration>', or 'add:<index>=<declaration>' for a held helper, index being the 0-based position the rejection printed. Only with retryWith.";
+    private const string FixHelp = "Correct held entries on a retryWith replay instead of re-sending the batch. Each entry is '<index>=<declaration>', or 'add:<index>=...' for a held helper; index is the 0-based position the rejection printed.";
 
     private static (int Index, string Text, bool Add)? Correction(string entry)
     {
@@ -557,7 +544,7 @@ public sealed class EditTools(ToolContext context)
         string.Create(CultureInfo.InvariantCulture, $"fix[{position}] names {named}, which an earlier entry already corrected"),
         "name each held entry at most once - two corrections of one entry cannot both land").Render();
 
-    private static Result<MemberPosition> PlacementSlot(string? position)
+    private static Result<MemberPosition> PlacementSlot(string? position, PlacementNames names)
     {
         if (position is null or "" || string.Equals(position, "last", StringComparison.OrdinalIgnoreCase))
             return Result.Ok(MemberPosition.Last);
@@ -568,29 +555,29 @@ public sealed class EditTools(ToolContext context)
         return string.Equals(position, "afterFields", StringComparison.OrdinalIgnoreCase)
             ? Result.Ok(MemberPosition.AfterFields)
             : Result.Fail<MemberPosition>(Errors.Invalid(
-                "position=" + position + " is not a slot this tool declares",
-                "pass position=first, position=afterFields or position=last, or before=/after= to anchor on a member this type declares"));
+                names.Position + "=" + position + " is not a slot this tool declares",
+                string.Create(CultureInfo.InvariantCulture, $"pass {names.Position}=first, {names.Position}=afterFields or {names.Position}=last, or {names.Before}=/{names.After}= to anchor on a member this type declares")));
     }
 
-    private static Result<MemberPlacement?> Anchored(string? before, string? after, string? position)
+    private static Result<MemberPlacement?> Anchored(string? before, string? after, string? position, PlacementNames names)
     {
-        var slot = PlacementSlot(position);
+        var slot = PlacementSlot(position, names);
 
         return slot.IsOk
-            ? Result.Ok<MemberPlacement?>(new MemberPlacement(before, after, slot.Value))
+            ? Result.Ok<MemberPlacement?>(new MemberPlacement(before, after, slot.Value, names.Before, names.After))
             : Result.Fail<MemberPlacement?>(slot.Error!);
     }
 
-    private static Result<MemberPlacement?> Placement(string? before, string? after, string? position) => (before, after, position) switch
+    private static Result<MemberPlacement?> Placement(string? before, string? after, string? position, PlacementNames names) => (before, after, position) switch
     {
         ({ Length: > 0 }, { Length: > 0 }, _) => Result.Fail<MemberPlacement?>(Errors.Invalid(
-            "before= and after= both name an anchor, and one member cannot land in two places",
-            "pass before= to land the new members above that member, or after= to land them below it - not both")),
+            string.Create(CultureInfo.InvariantCulture, $"{names.Before}= and {names.After}= both name an anchor, and one member cannot land in two places"),
+            string.Create(CultureInfo.InvariantCulture, $"pass {names.Before}= to land the new members above that member, or {names.After}= to land them below it - not both"))),
         ({ Length: > 0 }, _, { Length: > 0 }) or (_, { Length: > 0 }, { Length: > 0 }) => Result.Fail<MemberPlacement?>(Errors.Invalid(
-            "position= names a coarse slot and before=/after= names an anchor, so the two describe different insertion points",
-            "pass before= or after= to anchor on a member, or position=first, afterFields or last - not both")),
+            string.Create(CultureInfo.InvariantCulture, $"{names.Position}= names a coarse slot and {names.Before}=/{names.After}= names an anchor, so the two describe different insertion points"),
+            string.Create(CultureInfo.InvariantCulture, $"pass {names.Before}= or {names.After}= to anchor on a member, or {names.Position}=first, afterFields or last - not both"))),
         (null or "", null or "", null or "") => Result.Ok<MemberPlacement?>(null),
-        _ => Anchored(before, after, position),
+        _ => Anchored(before, after, position, names),
     };
 
     private Task<string> Paired(
@@ -656,4 +643,43 @@ public sealed class EditTools(ToolContext context)
 
     private static string[] PairedDeclarations(string[]? declarations, RejectedEdit? held) =>
             declarations ?? (held is { Payloads.Count: > 1 } ? [.. held.Payloads] : []);
+
+    internal readonly record struct PlacementNames(string Before, string After, string Position)
+    {
+        public static readonly PlacementNames Member = new("before", "after", "position");
+
+        public static readonly PlacementNames Added = new("addBefore", "addAfter", "addPosition");
+    }
+
+    private static Result<MemberPlacement?> Placement(string? before, string? after, string? position) =>
+            Placement(before, after, position, PlacementNames.Member);
+
+    private static string? RejectedPlacement(MemberPlacement? placement, string[]? helpers) =>
+            placement is not null && helpers is null or { Length: 0 }
+                ? Errors.Invalid(
+                    "addBefore=, addAfter= and addPosition= place the members add= appends, and no add= was passed",
+                    "pass the helpers as add=[...], or place members on their own with add_member before=/after=/position=").Render()
+                : null;
+
+    private static string? Refused(string[]? usings, string[]? add, Result<MemberPlacement?> placement) =>
+            RejectedUsings(usings) ?? RejectedAdd(add) ?? (placement.IsOk ? null : placement.Error!.Render());
+
+    private static string? RejectedAppend(bool append, RejectedEdit? held, string declaration, string? singular)
+    {
+        if (!append)
+            return null;
+
+        if (held is null)
+        {
+            return Errors.Invalid(
+                "'append' adds to the batch a retryWith token holds, and no token was passed",
+                "pass the retryWith token the rejection printed beside it, or send the whole batch as symbolIds= and declarations=").Render();
+        }
+
+        return declaration is { Length: > 0 } || singular is { Length: > 0 }
+            ? Errors.Invalid(
+                "'append' adds symbolIds= and declarations= pairs to the held batch, and a singular symbolId= or declaration= was passed beside it - it would be silently dropped",
+                "send the pair you are adding as symbolIds=[...] and declarations=[...], or drop append= to correct the held batch instead").Render()
+            : null;
+    }
 }

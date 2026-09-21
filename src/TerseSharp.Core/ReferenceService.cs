@@ -33,16 +33,19 @@ public static class ReferenceService
     }
 
     public static async Task<string> FindImplementationsAsync(
-        LoadedWorkspace workspace,
-        ISymbol symbol,
-        int maxResults,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            ISymbol symbol,
+            int maxResults,
+            CancellationToken cancellationToken)
     {
-        var implementations = await SymbolFinder
-            .FindImplementationsAsync(symbol, workspace.Solution, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        var implementations = await SymbolDerivation.FindAsync(workspace.Solution, symbol, cancellationToken).ConfigureAwait(false);
+        var found = implementations
+            .Select(implementation => (Symbol: implementation, Order: Ordinal(workspace.Root, implementation)))
+            .OrderBy(entry => entry.Order.Path, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entry => entry.Order.Line)
+            .Select(entry => entry.Symbol)
+            .ToArray();
 
-        var found = implementations.ToArray();
         var shown = ResultCap.Shown(found.Length, maxResults);
         var response = new ResponseBuilder("find_implementations", SymbolId.From(symbol).Value);
 
@@ -50,6 +53,9 @@ public static class ReferenceService
 
         foreach (var implementation in found.Take(shown))
             response.Line(Describe(workspace.Root, implementation));
+
+        if (found.Length is 0)
+            response.Note(SymbolDerivation.WhyEmpty(symbol));
 
         return response.ToString();
     }
@@ -200,5 +206,14 @@ public static class ReferenceService
             HashCode.Combine(location.Location.SourceSpan, StringComparer.OrdinalIgnoreCase.GetHashCode(PathOf(location)));
 
         private static string PathOf(ReferenceLocation location) => location.Document.FilePath ?? location.Document.Name;
+    }
+
+    private static (string Path, int Line) Ordinal(string root, ISymbol symbol)
+    {
+        var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
+
+        return location is null
+            ? (string.Empty, 0)
+            : (PositionFormat.Relative(root, PositionFormat.Source(location).Path), location.GetLineSpan().StartLinePosition.Line);
     }
 }

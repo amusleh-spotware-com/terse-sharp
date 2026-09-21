@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
@@ -18,7 +19,7 @@ public static class SymbolFormat
         miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes
             | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
-    public static string Describe(ISymbol symbol) => symbol.ToDisplayString(Signature);
+    public static string Describe(ISymbol symbol) => Describe(symbol, parameterNames: true);
 
     public static string Kind(ISymbol symbol) => symbol switch
     {
@@ -59,5 +60,29 @@ public static class SymbolFormat
         miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes
             | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
-    public static string Describe(ISymbol symbol, bool parameterNames) => symbol.ToDisplayString(parameterNames ? Signature : TypesOnly);
+    public static string Describe(ISymbol symbol, bool parameterNames)
+    {
+        var format = parameterNames ? Signature : TypesOnly;
+
+        return symbol is IMethodSymbol method && AttributeText.Any(method.Parameters)
+            ? Rebuilt(method, format)
+            : symbol.ToDisplayString(format);
+    }
+
+    private static string Rebuilt(IMethodSymbol method, SymbolDisplayFormat format)
+    {
+        var head = format.WithMemberOptions(format.MemberOptions & ~SymbolDisplayMemberOptions.IncludeParameters);
+        var builder = new StringBuilder(method.ToDisplayString(head)).Append('(');
+
+        for (var index = 0; index < method.Parameters.Length; index++)
+        {
+            if (index > 0)
+                builder.Append(", ");
+
+            AttributeText.Append(builder, method.Parameters[index]);
+            builder.Append(method.Parameters[index].ToDisplayString(format));
+        }
+
+        return builder.Append(')').ToString();
+    }
 }

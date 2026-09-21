@@ -12,13 +12,9 @@ matches that are not references.
 ## Route every question by its target
 
 **Every C#/.NET question has a tool, and the table below names it.** Read the left column, take the
-tool on the right, call it — that is the whole working rule, and it is the one thing to remember from
-this document. It holds for `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`,
+tool on the right, call it. It holds for `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`,
 `.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx` and `.resw`, and for every question about
 C# symbols, references, diagnostics, builds, tests or the working tree.
-
-The rules that keep it that way — what the guard denies, what to do when a tool errors, and the
-tripwires — are the hard gate directly **below** the table.
 
 ## The whole surface — one row per job
 
@@ -323,32 +319,28 @@ reloads it. The user can change the limit with `terse serve --max-workspaces N` 
 loaded workspace costs roughly 3 GB on a 148-project tree.
 **The advertised surface is derived from what the solution holds** — no `.xaml`/`.axaml` hides the 13
 `xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*` — and so does one whose Razor generator did not
-run — no `.resx`/`.resw` the 8 `resx_*`: 55 tools
-instead of 86 on a plain C# solution, because the full catalogue costs tokens on every request and
-measurably lowers selection accuracy. Loading a second solution that does hold them re-advertises
-those families through `notifications/tools/list_changed`; `--tools all` (or `TERSE_TOOLS=all`)
-advertises everything regardless and `--tools core` narrows to about twenty. A hidden tool still
-answers when called by name — but an agent can only call what its client lists, so treat a narrowed
-surface as narrowing what you can reach, not merely what you can see. `workspace_status` prints
-`tools=core - N advertised` under a profile and `tools=<families> hidden` when the workspace narrowed
-it. `verbose=true` adds `surface=<n> tools <t> tokens` - what the WHOLE surface costs.
+run — no `.resx`/`.resw` the 8 `resx_*`: 55 tools instead of 86 on a plain C# solution. Loading a
+second solution that does hold them re-advertises those families through
+`notifications/tools/list_changed`; `--tools all` (or `TERSE_TOOLS=all`) advertises everything and
+`--tools core` narrows to about twenty. A hidden tool still answers when called by name — but an
+agent can only call what its client lists, so a narrowed surface narrows what you can reach, not
+merely what you can see. `workspace_status` prints `tools=core - N advertised` under a profile and
+`tools=<families> hidden` when the workspace narrowed it; `verbose=true` adds
+`surface=<n> tools <t> tokens`.
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
-`compilations=cold - the first semantic call realizes them and pays for it once`, and the first
-semantic call that realizes them appends `compilations=realized in Nms (once per load, not per call)`.
-Read that as a one-off, not as the per-call cost of the tool that happened to pay it — measured at
-about 7 s on a 300-document solution — and do not reload or restart over it.
+`compilations=cold`, and the first semantic call that realizes them appends
+`compilations=realized in Nms (once per load, not per call)` — a one-off, measured at about 7 s on a
+300-document solution, not the per-call cost of the tool that happened to pay it.
 **A workspace nobody has used for 15 minutes gives its compilations back** (`--idle-minutes`,
-`TERSE_IDLE_MINUTES`, `0` to disable), and so does any idle workspace once the heap passes 2 GB.
-`workspace_status` then says `idle=<n>m compilations=dropped`; the next semantic call re-realizes
-what it needs, which costs a second or two once — that is the trade, and it is why the line is
-printed rather than left silent. On a **multi-targeted** solution pass
+`TERSE_IDLE_MINUTES`, `0` to disable), and so does any idle workspace once the heap passes 2 GB;
+`workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
+what it needs for a second or two. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
-be invisible to `find_usages` with every gate green. Whatever was chosen is printed as
-`targetFramework=` by both `load_workspace` and `workspace_status`.
-Unloading a workspace — by `unload_workspace` or by eviction — ends with a compacting collection, so
-the memory really does come back; that costs about a second, which is why it happens only when a
-workspace is genuinely dropped and why the unload-and-retry that `build`/`run_tests` perform on a
-locked output skips it.
+be invisible to `find_usages` with every gate green; whatever was chosen is printed as
+`targetFramework=`.
+Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory
+really does come back; it costs about a second, which is why it happens only when a workspace is
+genuinely dropped and why the unload-and-retry `build`/`run_tests` perform on a locked output skips it.
 
 **The analyzers a solution builds from source
 no longer block your own build**: every analyzer and source-generator assembly is loaded from a
@@ -397,32 +389,39 @@ project(s)` header. `verbose=true` prints every message of both — read them be
 project. A big solution routinely reports `failures=0 warnings=20`, is fully usable, and is never a
 reason to fall back to the built-ins.
 
+**An analyzer reference naming a file that is not on disk is DROPPED at load**: Roslyn cannot
+checksum it, and one used to make every `SymbolFinder` call - `find_usages`, `find_implementations` -
+throw `Unexpected value '...UnresolvedAnalyzerReference'`. `workspace_status` says
+`analyzers=N unresolved in M project(s)`; restore or build those packages to get their diagnostics.
+
+**`find_implementations` answers derived classes, implementations AND overrides**, transitively, and
+an empty answer carries its reason, so a `0` is never a query that quietly degraded.
+
+**An outline keeps a parameter's attributes** - `[NotNullWhen(true)] out string? title` - with
+arguments past 40 characters elided to `[Description(...)]`.
+
 **Success is quiet.** `build`, `run_tests`, `rerun_failed`, `format`, `cleanup` and `clean` answer a
 result that has nothing to say in one line, or one line per changed file. `verbose=true` restores the
 full report on any of them. The short form is **only** emitted when there is nothing else to report —
 a failure, a rolled-back edit, a timeout, a zero-result run and a locked file all keep the full
-output — so do not pass `verbose=true` defensively.
+output.
 
 **A warning is never something to report.** A build that **succeeds** answers in one line however
-many warnings it produced — `build ok  errors=0 warnings=37  elapsedMs=4235` — and a build that
-**fails** lists its error-severity diagnostics only, followed by `warnings=37 hidden`. The count is
-there so you know `verbose=true` has something to show; ask for it when you intend to act on the
-warnings, and use `analyze` when the warnings *are* the question. A failed build with no
-error-severity line falls back to listing what it does have, so a failure never answers with nothing.
+many warnings it produced — `build ok  errors=0 warnings=37` — and one that **fails** lists its
+error-severity diagnostics only, followed by `warnings=37 hidden`; ask `verbose=true` when you intend
+to act on them, and `analyze` when the warnings *are* the question. A failed build with no
+error-severity line lists what it does have, so a failure never answers with nothing.
 
-**`warnings=N` counts what that build emitted, not what the solution contains.** MSBuild re-reports
+**`warnings=N` counts what that build emitted, not what the solution contains** — MSBuild re-reports
 nothing for a project it did not recompile, so a second `build` on an unchanged tree answers
-`warnings=0` however many the first one found. Read it as "warnings from the work this build did";
-when you need the solution-wide truth, ask `analyze`.
+`warnings=0` however many the first found; ask `analyze` for the solution-wide truth.
 
-The same holds where `run_tests`, `rerun_failed` and `list_tests` report a build that failed under
-them: `no test results were produced` is followed by the **errors**, not by fifteen lines of raw
-MSBuild output. Those three have no "list the warnings when there is no error" fallback — a failure
-carrying only warnings answers with the bounded
-`FAILED with no error-severity diagnostic; last output lines:` tail, which is where a crashed test
-host says why. That tail is appended whenever no **error** was found, in either mode, so
-`verbose=true` is always a superset: it adds the warnings, it never replaces the failure reason. A
-`list_tests` that succeeded is untouched, whether or not it matched a name.
+`run_tests`, `rerun_failed` and `list_tests` report a build that failed under them the same way:
+`no test results were produced` followed by the **errors**, not by raw MSBuild output. Those three
+have no "list the warnings when there is no error" fallback — a failure carrying only warnings
+answers with the bounded `FAILED with no error-severity diagnostic; last output lines:` tail, which
+is where a crashed test host says why. It is appended whenever no **error** was found, in either
+mode, so `verbose=true` is always a superset: it adds the warnings, never replacing the reason.
 
 **The verification ladder — climb it, never start at the top.** `run_tests` is **37% of all tool wall
 time**, and **6.1% of its identical repeats were provably redundant - nothing was written between
@@ -567,8 +566,9 @@ explicit interface implementation cannot be anchored on. The placement is **not*
 `retryWith` token, as `add=` and `rename=` are not.
 **The default `last` is region-aware**: a trailing `#endregion` lives in the close brace's leading
 trivia, so an append lands above the region the type closes rather than inside it - where a new
-constant used to be filed silently under "Nested types". `replace_symbol add=` shares that default
-but takes no placement arguments.
+constant used to be filed silently under "Nested types". `replace_symbol add=` shares that default and takes
+`addBefore=`/`addAfter=`/`addPosition=`, spelled apart from `add_member`'s so a refusal never names a
+parameter the tool does not declare; one passed without `add=` is refused.
 
 **A mutation names the warnings it introduced** as `WARNING introduced  <diagnostic>`, up to five and
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **A NESTED TYPE's container is its declaring type**, so `symbolIds=["Outer.Nested", "Outer.Sibling"]
@@ -787,9 +787,10 @@ refused.
    names that `usings=` entry - `the ambiguity was introduced by usings=["ModelContextProtocol.Protocol"]
    which this edit added - retry with usings=[] and the retryWith token below to drop it` - rather than
    telling you to fix an edit whose text was fine.
-   **A remedy never names a parameter the rejecting tool does not declare**: `write_text` and
-   `edit_text` take no `usings=` and no `retryWith=`, so their rollback says to put the directive in
-   the content you send instead.
+   **A remedy never names a parameter the rejecting tool does not declare**: `edit_text` takes no
+   `usings=` and no `retryWith=`, so its rollback says to put the directive in the content you send
+   instead. **The sentence above the token obeys it too** - written per tool, so `add_member` never
+   advertises `fix=`, which only `replace_symbol` accepts.
    **When every new error is just a missing import, the remedy names the one-call fix**: a rollback
    whose errors are all `CS0246`/`CS0103` for names the project resolves in exactly one namespace each
    answers `remedy: retry with usings=["System.Collections.Immutable"] and the retryWith token below`.

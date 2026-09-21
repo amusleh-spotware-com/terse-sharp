@@ -63,7 +63,8 @@ internal static class WorkspaceLoader
             elapsedMilliseconds,
             empty.Length is 0 ? stopped : [.. stopped, .. empty],
             Messages(reported, loaded, stopped: false),
-            targetFramework);
+            targetFramework,
+            AnalyzerRebind.Unresolved(solution));
     }
 
     private static string[] Messages(

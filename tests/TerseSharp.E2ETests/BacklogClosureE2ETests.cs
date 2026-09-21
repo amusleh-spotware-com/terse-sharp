@@ -1239,8 +1239,8 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         Assert.StartsWith(counted, rolled, StringComparison.Ordinal);
         Assert.StartsWith(counted, top, StringComparison.Ordinal);
-        Assert.Contains("src/Fixture.Trading/**  x27 files", rolled, StringComparison.Ordinal);
-        Assert.Contains("src/**  x27 files", top, StringComparison.Ordinal);
+        Assert.Contains("src/Fixture.Trading/**  x28 files", rolled, StringComparison.Ordinal);
+        Assert.Contains("src/**  x28 files", top, StringComparison.Ordinal);
         Assert.Contains("DeliberateOutcomesTests.cs", rolled, StringComparison.Ordinal);
         Assert.DoesNotContain("OrderService.cs", rolled, StringComparison.Ordinal);
         Assert.True(rolled.Length * 4 < flat.Length, rolled);
@@ -2187,7 +2187,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         Assert.Contains("next: depth=1 folds this to 2 rows", listing, StringComparison.Ordinal);
         Assert.Contains("src/**", folded, StringComparison.Ordinal);
-        Assert.Contains("x27 files", folded, StringComparison.Ordinal);
+        Assert.Contains("x28 files", folded, StringComparison.Ordinal);
         Assert.DoesNotContain("next: depth=", folded, StringComparison.Ordinal);
     }
 

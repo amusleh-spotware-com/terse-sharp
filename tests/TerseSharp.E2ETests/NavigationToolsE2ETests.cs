@@ -819,4 +819,69 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
             grouped.Length * 3 < full.Length,
             string.Create(CultureInfo.InvariantCulture, $"the grouped outline costs {grouped.Length} characters against {full.Length} for the full one"));
     }
+
+    [Fact]
+    public async Task FindImplementations_ForABaseClass_NamesEveryDerivedTypeTransitively()
+    {
+        var text = await server.CallAsync("find_implementations", new() { ["symbolId"] = "T:Fixture.Trading.Gateway" });
+
+        Assert.Contains("FixGateway", text, StringComparison.Ordinal);
+        Assert.Contains("RestGateway", text, StringComparison.Ordinal);
+        Assert.StartsWith("2 implementations", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindImplementations_ForAnAbstractMember_NamesTheOverride()
+    {
+        var text = await server.CallAsync("find_implementations", new() { ["symbol"] = "Gateway.TryQuote" });
+
+        Assert.Contains("FixGateway.TryQuote", text, StringComparison.Ordinal);
+        Assert.StartsWith("1 implementations", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindImplementations_ForASealedTypeNothingDerivesFrom_SaysWhyTheListIsEmpty()
+    {
+        var text = await server.CallAsync("find_implementations", new() { ["symbolId"] = "T:Fixture.Trading.RestGateway" });
+
+        Assert.StartsWith("0 implementations", text, StringComparison.Ordinal);
+        Assert.Contains("RestGateway is a sealed class, so nothing can derive from it", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_ForAParameterCarryingAnAttribute_KeepsTheAttribute()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:Fixture.Trading.Gateway" });
+
+        Assert.Contains("[NotNullWhen(true)] out string? quote", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_ForAParameterWithoutAttributes_LeavesTheSignatureUnchanged()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/IOrderRepository.cs" });
+
+        Assert.Contains("bool Submit(Order order)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Submit([", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("(Order order)  [", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_ForAParameterAttributeWithALongArgument_ElidesTheArgumentInsteadOfInliningIt()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:Fixture.Trading.RestGateway" });
+
+        Assert.Contains("[Description(...)] string mode", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("never an empty string", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_ForAParameterAttributeCarryingAQuote_EscapesItAndKeepsOneRecordPerLine()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:Fixture.Trading.RestGateway" });
+        var record = text.Split('\n').Single(line => line.Contains("[Description(", StringComparison.Ordinal));
+
+        Assert.Contains("TryRoute", record, StringComparison.Ordinal);
+        Assert.Contains("[Description(\"a\\\"b\")] int tag", record, StringComparison.Ordinal);
+    }
 }

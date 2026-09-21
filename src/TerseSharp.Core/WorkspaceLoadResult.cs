@@ -7,4 +7,8 @@ public sealed record WorkspaceLoadResult(
     long ElapsedMilliseconds,
     IReadOnlyList<string> Failures,
     IReadOnlyList<string> Warnings,
-    string? TargetFramework = null);
+    string? TargetFramework = null,
+    UnresolvedAnalyzers? Analyzers = null)
+{
+    public UnresolvedAnalyzers Unresolved => Analyzers ?? UnresolvedAnalyzers.None;
+}

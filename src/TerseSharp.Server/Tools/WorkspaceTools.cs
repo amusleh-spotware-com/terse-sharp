@@ -282,6 +282,7 @@ CancellationToken cancellationToken = default) =>
 
         AppendFailures(response, result.Failures, root, verbose);
         AppendWarnings(response, result.Warnings, root, verbose);
+        AppendUnresolvedAnalyzers(response, result.Unresolved, root);
     }
 
     private static void AppendFailures(ResponseBuilder response, IReadOnlyList<string> failures, string root, bool verbose)
@@ -527,4 +528,24 @@ CancellationToken cancellationToken = default) =>
 
         return response.ToString();
     }
+
+    private static void AppendUnresolvedAnalyzers(ResponseBuilder response, UnresolvedAnalyzers analyzers, string root)
+    {
+        if (!analyzers.Any)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"analyzers={analyzers.Paths.Count} unresolved in {analyzers.ProjectCount} project(s) - dropped so the workspace stays queryable; restore or build the analyzer packages to get their diagnostics"));
+
+        var shown = Math.Min(analyzers.Paths.Count, MaxUnresolvedAnalyzers);
+
+        for (var index = 0; index < shown; index++)
+            response.Line("UNRESOLVED " + PositionFormat.Relative(root, analyzers.Paths[index]));
+
+        if (analyzers.Paths.Count > shown)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{analyzers.Paths.Count - shown} more not listed"));
+    }
+
+    private const int MaxUnresolvedAnalyzers = 5;
 }

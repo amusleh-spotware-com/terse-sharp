@@ -70,14 +70,12 @@ public static class ExploreService
             .Where(location => !location.IsImplicit)
             .ToArray();
 
-        var implementations = await SymbolFinder
-            .FindImplementationsAsync(symbol, workspace.Solution, cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
+        var implementations = await SymbolDerivation.FindAsync(workspace.Solution, symbol, cancellationToken).ConfigureAwait(false);
 
         return new Reach(
             locations.Length,
             locations.Count(location => TestScope.Of(workspace.Root, location.Document) is "test"),
-            implementations.Count(),
+            implementations.Length,
             [.. Grouped(workspace.Root, locations)],
             [.. XamlUsageService.Find(workspace, symbol, symbol.Name).Select(Describe)],
             locations);

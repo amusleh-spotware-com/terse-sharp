@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <Analyzer Include="analyzers/Gap.Analyzer.NotOnDisk.dll" />
+  </ItemGroup>
+</Project>

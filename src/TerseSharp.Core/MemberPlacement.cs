@@ -7,4 +7,9 @@ public enum MemberPosition
     AfterFields,
 }
 
-public readonly record struct MemberPlacement(string? Before, string? After, MemberPosition Position);
+public readonly record struct MemberPlacement(
+    string? Before,
+    string? After,
+    MemberPosition Position,
+    string BeforeName = "before",
+    string AfterName = "after");

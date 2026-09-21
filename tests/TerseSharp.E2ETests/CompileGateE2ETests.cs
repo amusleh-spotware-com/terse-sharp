@@ -799,4 +799,122 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("append", refused, StringComparison.Ordinal);
         Assert.Contains("silently dropped", refused, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AnAddMemberRollback_NamesOnlyTheRetryFormAddMemberAccepts()
+    {
+        var rejected = await CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Broken.Calculator",
+            ["declaration"] = "public int Added() => MissingHelperThatDoesNotExist();",
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.Contains("retryWith=", rejected, StringComparison.Ordinal);
+        Assert.Contains("the rejected declaration and its usings= are held", rejected, StringComparison.Ordinal);
+        Assert.DoesNotContain("fix=[", rejected, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AReplaceSymbolRollback_StillNamesTheAddAndUsingsItHolds()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => MissingHelperThatDoesNotExist();",
+        });
+
+        Assert.Contains("the rejected declaration, its add= and its usings= are held", rejected, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolWithAddAfter_LandsTheHelperBelowTheNamedMember()
+    {
+        var text = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => Doubled(1);",
+            ["add"] = new[] { "private static int Doubled(int value) => value * 2;" },
+            ["addAfter"] = "Healthy",
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+
+        var onDisk = await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken);
+
+        Assert.True(
+            onDisk.IndexOf("private static int Doubled", StringComparison.Ordinal)
+                < onDisk.IndexOf("PreExistingError", StringComparison.Ordinal),
+            onDisk);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolWithoutAPlacement_StillAppendsTheHelperAtTheEndOfTheType()
+    {
+        var text = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => Doubled(1);",
+            ["add"] = new[] { "private static int Doubled(int value) => value * 2;" },
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+
+        var onDisk = await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken);
+
+        Assert.True(
+            onDisk.IndexOf("private static int Doubled", StringComparison.Ordinal)
+                > onDisk.IndexOf("PreExistingError", StringComparison.Ordinal),
+            onDisk);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolWithAPlacementAndNoAdd_IsRefusedInsteadOfSilentlyIgnored()
+    {
+        var text = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => 2;",
+            ["addAfter"] = "PreExistingError",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("no add= was passed", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolWithAnUnknownAddAnchor_NamesTheParameterItDeclares()
+    {
+        var text = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => Doubled(1);",
+            ["add"] = new[] { "private static int Doubled(int value) => value * 2;" },
+            ["addAfter"] = "NoSuchMemberHere",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("addAfter=NoSuchMemberHere", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolWhoseAddAnchorTheReplacementRenamesAway_IsRefusedInsteadOfAppendingAtTheEnd()
+    {
+        var text = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Renamed() => Doubled(1);",
+            ["add"] = new[] { "private static int Doubled(int value) => value * 2;" },
+            ["addAfter"] = "Healthy",
+            ["rename"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("addAfter=Healthy", text, StringComparison.Ordinal);
+        Assert.Contains("no longer does after it", text, StringComparison.Ordinal);
+
+        var onDisk = await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("Doubled", onDisk, StringComparison.Ordinal);
+    }
 }

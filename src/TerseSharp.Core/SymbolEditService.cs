@@ -458,7 +458,7 @@ public static class SymbolEditService
     private static bool Identical(PlannedEdit planned) =>
         planned.Nodes is [var only] && only.ToFullString().Equals(planned.Target.Node.ToFullString(), StringComparison.Ordinal);
 
-    private static SyntaxNode? Applied(SyntaxNode root, IReadOnlyList<PlannedEdit> planned, IReadOnlyList<AppendedMembers> appended)
+    private static Result<SyntaxNode> Applied(SyntaxNode root, IReadOnlyList<PlannedEdit> planned, IReadOnlyList<AppendedMembers> appended)
     {
         var targets = planned.Select(edit => edit.Target.Node);
         var current = root.TrackNodes(appended.Count is 0 ? targets : targets.Concat(appended.Select(plan => (SyntaxNode)plan.Type)));
@@ -466,7 +466,7 @@ public static class SymbolEditService
         foreach (var edit in planned)
         {
             if (current.GetCurrentNode(edit.Target.Node) is not { } node)
-                return null;
+                return Result.Fail<SyntaxNode>(Overlapping(edit.Target.Document.Name));
 
             current = current.ReplaceNode(node, edit.Nodes.Select(replacement => Annotated(replacement, edit.Annotate)));
         }
@@ -475,11 +475,11 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<Solution>> SwappedAsync(
-            Solution solution,
-            IReadOnlyList<PlannedEdit> planned,
-            System.Collections.Immutable.ImmutableArray<string> usings,
-            IReadOnlyList<AppendedMembers> appended,
-            CancellationToken cancellationToken)
+                Solution solution,
+                IReadOnlyList<PlannedEdit> planned,
+                System.Collections.Immutable.ImmutableArray<string> usings,
+                IReadOnlyList<AppendedMembers> appended,
+                CancellationToken cancellationToken)
     {
         var document = planned[0].Target.Document;
 
@@ -491,10 +491,12 @@ public static class SymbolEditService
         if (root is null)
             return Result.Fail<Solution>(Errors.DocumentNotFound(document.FilePath ?? document.Name));
 
-        if (Applied(root, planned, appended) is not { } rewritten)
-            return Result.Fail<Solution>(Overlapping(document.Name));
+        var rewritten = Applied(root, planned, appended);
 
-        var updated = UsingDirectives.Ensured(rewritten, usings);
+        if (!rewritten.IsOk)
+            return Result.Fail<Solution>(rewritten.Error!);
+
+        var updated = UsingDirectives.Ensured(rewritten.Value!, usings);
         var formatted = await IndentedAsync(document.WithSyntaxRoot(updated), cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(solution.WithDocumentSyntaxRoot(document.Id, formatted));
@@ -547,15 +549,15 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> BatchedAsync(
-            LoadedWorkspace workspace,
-            PlannedEdit[] planned,
-            EditOptions options,
-            CancellationToken cancellationToken)
+                LoadedWorkspace workspace,
+                PlannedEdit[] planned,
+                EditOptions options,
+                CancellationToken cancellationToken)
     {
         if (options.Add.IsDefaultOrEmpty)
             return await SwappedManyAsync(workspace, planned, options, [], cancellationToken).ConfigureAwait(false);
 
-        var appended = AppendPlan(planned, options.Add, options.AddTo);
+        var appended = AppendPlan(planned, options.Add, options.AddTo, options.Placement);
 
         return appended.IsOk
             ? await SwappedManyAsync(workspace, planned, options, appended.Value!, cancellationToken).ConfigureAwait(false)
@@ -626,9 +628,10 @@ public static class SymbolEditService
         outer.Target.Node.Span.Contains(inner.Target.Node.Span);
 
     private readonly record struct AppendedMembers(
-            DocumentId Document,
-            TypeDeclarationSyntax Type,
-            IReadOnlyList<MemberDeclarationSyntax> Members);
+                DocumentId Document,
+                TypeDeclarationSyntax Type,
+                IReadOnlyList<MemberDeclarationSyntax> Members,
+                MemberPlacement? Placement = null);
 
     private static TerseError AddNotShared(BaseTypeDeclarationSyntax?[] types, string? addTo) => Errors.Invalid(
             addTo is { Length: > 0 } || types is not [_]
@@ -660,21 +663,29 @@ public static class SymbolEditService
         return false;
     }
 
-    private static Result<AppendedMembers[]> AppendPlan(IReadOnlyList<PlannedEdit> planned, System.Collections.Immutable.ImmutableArray<string> add, string? addTo)
+    private static Result<AppendedMembers[]> AppendPlan(
+            IReadOnlyList<PlannedEdit> planned,
+            System.Collections.Immutable.ImmutableArray<string> add,
+            string? addTo,
+            MemberPlacement? placement)
     {
         var routed = Routed(add, addTo);
 
         return routed.IsOk
-            ? RoutedPlans(planned, routed.Value!)
+            ? RoutedPlans(planned, routed.Value!, placement)
             : Result.Fail<AppendedMembers[]>(routed.Error!);
     }
 
-    private static SyntaxNode? Grown(SyntaxNode current, AppendedMembers appended)
+    private static Result<SyntaxNode> Grown(SyntaxNode current, AppendedMembers appended)
     {
         if (current.GetCurrentNode(appended.Type) is not TypeDeclarationSyntax type)
-            return null;
+            return Result.Fail<SyntaxNode>(Overlapping(Path.GetFileName(appended.Type.SyntaxTree.FilePath)));
 
-        return current.ReplaceNode(type, Appended(type, Formattable(appended.Members), OutsideRegions(type)));
+        var at = Placed(type, appended.Placement);
+
+        return at.IsOk
+            ? Result.Ok(current.ReplaceNode(type, Appended(type, Formattable(appended.Members), at.Value)))
+            : Result.Fail<SyntaxNode>(PlacementLost(appended));
     }
 
     private static int Chosen(IReadOnlyList<PlannedEdit> planned, BaseTypeDeclarationSyntax?[] types, string? addTo)
@@ -896,36 +907,62 @@ public static class SymbolEditService
             : Result.Fail<AddRoute[]>(RouteMismatch(containers.Count, add.Length));
     }
 
-    private static Result<AppendedMembers> RoutePlan(IReadOnlyList<PlannedEdit> planned, BaseTypeDeclarationSyntax?[] types, AddRoute route)
+    private static Result<AppendedMembers> RoutePlan(
+            IReadOnlyList<PlannedEdit> planned,
+            BaseTypeDeclarationSyntax?[] types,
+            AddRoute route,
+            MemberPlacement? placement)
     {
-        if (AmbiguousContainer(types, route.Container) is { } ambiguous)
-            return Result.Fail<AppendedMembers>(ambiguous);
+        var target = Targeted(planned, types, route);
 
-        var chosen = Chosen(planned, types, route.Container);
+        if (!target.IsOk)
+            return Result.Fail<AppendedMembers>(target.Error!);
 
-        if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
-            return Result.Fail<AppendedMembers>(AddNotShared(types, route.Container));
+        var at = Placed(target.Value.Container, placement);
 
-        var document = planned[chosen].Target.Document.Id;
-
-        if (planned.Any(edit => edit.Target.Document.Id == document && edit.Target.Node.Span == container.Span))
-            return Result.Fail<AppendedMembers>(AddReplacesItsOwnType());
+        if (!at.IsOk)
+            return Result.Fail<AppendedMembers>(at.Error!);
 
         var members = MemberDeclaration.ParseAll(string.Join("\n\n", route.Members));
 
         return members.IsOk
-            ? Result.Ok(new AppendedMembers(document, container, members.Value!))
+            ? Result.Ok(new AppendedMembers(target.Value.Document, target.Value.Container, members.Value!, placement))
             : Result.Fail<AppendedMembers>(members.Error!);
     }
 
-    private static Result<AppendedMembers[]> RoutedPlans(IReadOnlyList<PlannedEdit> planned, IReadOnlyList<AddRoute> routes)
+    private readonly record struct AddTarget(DocumentId Document, TypeDeclarationSyntax Container);
+
+    private static Result<AddTarget> Targeted(
+            IReadOnlyList<PlannedEdit> planned,
+            BaseTypeDeclarationSyntax?[] types,
+            AddRoute route)
+    {
+        if (AmbiguousContainer(types, route.Container) is { } ambiguous)
+            return Result.Fail<AddTarget>(ambiguous);
+
+        var chosen = Chosen(planned, types, route.Container);
+
+        if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
+            return Result.Fail<AddTarget>(AddNotShared(types, route.Container));
+
+        var document = planned[chosen].Target.Document.Id;
+
+        return planned.Any(edit => edit.Target.Document.Id == document && edit.Target.Node.Span == container.Span)
+            ? Result.Fail<AddTarget>(AddReplacesItsOwnType())
+            : Result.Ok(new AddTarget(document, container));
+    }
+
+    private static Result<AppendedMembers[]> RoutedPlans(
+            IReadOnlyList<PlannedEdit> planned,
+            IReadOnlyList<AddRoute> routes,
+            MemberPlacement? placement)
     {
         var types = planned.Select(edit => Container(edit.Target.Node)).ToArray();
         var plans = new AppendedMembers[routes.Count];
 
         for (var index = 0; index < routes.Count; index++)
         {
-            var one = RoutePlan(planned, types, routes[index]);
+            var one = RoutePlan(planned, types, routes[index], placement);
 
             if (!one.IsOk)
                 return Result.Fail<AppendedMembers[]>(one.Error!);
@@ -936,17 +973,19 @@ public static class SymbolEditService
         return Result.Ok(plans);
     }
 
-    private static SyntaxNode? Grown(SyntaxNode current, IReadOnlyList<AppendedMembers> appended)
+    private static Result<SyntaxNode> Grown(SyntaxNode current, IReadOnlyList<AppendedMembers> appended)
     {
         foreach (var plan in appended)
         {
-            if (Grown(current, plan) is not { } grown)
-                return null;
+            var grown = Grown(current, plan);
 
-            current = grown;
+            if (!grown.IsOk)
+                return grown;
+
+            current = grown.Value!;
         }
 
-        return current;
+        return Result.Ok(current);
     }
 
     private static TerseError BlankContainer(string addTo) => Errors.Invalid(
@@ -1162,8 +1201,8 @@ public static class SymbolEditService
 
         return (wanted.Before, wanted.After) switch
         {
-            ({ Length: > 0 } before, _) => Indexed(type, before, 0, "before"),
-            (_, { Length: > 0 } after) => Indexed(type, after, 1, "after"),
+            ({ Length: > 0 } before, _) => Indexed(type, before, 0, wanted.BeforeName),
+            (_, { Length: > 0 } after) => Indexed(type, after, 1, wanted.AfterName),
             _ => Result.Ok(Positioned(type, wanted.Position)),
         };
     }
@@ -1323,6 +1362,19 @@ public static class SymbolEditService
             ? Result.Ok(new PlannedEdit(target, [Appended(type, Formattable(members.Value!), at.Value)], false))
             : Result.Fail<PlannedEdit>(at.Error!);
     }
+
+    private static TerseError PlacementLost(AppendedMembers appended) => Errors.Invalid(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"the anchor {Anchor(appended.Placement)} resolved before the replacement and no longer does after it, so where the add= members belong is not decided"),
+            "anchor on a member this edit does not rewrite, send the helpers with add_member after the replacement, or drop the placement to append them at the end of the type");
+
+    private static string Anchor(MemberPlacement? placement) => placement switch
+    {
+        { Before: { Length: > 0 } before } => "addBefore=" + before,
+        { After: { Length: > 0 } after } => "addAfter=" + after,
+        _ => "the requested placement",
+    };
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);
