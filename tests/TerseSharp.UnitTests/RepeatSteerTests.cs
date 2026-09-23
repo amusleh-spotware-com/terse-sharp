@@ -235,6 +235,63 @@ public sealed class RepeatSteerTests
         Assert.Contains("10 files per call", steer, StringComparison.Ordinal);
         Assert.Contains("46 cultures is 5 calls", steer, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Steer_ForACallWhoseArgumentThePreviousAnswerNamed_SaysNothingBecauseTheTwoCouldNotHaveBeenOneCall()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("read_text", value: "docs/index.md"));
+        RepeatSteer.Answered("see docs/guide.md for the rest");
+
+        Assert.Null(RepeatSteer.Steer("read_text", value: "docs/guide.md"));
+    }
+
+    [Fact]
+    public void Steer_ForARetryOfACallThatTimedOut_SaysNothingBecauseTheRetryExistsOnlyBecauseTheFirstFailed()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("run_tests", value: "Slow.Tests"));
+        RepeatSteer.Answered("run_tests Slow.Tests\nFAILED timed out after 600305 ms, no test results were produced");
+
+        Assert.Null(RepeatSteer.Steer("run_tests", value: "Slow.Tests"));
+    }
+
+    [Fact]
+    public void Steer_ForTwoIndependentCallsAfterAnAnswerNamingNeither_StillSteers()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("read_text", value: "src/A.cs"));
+        RepeatSteer.Answered("3 members");
+
+        Assert.Equal(
+            "2 read_text calls in a row - these are ONE call: paths=[\"src/A.cs\", \"src/B.cs\"]",
+            RepeatSteer.Steer("read_text", value: "src/B.cs"));
+    }
+
+    [Fact]
+    public void Steer_ForARetryAfterAnError_SaysNothingBecauseTheSecondCallCorrectsTheFirst()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("get_symbol_source", value: "OrderService.Sumbit"));
+        RepeatSteer.Answered("ERROR SymbolNotFound: 'OrderService.Sumbit' did not resolve");
+
+        Assert.Null(RepeatSteer.Steer("get_symbol_source", value: "OrderService.Submit"));
+    }
+
+    [Fact]
+    public void Steer_ForAMemberThePreviousSourceCalled_SaysNothingBecauseItsNameCameFromThatAnswer()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(RepeatSteer.Steer("get_symbol_source", value: "OrderRouter.Route"));
+        RepeatSteer.Answered("public bool Route(Order order) => service.Submit(order);");
+
+        Assert.Null(RepeatSteer.Steer("get_symbol_source", value: "OrderService.Submit"));
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

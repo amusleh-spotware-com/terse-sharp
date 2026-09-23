@@ -228,15 +228,19 @@ public static class XamlEditService
 
     private static Result<int> Locate(XamlDocument document, string target)
     {
-        var matches = document.Elements().Where(element => Matches(element, target)).ToArray();
+        var elements = document.Elements().ToArray();
+        var exact = Array.FindAll(elements, element => Matches(element, target));
+        var matches = exact.Length > 0 ? exact : Array.FindAll(elements, element => EndsWith(element.Path, target));
 
         return matches switch
         {
             [var only] => Result.Ok(only.Line),
-            [] => Result.Fail<int>(Errors.Invalid($"'{target}' matched no element", "pass an element path from xaml_outline, #Name or key=Key")),
+            [] => Result.Fail<int>(Errors.Invalid(
+                $"'{target}' matched no element",
+                "pass an element path, a trailing part of one, @<line> from xaml_outline, #Name or key=Key - this file's elements: " + Addresses(elements))),
             _ => Result.Fail<int>(Errors.Invalid(
                 $"'{target}' matched {matches.Length} elements",
-                "pass the element path from xaml_outline, which is unique")),
+                "pass one of these, or its @<line>: " + Addresses(matches))),
         };
     }
 
@@ -244,6 +248,7 @@ public static class XamlEditService
     {
         ['#', .. var name] => string.Equals(element.Name, name, StringComparison.Ordinal),
         ['k', 'e', 'y', '=', .. var key] => string.Equals(element.Key, key, StringComparison.Ordinal),
+        ['@', ..] => int.TryParse(target.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out var line) && element.Line == line,
         _ => string.Equals(element.Path, target, StringComparison.Ordinal),
     };
 
@@ -262,7 +267,7 @@ public static class XamlEditService
     {
         var close = tag.EndsWith("/>", StringComparison.Ordinal) ? tag.Length - 2 : tag.Length - 1;
 
-        return tag.Insert(close, attribute + " ");
+        return tag.Insert(tag.AsSpan(0, close).TrimEnd().Length, attribute);
     }
 
     private static string Attribute(string property, string value) =>
@@ -320,4 +325,40 @@ public static class XamlEditService
             return offset;
         }
     }
+
+    private static bool EndsWith(string path, string target)
+    {
+        var tail = target.AsSpan().Trim('/');
+
+        return tail.Length > 0 && tail[0] is not ('#' or '@') && SegmentsEnd(path.AsSpan(), tail);
+    }
+
+    private static string Addresses(XamlElementInfo[] elements) =>
+            string.Join(", ", elements.Take(MaxAddresses).Select(element => string.Create(CultureInfo.InvariantCulture, $"{element.Path} @{element.Line}")))
+            + (elements.Length > MaxAddresses ? string.Create(CultureInfo.InvariantCulture, $" and {elements.Length - MaxAddresses} more") : string.Empty);
+
+    private const int MaxAddresses = 8;
+
+    private static bool SegmentsEnd(ReadOnlySpan<char> path, ReadOnlySpan<char> tail)
+    {
+        while (tail.Length > 0)
+        {
+            var pathCut = path.LastIndexOf('/');
+            var tailCut = tail.LastIndexOf('/');
+
+            if (path.IsEmpty || !SameSegment(path[(pathCut + 1)..], tail[(tailCut + 1)..]))
+                return false;
+
+            path = pathCut < 0 ? [] : path[..pathCut];
+            tail = tailCut < 0 ? [] : tail[..tailCut];
+        }
+
+        return true;
+    }
+
+    private static bool SameSegment(ReadOnlySpan<char> segment, ReadOnlySpan<char> wanted) =>
+            segment.SequenceEqual(wanted) || (!wanted.Contains('[') && Unindexed(segment).SequenceEqual(wanted));
+
+    private static ReadOnlySpan<char> Unindexed(ReadOnlySpan<char> segment) =>
+            segment.IndexOf('[') is > 0 and var open ? segment[..open] : segment;
 }

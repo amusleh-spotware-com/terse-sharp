@@ -995,4 +995,58 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
         Assert.Contains("one of the two would be silently dropped", refused, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AnAddMemberRollback_AdoptedByReplaceSymbolWithAppend_LandsTheHeldMemberBesideTheMemberThatNeedsChanging()
+    {
+        var rejected = await CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Broken.Calculator",
+            ["declaration"] = "public int Limit() => limit;",
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+
+        var text = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["append"] = true,
+            ["symbolIds"] = new[] { "Calculator.Healthy" },
+            ["declarations"] = new[] { "public int Healthy() => limit;" },
+            ["add"] = new[] { "private readonly int limit = 1;" },
+        });
+
+        var written = await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("public int Limit() => limit;", written, StringComparison.Ordinal);
+        Assert.Contains("private readonly int limit = 1;", written, StringComparison.Ordinal);
+        Assert.Contains("public int Healthy() => limit;", written, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_WithBaseRef_FoldsTheDiagnosticsNoChangedLineCarriesIntoOneCount()
+    {
+        var text = await CallAsync("get_diagnostics", new() { ["minSeverity"] = "error", ["baseRef"] = "HEAD" });
+
+        Assert.StartsWith("0 diagnostics", text, StringComparison.Ordinal);
+        Assert.Contains("1 pre-existing diagnostic(s)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PreExistingError", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_WhenALineFoldsSeveralPositions_CountsTheOccurrencesAnEditCounterReports()
+    {
+        await CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "Calculator.Healthy",
+            ["body"] = "=> \"this does not compile either\"",
+            ["allowErrors"] = true,
+        });
+
+        var text = await CallAsync("get_diagnostics", new() { ["minSeverity"] = "error" });
+
+        Assert.StartsWith("1 diagnostics", text, StringComparison.Ordinal);
+        Assert.Contains("occurrences=2 errors=2 warnings=0", text, StringComparison.Ordinal);
+    }
 }

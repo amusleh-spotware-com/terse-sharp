@@ -51,7 +51,7 @@ public sealed class LoadedWorkspace : IDisposable
 
     public string LineEnding => lineEnding.Value;
 
-    public DateTimeOffset LastUsedUtc { get; private set; }
+    public DateTimeOffset LastUsedUtc { get; internal set; }
 
     public DateTimeOffset LoadedUtc { get; }
 
@@ -553,6 +553,8 @@ public sealed class LoadedWorkspace : IDisposable
 
     public bool CompilationsDropped { get; private set; }
 
+    public int Drops { get; private set; }
+
     public TimeSpan Idle => DateTimeOffset.UtcNow - LastUsedUtc;
 
     public bool DropCompilations()
@@ -569,6 +571,7 @@ public sealed class LoadedWorkspace : IDisposable
 
             CompilationsDropped = true;
             DroppedAfter = Idle;
+            Drops++;
             droppedNotice = true;
             Interlocked.Exchange(ref realizedNoticeTaken, 0);
 

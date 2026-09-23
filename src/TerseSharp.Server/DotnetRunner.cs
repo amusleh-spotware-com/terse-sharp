@@ -227,7 +227,7 @@ public static partial class DotnetRunner
         if (request.Verbose)
             AppendCommand(response, run);
 
-        AppendWarnings(response, run, report, request.Filter);
+        AppendWarnings(response, run, report, request.Filter, request.Timeout);
         AppendFailures(response, report, shown);
         AppendTimings(response, report, request);
         AppendRerun(response, report);
@@ -275,7 +275,7 @@ public static partial class DotnetRunner
         CultureInfo.InvariantCulture,
         $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}{Slowest(report, run)}{Pathological(report, target)}") + PerProject(report);
 
-    private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter)
+    private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter, TimeSpan deadline)
     {
         AppendLockWarning(response, run);
         AppendDrainWarning(response, run);
@@ -283,7 +283,7 @@ public static partial class DotnetRunner
         if (run.TimedOut)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"WARNING timed out after {run.ElapsedMilliseconds} ms; the results below are partial"));
 
-        AppendDeadlineRemedy(response, run);
+        AppendDeadlineRemedy(response, run, deadline);
 
         if (report.Total is 0)
             response.Note(NoMatch(filter));
@@ -831,7 +831,11 @@ public static partial class DotnetRunner
         if (!run.TimedOut && !Deadlined(run, deadline))
             return;
 
-        response.Note("remedy: the run reached its deadline before it finished; raise timeoutSeconds, or narrow the run with test= or filter=");
+        var budget = deadline > TimeSpan.Zero ? (int)deadline.TotalSeconds : (int)(run.ElapsedMilliseconds / 1000);
+
+        response.Note(budget >= MaxTimeoutSeconds
+            ? string.Create(CultureInfo.InvariantCulture, $"remedy: the run reached its deadline and timeoutSeconds is already at the {MaxTimeoutSeconds} s maximum - split it with projects=[...] (each project gets its own budget) or narrow it with test= or filter=")
+            : string.Create(CultureInfo.InvariantCulture, $"remedy: the run reached its deadline before it finished; raise timeoutSeconds - retry with timeoutSeconds={Math.Min(MaxTimeoutSeconds, Math.Max(60, budget * 2))}, the maximum is {MaxTimeoutSeconds} - or narrow the run with test= or filter="));
     }
 
     private static void AppendDrainWarning(ResponseBuilder response, ProcessRun run)
@@ -1214,6 +1218,8 @@ public static partial class DotnetRunner
             ? "next: rerun_failed tests=[" + string.Join(", ", report.Failures.Select(failure => "\"" + failure.Name + "\"")) + "] - a mean 20 s against this run's, and it rebuilds nothing the failures do not reach"
             : string.Create(CultureInfo.InvariantCulture, $"next: rerun_failed - replays all {report.Failures.Length} remembered failures, a mean 20 s against this run's"));
     }
+
+    internal const int MaxTimeoutSeconds = 3600;
 }
 
 internal sealed record ProcessRun(

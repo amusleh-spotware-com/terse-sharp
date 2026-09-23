@@ -462,4 +462,21 @@ public sealed class WorkspaceRegistryTests
         Assert.False(result.IsOk);
         Assert.Equal(TerseErrorCode.AmbiguousWorkspace, result.Error!.Code);
     }
+
+    [Fact]
+    public async Task DropIdleCompilations_UnderMemoryPressure_SparesTheMostRecentlyUsedWorkspaceUntilItsOwnIdleTimeout()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        var workspace = registry.All()[0];
+
+        workspace.LastUsedUtc = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2);
+
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromHours(1), long.MaxValue));
+        Assert.False(workspace.CompilationsDropped);
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromMinutes(1), long.MaxValue));
+        Assert.Equal(1, workspace.Drops);
+    }
 }

@@ -186,10 +186,10 @@ public static class SymbolLookup
             return Result.Fail<ISymbol>(Errors.DocumentNotFound(path));
 
         var declared = await SymbolFinder
-            .FindSourceDeclarationsAsync(document.Project, query.Member, ignoreCase: false, cancellationToken)
+            .FindSourceDeclarationsAsync(document.Project, SymbolReference.Searched(query), ignoreCase: false, cancellationToken)
             .ConfigureAwait(false);
 
-        return Scoped(text, [.. declared
+        return Scoped(text, [.. SymbolReference.Expanded(declared, query)
         .Where(symbol => DeclaredIn(symbol, document.FilePath) && SymbolReference.Matches(symbol, query))
         .DistinctBy(Describe, StringComparer.Ordinal)]);
     }
@@ -250,7 +250,7 @@ public static class SymbolLookup
     private static string[] Nearest(INamedTypeSymbol type, string member) =>
     [
         .. type.GetMembers()
-        .Where(symbol => symbol.CanBeReferencedByName)
+        .Where(symbol => symbol.CanBeReferencedByName || symbol is IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor, IsImplicitlyDeclared: false })
         .Select(Addressable)
         .Distinct(StringComparer.Ordinal)
         .OrderBy(name => name.Contains(member, StringComparison.OrdinalIgnoreCase) ? 0 : 1)

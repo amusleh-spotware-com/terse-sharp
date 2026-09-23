@@ -381,7 +381,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         return text.ToString();
     }
 
-    private static TimeSpan Seconds(int timeoutSeconds) => TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, 3600));
+    private static TimeSpan Seconds(int timeoutSeconds) => TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, DotnetRunner.MaxTimeoutSeconds));
 
     private static Task<string> Contained(WorkspaceTarget workspace, string? project, Func<string?, Task<string>> action)
     {

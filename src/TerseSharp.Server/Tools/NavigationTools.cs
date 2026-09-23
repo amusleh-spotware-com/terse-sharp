@@ -211,22 +211,32 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             ReferenceService.FindImplementationsAsync(loaded, resolved, Cap(maxResults, 100), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "get_diagnostics", ReadOnly = true)]
-    [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those.")]
+    [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those. A line folds every position sharing an id and a message, and when it folded any the answer also counts occurrences=N errors=N warnings=N - comparable to an edit's errors= counter when the two cover the same projects. baseRef=HEAD keeps only the diagnostics on lines this working tree ADDED or CHANGED against that ref and folds the rest to one pre-existing count, so a convergence read shows your own errors and not the repository's; a baseRef call always runs.")]
     public Task<string> GetDiagnostics(
-        [Description("File to scope to.")] string? path = null,
-        [Description("Minimum severity: error, warning, info. Default warning.")] string? minSeverity = null,
-        [Description("Alias for minSeverity.")] string? severity = null,
-        [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Max results (100).")] int maxResults = 0,
-        CancellationToken cancellationToken = default) =>
-        replay.ReplayedAsync(
-            "get_diagnostics",
-            ReplayGate.Key("get_diagnostics", path, minSeverity, severity, workspace, maxResults.ToString(CultureInfo.InvariantCulture)),
-            force: false,
-            () => context.WithWorkspaceAsync(workspace, path, loaded =>
-                DiagnosticsService.CollectAsync(loaded, path, Severity(minSeverity ?? severity), Cap(maxResults, 100), cancellationToken),
-                cancellationToken: cancellationToken),
-            cancellationToken);
+            [Description("File to scope to.")] string? path = null,
+            [Description("Minimum severity: error, warning, info. Default warning.")] string? minSeverity = null,
+            [Description("Alias for minSeverity.")] string? severity = null,
+            [Description("Workspace or worktree name.")] string? workspace = null,
+            [Description("Max results (100).")] int maxResults = 0,
+            [Description("Report only diagnostics on a line the working tree added or changed against this git ref, e.g. HEAD or main, folding the rest to one pre-existing count. A file git does not track counts whole. Empty reports every diagnostic in scope.")] string? baseRef = null,
+            CancellationToken cancellationToken = default) =>
+            replay.ReplayedAsync(
+                "get_diagnostics",
+                ReplayGate.Key("get_diagnostics", path, minSeverity, severity, workspace, maxResults.ToString(CultureInfo.InvariantCulture), baseRef),
+                force: baseRef is { Length: > 0 },
+                () => context.WithWorkspaceAsync(workspace, path, async loaded =>
+                {
+                    var (touched, error) = await AnalysisTools.TouchedAsync(loaded.Root, baseRef, cancellationToken).ConfigureAwait(false);
+
+                    return error is { } failure
+                        ? failure.Render()
+                        : await DiagnosticsService.CollectAsync(
+                            loaded,
+                            new DiagnosticsRequest(path, Severity(minSeverity ?? severity), Cap(maxResults, 100), touched, baseRef ?? string.Empty),
+                            cancellationToken).ConfigureAwait(false);
+                },
+                    cancellationToken: cancellationToken),
+                cancellationToken);
 
     private static async Task<string> SearchAsync(
             LoadedWorkspace workspace,

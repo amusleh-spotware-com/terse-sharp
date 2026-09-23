@@ -1178,10 +1178,10 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "echo one; git log --oneline -3; echo two" },
+            new JsonObject { ["command"] = "npm test; git log --oneline -3; npm run lint" },
             Fixtures.RepositoryRoot);
 
-        Assert.Equal("echo one; echo two", verdict.Rewrite);
+        Assert.Equal("npm test; npm run lint", verdict.Rewrite);
     }
 
     [Fact]
@@ -1393,20 +1393,20 @@ public sealed class ToolGuardTests
     [Fact]
     public void Inspect_ForAReplacedCommandCarryingAnFdDuplication_StripsItInsteadOfRefusingTheWholeCommand()
     {
-        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build 2>&1 && echo finished" });
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build 2>&1 && npm test" });
 
         Assert.True(verdict.Denied);
         Assert.Contains("build", verdict.Routing ?? string.Empty, StringComparison.Ordinal);
-        Assert.Contains("echo finished", verdict.Rewrite ?? string.Empty, StringComparison.Ordinal);
+        Assert.Contains("npm test", verdict.Rewrite ?? string.Empty, StringComparison.Ordinal);
     }
 
     [Fact]
     public void Inspect_ForAReplacedCommandCarryingAFileRedirection_StripsItWithItsRedirect()
     {
-        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build > build.log && echo finished" });
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build > build.log && npm test" });
 
         Assert.True(verdict.Denied);
-        Assert.Equal("echo finished", verdict.Rewrite);
+        Assert.Equal("npm test", verdict.Rewrite);
     }
 
     [Theory]
@@ -1654,7 +1654,7 @@ public sealed class ToolGuardTests
     [Theory]
     [InlineData("echo finished > out.txt && git log --oneline -3", "echo finished > out.txt")]
     [InlineData("sort < in.txt > out.txt && grep foo out.txt", "sort < in.txt > out.txt")]
-    [InlineData("grep foo src > hits.txt && echo ok", "echo ok")]
+    [InlineData("grep foo src > hits.txt && gh auth status", "gh auth status")]
     [InlineData("echo a 2> err.txt && git status", "echo a 2> err.txt")]
     [InlineData("npm test >> all.log && git log --oneline -2", "npm test >> all.log")]
     public void Guard_ForABatchWithAPlainRedirect_StripsTheReplacedPipelinesAndRunsTheRest(string command, string rewrite)
@@ -1812,5 +1812,42 @@ public sealed class ToolGuardTests
 
             Assert.False(verdict.Denied, NotHermetic(dotnet, verdict.Reason));
         }
+    }
+
+    [Fact]
+    public void Guard_ForABatchWhoseOnlyUnreplacedPartsAreEchoFraming_DeniesItWholeInsteadOfRunningTheLabels()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "echo '=== log' && git show --stat HEAD && echo '=== tags' && git tag --list" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+        Assert.Contains("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForABatchWithRealWorkBesideItsEchoFraming_StillRewritesIt()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "echo '=== push' && git push && git show --stat HEAD" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("echo '=== push' && git push", verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Guard_ForABatchWhoseEchoFeedsAPipe_StillRewritesItBecauseThatEchoIsNotFraming()
+    {
+        var verdict = ToolGuard.Inspect(
+            "Bash",
+            new JsonObject { ["command"] = "echo y | gh auth status && git show --stat HEAD" },
+            Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("echo y | gh auth status", verdict.Rewrite);
     }
 }

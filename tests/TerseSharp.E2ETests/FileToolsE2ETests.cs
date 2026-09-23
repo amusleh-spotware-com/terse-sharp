@@ -1927,4 +1927,35 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Fact]
+    public async Task WriteText_OverwritingACSharpFileWithoutSomeOfItsMembers_NamesEveryDeclarationItDrops()
+    {
+        const string Truncated = """
+            namespace Fixture.Trading;
+
+            public sealed class OrderService
+            {
+                private readonly IOrderRepository repository;
+
+                public OrderService(IOrderRepository repository) => this.repository = repository;
+
+                public int PendingCount => repository.PendingCount;
+
+                public bool Submit(Order order) => repository.Submit(order);
+
+                public bool SubmitTwice(Order order) => Submit(order) && Submit(order);
+            }
+            """;
+
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["content"] = Truncated,
+            ["force"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("WARNING this overwrite drops 2 declaration(s) the file declared: OrderService.Unused(), OrderService.NeverCalled()", text, StringComparison.Ordinal);
+    }
 }

@@ -62,7 +62,7 @@ public static class SymbolReference
             ? null
             : new SymbolQuery(
                 separator < 0 ? null : name[..separator],
-                separator < 0 ? name : name[(separator + 1)..],
+                Member(separator < 0 ? name : name[(separator + 1)..]),
                 open < 0 ? null : Split(trimmed[open..]));
     }
 
@@ -254,4 +254,23 @@ public static class SymbolReference
 
     private static bool StartsAName(char character) =>
         char.IsLetter(character) || character is '_';
+
+    public static string Searched(SymbolQuery query) =>
+            IsConstructor(query.Member) && query.ContainingType is { Length: > 0 } qualifier
+                ? qualifier[(qualifier.LastIndexOf('.') + 1)..]
+                : query.Member;
+
+    public static IEnumerable<ISymbol> Expanded(IEnumerable<ISymbol> declared, SymbolQuery query) => IsConstructor(query.Member)
+            ? declared.OfType<INamedTypeSymbol>().SelectMany(type => type.GetMembers(query.Member))
+            : declared;
+
+    private static bool IsConstructor(string member) =>
+            member is WellKnownMemberNames.InstanceConstructorName or WellKnownMemberNames.StaticConstructorName;
+
+    private static string Member(string name) => name switch
+    {
+        "#ctor" => WellKnownMemberNames.InstanceConstructorName,
+        "#cctor" => WellKnownMemberNames.StaticConstructorName,
+        _ => name,
+    };
 }

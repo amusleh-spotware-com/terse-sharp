@@ -88,15 +88,15 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     }
 
     private static async Task<string> ListAsync(
-        string root,
-        string? baseRef,
-        string? path,
-        string? exclude,
-        int maxResults,
-        string? outside,
-        ChangeScope scope,
-        bool chosen,
-        CancellationToken cancellationToken)
+            string root,
+            string? baseRef,
+            string? path,
+            string? exclude,
+            int maxResults,
+            string? outside,
+            ChangeScope scope,
+            bool chosen,
+            CancellationToken cancellationToken)
     {
         string[] command = scope.Staged ? ["diff", "--cached"] : ["diff"];
         var numstat = await GitRunner.ReadAsync(root, Arguments([.. command, "--numstat"], baseRef, path), cancellationToken).ConfigureAwait(false);
@@ -117,20 +117,21 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
                 cancellationToken).ConfigureAwait(false);
 
         return untracked.IsOk
-            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen)
+            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen, root)
             : untracked.Error!.Render();
     }
 
     private static string Render(
-            string numstat,
-            string nameStatus,
-            string untracked,
-            string? exclude,
-            string? path,
-            int maxResults,
-            string? outside,
-            string? steer,
-            bool chosen)
+                string numstat,
+                string nameStatus,
+                string untracked,
+                string? exclude,
+                string? path,
+                int maxResults,
+                string? outside,
+                string? steer,
+                bool chosen,
+                string root)
     {
         var listed = Lines(numstat, nameStatus, untracked, Excluded(exclude), path);
         var response = new ResponseBuilder("changed_files", string.Empty).Chosen(chosen);
@@ -142,6 +143,9 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             listed.Files,
             "files",
             "path=, exclude=, baseRef= or maxResults=");
+
+        if (listed.Files is 0 && Unmatched(root, path) is { } unmatched)
+            response.Note(unmatched);
 
         if (listed.Tracked > 0 && listed.Files > listed.Tracked)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"tracked={listed.Tracked} untracked={listed.Files - listed.Tracked} - untracked=false or exclude= drops what path= cannot"));
@@ -948,4 +952,22 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         return buffer[..scope.Length];
     }
+
+    private static string? Unmatched(string root, string? path)
+    {
+        var concrete = Bare(path.AsSpan()).TrimEnd(Separators);
+
+        if (!Concrete(concrete) || Path.Exists(Rooted(root, concrete)))
+            return null;
+
+        return concrete.ContainsAny(' ', '\t')
+            ? string.Create(CultureInfo.InvariantCulture, $"WARNING path='{path}' names nothing on disk, so this 0 proves nothing - path= is ONE pathspec and a space does not split it; call once per path, or pass their common parent")
+            : string.Create(CultureInfo.InvariantCulture, $"WARNING path='{path}' names nothing on disk, so this 0 proves nothing - check the spelling, or find_files name= to locate it");
+    }
+
+    private static string Rooted(string root, ReadOnlySpan<char> path) =>
+            Path.IsPathRooted(path) ? new string(path) : Path.Join(root, path);
+
+    private static bool Concrete(ReadOnlySpan<char> path) =>
+            !path.IsEmpty && path[0] is not ':' && path.IndexOfAny('*', '?') < 0;
 }

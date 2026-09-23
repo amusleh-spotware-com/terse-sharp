@@ -263,9 +263,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         return loaded.CompilationsRealized
             && !answer.StartsWith("ERROR", StringComparison.Ordinal)
             && loaded.TakeRealizedNotice()
-            ? answer + string.Create(
-                CultureInfo.InvariantCulture,
-                $"\ncompilations=realized in {stopwatch.ElapsedMilliseconds}ms (once per load, not per call)")
+            ? answer + "\n" + Realized(stopwatch.ElapsedMilliseconds, loaded.Drops, loaded.DroppedAfter)
             : answer;
     }
 
@@ -382,6 +380,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             ActiveRuns.Leave(target.SolutionPath);
         }
     }
+
+    internal static string Realized(long milliseconds, int drops, TimeSpan droppedAfter) => drops is 0
+            ? string.Create(CultureInfo.InvariantCulture, $"compilations=realized in {milliseconds}ms (once per load, not per call)")
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"compilations=realized in {milliseconds}ms (again - drop #{drops} released them after {(int)droppedAfter.TotalMinutes}m idle; --idle-minutes or TERSE_IDLE_MINUTES=0 keeps them)");
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

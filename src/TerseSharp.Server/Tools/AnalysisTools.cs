@@ -300,7 +300,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
             : "\nnext: gate - the unscoped end-of-task sweep (analyze at info, format, cleanup fix=all, re-analyze) in ONE call");
     }
 
-    private static async Task<(TouchedLines? Touched, TerseError? Error)> TouchedAsync(string root, string? baseRef, CancellationToken cancellationToken)
+    internal static async Task<(TouchedLines? Touched, TerseError? Error)> TouchedAsync(string root, string? baseRef, CancellationToken cancellationToken)
     {
         if (baseRef is not { Length: > 0 } reference)
             return (null, null);

@@ -364,4 +364,68 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
         Assert.Contains("ABSENT, EXCLUDED or EXISTS", text, StringComparison.Ordinal);
         Assert.DoesNotContain("fix the markup", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task XamlSetProperty_AddressedByAPathSuffixUnderAPropertyElement_LandsOnTheOneElementItNames()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = "src/Fixture.Trading/Views/Nested.xaml",
+            ["target"] = "Grid/TextBlock",
+            ["property"] = "FontSize",
+            ["value"] = "14",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("<TextBlock Text=\"deep\" FontSize=\"14\" />", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlSetProperty_AddressedByTheLineTheOutlinePrinted_LandsOnThatElement()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = "src/Fixture.Trading/Views/Nested.xaml",
+            ["target"] = "@7",
+            ["property"] = "FontSize",
+            ["value"] = "14",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("<Button x:Name=\"Trailing\" Content=\"Keep me\" FontSize=\"14\" />", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlSetProperty_OnAnAmbiguousSuffix_NamesEveryCandidateAsAnAddressableTarget()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = View,
+            ["target"] = "Window.Resources/SolidColorBrush",
+            ["property"] = "Opacity",
+            ["value"] = "0.5",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("matched 2 elements", text, StringComparison.Ordinal);
+        Assert.Contains("Window/Window.Resources/SolidColorBrush[0] @5", text, StringComparison.Ordinal);
+        Assert.Contains("Window/Window.Resources/SolidColorBrush[1] @6", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task XamlSetProperty_OnATypeNameThatMatchesNothing_NamesTheValidTargetsOfThatFile()
+    {
+        var text = await server.CallAsync("xaml_set_property", new()
+        {
+            ["path"] = "src/Fixture.Trading/Views/Nested.xaml",
+            ["target"] = "UserControl/Grid/StackPanel",
+            ["property"] = "FontSize",
+            ["value"] = "14",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("matched no element", text, StringComparison.Ordinal);
+        Assert.Contains("UserControl/Grid/Grid @4", text, StringComparison.Ordinal);
+    }
 }

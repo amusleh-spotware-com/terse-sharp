@@ -884,4 +884,72 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("TryRoute", record, StringComparison.Ordinal);
         Assert.Contains("[Description(\"a\\\"b\")] int tag", record, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetFileOutline_WithContainsNamingTheConstructor_ListsTheConstructor()
+    {
+        var byMarker = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["contains"] = "#ctor" });
+        var byCall = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["contains"] = "OrderService(" });
+
+        Assert.Contains("public OrderService(IOrderRepository repository)", byMarker, StringComparison.Ordinal);
+        Assert.Contains("1 of 7 members", byMarker, StringComparison.Ordinal);
+        Assert.Contains("public OrderService(IOrderRepository repository)", byCall, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithPathAndAConstructorName_ReturnsTheConstructor()
+    {
+        var scoped = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderService.#ctor", ["path"] = "src/Fixture.Trading/OrderService.cs" });
+        var unscoped = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderService.#ctor" });
+
+        Assert.Contains("public OrderService(IOrderRepository repository) => this.repository = repository;", scoped, StringComparison.Ordinal);
+        Assert.Contains("public OrderService(IOrderRepository repository) => this.repository = repository;", unscoped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_OnAMemberTheTypeDoesNotDeclare_OffersItsConstructorAmongTheNearest()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderRouter.Constructor" });
+
+        Assert.Contains("declares no such member", text, StringComparison.Ordinal);
+        Assert.Contains("M:Fixture.Trading.OrderRouter.#ctor(Fixture.Trading.OrderService)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithADirectoryAsItsPath_SearchesEveryFileUnderIt()
+    {
+        var text = await server.CallAsync("search_text", new() { ["query"] = "class OrderRouter", ["path"] = "src/Fixture.Trading" });
+
+        Assert.StartsWith("1 matches", text, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_OverAFileTooLargeToScan_NamesTheFileItSkipped()
+    {
+        var root = Directory.CreateTempSubdirectory("terse-oversized-").FullName;
+
+        try
+        {
+            await File.WriteAllBytesAsync(Path.Combine(root, "huge.log"), new byte[(17 * 1024 * 1024) + 1], TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(root, "small.log"), "nothing here", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("search_text", new() { ["query"] = "needle", ["root"] = root });
+
+            Assert.Contains("skipped 1 files over 16 MB", text, StringComparison.Ordinal);
+            Assert.Contains("huge.log", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithContainsMerelySpellingCtorInsideAWord_DoesNotListTheConstructor()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["contains"] = "Factor" });
+
+        Assert.DoesNotContain("public OrderService(IOrderRepository repository)", text, StringComparison.Ordinal);
+    }
 }

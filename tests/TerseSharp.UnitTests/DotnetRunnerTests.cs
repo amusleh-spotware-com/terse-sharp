@@ -1000,4 +1000,43 @@ public sealed class DotnetRunnerTests
         0,
         TimeSpan.FromSeconds(600),
         Searched: testProjects);
+
+    [Fact]
+    public void RenderNoResults_ForARunStoppedAtItsDeadline_NamesTheLongerTimeoutToRetryWithAndTheCeiling()
+    {
+        var text = DotnetRunner.RenderNoResults("A.slnx", new ProcessRun(-1, "TIMED_OUT after 600305 ms", 600305, TimedOut: true), verbose: false);
+
+        Assert.Contains("retry with timeoutSeconds=1200", text, StringComparison.Ordinal);
+        Assert.Contains("the maximum is 3600", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderNoResults_ForARunStoppedAtTheMaximumTimeout_SaysNoLongerTimeoutExistsAndHowToSplitTheRun()
+    {
+        var text = DotnetRunner.RenderNoResults("A.slnx", new ProcessRun(-1, "TIMED_OUT after 3600210 ms", 3600210, TimedOut: true), verbose: false);
+
+        Assert.Contains("already at the 3600 s maximum", text, StringComparison.Ordinal);
+        Assert.Contains("projects=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("retry with timeoutSeconds=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderNoResults_ForAHangStoppedJustBelowTheMaximumDeadline_SaysTheMaximumIsAlreadyInUse()
+    {
+        var text = DotnetRunner.RenderNoResults("A.slnx", new ProcessRun(-1, "blame stopped the run", 3585100), verbose: false, deadline: TimeSpan.FromSeconds(3600));
+
+        Assert.Contains("already at the 3600 s maximum", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("retry with timeoutSeconds=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForAPartialRunStoppedJustBelowTheMaximumDeadline_SaysTheMaximumIsAlreadyInUse()
+    {
+        var report = new TestRunReport(3, 0, 0, 3, 900, [], []);
+        var request = new TestRunRequest("A.slnx", null, false, false, 0, TimeSpan.FromSeconds(3600));
+        var text = DotnetRunner.RenderTest(new ProcessRun(-1, "blame stopped the run", 3585100, Stopped: true), report, request, root: string.Empty);
+
+        Assert.Contains("already at the 3600 s maximum", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("retry with timeoutSeconds=", text, StringComparison.Ordinal);
+    }
 }

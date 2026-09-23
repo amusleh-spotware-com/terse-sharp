@@ -841,14 +841,14 @@ public static class FileService
     }
 
     public static async Task<Result<string>> WriteTextManyAsync(
-        LoadedWorkspace workspace,
-        IReadOnlyList<FileWrite> files,
-        bool dryRun,
-        bool force,
-        bool allowErrors,
-        bool verbose,
-        bool allowPolicy,
-        CancellationToken cancellationToken)
+            LoadedWorkspace workspace,
+            IReadOnlyList<FileWrite> files,
+            bool dryRun,
+            bool force,
+            bool allowErrors,
+            bool verbose,
+            bool allowPolicy,
+            CancellationToken cancellationToken)
     {
         if (Unforced(files, force) is { } unforced)
             return Result.Fail<string>(unforced);
@@ -870,13 +870,16 @@ public static class FileService
         if (gated is { IsOk: false })
             return gated.Value;
 
-        var rendered = new List<string>(pending.Count);
+        var rendered = new List<string>(pending.Count + 1);
 
         if (gated is { } applied)
             rendered.Add(applied.Value!);
 
         foreach (var entry in pending)
             rendered.Add(await PlainAsync(workspace, entry, dryRun, verbose, cancellationToken).ConfigureAwait(false));
+
+        foreach (var entry in pending)
+            rendered.Add(DroppedDeclarations.Warning(entry.Path, entry.Before, entry.After) ?? string.Empty);
 
         return Result.Ok(string.Join('\n', rendered.FindAll(line => line.Length > 0)));
     }
@@ -1345,25 +1348,26 @@ public static class FileService
     }
 
     private static async Task<Result<string>> InsideAsync(
-            LoadedWorkspace workspace,
-            string path,
-            string full,
-            string content,
-            bool dryRun,
-            bool allowErrors,
-            bool verbose,
-            bool allowPolicy,
-            CancellationToken cancellationToken)
+                LoadedWorkspace workspace,
+                string path,
+                string full,
+                string content,
+                bool dryRun,
+                bool allowErrors,
+                bool verbose,
+                bool allowPolicy,
+                CancellationToken cancellationToken)
     {
         var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
+        var dropped = DroppedDeclarations.Warning(path, before, after);
 
         if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
-            return gated;
+            return gated.IsOk ? Result.Ok(DroppedDeclarations.Warned(gated.Value!, dropped)) : gated;
 
         if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DiffResponse("write_text", path, before, after, dryRun, verbose));
+        return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, dryRun, verbose), dropped));
     }
 
     private static async Task<Result<string>> OutsideWriteAsync(

@@ -26,10 +26,12 @@ internal static class RetryNote
         _ => "the declaration is held, so the retry is the token plus a corrected symbolId= and nothing else",
     };
 
+    private const string ChangeBeside = " - and when an existing member must change with them, such as the constructor that assigns a new field, replace_symbol takes this same token with append set and lands them beside that member in ONE edit";
+
     private static string AddMember(TerseErrorCode code, int payloads) => (code, payloads) switch
     {
-        (TerseErrorCode.CompileRegression, > 1) => "the rejected declarations and their usings= are held, so the retry names the token plus a corrected declarations= - one entry per held declaration",
-        (TerseErrorCode.CompileRegression, _) => "the rejected declaration and its usings= are held, so the retry names the token instead of re-sending them",
+        (TerseErrorCode.CompileRegression, > 1) => "the rejected declarations and their usings= are held, so the retry names the token plus a corrected declarations= - one entry per held declaration" + ChangeBeside,
+        (TerseErrorCode.CompileRegression, _) => "the rejected declaration and its usings= are held, so the retry names the token instead of re-sending them" + ChangeBeside,
         (_, > 1) => "the declarations are held, so the retry is the token plus a corrected typeSymbolIds= - one entry per held declaration",
         _ => "the declaration is held, so the retry is the token plus a corrected typeSymbolId= and nothing else",
     };

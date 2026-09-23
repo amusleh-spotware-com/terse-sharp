@@ -176,7 +176,8 @@ cleanup verify=true fix=ci
 
 `analyze` reaches the info-severity CA/IDE rules a build never prints — `CA1822`, `CA1859`, `CA1806`,
 `CA1865` — `format` and `cleanup` apply the fixable set through the same compile-gated path, and
-`get_diagnostics` sweeps the whole solution for the consumer you broke. `cleanup fix=all` **withholds
+`get_diagnostics` sweeps the whole solution for the consumer you broke - `baseRef=HEAD` keeps only the
+lines your change touched. `cleanup fix=all` **withholds
 a fix that would rewrite the shape of an externally visible member** — `CA1822`'s instance-to-static
 flip breaks a Razor template or a data binding while every compiler gate stays green — and reports it
 `UNFIXED` instead. `cleanup verify=true` never withholds, so a verify cannot hide a red CI leg. `build` answers a green build in
@@ -259,7 +260,8 @@ a text command naming no .NET source whose every path operand lands outside it i
 working directory is not a reason to refuse a file your solution does not contain. And **a batch is not denied whole for one
 covered command in it**: when a compound command mixes commands the server answers with commands it does
 not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at all, so
-the rest runs under your normal permission rules.
+the rest runs under your normal permission rules - unless all that would remain is `echo`/`printf`
+framing, which is denied whole rather than run without what it labels.
 
 <details>
 <summary>Exactly what the guard denies, what it allows, and how to log or remove it</summary>

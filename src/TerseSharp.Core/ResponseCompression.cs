@@ -15,8 +15,8 @@ internal static class ResponseCompression
         $"errors={errors} ({Signed(errorDelta)}) warnings={warnings} ({Signed(warningDelta)})");
 
     private static string Counter(string name, int count, int delta) => count is 0 && delta is 0
-        ? string.Empty
-        : string.Create(CultureInfo.InvariantCulture, $"{name}={count} ({Signed(delta)})");
+            ? string.Empty
+            : string.Create(CultureInfo.InvariantCulture, $"{name}={Signed(delta)} ({count} in scope)");
 
     private static string Signed(int delta) =>
         delta >= 0 ? "+" + delta.ToString(CultureInfo.InvariantCulture) : delta.ToString(CultureInfo.InvariantCulture);

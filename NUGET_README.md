@@ -132,7 +132,8 @@ cleanup verify=true fix=ci
 
 `analyze` reaches the info-severity CA/IDE rules a build never prints — `CA1822`, `CA1859`, `CA1806`,
 `CA1865` — `format` and `cleanup` apply the fixable set through the same compile-gated path, and
-`get_diagnostics` sweeps the whole solution for the consumer you broke. `cleanup fix=all` **withholds
+`get_diagnostics` sweeps the whole solution for the consumer you broke - `baseRef=HEAD` keeps only the
+lines your change touched. `cleanup fix=all` **withholds
 a fix that would rewrite the shape of an externally visible member** — `CA1822`'s instance-to-static
 flip breaks a Razor template or a data binding while every compiler gate stays green — and reports it
 `UNFIXED` instead. `cleanup verify=true` never withholds, so a verify cannot hide a red CI leg. `build` answers a green build in
@@ -215,7 +216,8 @@ all, so the rest runs under your normal permission rules. The rewrite is only at
 provably sound: every top-level separator is `&&`, `;` or a newline, and a pipeline holding a covered stage
 is dropped whole, its redirects with it — a plain `>`, `>>`, `2>` or `<` binds to the command it
 follows and no longer forces a refusal. A command carrying `||`, a background `&`, a subshell, a heredoc, a substitution, a
-comment, any backslash escape, a mixed `;`/`&&` run or a shell keyword is denied whole, as before.
+comment, any backslash escape, a mixed `;`/`&&` run or a shell keyword is denied whole, as before - and
+so is a batch whose only surviving parts would be `echo`/`printf` framing.
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text tools
 (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that names a

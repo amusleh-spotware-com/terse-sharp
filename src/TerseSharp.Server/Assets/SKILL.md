@@ -154,7 +154,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Analyse** | one `analyze` call per touched file | `analyze(paths: [...])` |
 | **Analyse** | `dotnet format whitespace` / an IDE inspection | `analyze` — compiler + analyzers + dead code, down to `info` |
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` — one verdict line |
-| **Analyse** | an end-of-task sweep buried in findings this task did not author | `analyze baseRef="HEAD"` · `gate baseRef="HEAD"` — only the lines the working tree changed; the rest is one count |
+| **Analyse** | an end-of-task sweep buried in findings this task did not author | `analyze baseRef="HEAD"` · `gate baseRef="HEAD"` · `get_diagnostics baseRef="HEAD"` — only the lines the working tree changed; the rest is one count |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` |
 | **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` |
 | **Analyse** | one `cleanup` call per touched file | `cleanup(paths: [...])` |
@@ -202,10 +202,7 @@ that carried them: **1.165 calls per assistant message, and only 14.3% of messag
 more**. Measured A/B on the same eight
 files: eight `get_file_outline` calls one-per-message cost **151.4 s wall**, of which **148.5 s was
 model gap**; the identical work as one `paths=[...]` call cost **10.2 s** - **14.8x faster**, and
-**98% of the saving was gap, not tool time**. What it is worth has been measured elsewhere too:
-three tool calls per turn cut wall clock **40.6%** while accuracy *rose* (arXiv:2602.07359), and one
-batched call rather than 38 separate ones measured **57% faster and 41% fewer tokens**
-(arXiv:2511.19477). Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
+**98% of the saving was gap, not tool time**. Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
 `find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
 message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
@@ -251,10 +248,9 @@ rest and lets them RUN, naming what it removed — call the tools for those, do 
 rewrites only sound shapes: uniform `&&`/`;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with the pipeline it follows - stripped with a replaced one, run with a kept one; a heredoc (`<<`), a target-less redirect and `>&-` still fence. `||`, a background `&`, a subshell, a substitution, a comment, a backslash escape, a mixed `;`/`&&` run or a shell keyword is **denied
 whole** — `NO part of the command ran`, and `Call this instead:` names each denied segment's tool call
 **and** every segment nothing replaces — chained with `&&` when re-issuing them together is sound,
-listed one by one when it is not, because printing a segment executes nothing. That class cost **18.1 h — 51.5% of all `Bash` wall time** in
-one week, at a 13.2% error rate. A whole-command
+listed one by one when it is not, because printing a segment executes nothing. A whole-command
 refusal also names the construct that forced it and its offset, so you re-issue that ONE segment rather
-than re-deriving the command.
+than re-deriving the command. A remainder of bare `echo`/`printf` framing is denied whole too.
 
 **A `maxResults=` you pass is taken as your bound.** `search_text`, `search_regex`, `find_files`,
 `changed_files` and `history` still say the cap bit - `2/38 matches truncated` - but never advise
@@ -332,7 +328,7 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 `compilations=realized in Nms (once per load, not per call)` — a one-off, measured at about 7 s on a
 300-document solution, not the per-call cost of the tool that happened to pay it.
 **A workspace nobody has used for 15 minutes gives its compilations back** (`--idle-minutes`,
-`TERSE_IDLE_MINUTES`, `0` to disable), and so does any idle workspace once the heap passes 2 GB;
+`TERSE_IDLE_MINUTES`, `0` to disable), and past 2 GB of heap so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
 what it needs for a second or two. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
@@ -532,9 +528,8 @@ so two new interdependent `.cs` files land in either order.
 partial batch, not a truncation - and the `NOT_RESOLVED` line names which one.
 
 **A question with a defensible default is answered by taking the default, not by asking.** Stopping
-the loop to ask cost **12.91 h over 90 calls** in one fortnight - p90 **1 011 s**, max **4.23 h on one
-question** - more than every `analyze`, `cleanup`, `format`, `get_diagnostics`, `gate` and
-`list_tests` call combined. Take the default and record it as an ASSUMPTION.
+the loop to ask cost **12.91 h over 90 calls** in one fortnight. Take the default and record it as an
+ASSUMPTION.
 
 **A missing path is answered, not just refused.** `get_file_outline` and `read_text` on a path named
 after a type the workspace declares elsewhere name the file that declares it, and `add_member path=`
@@ -622,12 +617,10 @@ on every call after it** —
 DISTINCT arguments, already filled in, whenever every call of the run carried a short identifier one;
 otherwise `pass paths=[...]`, naming the plural parameter that tool declares. It is framing, never payload, it says nothing when the call already
 used the plural parameter, and the counter
-resets on any different tool - and on a `read_text` that
-carried `startLine`, `endLine`, `tail` or `section`, because `paths=` cannot express a per-entry
-range and a steer that asks for the wrong lines is worse than none. Obey it literally: 571 runs
-of exactly **two** consecutive calls stay unreachable, because a steer can only ride on a response, and
-firing it on the first call was measured to break the one-line success contract on six tools. So batch
-on your own judgement: whenever the next two calls are the same tool and independent, send them as one.
+resets on any different tool, on a call whose argument the previous answer named or that follows an
+`ERROR` or timeout, and on a `read_text` carrying `startLine`, `endLine`, `tail` or `section`, which
+`paths=` cannot express per entry. A steer can only ride on a response, so the first call of a run is
+never steered: whenever the next two calls are the same tool and independent, send them as one.
 
 **A whole markdown read ends with its section map** - `sections=N - address one with read_text or
 edit_text section="..."`, naming up to six of them - so the anchor a `read_text` was paid for is
@@ -670,7 +663,8 @@ an argument the server does not understand is never silently dropped, because a 
 your `maxResults` is a confidently wrong answer you cannot detect. **A glob expands `{a,b}`**,
 nested and across separators - `**/*.{md,yml}`, `{src,tests}/**/*.cs`, `{src/**/*.cs,notes.md}` -
 everywhere a glob is taken, `exclude=` and every `path=` scope included; an unclosed brace is a
-literal rather than a swallowed glob. All three skip `bin`, `obj`,
+literal rather than a swallowed glob; a wildcard-free one naming a directory means everything under
+it. All three skip `bin`, `obj`,
 `.git`, `.vs`, `.idea`, `artifacts`, `TestResults`, `node_modules`, directory symlinks and `.claude`
 SESSION STATE — the same set every index uses, so a nested agent worktree never doubles a result.
 **`.claude/commands`, `agents`, `skills` and `hooks` ARE listed** - project source. The files
@@ -749,14 +743,15 @@ refused.
    **Every caveat still prints in full**, condensed or not: the `errors=/warnings=` deltas, a rollback,
    a new compile error, `0 files changed` — which now also carries
    `NOTE no change - the result is identical to what is already there`, so a no-op is never
-   byte-identical to a silent drop — `compileGate=unavailable`, `workspace=stale`, `UNFIXED`,
+   byte-identical to a silent drop — `WARNING this overwrite drops N declaration(s)`, `compileGate=unavailable`, `workspace=stale`, `UNFIXED`,
    `designerStale`, and the `NOT rewritten` list a XAML-aware rename leaves — so a short answer never
    hides something you must act on. A rename of a **Razor component** and a Razor edit whose compile
    gate could not run keep the whole diff, because the result itself carries a caveat. Do not pass
    `verbose=true` defensively; ask for it when you actually intend to read the diff.
 
-5. **Every edit reports its diagnostics.** Each mutation and each `dryRun` carries
-   `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents, and
+5. **Every edit reports its diagnostics.** Each `dryRun` carries
+   `errors=N (+D) warnings=N (+D)` for the changed projects and their dependents (an applied edit
+   leads with the delta: `errors=+0 (N in scope)`), and
    `info=N introduced` for an info-severity **compiler** diagnostic, named under `verbose=true`.
    Analyzers are NOT run on an edit, so a `CA`/`IDE` rule still needs `analyze`. A `dryRun` that *would* be rolled back says
    `WARNING … would be rolled back` and names the errors; a `(+0)` delta alone is **not** proof the
@@ -774,6 +769,7 @@ refused.
    index and replays the rest (`fix=["add:1=..."]` for a held `add=` helper; refused beside a replacing
    declaration). **`append: true` ADDS the `symbolIds=`/`declarations=` pairs you pass** - how a
    `CS7036` rollback's callers land with the member; a bare `symbolIds=` corrects the held ids.
+   It also takes an `add_member` token: the held members land as `add=` beside the constructor you pass.
    Better still, do not earn the rollback: `replace_symbol add=[…]` appends the helper in the same
    edit. **`add=`, `addTo=` and `usings=` are held with the token too**, so a retry names the token
    and nothing else; pass any of them again only to override what is held, and **pass `usings: []` to
@@ -1057,9 +1053,10 @@ reference. Anything else is listed `NOT rewritten`; **read that list after every
 `find_usages` shows the same XAML sites, so check the blast radius before renaming. A C# comment or string literal the old name survives in is
 reported the same way and never rewritten, because no compiler checks that text.
 
-`xaml_set_property`, `xaml_add_element` and `xaml_remove_element` address an element by the path
-`xaml_outline` prints, by `#Name` or by `key=Key`, edit in place so formatting survives, and refuse an
-edit whose result would not parse. An ambiguous target is refused with the count, never guessed.
+`xaml_set_property`, `xaml_add_element` and `xaml_remove_element` address an element by `@140` (the
+outline's `:140`), by any trailing run of its path (`[n]` optional), by `#Name` or by `key=Key`, edit
+in place so formatting survives, and refuse an edit whose result would not parse. An ambiguous target
+is refused naming its candidates as `<path> @<line>`, never guessed.
 
 `xaml_validate scope=solution includeUnused=true` also reports `x:Key` and `x:Name` declarations that
 no XAML attribute and no C# string literal references — `HEURISTIC`, because reflection can reach
@@ -1166,7 +1163,8 @@ up to three of them**, workspace-relative, in parentheses after the count.
 **A stopped run says why.** Above 30 s, `timeoutSeconds` arms VSTest's blame collector 15 s below it,
 so a *hung* test is named in
 `WARNING the run was stopped while these test(s) were still running: <name>`; a merely *slow* one
-answers `FAILED timed out after <n> ms`, a `remedy:` and the lines it printed.
+answers `FAILED timed out after <n> ms`, a `remedy:` naming the `timeoutSeconds=` to retry with
+(600 is the default; 3600 the maximum) and the lines it printed.
 `WARNING … output stream stayed open` means the capture is partial.
 
 **A batch is concurrent by default**, `parallel` at a time (default per-core); each is built before

@@ -746,6 +746,26 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Contains("Unused", byId, StringComparison.Ordinal);
         Assert.Contains("at HEAD", byId, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ChangedFiles_WithTwoPathsInOnePathspec_SaysTheZeroProvesNothingInsteadOfAnsweringASilentZero()
+    {
+        var text = await server.CallAsync("changed_files", new() { ["path"] = "src/Fixture.Trading tests" });
+
+        Assert.StartsWith("0 files", text, StringComparison.Ordinal);
+        Assert.Contains("WARNING path='src/Fixture.Trading tests' names nothing on disk", text, StringComparison.Ordinal);
+        Assert.Contains("ONE pathspec", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithAnAbsolutePathToACleanDirectory_DoesNotClaimItNamesNothingOnDisk()
+    {
+        var text = await server.CallAsync("changed_files", new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "Views") });
+        var magic = await server.CallAsync("changed_files", new() { ["path"] = ":!src/Fixture.Trading/Views" });
+
+        Assert.DoesNotContain("names nothing on disk", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("names nothing on disk", magic, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe

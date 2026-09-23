@@ -167,7 +167,7 @@ public static class OutlineService
         if (symbol is null || IsTypeDeclaration(member))
             return null;
 
-        if (format.Contains is { Length: > 0 } filter && !symbol.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))
+        if (!Wanted(symbol, format.Contains))
             return null;
 
         var reference = Reference(symbol, format.Ids, overloaded);
@@ -400,7 +400,9 @@ public static class OutlineService
     }
 
     private static bool Wanted(ISymbol member, string? contains) =>
-        contains is not { Length: > 0 } text || member.Name.Contains(text, StringComparison.OrdinalIgnoreCase);
+            contains is not { Length: > 0 } text
+            || member.Name.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || NamesConstructor(member, text);
 
     private static bool Listable(ISymbol member) =>
         !member.IsImplicitlyDeclared && member is not IMethodSymbol { AssociatedSymbol: not null };
@@ -555,5 +557,17 @@ public static class OutlineService
         groups.Add(new KeyValuePair<string, List<string>>(access, created));
 
         return created;
+    }
+
+    private static bool NamesConstructor(ISymbol member, string text)
+    {
+        if (member is not IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor })
+            return false;
+
+        var wanted = text.AsSpan().Trim().TrimEnd('(').TrimStart("#.");
+
+        return wanted.Equals("ctor", StringComparison.OrdinalIgnoreCase)
+            || wanted.Equals("cctor", StringComparison.OrdinalIgnoreCase)
+            || wanted.Equals(member.ContainingType.Name, StringComparison.OrdinalIgnoreCase);
     }
 }

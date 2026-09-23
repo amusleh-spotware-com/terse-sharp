@@ -62,7 +62,7 @@ public sealed class EditTools(ToolContext context)
                         [Description(UsingsHelp)] string[]? usings = null,
                         [Description("Apply a declaration whose name differs from its paired symbol. References are NOT rewritten; rename_symbol makes them follow.")] bool rename = false,
                     [Description(FixHelp)] string[]? fix = null,
-                    [Description("Beside retryWith=, ADD the pairs you pass to the held batch instead of correcting it. Refused without a token.")] bool append = false,
+                    [Description("Beside retryWith=, ADD the pairs you pass to the held batch; an add_member token's members become add=. Refused without a token.")] bool append = false,
                     [Description(RetryHelp)] string? retryWith = null,
                 [Description("Member to land the add= helpers ABOVE, by short name or documentation id. Only with add=.")] string? addBefore = null,
                 [Description("Member to land them BELOW, addressed as addBefore= is.")] string? addAfter = null,
@@ -75,18 +75,22 @@ public sealed class EditTools(ToolContext context)
             return Task.FromResult(refusal);
 
         var held = Held(retryWith, "replace_symbol");
+        var adopted = append && held is null ? Held(retryWith, "add_member") : null;
 
-        if (retryWith is { Length: > 0 } token && held is null)
+        if (retryWith is { Length: > 0 } token && held is null && adopted is null)
             return Task.FromResult(Unknown(token, "replace_symbol"));
 
         if (RejectedFix(fix, retryWith, held?.Payloads.Count ?? 0, held?.Add.Count ?? 0) is { } misfit)
             return Task.FromResult(misfit);
 
-        if (RejectedAppend(append, held, declaration, symbolId ?? symbol) is { } misused)
+        if (RejectedAppend(append, held ?? adopted, declaration, symbolId ?? symbol) is { } misused)
             return Task.FromResult(misused);
 
         if (RejectedClash(fix, declaration, declarations, append) is { } clash)
             return Task.FromResult(clash);
+
+        if (adopted is not null)
+            return Adopting(workspace, adopted, new AdoptedEdit(symbolIds ?? [], declarations ?? [], add, addTo, usings, placement.Value), new EditFlags(dryRun, allowErrors, verbose, rename, allowPolicy), cancellationToken);
 
         var imports = Kept(usings, held?.Usings);
         var helpers = Kept(add, held is null ? null : Patched(held.Add, fix, add: true));
@@ -698,4 +702,52 @@ public sealed class EditTools(ToolContext context)
 
     private static bool Replaces(string declaration, string[]? declarations, bool append) =>
         declaration is { Length: > 0 } || (!append && declarations is { Length: > 0 });
+
+    private Task<string> Adopting(string? workspace, RejectedEdit adopted, AdoptedEdit sent, EditFlags flags, CancellationToken cancellationToken)
+    {
+        if (AdoptedContainers(adopted) is not { } containers)
+        {
+            return Task.FromResult(Errors.Invalid(
+                "the add_member token holds namespace-level types added to a file, which have no containing type to land in as add=",
+                "replay it with add_member, which is the tool that can apply what it holds").Render());
+        }
+
+        string[] helpers = [.. adopted.Payloads, .. sent.Add ?? []];
+        var container = sent.AddTo ?? Routed(containers, sent.Add?.Length ?? 0);
+        var imports = Kept(sent.Usings, adopted.Usings);
+        var options = Options("replace_symbol", flags.DryRun, flags.AllowErrors, flags.Verbose, imports, helpers, container, flags.Rename, flags.AllowPolicy, sent.Placement);
+
+        return Batched(workspace, sent.SymbolIds, sent.Declarations, options, cancellationToken, adopted.Root, helpers, container, imports);
+    }
+
+    private static string Routed(string containers, int extra) => extra is 0
+        ? containers
+        : string.Join(',', [containers, .. Enumerable.Repeat(containers[(containers.LastIndexOf(',') + 1)..], extra)]);
+
+    private static string? AdoptedContainers(RejectedEdit adopted) => adopted switch
+    {
+        { Targets: [{ Length: > 0 } type, { Length: 0 }], Payloads.Count: 1 } => TypeLeaf(type),
+        { Targets.Count: > 0 } when adopted.Targets.Count == adopted.Payloads.Count && adopted.Targets.All(target => target.Length > 0) =>
+            string.Join(',', adopted.Targets.Select(TypeLeaf)),
+        _ => null,
+    };
+
+    private static string TypeLeaf(string type)
+    {
+        var name = type.AsSpan();
+
+        if (name.StartsWith("T:", StringComparison.Ordinal))
+            name = name[2..];
+
+        var generic = name.IndexOfAny('`', '<');
+
+        if (generic >= 0)
+            name = name[..generic];
+
+        return new string(name[(name.LastIndexOf('.') + 1)..]);
+    }
+
+    private readonly record struct AdoptedEdit(string[] SymbolIds, string[] Declarations, string[]? Add, string? AddTo, string[]? Usings, MemberPlacement? Placement);
+
+    private readonly record struct EditFlags(bool DryRun, bool AllowErrors, bool Verbose, bool Rename, bool AllowPolicy);
 }

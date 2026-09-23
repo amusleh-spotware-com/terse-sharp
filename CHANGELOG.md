@@ -13,7 +13,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 > new `NOTE the filter matched tests in N of M test projects ...` line, and `replace_symbol` refuses
 > `fix=` beside a replacing `declaration=`/`declarations=`. `replace_symbol` on a
 > type now accepts the type's header alone. Every change answers a field report against 0.67.0 on a
-> 148-project WPF solution.
+> 148-project WPF solution. The second round of those reports changes four more shapes: an applied
+> edit's condensed counters lead with the delta - `errors=+0 (58828 in scope)` instead of
+> `errors=58828 (+0)` (the `dryRun`/`verbose` form is unchanged); `get_diagnostics` may add an
+> `occurrences=N errors=N warnings=N` line and takes `baseRef=`; a `compilations=realized` note
+> after an idle drop says `again - drop #N ...` instead of `once per load`; and `search_text`,
+> `search_regex` and `find_files` read a `path=`/`glob=` naming a directory as everything under it.
 
 ### Fixed
 
@@ -29,6 +34,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `CompileGateE2ETests.ARetryCarryingACorrectedPayload_AppliesThatPayloadInsteadOfReplayingTheHeldOne`
   and `FileToolsE2ETests.WriteText_RetriedWithACorrectedContent_WritesThatContentInsteadOfReplayingTheHeldOne`,
   both observed failing before the fix.
+- **`get_file_outline contains=` and name resolution reach constructors.** `contains="#ctor"` and
+  `contains="TypeName("` answered `0 of 77 members`, `get_symbol_source symbolId="Type.#ctor"`
+  answered `declares no such member`, and that refusal's nearest list left constructors out, so a
+  30-parameter constructor id was reachable only through `get_type_outline ids=full`. A
+  constructor now matches `contains=` on `ctor` or its type's name, `Type.#ctor` (and `#cctor`)
+  resolves with or without `path=`, and the nearest list names constructors by id. Covered by
+  `NavigationToolsE2ETests.GetFileOutline_WithContainsNamingTheConstructor_ListsTheConstructor`,
+  `NavigationToolsE2ETests.GetSymbolSource_WithPathAndAConstructorName_ReturnsTheConstructor` and
+  `NavigationToolsE2ETests.GetSymbolSource_OnAMemberTheTypeDoesNotDeclare_OffersItsConstructorAmongTheNearest`.
+- **A directory passed as `search_text path=` is searched, not silently missed.** It was compiled as
+  a glob matching one file of that name and answered `0 matches`; a `path=`/`glob=` with no wildcard
+  naming a directory now means everything under it, in `search_text`, `search_regex` and
+  `find_files`. Covered by `NavigationToolsE2ETests.SearchText_WithADirectoryAsItsPath_SearchesEveryFileUnderIt`.
+- **`skipped N files over 16 MB` names the first one**, so a zero that may hide in it can be judged.
+  Covered by `NavigationToolsE2ETests.SearchText_OverAFileTooLargeToScan_NamesTheFileItSkipped`.
+- **`get_diagnostics` reconciles its count with an edit's `errors=`.** An edit reported `errors=12`
+  and the next `get_diagnostics` listed 3 lines, because a line folds every position of one id and
+  message. When it folded any, the answer now adds `occurrences=12 errors=12 warnings=0`. Covered by
+  `CompileGateE2ETests.GetDiagnostics_WhenALineFoldsSeveralPositions_CountsTheOccurrencesAnEditCounterReports`.
+- **`write_text` names every declaration an overwrite of a `.cs` file drops.** A file re-sent with
+  only its fields and constructor compiled, and five methods vanished with no signal. The write
+  still lands, and now carries `WARNING this overwrite drops 5 declaration(s) the file declared: ...`
+  - `dryRun` included. Covered by
+  `FileToolsE2ETests.WriteText_OverwritingACSharpFileWithoutSomeOfItsMembers_NamesEveryDeclarationItDrops`.
+- **A timed-out `run_tests` names the retry.** The 600 s default read as the ceiling; the remedy now
+  says `retry with timeoutSeconds=1200, the maximum is 3600`, and at the maximum names `projects=`
+  to split the run. Covered by
+  `DotnetRunnerTests.RenderNoResults_ForARunStoppedAtItsDeadline_NamesTheLongerTimeoutToRetryWithAndTheCeiling`.
+- **`changed_files` warns when its `path=` names nothing on disk**, and says a space does not split a
+  pathspec, instead of answering a silent `0 files`. Covered by
+  `GitToolsE2ETests.ChangedFiles_WithTwoPathsInOnePathspec_SaysTheZeroProvesNothingInsteadOfAnsweringASilentZero`.
+- **`xaml_set_property` no longer leaves a double space** before a self-closing tag's ` />`.
 
 ### Added
 
@@ -50,6 +87,58 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   The project is taken from the run's own results, never guessed up front: `test=` is a substring
   filter, so no declaration search can prove which projects it reaches. Covered by
   `ChangedTestSelectionE2ETests.RunTests_WithAFilterAndNoProject_NamesTheOnlyProjectThatMatchedSoTheNextRunCanBeScoped`.
+- **`get_diagnostics` takes `baseRef=`.** `analyze` could scope to the lines a change touched and
+  `get_diagnostics` could not, so ~17 pre-existing `CS4014` errors in untouched files reappeared in
+  every convergence read of a refactor. `baseRef=HEAD` keeps only the diagnostics on lines the
+  working tree added or changed against that ref and folds the rest to `N pre-existing
+  diagnostic(s) were not reported`; a `baseRef` call always runs. Covered by
+  `CompileGateE2ETests.GetDiagnostics_WithBaseRef_FoldsTheDiagnosticsNoChangedLineCarriesIntoOneCount`.
+- **`replace_symbol append=true` adopts an `add_member` rejection.** Three new fields rejected for
+  `CS8618` because the constructor that assigns them is a third declaration had no transactional
+  way out but a monolithic `replace_symbol` re-sending everything. `replace_symbol retryWith=<the
+  add_member token> append=true symbolIds=[ctor] declarations=[...]` now lands the held members as
+  `add=` entries in their own types beside the member that changes with them, in ONE compile-gated
+  edit; `add=` beside it adds more, routed to the same type. The `add_member` rejection says so.
+  Covered by
+  `CompileGateE2ETests.AnAddMemberRollback_AdoptedByReplaceSymbolWithAppend_LandsTheHeldMemberBesideTheMemberThatNeedsChanging`.
+- **`xaml_set_property`, `xaml_add_element` and `xaml_remove_element` take `@<line>` and a trailing
+  path.** The addressing grammar was the full element path, sibling indexes included
+  (`UserControl/Grid/Grid[1]/SplitButton/SplitButton.Items/Menu`), and `xaml_outline` never prints
+  it - six guesses in the report were all refused. A target is now also `@140` (the `:140` the
+  outline prints) or any trailing run of the path, whose segments match with or without their
+  `[n]` index; a refusal names up to eight addressable candidates with their `@line`. Covered by
+  `XamlToolsE2ETests.XamlSetProperty_AddressedByAPathSuffixUnderAPropertyElement_LandsOnTheOneElementItNames`,
+  `XamlToolsE2ETests.XamlSetProperty_AddressedByTheLineTheOutlinePrinted_LandsOnThatElement`,
+  `XamlToolsE2ETests.XamlSetProperty_OnAnAmbiguousSuffix_NamesEveryCandidateAsAnAddressableTarget` and
+  `XamlToolsE2ETests.XamlSetProperty_OnATypeNameThatMatchesNothing_NamesTheValidTargetsOfThatFile`.
+
+### Changed
+
+- **Under memory pressure the most recently used workspace keeps its compilations.** The 2 GB
+  pressure threshold is below what ONE 148-project workspace holds, so every idle minute - typically
+  a build or test run holding no lease - dropped its compilations and the next call re-realized them
+  for 50-127 s: eight times in one session, each printed as `once per load, not per call`. Pressure
+  now releases only the workspaces other than the most recently used one, which still drops at its
+  own `--idle-minutes`; a re-realization says `again - drop #N released them after Nm idle`. Covered
+  by `WorkspaceRegistryTests.DropIdleCompilations_UnderMemoryPressure_SparesTheMostRecentlyUsedWorkspaceUntilItsOwnIdleTimeout`
+  and `RealizedNoteTests.Realized_AfterAnIdleDrop_SaysItIsARealizationAgainAndWhy`.
+- **An applied edit's counters lead with the delta.** `errors=58828 (+0)` made the absolute count of
+  every pre-existing breakage the first thing read; the condensed form is now
+  `errors=+0 (58828 in scope)`. Covered by
+  `ResponseCompressionTests.Counters_ForAnEditThatAddedNothingToAlreadyBrokenCode_LeadsWithTheDeltaAndCallsTheRestInScope`.
+- **The batching steer stays quiet on a call that could not have been batched.** `2 read_text calls
+  in a row` fired when the second path came out of the first answer, and `2 run_tests calls in a
+  row` when the second run existed because the first timed out. A call whose argument the previous
+  answer names, or that follows an `ERROR` or a timeout, now starts a new run. Covered by
+  `RepeatSteerTests.Steer_ForACallWhoseArgumentThePreviousAnswerNamed_SaysNothingBecauseTheTwoCouldNotHaveBeenOneCall`
+  and `RepeatSteerTests.Steer_ForARetryOfACallThatTimedOut_SaysNothingBecauseTheRetryExistsOnlyBecauseTheFirstFailed`.
+- **The guard denies a batch whole when only `echo` framing would survive the strip.** A chain like
+  `echo '=== log' && git show --stat HEAD && echo '=== tags' && git tag --list` ran its labels and
+  nothing they labelled. When every kept part is `echo`, `printf`, `true` or `:`, the batch is now
+  refused whole, naming each replacement. Covered by
+  `ToolGuardTests.Guard_ForABatchWhoseOnlyUnreplacedPartsAreEchoFraming_DeniesItWholeInsteadOfRunningTheLabels`.
+- **`edit_text`'s description says what `force=true` does on a `.cs` file:** a plain, ungated text
+  edit of any snippet, not only a declaration's attributes.
 
 ## [0.67.0] - 2026-09-21
 

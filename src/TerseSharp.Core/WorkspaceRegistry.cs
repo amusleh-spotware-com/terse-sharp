@@ -313,14 +313,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         if (idleFor <= TimeSpan.Zero)
             return 0;
 
-        var pressured = managedBytes >= PressureBytes;
-        var dropped = 0;
-
-        foreach (var workspace in Snapshot())
-        {
-            if (Releasable(workspace, idleFor, pressured) && workspace.DropCompilations())
-                dropped++;
-        }
+        var dropped = Dropped(Snapshot(), idleFor, managedBytes >= PressureBytes);
 
         if (dropped > 0)
             Reclaim();
@@ -329,8 +322,8 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     }
 
     private static bool Releasable(LoadedWorkspace workspace, TimeSpan idleFor, bool pressured) =>
-        !workspace.CompilationsDropped
-        && workspace.Idle >= (pressured ? MinimumIdle : idleFor);
+            !workspace.CompilationsDropped
+            && workspace.Idle >= (pressured ? MinimumIdle : idleFor);
 
     private const long PressureBytes = 2L * 1024 * 1024 * 1024;
     private static readonly TimeSpan MinimumIdle = TimeSpan.FromMinutes(1);
@@ -347,5 +340,32 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         var full = Path.Combine(root, relative);
 
         return PathBoundary.Contains(root, full) && (File.Exists(full) || Directory.Exists(full));
+    }
+
+    private static LoadedWorkspace? MostRecent(LoadedWorkspace[] loaded)
+    {
+        LoadedWorkspace? recent = null;
+
+        foreach (var workspace in loaded)
+        {
+            if (recent is null || workspace.LastUsedUtc > recent.LastUsedUtc)
+                recent = workspace;
+        }
+
+        return recent;
+    }
+
+    private static int Dropped(LoadedWorkspace[] loaded, TimeSpan idleFor, bool pressured)
+    {
+        var recent = MostRecent(loaded);
+        var dropped = 0;
+
+        foreach (var workspace in loaded)
+        {
+            if (Releasable(workspace, idleFor, pressured && !ReferenceEquals(workspace, recent)) && workspace.DropCompilations())
+                dropped++;
+        }
+
+        return dropped;
     }
 }

@@ -38,20 +38,22 @@ public static class RepeatSteer
     private static int run;
 
     public static McpRequestFilter<CallToolRequestParams, CallToolResult> Filter() => next => async (request, cancellationToken) =>
-{
-    var result = await next(request, cancellationToken).ConfigureAwait(false);
+    {
+        var result = await next(request, cancellationToken).ConfigureAwait(false);
 
-    if (request.Params is not { Name.Length: > 0 } parameters)
+        if (request.Params is not { Name.Length: > 0 } parameters)
+            return result;
+
+        if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
+            result.Content.Add(new TextContentBlock { Text = repeat });
+
+        if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name)) is { } note)
+            result.Content.Add(new TextContentBlock { Text = note });
+
+        Answered(result.Content is [TextContentBlock { Text: var answer }, ..] ? answer : string.Empty);
+
         return result;
-
-    if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
-        result.Content.Add(new TextContentBlock { Text = repeat });
-
-    if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name)) is { } note)
-        result.Content.Add(new TextContentBlock { Text = note });
-
-    return result;
-};
+    };
 
     private static readonly string[] PerEntryOnly = ["startLine", "endLine", "tail", "section"];
 
@@ -74,6 +76,9 @@ public static class RepeatSteer
             return null;
         }
 
+        if (Dependent(value))
+            Reset();
+
         var (count, seen, captured) = Counted(tool, value);
 
         return Repeated(tool, count, seen, captured);
@@ -95,6 +100,12 @@ public static class RepeatSteer
     private const int MaxBatch = 10;
 
     public static void Forget() => Reset();
+
+    public static void Answered(string answer)
+    {
+        lock (Gate)
+            previous = answer;
+    }
 
     private static (int Count, string[] Seen, int Captured) Counted(string tool, string? value)
     {
@@ -192,7 +203,47 @@ public static class RepeatSteer
             last = string.Empty;
             run = 0;
             captured = 0;
+            previous = string.Empty;
             Values.Clear();
         }
     }
+
+    private static string previous = string.Empty;
+
+    private static bool Dependent(string? value)
+    {
+        lock (Gate)
+        {
+            return previous.StartsWith("ERROR", StringComparison.Ordinal)
+                || previous.AsSpan(0, Math.Min(previous.Length, VerdictSpan)).Contains("timed out", StringComparison.OrdinalIgnoreCase)
+                || Named(previous, value);
+        }
+    }
+
+    private static bool Named(string answer, string? value)
+    {
+        if (value is not { Length: >= MinNamedLength })
+            return false;
+
+        var leaf = Leaf(value);
+
+        return answer.Contains(value, StringComparison.Ordinal)
+            || (leaf.Length >= MinNamedLength && answer.AsSpan().Contains(leaf, StringComparison.Ordinal));
+    }
+
+    private static ReadOnlySpan<char> Leaf(string value)
+    {
+        var name = value.AsSpan();
+        var open = name.IndexOf('(');
+
+        if (open >= 0)
+            name = name[..open];
+
+        var separator = name.LastIndexOfAny('/', '\\');
+
+        return separator >= 0 ? name[(separator + 1)..] : name[(name.LastIndexOf('.') + 1)..];
+    }
+
+    private const int MinNamedLength = 4;
+    private const int VerdictSpan = 400;
 }

@@ -997,7 +997,7 @@ public static class ToolGuard
         var kept = judged.FindAll(entry => !entry.Verdict.Denied);
         var dropped = judged.FindAll(entry => entry.Verdict.Denied);
 
-        if (dropped.Count is 0 || kept.Count is 0)
+        if (dropped.Count is 0 || kept.TrueForAll(entry => Framing(entry.Pipeline.Text)))
             return null;
 
         return dropped[0].Verdict with
@@ -1700,6 +1700,13 @@ public static class ToolGuard
                     || token.StartsWith("--stat", StringComparison.Ordinal));
     }
 
+    private static bool Framing(string pipeline)
+    {
+        var text = pipeline.AsSpan().TrimStart();
+        var end = text.IndexOfAny(" \t");
+
+        return text.IndexOfAny('|', '>') < 0 && (end < 0 ? text : text[..end]) is "echo" or "printf" or "true" or ":";
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

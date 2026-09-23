@@ -56,7 +56,9 @@ public static class TextSearchService
             async (index, token) => perFile[index] = await ScanAsync(files[index], matcher, request, token).ConfigureAwait(false))
             .ConfigureAwait(false);
 
-        return Render(request, perFile);
+        var skipped = Array.FindIndex(perFile, file => file.Skipped > 0);
+
+        return Render(request, perFile, skipped < 0 ? null : files[skipped].RelativePath);
     }
 
     private static Result<List<WorkspacePath>> Outside(string root, string glob)
@@ -73,7 +75,7 @@ public static class TextSearchService
         if (!Directory.Exists(full))
             return Result.Fail<List<WorkspacePath>>(Errors.DocumentNotFound(root));
 
-        var matcher = FileGlob.Compile(string.IsNullOrWhiteSpace(glob) ? "*" : glob);
+        var matcher = FileGlob.Compile(DirectoryGlob(full, glob));
         var matched = new List<WorkspacePath>(1024);
 
         foreach (var file in WorkspaceFiles.Enumerate(full, _ => true))
@@ -238,10 +240,10 @@ public static class TextSearchService
         ? new string(line)
         : string.Create(CultureInfo.InvariantCulture, $"{line[..MaxLineLength]}... (+{line.Length - MaxLineLength} chars)");
 
-    private static string Render(TextSearchRequest request, FileHits[] perFile)
+    private static string Render(TextSearchRequest request, FileHits[] perFile, string? firstSkipped)
     {
         if (request.CountOnly)
-            return Counts(request, perFile);
+            return Counts(request, perFile, firstSkipped);
 
         var response = new ResponseBuilder(request.Tool, Argument(request)).Chosen(request.Chosen);
         var total = 0;
@@ -259,13 +261,13 @@ public static class TextSearchService
         foreach (var file in perFile)
             shown.AddRange(file.Hits.Take(Math.Max(0, cap - shown.Count)));
 
-        var tally = new SearchTally(shown.Count, total, skipped);
+        var tally = new SearchTally(shown.Count, total, skipped, firstSkipped);
 
         return request.Unique
             ? Write(response, Collapsed(shown), request, tally)
             : Write(response, shown, request, tally);
     }
-    private readonly record struct SearchTally(int Shown, int Total, int Skipped);
+    private readonly record struct SearchTally(int Shown, int Total, int Skipped, string? FirstSkipped = null);
 
     private static List<string> Collapsed(List<string> shown)
     {
@@ -465,7 +467,7 @@ public static class TextSearchService
 
     private static List<WorkspacePath> Matched(LoadedWorkspace workspace, string glob)
     {
-        var matcher = FileGlob.Compile(string.IsNullOrWhiteSpace(glob) ? "*" : glob);
+        var matcher = FileGlob.Compile(DirectoryGlob(workspace.Root, glob));
         var index = workspace.Indexes.Paths();
         var matched = new List<WorkspacePath>(Math.Min(index.Count, 1024));
 
@@ -688,7 +690,7 @@ public static class TextSearchService
         }
 
         if (tally.Skipped > 0)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"skipped {tally.Skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB"));
+            response.Note(Skipped(tally));
     }
 
     private static int Other(TextMatcher matcher, ReadOnlySpan<char> line, int first, int from)
@@ -951,13 +953,13 @@ public static class TextSearchService
         return (rows, matched, lines, skipped);
     }
 
-    private static string Counts(TextSearchRequest request, FileHits[] perFile)
+    private static string Counts(TextSearchRequest request, FileHits[] perFile, string? firstSkipped)
     {
         var response = new ResponseBuilder(request.Tool, Argument(request)).Chosen(request.Chosen);
         var tallied = Tallied(perFile, request.MaxResults);
 
         response.Summary(tallied.Rows.Count, tallied.Matched, "files", "glob= or maxResults=");
-        Annotate(response, tallied.Rows.Count, request, new SearchTally(tallied.Rows.Count, tallied.Matched, tallied.Skipped));
+        Annotate(response, tallied.Rows.Count, request, new SearchTally(tallied.Rows.Count, tallied.Matched, tallied.Skipped, firstSkipped));
         response.Note(string.Create(CultureInfo.InvariantCulture, $"{tallied.Lines} matching lines"));
 
         foreach (var row in tallied.Rows)
@@ -1090,4 +1092,20 @@ public static class TextSearchService
         (_, true) => " - tracked=true keeps only the files git tracks",
         _ => string.Empty,
     };
+
+    private static string Skipped(SearchTally tally) => string.Create(
+            CultureInfo.InvariantCulture,
+            $"skipped {tally.Skipped} files over {MaxSearchableBytes / (1024 * 1024)} MB, the first {tally.FirstSkipped} - read_text tail= or a line range reads one");
+
+    private static string DirectoryGlob(string root, string glob)
+    {
+        if (string.IsNullOrWhiteSpace(glob))
+            return "*";
+
+        var directory = glob.AsSpan().TrimEnd("/\\");
+
+        return !Globbed(glob) && directory.Length > 0 && Directory.Exists(Path.Join(root, directory))
+            ? string.Concat(directory, "/**")
+            : glob;
+    }
 }
