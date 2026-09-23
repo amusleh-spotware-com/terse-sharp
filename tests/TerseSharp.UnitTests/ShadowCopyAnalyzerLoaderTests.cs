@@ -25,6 +25,8 @@ public sealed class ShadowCopyAnalyzerLoaderTests
     [Fact]
     public async Task ReboundSolution_AfterRunningTheAnalyzer_LeavesTheOriginalAssemblyUnmapped()
     {
+        await using var fixtureLock = await GeneratorSolutionLock.AcquireAsync(TestContext.Current.CancellationToken);
+
         await EnsureBuiltAsync();
 
         for (var attempt = 0; attempt < 30 && !Writable(); attempt++)
@@ -119,6 +121,8 @@ public sealed class ShadowCopyAnalyzerLoaderTests
     [Fact]
     public async Task MappedAnalyzers_ReportsAReferenceInsideTheRootAndNeverOneOutsideIt()
     {
+        await using var fixtureLock = await GeneratorSolutionLock.AcquireAsync(TestContext.Current.CancellationToken);
+
         await EnsureBuiltAsync();
 
         using var registry = new WorkspaceRegistry(watch: false);

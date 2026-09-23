@@ -5,6 +5,7 @@ namespace TerseSharp.E2ETests;
 public sealed class AnalyzerLockE2ETests : IAsyncLifetime
 {
     private TerseServerProcess server = null!;
+    private FileStream fixtureLock = null!;
 
     public static string FixtureRoot { get; } =
         Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "GeneratorSolution");
@@ -25,6 +26,8 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
+        fixtureLock = await GeneratorSolutionLock.AcquireAsync(TestContext.Current.CancellationToken);
+
         await EnsureBuiltAsync();
 
         server = await TerseServerProcess.StartAsync(
@@ -48,7 +51,17 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
         Assert.True(File.Exists(AnalyzerAssembly), output);
     }
 
-    public async ValueTask DisposeAsync() => await server.StopAsync();
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await server.StopAsync();
+        }
+        finally
+        {
+            await fixtureLock.DisposeAsync();
+        }
+    }
 
     [Fact]
     public async Task SemanticTools_OnASolutionBuildingItsOwnAnalyzer_LeaveTheAnalyzerAssemblyWritable()
