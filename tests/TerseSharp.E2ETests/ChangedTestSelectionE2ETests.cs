@@ -321,6 +321,13 @@ public sealed class ChangedTestSelectionE2ETests
 
         try
         {
+            Assert.Contains("build ok", await CallAsync(server, "build", []), StringComparison.Ordinal);
+            await CallAsync(server, "load_workspace", new()
+            {
+                ["path"] = Path.Combine(SelectionRoot, "SelectionSolution.slnx"),
+                ["reload"] = true,
+            });
+
             var filtered = await CallAsync(server, "run_tests", new() { ["test"] = "AdderTests", ["timeoutSeconds"] = 600 });
             var scoped = await CallAsync(server, "run_tests", new() { ["test"] = "AdderTests", ["project"] = "Selection.Core.Tests", ["timeoutSeconds"] = 600 });
             var everywhere = await CallAsync(server, "run_tests", new() { ["test"] = "Selection.", ["timeoutSeconds"] = 600 });
