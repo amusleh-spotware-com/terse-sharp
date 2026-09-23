@@ -8,6 +8,49 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+> **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> A `run_tests` verdict for a `test=`, `tests=` or `filter=` run with no `project=` may end with one
+> new `NOTE the filter matched tests in N of M test projects ...` line, and `replace_symbol` refuses
+> `fix=` beside a replacing `declaration=`/`declarations=`. `replace_symbol` on a
+> type now accepts the type's header alone. Every change answers a field report against 0.67.0 on a
+> 148-project WPF solution.
+
+### Fixed
+
+- **A corrected payload passed beside `retryWith=` is applied instead of the held one.**
+  `replace_symbol`, `replace_symbol_body` and `add_member` preferred the held declaration over a
+  `declaration=`/`declarations=`/`body=` passed with the token, and `write_text` ignored `content=`
+  beside `retryWith=` entirely, so a corrected retry failed with the identical `CompileRegression`
+  and only a full re-send without the token landed - three lost calls in the report. The passed text
+  now outranks the held one, as `symbolId=` already did; the held `add=`, `addTo=` and `usings=`
+  still ride along - on a held batch too, where `declarations=` beside the token used to be ignored.
+  `fix=` beside a replacing declaration is refused naming both, rather than one being dropped. The
+  `write_text` retry note now names `force=true`, which a `.cs` replay still needs. Closes `I596`. Covered by
+  `CompileGateE2ETests.ARetryCarryingACorrectedPayload_AppliesThatPayloadInsteadOfReplayingTheHeldOne`
+  and `FileToolsE2ETests.WriteText_RetriedWithACorrectedContent_WritesThatContentInsteadOfReplayingTheHeldOne`,
+  both observed failing before the fix.
+
+### Added
+
+- **`replace_symbol` on a type takes the header alone.** Adding one attribute to a 250-line class
+  used to need the whole body re-sent, or an ungated `edit_text force=true`; a header-only
+  declaration (`[Export(typeof(IFoo))]\npublic sealed class Foo : IFoo`) was refused with
+  `did not parse: { expected`. A declaration of the same kind with no body now re-heads the type -
+  attributes, modifiers, name, type parameters, base list and constraints - and keeps every member,
+  through the same compile gate. A complete declaration still replaces the whole type, and a
+  positional record ending in `;` is not a header. Covered by
+  `CompileGateE2ETests.ReplaceSymbol_OnATypeWithItsHeaderAlone_ReplacesTheHeaderAndKeepsEveryMember`
+  and `MemberDeclarationTests.Headed_ADeclarationThatIsNotABareHeaderOfTheSameKind_IsNotSpliced`.
+- **An unscoped filtered `run_tests` names the project that matched.** `run_tests test="...Tests"`
+  with no `project=` builds and searches the whole solution - 107 s in the report for a fixture that
+  lives in one test project. When the results came from fewer test projects than the solution holds,
+  the verdict now ends with `NOTE the filter matched tests in 1 of 3 test projects, but the whole
+  solution was run - pass project="<name>" to build and run only that one` (`projects=[...]` up to
+  ten); a filter that matched every test project says nothing.
+  The project is taken from the run's own results, never guessed up front: `test=` is a substring
+  filter, so no declaration search can prove which projects it reaches. Covered by
+  `ChangedTestSelectionE2ETests.RunTests_WithAFilterAndNoProject_NamesTheOnlyProjectThatMatchedSoTheNextRunCanBeScoped`.
+
 ## [0.67.0] - 2026-09-21
 
 > **Response-format changes (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**

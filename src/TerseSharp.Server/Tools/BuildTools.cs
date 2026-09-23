@@ -520,7 +520,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         {
             return Contained(target, project, resolved => SelectedAsync(
                 target,
-                request with { Target = resolved ?? target.SolutionPath },
+                request with { Target = resolved ?? target.SolutionPath, Searched = Searched(target, resolved, changed, request.Filter) },
                 resolved is null && changed,
                 cancellationToken));
         }
@@ -728,4 +728,10 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     private Task<bool> SyncedAsync(CancellationToken cancellationToken) => RunStamp.SyncedAsync(context.Registry, cancellationToken);
 
     private IReadOnlyList<string> Roots() => [.. context.Registry.All().Select(loaded => loaded.Root)];
+
+    private static int Searched(WorkspaceTarget target, string? resolved, bool changed, string? filter) =>
+        resolved is null && !changed && filter is { Length: > 0 } ? TestProjectCount(target) : 0;
+
+    private static int TestProjectCount(WorkspaceTarget target) =>
+        target.TestProjects.IsDefault ? 0 : target.TestProjects.Length;
 }

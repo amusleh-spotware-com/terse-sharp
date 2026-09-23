@@ -34,7 +34,7 @@ public sealed class EditTools(ToolContext context)
 
         var target = symbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
         var supplied = body is { Length: > 0 } ? body : declaration ?? string.Empty;
-        var text = held is null ? supplied : First(held.Payloads, supplied);
+        var text = held is null ? supplied : Preferred(supplied, held.Payloads);
         var imports = Kept(usings, held?.Usings);
 
         return Supplied(workspace, target, text, "body", (loaded, resolved) => SymbolEditService.ReplaceBodyAsync(
@@ -45,12 +45,12 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration - signature, attributes and doc comment - by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them - how a member splits into overloads. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands with the callers it breaks. add= adds the private helpers the declaration calls, placed by addBefore=/addAfter=/addPosition=. A rollback names a retryWith token holding what was rejected, so the retry costs a token, not the payload.")]
+    [Description("Replace a whole member declaration - signature, attributes and doc comment - by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them - how a member splits into overloads. A type's bodiless header re-heads it. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands with the callers it breaks. add= adds the private helpers the declaration calls, placed by addBefore=/addAfter=/addPosition=. A rollback names a retryWith token holding what was rejected, so the retry costs a token, not the payload.")]
     public Task<string> ReplaceSymbol(
                         [Description("Symbol id of the member.")] string? symbolId = null,
                         [Description("One complete member declaration, or several in sequence.")] string declaration = "",
                         [Description(AddHelp)] string[]? add = null,
-                        [Description("Containing type that add= lands in, e.g. ToolBoundary. Needed only when the targets do not share one; comma-separated routes each add= entry to its own.")] string? addTo = null,
+                        [Description("Containing type add= lands in when the targets share none; comma-separated routes each add= entry to its own.")] string? addTo = null,
                         [Description("Diff only, write nothing.")] bool dryRun = false,
                         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
                         [Description(PolicyHelp)] bool allowPolicy = false,
@@ -60,7 +60,7 @@ public sealed class EditTools(ToolContext context)
                         [Description("Symbol ids to replace together, paired positionally with declarations. Beside retryWith= it corrects the held ids.")] string[]? symbolIds = null,
                         [Description("One complete declaration per symbolIds entry, in order, applied as ONE compile-gated edit across their files.")] string[]? declarations = null,
                         [Description(UsingsHelp)] string[]? usings = null,
-                        [Description("Apply a declaration whose name differs from its paired symbol. References are NOT rewritten, so the gate rolls it back when a caller breaks; rename_symbol makes them follow.")] bool rename = false,
+                        [Description("Apply a declaration whose name differs from its paired symbol. References are NOT rewritten; rename_symbol makes them follow.")] bool rename = false,
                     [Description(FixHelp)] string[]? fix = null,
                     [Description("Beside retryWith=, ADD the pairs you pass to the held batch instead of correcting it. Refused without a token.")] bool append = false,
                     [Description(RetryHelp)] string? retryWith = null,
@@ -84,6 +84,9 @@ public sealed class EditTools(ToolContext context)
 
         if (RejectedAppend(append, held, declaration, symbolId ?? symbol) is { } misused)
             return Task.FromResult(misused);
+
+        if (RejectedClash(fix, declaration, declarations, append) is { } clash)
+            return Task.FromResult(clash);
 
         var imports = Kept(usings, held?.Usings);
         var helpers = Kept(add, held is null ? null : Patched(held.Add, fix, add: true));
@@ -109,13 +112,13 @@ public sealed class EditTools(ToolContext context)
         }
 
         if (held is { Targets.Count: > 1 })
-            return Batched(workspace, Corrected(symbolIds, held.Targets), Patched(held.Payloads, fix), options, cancellationToken, held.Root, helpers, container, imports);
+            return Batched(workspace, Corrected(symbolIds, held.Targets), Corrected(declarations, Patched(held.Payloads, fix)), options, cancellationToken, held.Root, helpers, container, imports);
 
         if (held is null && (symbolIds, declarations) is not (null, null))
             return Batched(workspace, symbolIds ?? [], declarations ?? [], options, cancellationToken, null, helpers, container, imports);
 
         var target = symbolId ?? symbol ?? (held is null ? null : Slot(held.Targets, 0));
-        var text = held is null ? declaration : First(Patched(held.Payloads, fix), declaration);
+        var text = held is null ? declaration : Preferred(declaration, Patched(held.Payloads, fix));
 
         return Supplied(workspace, target, text, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
             loaded, resolved, text, options, cancellationToken),
@@ -171,7 +174,7 @@ public sealed class EditTools(ToolContext context)
             workspace,
             typeSymbolId ?? symbol ?? symbolId ?? (held is null ? null : Slot(held.Targets, 0)),
             path ?? (held is null ? null : Slot(held.Targets, 1)),
-            held is null ? sent : First(held.Payloads, sent),
+            held is null ? sent : Preferred(sent, held.Payloads),
             options,
             cancellationToken,
             held?.Root,
@@ -316,7 +319,7 @@ public sealed class EditTools(ToolContext context)
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous rejection, e.g. r3, printed alone on its LAST line. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; pass either again to override, or allowErrors=true beside it. A symbolId you pass OUTRANKS the held one.";
+    private const string RetryHelp = "Token from a previous rejection, e.g. r3, printed alone on its LAST line. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; anything passed again - symbolId, the corrected text, usings= - OUTRANKS the held value; allowErrors=true may ride beside it.";
 
     internal readonly record struct Carry(
         string? Tool,
@@ -351,6 +354,9 @@ public sealed class EditTools(ToolContext context)
 
     private static string First(IReadOnlyList<string> values, string fallback) =>
         values is [var only, ..] ? only : fallback;
+
+    private static string Preferred(string supplied, IReadOnlyList<string> held) =>
+        supplied is { Length: > 0 } ? supplied : First(held, supplied);
 
     private static string? Slot(IReadOnlyList<string> targets, int index) =>
         index < targets.Count && targets[index] is { Length: > 0 } value ? value : null;
@@ -682,4 +688,14 @@ public sealed class EditTools(ToolContext context)
                 "send the pair you are adding as symbolIds=[...] and declarations=[...], or drop append= to correct the held batch instead").Render()
             : null;
     }
+
+    private static string? RejectedClash(string[]? fix, string declaration, string[]? declarations, bool append) =>
+        fix is { Length: > 0 } && fix.Any(entry => Correction(entry) is { Add: false }) && Replaces(declaration, declarations, append)
+            ? Errors.Invalid(
+                "fix= corrects held declarations by index and declaration=/declarations= replaces them, so one of the two would be silently dropped",
+                "pass fix= alone to correct the held entries it names, or the corrected declaration(s) alone").Render()
+            : null;
+
+    private static bool Replaces(string declaration, string[]? declarations, bool append) =>
+        declaration is { Length: > 0 } || (!append && declarations is { Length: > 0 });
 }

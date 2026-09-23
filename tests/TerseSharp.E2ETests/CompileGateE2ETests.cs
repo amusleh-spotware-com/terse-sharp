@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 public sealed class CompileGateE2ETests : IAsyncLifetime
@@ -916,5 +917,82 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         var onDisk = await File.ReadAllTextAsync(CalculatorPath, TestContext.Current.CancellationToken);
 
         Assert.DoesNotContain("Doubled", onDisk, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("replace_symbol", "symbolId", "M:Fixture.Broken.Calculator.Healthy", "declaration", "public int Healthy() => HeldHelperThatDoesNotExist();", "public int Healthy() => 41;")]
+    [InlineData("replace_symbol_body", "symbolId", "M:Fixture.Broken.Calculator.Healthy", "body", "=> HeldHelperThatDoesNotExist()", "=> 41")]
+    [InlineData("add_member", "typeSymbolId", "T:Fixture.Broken.Calculator", "declaration", "public int Extra() => HeldHelperThatDoesNotExist();", "public int Extra() => 41;")]
+    public async Task ARetryCarryingACorrectedPayload_AppliesThatPayloadInsteadOfReplayingTheHeldOne(
+        string tool,
+        string targetKey,
+        string target,
+        string payloadKey,
+        string rejectedPayload,
+        string correctedPayload)
+    {
+        var rejected = await CallAsync(tool, new() { [targetKey] = target, [payloadKey] = rejectedPayload });
+        var retried = await CallAsync(tool, new() { ["retryWith"] = Token(rejected), [payloadKey] = correctedPayload, ["dryRun"] = true });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", retried, StringComparison.Ordinal);
+        Assert.Contains("41", retried, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeldHelperThatDoesNotExist", retried, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_OnATypeWithItsHeaderAlone_ReplacesTheHeaderAndKeepsEveryMember()
+    {
+        var preview = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Broken.Calculator",
+            ["declaration"] = "[System.Serializable]\npublic sealed class Calculator",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", preview, StringComparison.Ordinal);
+        Assert.Contains("+[System.Serializable]", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("-    public int Healthy", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("-    public int PreExistingError", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ABatchRetryCarryingCorrectedDeclarations_AppliesThemInsteadOfTheHeldBatch()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "M:Fixture.Broken.Calculator.PreExistingError" },
+            ["declarations"] = new[] { "public int Healthy() => HeldHelperThatDoesNotExist();", "public int PreExistingError() => \"this does not compile\";" },
+        });
+        var retried = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["declarations"] = new[] { "public int Healthy() => 41;", "public int PreExistingError() => \"this does not compile\";" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", retried, StringComparison.Ordinal);
+        Assert.Contains("=> 41", retried, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeldHelperThatDoesNotExist", retried, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ARetryCarryingBothFixAndADeclaration_IsRefusedInsteadOfDroppingOne()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Broken.Calculator.Healthy",
+            ["declaration"] = "public int Healthy() => HeldHelperThatDoesNotExist();",
+        });
+        var refused = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["fix"] = new[] { "0=public int Healthy() => 7;" },
+            ["declaration"] = "public int Healthy() => 41;",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.Contains("one of the two would be silently dropped", refused, StringComparison.Ordinal);
     }
 }

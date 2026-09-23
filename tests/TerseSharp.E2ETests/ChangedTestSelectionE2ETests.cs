@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 public sealed class ChangedTestSelectionE2ETests
@@ -306,6 +307,31 @@ public sealed class ChangedTestSelectionE2ETests
             Assert.Contains("IsPackable=true", text, StringComparison.Ordinal);
             Assert.Contains("IsPackable=false", text, StringComparison.Ordinal);
             Assert.Contains("TargetFramework=net10.0", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RunTests_WithAFilterAndNoProject_NamesTheOnlyProjectThatMatchedSoTheNextRunCanBeScoped()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var filtered = await CallAsync(server, "run_tests", new() { ["test"] = "AdderTests", ["timeoutSeconds"] = 600 });
+            var scoped = await CallAsync(server, "run_tests", new() { ["test"] = "AdderTests", ["project"] = "Selection.Core.Tests", ["timeoutSeconds"] = 600 });
+            var everywhere = await CallAsync(server, "run_tests", new() { ["test"] = "Selection.", ["timeoutSeconds"] = 600 });
+
+            Assert.Contains("total=1", filtered, StringComparison.Ordinal);
+            Assert.Contains("NOTE the filter matched tests in 1 of 2 test projects", filtered, StringComparison.Ordinal);
+            Assert.Contains("pass project=\"Selection.Core.Tests\" to build and run only that one", filtered, StringComparison.Ordinal);
+            Assert.Contains("total=1", scoped, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOTE the filter matched", scoped, StringComparison.Ordinal);
+            Assert.Contains("total=2", everywhere, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOTE the filter matched", everywhere, StringComparison.Ordinal);
         }
         finally
         {

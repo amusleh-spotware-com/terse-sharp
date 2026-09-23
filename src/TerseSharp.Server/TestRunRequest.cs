@@ -16,7 +16,8 @@ internal readonly record struct TestRunRequest(
     ImmutableArray<string> RunSettings = default,
     TestReporter Reporter = TestReporter.VsTestLogger,
     string? BuildTarget = null,
-    bool Direct = false)
+    bool Direct = false,
+    int Searched = 0)
 {
     public bool WantsDetail => Verbose || IncludePassed || Slowest > 0;
 

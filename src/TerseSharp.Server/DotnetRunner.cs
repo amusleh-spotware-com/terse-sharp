@@ -216,7 +216,7 @@ public static partial class DotnetRunner
             return RenderNoResults(request.Target, run, request.Verbose, root, request.Timeout);
 
         if (IsGreen(run, report) && !request.WantsDetail)
-            return QuietTest(report, run, request.Target);
+            return QuietTest(report, run, request.Target) + ScopeNote(report, request);
 
         var shown = Math.Min(report.Failures.Length, MaxFailures);
         var response = new ResponseBuilder("run_tests", request.Target).Verbose(request.Verbose);
@@ -232,8 +232,26 @@ public static partial class DotnetRunner
         AppendTimings(response, report, request);
         AppendRerun(response, report);
 
-        return response.ToString();
+        return response.ToString() + ScopeNote(report, request);
     }
+
+    internal static string ScopeNote(TestRunReport report, TestRunRequest request)
+    {
+        if (request.Searched is 0)
+            return string.Empty;
+
+        string[] matched = [.. report.Projects.Where(project => project.Total > 0).Select(project => project.Project).Distinct(StringComparer.Ordinal)];
+
+        return IsNarrower(matched.Length, request.Searched) ? "\n" + Scoping(matched, request.Searched) : string.Empty;
+    }
+
+    private static bool IsNarrower(int matched, int searched) =>
+        matched is > 0 and <= TestRunRequest.MaxParallel && matched < searched;
+
+    private static string Scoping(string[] matched, int searched) => matched is [var only]
+        ? string.Create(CultureInfo.InvariantCulture, $"NOTE the filter matched tests in 1 of {searched} test projects, but the whole solution was run - pass project=\"{only}\" to build and run only that one")
+        : string.Create(CultureInfo.InvariantCulture, $"NOTE the filter matched tests in {matched.Length} of {searched} test projects, but the whole solution was run - pass projects=[{string.Join(", ", matched.Select(name => "\"" + name + "\""))}] to build and run only those");
+
     internal static string RenderNoResults(string target, ProcessRun run, bool verbose, string root = "", TimeSpan deadline = default)
     {
         var response = new ResponseBuilder("run_tests", target).Verbose(verbose);

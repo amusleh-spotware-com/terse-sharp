@@ -545,7 +545,7 @@ on a `.cs` file nobody has written yet names `write_text path=… force=true` �
 them** — `WARNING attributes dropped: McpServerTool, Description`. The edit still applies, because
 dropping an attribute is sometimes the intent, but an un-advertised tool is exactly what a clean
 build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, or use
-`replace_symbol_body`.
+`replace_symbol_body`. On a TYPE, a bodiless header of the same kind re-heads it and keeps its members.
 
 **`add_member` formats only what it inserted** - no collateral hunks, and an anchored insert leaves the
 close brace alone.
@@ -766,17 +766,14 @@ refused.
    push, not after every edit**; the first *applied* gated edit of a process says so once as
    `gate=semantic …`.
    An edit introducing a new compile error is rolled back and the error returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
-   **A rollback keeps your text**: the error ends `retryWith=r3`, and `replace_symbol`,
-   `replace_symbol_body` and `add_member` take `retryWith: "r3"` to replay exactly what was rejected —
-   after you add the missing callee, or together with `allowErrors: true`. Never re-send the whole
-   declaration to retry; the server holds the last 8 rejections and says so if a token has expired.
-   **When only ONE declaration of a batch was wrong, correct that one and replay the rest**:
-   `replace_symbol retryWith="r3" fix=["2=<corrected>"]` replaces the held entry at the 0-based index
-   the rejection printed and replays the others unchanged — measured at ~4 700 characters saved per
-   retry on a 5-entry batch. `fix=["add:1=..."]` corrects a held `add=` helper the same way.
-   **`append: true` beside a token ADDS the `symbolIds=`/`declarations=` pairs you pass to the held
-   batch** - how a `CS7036` rollback's callers land with the member; a bare `symbolIds=` still
-   OVERRIDES, which is how a mis-typed id is corrected.
+   **A rollback keeps your text**: the error ends `retryWith=r3`; `replace_symbol`,
+   `replace_symbol_body` and `add_member` take the token to replay what was rejected - after adding the
+   missing callee, or with `allowErrors: true` - and the last 8 are held. A corrected
+   `declaration=`/`body=`/`content=` beside it REPLACES the held text.
+   **One wrong entry of a batch**: `fix=["2=<corrected>"]` replaces the held entry at that 0-based
+   index and replays the rest (`fix=["add:1=..."]` for a held `add=` helper; refused beside a replacing
+   declaration). **`append: true` ADDS the `symbolIds=`/`declarations=` pairs you pass** - how a
+   `CS7036` rollback's callers land with the member; a bare `symbolIds=` corrects the held ids.
    Better still, do not earn the rollback: `replace_symbol add=[…]` appends the helper in the same
    edit. **`add=`, `addTo=` and `usings=` are held with the token too**, so a retry names the token
    and nothing else; pass any of them again only to override what is held, and **pass `usings: []` to
@@ -1150,7 +1147,8 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 
 `test=` is a **substring** match, so a name that is a prefix of another (`…Submits` vs
 `…SubmitsTwice`) runs both — check `total=`, and use `filter="FullyQualifiedName=<name>"` for exactly
-one.
+one. Without `project=` it runs the whole solution, and a `NOTE ... pass project="X"` names the
+projects it matched - pass that next time.
 
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
 produced no results says so, and never `0 failures`.

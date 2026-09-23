@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.Core;
 
@@ -22,6 +23,26 @@ public static class MemberDeclaration
 
         return errors.Length is 0 ? Result.Ok(parsed) : Result.Fail<MemberDeclarationSyntax>(Malformed(errors, declaration));
     }
+
+    public static string? Headed(SyntaxNode target, string header)
+    {
+        if (target is not BaseTypeDeclarationSyntax { OpenBraceToken: { RawKind: (int)SyntaxKind.OpenBraceToken, IsMissing: false } } existing)
+            return null;
+
+        return SyntaxFactory.ParseMemberDeclaration(header, consumeFullText: false) is BaseTypeDeclarationSyntax parsed
+            && IsHeaderOf(parsed, existing)
+            && header.AsSpan(parsed.FullSpan.End).IsWhiteSpace()
+                ? string.Concat(header.AsSpan().TrimEnd(), Body(existing))
+                : null;
+    }
+
+    private static bool IsHeaderOf(BaseTypeDeclarationSyntax parsed, BaseTypeDeclarationSyntax existing) =>
+        parsed.RawKind == existing.RawKind
+        && parsed.OpenBraceToken.IsMissing
+        && parsed.SemicolonToken is { RawKind: 0 } or { IsMissing: true };
+
+    private static string Body(BaseTypeDeclarationSyntax existing) => existing.SyntaxTree.GetText().ToString(
+        TextSpan.FromBounds(existing.OpenBraceToken.GetPreviousToken().Span.End, existing.Span.End));
 
     private static TerseError Trailing(string trailing) => Errors.Invalid(
         "the declaration is not exactly one member; it is followed by " + Excerpt(trailing),

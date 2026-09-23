@@ -421,7 +421,8 @@ public static class SymbolEditService
 
         var target = Promoted(found);
         var column = target.Node.GetLocation().GetLineSpan().StartLinePosition.Character;
-        var parsed = MemberDeclaration.ParseAll(MemberDeclaration.Reindented(declaration, column));
+        var reindented = MemberDeclaration.Reindented(declaration, column);
+        var parsed = MemberDeclaration.ParseAll(MemberDeclaration.Headed(target.Node, reindented) ?? reindented);
 
         return parsed.IsOk
             ? Result.Ok(new PlannedEdit(target, Rewritten(parsed.Value!, target.Node)))

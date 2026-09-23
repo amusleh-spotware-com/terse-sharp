@@ -10,7 +10,7 @@ internal static class RetryNote
         "replace_symbol" => ReplaceSymbol(code, payloads),
         "add_member" => AddMember(code, payloads),
         "write_text" => code is TerseErrorCode.CompileRegression
-            ? "the rejected content and its usings= are held, so the retry names the token instead of re-sending the file"
+            ? "the rejected content and its usings= are held, so the retry names the token plus force=true instead of re-sending the file - a content= you pass replaces the held one"
             : "the content is held, so the retry is the token plus a corrected path= and nothing else",
         "replace_symbol_body" => code is TerseErrorCode.CompileRegression
             ? "the rejected body and its usings= are held, so the retry names the token instead of re-sending them"

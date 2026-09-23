@@ -1900,4 +1900,31 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     private static string WithoutTheOnceOffNotice(string text) => string.Join(
         '\n',
         text.Split('\n').Where(line => !line.StartsWith("compilations=realized", StringComparison.Ordinal)));
+
+    [Fact]
+    public async Task WriteText_RetriedWithACorrectedContent_WritesThatContentInsteadOfReplayingTheHeldOne()
+    {
+        const string Probe = "src/Fixture.Trading/RetryContentProbe.cs";
+        const string Seed = "namespace Fixture.Trading;\n\npublic sealed class RetryContentProbe\n{\n    public int Values => 0;\n}\n";
+        const string Rejected = "namespace Fixture.Trading;\n\npublic sealed class RetryContentProbe\n{\n    public HeldTypeThatDoesNotExist Values => null!;\n}\n";
+        const string Corrected = "namespace Fixture.Trading;\n\npublic sealed class RetryContentProbe\n{\n    public int Values => 41;\n}\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Seed, ["force"] = true });
+        try
+        {
+            var rejected = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Rejected, ["force"] = true });
+            var tail = rejected[(rejected.LastIndexOf("retryWith=", StringComparison.Ordinal) + "retryWith=".Length)..];
+            var applied = await server.CallAsync("write_text", new() { ["retryWith"] = tail.Split('\n')[0].Trim(), ["content"] = Corrected, ["force"] = true });
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("CompileRegression", rejected, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("Values => 41", after, StringComparison.Ordinal);
+            Assert.DoesNotContain("HeldTypeThatDoesNotExist", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

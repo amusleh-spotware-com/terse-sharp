@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
@@ -70,4 +72,43 @@ public sealed class MemberDeclarationTests
     [InlineData("public partial void OnChanged();")]
     public void Parse_AnUncommonButLegalSingleMember_IsStillAccepted(string declaration) =>
         Assert.True(MemberDeclaration.Parse(declaration).IsOk, declaration);
+
+    [Fact]
+    public void Headed_AHeaderOnlyClassDeclaration_KeepsTheExistingBody()
+    {
+        var target = Type("public sealed class Probe : IProbe\n{\n    public int Value => 1;\n}\n");
+
+        var spliced = MemberDeclaration.Headed(target, "[Obsolete]\npublic sealed class Probe : IProbe\n");
+
+        Assert.Equal("[Obsolete]\npublic sealed class Probe : IProbe\n{\n    public int Value => 1;\n}", spliced);
+    }
+
+    [Theory]
+    [InlineData("public sealed class Probe : IProbe { }")]
+    [InlineData("public sealed record Probe(int Value);")]
+    [InlineData("public struct Probe")]
+    [InlineData("public sealed class Probe\npublic int Trailing;")]
+    public void Headed_ADeclarationThatIsNotABareHeaderOfTheSameKind_IsNotSpliced(string declaration)
+    {
+        var target = Type("public sealed class Probe : IProbe\n{\n    public int Value => 1;\n}\n");
+
+        Assert.Null(MemberDeclaration.Headed(target, declaration));
+    }
+
+    [Fact]
+    public void Headed_AMemberTarget_IsNotSpliced()
+    {
+        var member = Type("public sealed class Probe\n{\n    public int Value => 1;\n}\n").Members[0];
+
+        Assert.Null(MemberDeclaration.Headed(member, "public sealed class Probe"));
+    }
+
+    private static TypeDeclarationSyntax Type(string source) =>
+        CSharpSyntaxTree.ParseText(source).GetRoot().DescendantNodes().OfType<TypeDeclarationSyntax>().Single();
+
+    [Theory]
+    [InlineData("public record Probe(int Value);", "public sealed record Probe(int Value)")]
+    [InlineData("public sealed class Probe;", "public sealed class Probe")]
+    public void Headed_ATargetDeclaredWithoutABody_IsNotSpliced(string source, string header) =>
+        Assert.Null(MemberDeclaration.Headed(Type(source), header));
 }

@@ -132,7 +132,7 @@ bool verbose) =>
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Apply a write the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
-        [Description("Token from a previous rejected write, e.g. r3, printed alone on the LAST line of the rejection. It holds the content, so the retry names the token instead of re-sending the file - add usings= for a CS0246 rollback, or allowErrors=true. A path you pass outranks the held one.")] string? retryWith = null,
+        [Description("Token from a previous rejected write, e.g. r3, printed alone on the LAST line of the rejection. It holds the content, so the retry names the token instead of re-sending the file - add usings= for a CS0246 rollback, or allowErrors=true. A path or content you pass outranks the held one; a .cs replay still needs force=true.")] string? retryWith = null,
         [Description("Namespaces added to the content this retry replays, e.g. System.Collections.Immutable. Ignored without retryWith=.")] string[]? usings = null,
         CancellationToken cancellationToken = default)
     {
@@ -146,7 +146,7 @@ bool verbose) =>
         var options = new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince);
 
         if (retryWith is { Length: > 0 } token)
-            return Replayed(token, workspace, path, usings, options, cancellationToken);
+            return Replayed(token, workspace, path, content, usings, options, cancellationToken);
 
         return files is { Length: > 0 } batch
             ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, options, cancellationToken)
@@ -1145,13 +1145,13 @@ context.RejectWrite() is { } rejection
     private static FileService.EditRequest WithoutMove(FileService.EditRequest request) =>
         request with { OldText = string.Empty, NewText = string.Empty, Row = null, ToPath = null };
 
-    private Task<string> Replayed(string token, string? workspace, string? path, string[]? usings, WriteOptions options, CancellationToken cancellationToken)
+    private Task<string> Replayed(string token, string? workspace, string? path, string? supplied, string[]? usings, WriteOptions options, CancellationToken cancellationToken)
     {
         if (EditTools.Held(token, "write_text") is not { } held)
             return Task.FromResult(EditTools.Unknown(token, "write_text"));
 
         var target = path is { Length: > 0 } named ? named : Entry(held.Targets);
-        var content = WriteRetry.WithUsings(Entry(held.Payloads), usings is { Length: > 0 } ? usings : [.. held.Usings]);
+        var content = WriteRetry.WithUsings(supplied is { Length: > 0 } ? supplied : Entry(held.Payloads), usings is { Length: > 0 } ? usings : [.. held.Usings]);
 
         if (target.Length is 0)
             return Task.FromResult(Errors.Blank("path").Render());

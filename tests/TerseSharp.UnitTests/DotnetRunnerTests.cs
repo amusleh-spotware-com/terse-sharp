@@ -942,4 +942,62 @@ public sealed class DotnetRunnerTests
 
         Assert.Contains("next: rerun_failed tests=[\"Ns.A.Fails\", \"Ns.B.AlsoFails\"]", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void ScopeNote_ForAnUnscopedFilterThatMatchedOneOfThreeProjects_NamesThatProject()
+    {
+        var note = DotnetRunner.ScopeNote(ScopedReport([new("Core.Tests", 2, 0, 0, 2, 40)]), Searching(3));
+
+        Assert.Equal("\nNOTE the filter matched tests in 1 of 3 test projects, but the whole solution was run - pass project=\"Core.Tests\" to build and run only that one", note);
+    }
+
+    [Fact]
+    public void ScopeNote_ForAnUnscopedFilterThatMatchedTwoOfThreeProjects_NamesThemAsABatch()
+    {
+        var note = DotnetRunner.ScopeNote(ScopedReport([new("A.Tests", 1, 0, 0, 1, 4), new("B.Tests", 1, 0, 0, 1, 4)]), Searching(3));
+
+        Assert.Contains("2 of 3 test projects", note, StringComparison.Ordinal);
+        Assert.Contains("pass projects=[\"A.Tests\", \"B.Tests\"]", note, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ScopeNote_ForARunThatWasScopedToAProject_SaysNothing()
+    {
+        var note = DotnetRunner.ScopeNote(ScopedReport([new("A.Tests", 1, 0, 0, 1, 4)]), Searching(0));
+
+        Assert.Equal(string.Empty, note);
+    }
+
+    [Fact]
+    public void ScopeNote_WhenTheFilterMatchedEveryTestProjectOfTheSolution_SaysNothing()
+    {
+        var note = DotnetRunner.ScopeNote(ScopedReport([new("A.Tests", 1, 0, 0, 1, 4), new("B.Tests", 1, 0, 0, 1, 4)]), Searching(2));
+
+        Assert.Equal(string.Empty, note);
+    }
+
+    [Fact]
+    public void RenderTest_ForAGreenUnscopedFilteredRun_EndsWithTheScopeNote()
+    {
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(0, string.Empty, 2000),
+            ScopedReport([new("Core.Tests", 2, 0, 0, 2, 40)]),
+            Searching(2),
+            "C:/repo");
+
+        Assert.StartsWith("run_tests PASSED", text, StringComparison.Ordinal);
+        Assert.EndsWith("pass project=\"Core.Tests\" to build and run only that one", text, StringComparison.Ordinal);
+    }
+
+    private static TestRunReport ScopedReport(TestProjectSummary[] projects) =>
+        new(projects.Sum(project => project.Passed), 0, 0, projects.Sum(project => project.Total), 40, [], []) { Projects = [.. projects] };
+
+    private static TestRunRequest Searching(int testProjects) => new(
+        "sln",
+        "FullyQualifiedName~Adder",
+        false,
+        false,
+        0,
+        TimeSpan.FromSeconds(600),
+        Searched: testProjects);
 }
