@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.68.0] - 2026-09-23
+
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
 > A `run_tests` verdict for a `test=`, `tests=` or `filter=` run with no `project=` may end with one
 > new `NOTE the filter matched tests in N of M test projects ...` line, and `replace_symbol` refuses
@@ -6728,7 +6730,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.67.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.68.0...HEAD
+[0.68.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.68.0
 [0.67.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.67.0
 [0.66.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.66.0
 [0.65.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.65.0
