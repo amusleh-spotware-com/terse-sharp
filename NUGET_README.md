@@ -87,6 +87,7 @@ merely shortens a response.
 | one edit call per site | `edit_text edits=[…]` — 25 edits across files, one write |
 | edit, build, find you broke a caller, edit again | `replace_symbol symbolIds=[…]` — the member and its callers land in **one** compile gate |
 | grep the test tree and guess what to run | `find_usages impact=true tests=true` — ready-made `run_tests test=` arguments |
+| one search per glob | `search_text paths=["src/**/*.cs", "**/*.md"]` — globs OR-ed into one file set, one answer |
 | `dotnet test` per project, serially | `run_tests projects=[…]` — concurrent, one process per core |
 
 **And the waiting itself is shorter.** A bare `run_tests` over a solution builds **once**, then runs each

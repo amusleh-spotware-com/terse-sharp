@@ -2026,4 +2026,157 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("WARNING this overwrite drops 2 declaration(s) the file declared: OrderService.Unused(), OrderService.NeverCalled()", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_OnAFileAnotherProcessHoldsOpenForWriting_ReadsItInsteadOfRefusing()
+    {
+        const string Relative = "terse-held-open-probe.log";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, Relative);
+        await File.WriteAllTextAsync(path, "first line\nHELD-OPEN-MARKER\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            await using (new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read))
+            {
+                var whole = await server.CallAsync("read_text", new() { ["path"] = Relative });
+                var tailed = await server.CallAsync("read_text", new() { ["path"] = Relative, ["tail"] = 1 });
+
+                Assert.DoesNotContain("ERROR", whole, StringComparison.Ordinal);
+                Assert.Contains("HELD-OPEN-MARKER", whole, StringComparison.Ordinal);
+                Assert.Contains("HELD-OPEN-MARKER", tailed, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_OnAFileHeldWithNoReadSharing_AnswersFileLockedInsteadOfAnArgumentError()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows makes FileShare.None a mandatory lock, so only there can a held handle stop a read");
+        const string Relative = "terse-locked-probe.log";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, Relative);
+        await File.WriteAllTextAsync(path, "LOCKED\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            await using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var text = await server.CallAsync("read_text", new() { ["path"] = Relative });
+
+                Assert.Contains("ERROR FileLocked", text, StringComparison.Ordinal);
+                Assert.Contains("find_files stamps=true", text, StringComparison.Ordinal);
+                Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task SearchRegex_WithPaths_SearchesTheUnionOfEveryGlobInOnePass()
+    {
+        var text = await server.CallAsync("search_regex", new()
+        {
+            ["query"] = "\\S",
+            ["paths"] = new[] { "**/*.csproj", "src/**/OrderBook.cs" },
+            ["countOnly"] = true,
+            ["maxResults"] = 500,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("OrderBook.cs", text, StringComparison.Ordinal);
+        Assert.Contains(".csproj", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_WithPathsAndRoot_SearchesTheUnionOfThoseGlobsUnderThatDirectory()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-search-paths-");
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "alpha.cs"), "PATHS-MARKER", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "beta.md"), "PATHS-MARKER", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "gamma.txt"), "PATHS-MARKER", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("search_text", new()
+            {
+                ["query"] = "PATHS-MARKER",
+                ["root"] = directory.FullName,
+                ["paths"] = new[] { "*.cs", "*.md" },
+            });
+
+            Assert.Contains("alpha.cs", text, StringComparison.Ordinal);
+            Assert.Contains("beta.md", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("gamma.txt", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SearchText_WithABlankPathsEntry_RefusesItByName()
+    {
+        var text = await server.CallAsync("search_text", new() { ["query"] = "x", ["paths"] = new[] { "src/**/*.cs", "" } });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("paths", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithLinesAsOneRange_ReadsExactlyWhatStartLineAndEndLineRead()
+    {
+        var aliased = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["lines"] = "2-3" });
+        var paired = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["startLine"] = 2, ["endLine"] = 3 });
+
+        Assert.StartsWith("2 lines", aliased, StringComparison.Ordinal);
+        Assert.Equal(paired, aliased);
+    }
+
+    [Fact]
+    public async Task ReadText_WithLinesNamingOneLine_ReadsThatLineOnly()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["lines"] = "2" });
+        var lines = text.Split('\n');
+
+        Assert.StartsWith("2: ", lines[1], StringComparison.Ordinal);
+        Assert.DoesNotContain("3: ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("startLine")]
+    [InlineData("endLine")]
+    [InlineData("tail")]
+    public async Task ReadText_WithLinesBesideAnotherRangeForm_RefusesNamingLines(string other)
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["lines"] = "2-3", [other] = 5 });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("'lines' already names the range", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithLinesBesideRanges_RefusesNamingLines()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["lines"] = "2-3", ["ranges"] = new[] { "1" } });
+
+        Assert.Contains("'lines' already names the range", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WithAMalformedLinesValue_RefusesItByName()
+    {
+        var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["lines"] = "40-2" });
+
+        Assert.Contains("'lines' value '40-2' is not a line or a line range", text, StringComparison.Ordinal);
+    }
 }

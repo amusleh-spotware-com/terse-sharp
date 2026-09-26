@@ -692,7 +692,12 @@ default is set so a whole-file read stays inline in your client rather than bein
 that answers nothing, and the clip always names `next: startLine=`. A file whose bytes open with a
 Unicode byte order mark - UTF-16 LE or BE, UTF-32, UTF-8 - is decoded and served, not refused as
 binary, and a write back to it keeps that encoding; only a file carrying a real NUL code unit is
-refused.
+refused. A file another process holds open for writing (a live log, a build output) is read, not
+refused; only a handle that shares no read access answers `ERROR FileLocked`, and no `read_text`
+argument changes that - `find_files stamps=true` still gives its size and last-write time.
+`read_text lines="40-200"` (or `"42"`) is the one-value spelling of `startLine`/`endLine`.
+`find_files root=` lists any absolute directory and `globs=` batches there too, each glob under its
+own header. `search_text` / `search_regex` take `paths=[...]` - up to 10 globs OR-ed into one file set.
 
 ## Working rules
 

@@ -243,6 +243,11 @@ public static class Errors
             "the new field is never assigned: " + string.Join(", ", fields) + (HoldsUsings(tool)
                 ? " - send it in the SAME edit as the member that writes it: replace_symbol symbolId=\"<that member>\" add=[\"<this field's declaration>\"], which lands both as one compile-gated edit, or pass allowErrors=true to apply it anyway"
                 : " - add the member that writes it in the content you send, or pass allowErrors=true to apply it anyway");
+
+    public static TerseError FileLocked(string path) => new(
+            TerseErrorCode.FileLocked,
+            string.Create(CultureInfo.InvariantCulture, $"'{path}' is held open by another process that shares no read access, so no read can open it"),
+            "retry once that process closes it - no read_text argument helps, tail= included, because every read opens the file the same way; find_files stamps=true still answers its size and last-write time");
 }
 
 public readonly record struct RollbackHints(

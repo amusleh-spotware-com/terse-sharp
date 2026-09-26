@@ -21,7 +21,8 @@ public enum TerseErrorCode
     Transient,
     UnsupportedRunner,
     NameTaken,
-    RunInFlight
+    RunInFlight,
+    FileLocked
 }
 
 public sealed record TerseError(TerseErrorCode Code, string Message, string Remedy)

@@ -15,7 +15,8 @@ public readonly record struct TextSearchRequest(
     bool CountOnly = false,
     bool Containers = false,
     bool Word = false,
-    bool Chosen = false)
+    bool Chosen = false,
+    ImmutableArray<string> Globs = default)
 {
     public const int MaxContext = 5;
 

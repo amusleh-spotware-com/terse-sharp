@@ -2124,16 +2124,45 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task FindFiles_WithGlobsAndRoot_IsRefusedRatherThanAnsweringAboutTheWorkspace()
+    public async Task FindFiles_WithGlobsAndRoot_AnswersEveryGlobUnderItsOwnHeaderOverThatDirectory()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-root-globs-");
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "alpha.cs"), "class A;", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "beta.md"), "# b", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("find_files", new()
+            {
+                ["globs"] = new[] { "**/*.cs", "**/*.md", "**/*.zzz" },
+                ["root"] = directory.FullName,
+            });
+
+            Assert.StartsWith("3 globs", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("outside-workspace", text, StringComparison.Ordinal);
+            Assert.Contains("**/*.zzz", text, StringComparison.Ordinal);
+            Assert.True(text.IndexOf("alpha.cs", StringComparison.Ordinal) < text.IndexOf("**/*.md", StringComparison.Ordinal), text);
+            Assert.True(text.IndexOf("beta.md", StringComparison.Ordinal) > text.IndexOf("**/*.md", StringComparison.Ordinal), text);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FindFiles_WithGlobsAndARelativeRoot_RefusesTheRootOnceForTheWholeBatch()
     {
         var text = await server.CallAsync("find_files", new()
         {
-            ["globs"] = new[] { "**/*.cs", "**/*.md" },
-            ["root"] = Path.GetTempPath(),
+            ["globs"] = new[] { "*.cs", "*.md" },
+            ["root"] = "relative/dir",
         });
 
-        Assert.Contains("ERROR", text, StringComparison.Ordinal);
-        Assert.Contains("root", text, StringComparison.Ordinal);
+        Assert.Contains("is not an absolute path", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("'globs' was passed with 'root'", text, StringComparison.Ordinal);
     }
 
     [Fact]

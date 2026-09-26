@@ -30,17 +30,26 @@ public static class TextSearchService
         TextSearchRequest request,
         CancellationToken cancellationToken)
     {
-        var files = Kept([.. Matched(workspace, request.Glob).Where(IsSearchableFile)], request.Exclude);
+        var selected = request.Globs.IsDefaultOrEmpty
+            ? Matched(workspace, request.Glob)
+            : Selected(Matched(workspace, "**"), workspace.Root, request.Globs.AsSpan());
+        var files = Kept([.. selected.Where(IsSearchableFile)], request.Exclude);
 
         return await ScannedAsync(files, request, cancellationToken).ConfigureAwait(false);
     }
     public static async Task<string> SearchOutsideAsync(TextSearchRequest request, CancellationToken cancellationToken)
     {
-        var candidates = Outside(request.Root ?? string.Empty, request.Glob);
+        var root = request.Root ?? string.Empty;
+        var candidates = Outside(root, request.Globs.IsDefaultOrEmpty ? request.Glob : "**");
 
-        return candidates.IsOk
-            ? await ScannedAsync(Kept([.. candidates.Value!.Where(IsSearchableFile)], request.Exclude), request, cancellationToken).ConfigureAwait(false)
-            : candidates.Error!.Render();
+        if (!candidates.IsOk)
+            return candidates.Error!.Render();
+
+        var selected = request.Globs.IsDefaultOrEmpty
+            ? candidates.Value!
+            : Selected(candidates.Value!, Path.GetFullPath(root), request.Globs.AsSpan());
+
+        return await ScannedAsync(Kept([.. selected.Where(IsSearchableFile)], request.Exclude), request, cancellationToken).ConfigureAwait(false);
     }
     private static async Task<string> ScannedAsync(
         List<WorkspacePath> files,
@@ -1011,7 +1020,7 @@ public static class TextSearchService
         && !request.Containers
         && !request.CountOnly
         && request.Root is not { Length: > 0 }
-        && request.Glob.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+        && EveryCSharp(request);
 
     private const int FoldSteer = 25;
     private const int MaxFoldDepth = 4;
@@ -1107,5 +1116,76 @@ public static class TextSearchService
         return !Globbed(glob) && directory.Length > 0 && Directory.Exists(Path.Join(root, directory))
             ? string.Concat(directory, "/**")
             : glob;
+    }
+
+    private static List<WorkspacePath> Selected(List<WorkspacePath> candidates, string root, ReadOnlySpan<string> globs)
+    {
+        var matchers = new FileGlob[globs.Length];
+
+        for (var index = 0; index < globs.Length; index++)
+            matchers[index] = FileGlob.Compile(DirectoryGlob(root, globs[index]));
+
+        var selected = new List<WorkspacePath>(candidates.Count);
+
+        foreach (var candidate in candidates)
+        {
+            if (AnyMatches(matchers, candidate.RelativePath))
+                selected.Add(candidate);
+        }
+
+        return selected;
+    }
+
+    private static bool AnyMatches(FileGlob[] matchers, string relativePath)
+    {
+        foreach (var matcher in matchers)
+        {
+            if (matcher.MatchesRelative(relativePath))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool EveryCSharp(TextSearchRequest request)
+    {
+        if (request.Globs.IsDefaultOrEmpty)
+            return request.Glob.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+
+        foreach (var glob in request.Globs)
+        {
+            if (!glob.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+
+        return true;
+    }
+
+    public static Result<string> FindFilesManyOutside(
+        string root,
+        IReadOnlyList<string> globs,
+        int maxResults,
+        bool stamps,
+        string? name = null,
+        int depth = 0,
+        bool chosen = false)
+    {
+        var candidates = Outside(root, "**");
+
+        if (!candidates.IsOk)
+            return Result.Fail<string>(candidates.Error!);
+
+        var full = Path.GetFullPath(root);
+        var response = new ResponseBuilder("find_files", string.Join(", ", globs));
+
+        response.Summary(globs.Count, globs.Count, "globs");
+
+        foreach (var glob in globs)
+        {
+            response.Note(glob);
+            response.Line(Rendered(Selected(candidates.Value!, full, [glob]), glob, maxResults, stamps, name, depth, full, chosen).TrimEnd('\n'));
+        }
+
+        return Result.Ok(response.ToString());
     }
 }

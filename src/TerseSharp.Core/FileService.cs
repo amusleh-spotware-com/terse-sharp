@@ -515,30 +515,59 @@ public static class FileService
     private static string Outside(string full) => full + OutsideSuffix;
 
     private static async Task<Result<string>> PresentFileAsync(
-            string full,
-            string label,
-            ReadRequest request,
-            CancellationToken cancellationToken)
+                string full,
+                string label,
+                ReadRequest request,
+                CancellationToken cancellationToken)
     {
         var file = new FileInfo(full);
 
         if (!file.Exists)
             return Result.Fail<string>(Errors.DocumentNotFound(label));
 
-        var probe = await BinaryContent.ProbeAsync(full, label, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await DecodedAsync(file, label, request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException failure) when (SharingViolation(failure))
+        {
+            return Result.Fail<string>(Errors.FileLocked(label));
+        }
+    }
+
+    private const int SharingViolationCode = 32;
+    private const int LockViolationCode = 33;
+
+    private static async Task<Result<string>> DecodedAsync(FileInfo file, string label, ReadRequest request, CancellationToken cancellationToken)
+    {
+        var probe = await BinaryContent.ProbeAsync(file.FullName, label, cancellationToken).ConfigureAwait(false);
 
         if (probe.Refusal is { } binary)
             return binary;
 
-        var text = probe.Utf16 is null
-            ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false)
-            : await File.ReadAllTextAsync(full, probe.Utf16, cancellationToken).ConfigureAwait(false);
-        var presented = Present(full, label, text, request with { Length = file.Length, Characters = text.Length, Ticks = file.LastWriteTimeUtc.Ticks });
+        var text = await SharedTextAsync(file.FullName, probe.Utf16, cancellationToken).ConfigureAwait(false);
+        var presented = Present(file.FullName, label, text, request with { Length = file.Length, Characters = text.Length, Ticks = file.LastWriteTimeUtc.Ticks });
 
         return probe.Utf16 is null || !presented.IsOk
             ? presented
             : Result.Ok(presented.Value! + "\nHEURISTIC decoded as " + probe.Utf16.WebName + " - this file carries no byte order mark, and every zero byte of the probe sat at the same offset of a printable pair");
     }
+
+    private static async Task<string> SharedTextAsync(string full, Encoding? encoding, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(full, new FileStreamOptions
+        {
+            Mode = FileMode.Open,
+            Access = FileAccess.Read,
+            Share = FileShare.ReadWrite | FileShare.Delete,
+            Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+        });
+        using var reader = new StreamReader(stream, encoding ?? Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+
+        return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool SharingViolation(IOException failure) => (failure.HResult & 0xFFFF) is SharingViolationCode or LockViolationCode;
 
     private const string OutsideSuffix = "  " + OutsideMarker;
 

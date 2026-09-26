@@ -7,13 +7,14 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no startLine, endLine, ranges or tail - answers that file's OUTLINE plus a steer, because the text is about three times the tokens; verbose=true or any line range returns the text, and a verbose whole-file read ends with what it cost against the outline it skipped. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N is how a long log is read, and a clipped read names the line to continue from. ref= reads the file at a git ref instead of shelling out.")]
+    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no line range, lines, ranges or tail - answers its OUTLINE plus a steer, a third of the tokens; verbose=true or any line range returns the text. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N is how a long log is read, and a clipped read names the line to continue from. ref= reads the file at a git ref instead of shelling out.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
                 [Description("Several files answered in one response, at most 10. Combines with path, which is taken first; a blank or 11th entry is refused by name rather than dropped.")] string?[]? paths = null,
                 [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
                 [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
-                [Description("Discontinuous ranges of one file, at most 20, each \"42\" or \"101-102\". Refused beside startLine, endLine, tail, headings, section, columns.")] string?[]? ranges = null,
+                [Description("Discontinuous ranges of one file, at most 20, each \"42\" or \"101-102\"; refused beside every other range or markdown view.")] string?[]? ranges = null,
+                [Description("\"40-200\" or \"42\": startLine/endLine as one value.")] string? lines = null,
                 [Description("Maximum lines returned, default 2000; the response is truncated, never refused. With headings=true it bounds the SECTIONS listed.")] int maxLines = 0,
                 [Description("Maximum characters of file text, default 40960 at most 131072; one budget shared across a paths= batch.")] int maxChars = 0,
                 [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
@@ -38,6 +39,13 @@ public sealed class FileTools(ToolContext context)
 
         if (Refused(section, occurrence, headings, maxLevel, columns, cellChars) is { } refusal)
             return Task.FromResult(refusal.Render());
+
+        var lined = Lined(lines, startLine, endLine, tail, ranges);
+
+        if (!lined.IsOk)
+            return Task.FromResult(lined.Error!.Render());
+
+        (startLine, endLine) = lined.Value;
 
         if (RefusedRanges(ranges, startLine, endLine, tail, headings, columns, section) is { } ranged)
             return Task.FromResult(ranged.Render());
@@ -275,7 +283,7 @@ bool verbose) =>
             [Description("Keep only the files whose FILE NAME contains this text, case-insensitively - no glob to get right. Used alone it searches every file; with glob= it filters what the glob selected.")] string? name = null,
             [Description("Fold every file below the Nth path segment into one directory row with its file count, so the answer is the shape of the tree. A directory with a single match stays that file. 0, the default, lists every file.")] int depth = 0,
             [Description("Absolute directory to list instead of the workspace, tagged outside-workspace; its paths= line carries full paths. Refused beside tracked=true.")] string? root = null,
-            [Description("Several globs in ONE response, at most 10. Replaces one call per glob: each gets its own header line and count, so a glob that matched nothing is visible. Combines with glob, taken first.")] string?[]? globs = null,
+            [Description("Several globs in ONE response, at most 10. Replaces one call per glob: each gets its own header line and count, so a glob that matched nothing is visible. Combines with glob, taken first, and with root=.")] string?[]? globs = null,
             CancellationToken cancellationToken = default)
     {
         var matcher = glob ?? pattern ?? query ?? path;
@@ -285,13 +293,6 @@ bool verbose) =>
             return Task.FromResult(Errors.Invalid(
                 "neither 'glob' nor 'name' was supplied",
                 "pass a glob, spelled glob or pattern or query or path, or 'name' to match a file name substring instead").Render());
-        }
-
-        if (globs is { Length: > 0 } && root is { Length: > 0 })
-        {
-            return Task.FromResult(Errors.Invalid(
-                "'globs' was passed with 'root', and a batch answers about the loaded workspace only",
-                "drop root= to answer several globs over the workspace, or pass one glob= beside root= for that directory").Render());
         }
 
         if (depth < 0)
@@ -307,14 +308,7 @@ bool verbose) =>
                 ? Errors.Invalid(
                     "'tracked' was passed with 'root', and this tool loads no repository for that directory",
                     "drop tracked=true to list every file under root=, or drop root= to list the tracked files of the workspace").Render()
-                : NavigationTools.Unwrap(TextSearchService.FindFilesOutside(
-                    directory,
-                    matcher ?? string.Empty,
-                    NavigationTools.Cap(maxResults, 100),
-                    stamps,
-                    name,
-                    depth,
-                    maxResults > 0)));
+                : ListedOutside(directory, matcher, globs, maxResults, stamps, name, depth));
         }
 
         if (globs is not { Length: > 0 })
@@ -343,7 +337,7 @@ bool verbose) =>
     }
 
     [McpServerTool(Name = "search_text", ReadOnly = true)]
-    [Description("Literal text search across the workspace, or across any absolute directory with root=. queries= searches up to 10 literals in ONE pass over the same file set. Replaces one call per literal: every record is tagged q1..qN by the position of its literal, which the shell grep alternation cannot do, and a line matching several is ONE record carrying all their tags. An entry matching across a line break is reported once, at the line its text starts on. Also the counting tool: the count line is how many matching LINES exist, and a zero result proves absence in the files it searched - bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are skipped; .claude/commands, agents, skills and hooks ARE searched. countOnly=true answers ONE line per file with its match count. context=N adds surrounding lines so a hit needs no follow-up read, unique=true collapses identical lines to x<count>, exclude= drops what a glob= cannot, containers=true names the C# declaration each hit sits in - an id get_symbol_source takes - and word=true keeps a literal only where neither side is a letter, digit or underscore. Results are HEURISTIC: for a type or member name use search_symbols or find_usages.")]
+    [Description("Literal text search across the workspace, or across any absolute directory with root=. queries= searches up to 10 literals in ONE pass over the same file set. Replaces one call per literal: every record is tagged q1..qN by the position of its literal, which the shell grep alternation cannot do, and a line matching several is ONE record carrying all their tags. An entry matching across a line break is reported once, at the line its text starts on. Also the counting tool: the count line is how many matching LINES exist, and a zero result proves absence in the files it searched - bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are skipped; .claude/commands, agents, skills and hooks ARE searched. countOnly=true answers ONE line per file with its match count. context=N adds surrounding lines so a hit needs no follow-up read, unique=true collapses identical lines to x<count>, exclude= drops what a glob= cannot, containers=true names the C# declaration each hit sits in - an id get_symbol_source takes - and word=true keeps a literal only where neither side is a letter, digit or underscore. paths= ORs up to 10 globs into one file set. Results are HEURISTIC: for a type or member name use search_symbols or find_usages.")]
     public Task<string> SearchText(
         [Description("Literal text to find.")] string? query = null,
         [Description("Optional file glob, e.g. *.json or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -360,11 +354,12 @@ bool verbose) =>
         [Description("Several literals searched in one pass over the same file set, at most 10, every record tagged q1..qN by position. Combines with query, which is taken first.")] string?[]? queries = null,
         [Description("Name the C# declaration each hit sits in - Type.Member, from syntax - so the record is an id get_symbol_source takes. .cs only; refused beside countOnly=. Default false.")] bool containers = false,
         [Description("Match whole words only: kept only where neither side is a letter, digit or underscore. Applies to query= and every queries= entry. Default false.")] bool word = false,
+        [Description("Several globs OR-ed into one file set, at most 10; combines with glob, taken first.")] string?[]? paths = null,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, word), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, word, Globs: paths), cancellationToken);
 
     [McpServerTool(Name = "search_regex", ReadOnly = true)]
-    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 expressions in ONE pass over the same file set. Replaces one call per expression, and every record is tagged q1..qN by the position of its expression in queries=, which is what an alternation cannot do: it returns one undifferentiated list. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An expression that spans a line break - a literal newline, [\\s\\S] or (?s). - is reported once, at the line its text starts on, and the scan resumes on the next line, so every other expression still sees the lines it spanned. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are skipped; .claude/commands, agents, skills and hooks ARE searched. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. countOnly=true answers ONE line per file with its match count and no matched text, tagged q1=N per expression. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes; word= belongs to search_text, because \\b answers it here. Results are tagged HEURISTIC.")]
+    [Description("Regular-expression search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 expressions in ONE pass over the same file set. Replaces one call per expression, and every record is tagged q1..qN by the position of its expression in queries=, which is what an alternation cannot do: it returns one undifferentiated list. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An expression that spans a line break - a literal newline, [\\s\\S] or (?s). - is reported once, at the line its text starts on, and the scan resumes on the next line, so every other expression still sees the lines it spanned. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are skipped; .claude/commands, agents, skills and hooks ARE searched. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. countOnly=true answers ONE line per file with its match count and no matched text, tagged q1=N per expression. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes; word= belongs to search_text, because \\b answers it here. paths= ORs up to 10 globs into one file set. Results are tagged HEURISTIC.")]
     public Task<string> SearchRegex(
         [Description(".NET regular expression.")] string? query = null,
         [Description("Optional file glob, e.g. *.cs or **/Views/*.xaml. ** spans directories, * and ? stop at a separator.")] string? glob = null,
@@ -380,8 +375,9 @@ bool verbose) =>
         [Description("One line per file - path and its match count, q1=N per expression - and no matched text. Refused beside matchesOnly=, unique= and context=. Default false.")] bool countOnly = false,
         [Description("Pass queries to search several expressions in one pass over the same file set, at most 10. Replaces one call per expression; every record is tagged q1..qN by the position of its expression here, which an alternation cannot do. Combines with query, which is taken first.")] string?[]? queries = null,
         [Description("Name the C# declaration each hit sits in - Type.Member, from syntax - so the record is an id get_symbol_source takes. .cs only; refused beside countOnly=. Default false.")] bool containers = false,
+        [Description("Several globs OR-ed into one file set, at most 10; combines with glob, taken first.")] string?[]? paths = null,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries, countOnly, containers), cancellationToken);
+        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, Globs: paths), cancellationToken);
 
     private Task<string> Search(TextQuery request, CancellationToken cancellationToken)
     {
@@ -390,9 +386,14 @@ bool verbose) =>
 
         var requested = Requested(request);
 
-        return requested.IsOk
-            ? Scanned(request, Scoped(request, requested.Value), cancellationToken)
-            : Task.FromResult(requested.Error!.Render());
+        if (!requested.IsOk)
+            return Task.FromResult(requested.Error!.Render());
+
+        var globs = Globbed(request);
+
+        return globs.IsOk
+            ? Scanned(request, Scoped(request, requested.Value, globs.Value), cancellationToken)
+            : Task.FromResult(globs.Error!.Render());
     }
 
     private static Result<ImmutableArray<string>> Requested(TextQuery request)
@@ -422,20 +423,21 @@ bool verbose) =>
         _ => Result.Ok(patterns),
     };
 
-    private static TextSearchRequest Scoped(TextQuery request, ImmutableArray<string> patterns) => new(
-            patterns,
-            request.Glob ?? "*",
-            request.Regex,
-            NavigationTools.Cap(request.MaxResults, 100),
-            request.Context,
-            request.Unique,
-            request.Root,
-            request.Exclude,
-            request.MatchesOnly,
-            request.CountOnly,
-            request.Containers,
-            request.Word,
-            request.MaxResults is > 0 and <= NavigationTools.MaxCap);
+    private static TextSearchRequest Scoped(TextQuery request, ImmutableArray<string> patterns, ImmutableArray<string> globs) => new(
+        patterns,
+        globs.IsEmpty ? request.Glob ?? "*" : globs[0],
+        request.Regex,
+        NavigationTools.Cap(request.MaxResults, 100),
+        request.Context,
+        request.Unique,
+        request.Root,
+        request.Exclude,
+        request.MatchesOnly,
+        request.CountOnly,
+        request.Containers,
+        request.Word,
+        request.MaxResults is > 0 and <= NavigationTools.MaxCap,
+        globs);
 
     private Task<string> Scanned(TextQuery request, TextSearchRequest search, CancellationToken cancellationToken) =>
         request.Root is { Length: > 0 }
@@ -461,7 +463,8 @@ bool verbose) =>
         IReadOnlyList<string?>? Texts = null,
         bool CountOnly = false,
         bool Containers = false,
-        bool Word = false);
+        bool Word = false,
+        string?[]? Globs = null);
 
     private Task<string> Guarded(
 string? workspace,
@@ -1165,4 +1168,42 @@ context.RejectWrite() is { } rejection
     }
 
     private static string Entry(IReadOnlyList<string> values) => values is [var only, ..] ? only : string.Empty;
+
+    private static Result<ImmutableArray<string>> Globbed(TextQuery request) =>
+        request.Globs is { Length: > 0 } globs
+            ? PluralPaths.Combine(request.Glob, globs, "paths")
+            : Result.Ok(ImmutableArray<string>.Empty);
+
+    private static string ListedOutside(string directory, string? matcher, string?[]? globs, int maxResults, bool stamps, string? name, int depth)
+    {
+        if (globs is not { Length: > 0 })
+            return NavigationTools.Unwrap(TextSearchService.FindFilesOutside(directory, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0));
+
+        var combined = PluralPaths.Combine(matcher, globs, "globs");
+
+        return combined.IsOk
+            ? NavigationTools.Unwrap(TextSearchService.FindFilesManyOutside(directory, combined.Value, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0))
+            : combined.Error!.Render();
+    }
+
+    private static Result<(int Start, int End)> Lined(string? lines, int startLine, int endLine, int tail, string?[]? ranges)
+    {
+        if (lines is null)
+            return Result.Ok((startLine, endLine));
+
+        if ((startLine, endLine, tail) is not ( <= 0, <= 0, <= 0) || ranges is { Length: > 0 })
+        {
+            return Result.Fail<(int Start, int End)>(Errors.Invalid(
+                "'lines' already names the range to read, and startLine=, endLine=, tail= or ranges= was passed beside it",
+                "pass lines=\"40-200\" on its own, or drop it and keep the other form"));
+        }
+
+        var parsed = FileService.ParseSpans([lines]);
+
+        return parsed.Value is [var span]
+            ? Result.Ok((span.Start, span.End))
+            : Result.Fail<(int Start, int End)>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'lines' value '{lines}' is not a line or a line range"),
+                "pass lines=\"42\" for one line or lines=\"40-200\" for a range, 1-based, with the end not before the start"));
+    }
 }
