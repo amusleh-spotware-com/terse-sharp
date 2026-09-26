@@ -50,7 +50,7 @@ public sealed class EditTools(ToolContext context)
                         [Description("Symbol id of the member.")] string? symbolId = null,
                         [Description("One complete member declaration, or several in sequence.")] string declaration = "",
                         [Description(AddHelp)] string[]? add = null,
-                        [Description("Containing type add= lands in when the targets share none; comma-separated routes each add= entry to its own.")] string? addTo = null,
+                        [Description("Type add= lands in - any type in the workspace, addressed as add_member's typeSymbolId is; comma-separated routes each add= entry to its own.")] string? addTo = null,
                         [Description("Diff only, write nothing.")] bool dryRun = false,
                         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
                         [Description(PolicyHelp)] bool allowPolicy = false,
@@ -232,19 +232,25 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "delete_symbol", Destructive = true)]
-    [Description("Safe-delete a member, an enum member or a type. Refuses while references exist unless force is set, and lists them; allowErrors=true applies it anyway. A successful delete answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Safe-delete a member, an enum member or a type. Refuses while references exist unless force is set, and lists them; allowErrors=true applies it anyway. symbolIds= removes up to 20 across files in ONE compile-gated edit. Replaces one call per member, and a reference sitting inside another removed member does not block it. A successful delete answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> DeleteSymbol(
-            [Description("Symbol id to delete.")] string? symbolId = null,
-            [Description("Delete even when references exist. Default false.")] bool force = false,
-            [Description("Diff only, write nothing.")] bool dryRun = false,
-            [Description("Apply even if it introduces compile errors. Default false.")] bool allowErrors = false,
-            [Description(PolicyHelp)] bool allowPolicy = false,
-            [Description(VerboseHelp)] bool verbose = false,
-            [Description("Workspace or worktree name.")] string? workspace = null,
-            [Description("Alias for symbolId.")] string? symbol = null,
-            CancellationToken cancellationToken = default) =>
-            Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => SymbolEditService.DeleteAsync(
-                loaded, resolved, force, Options("delete_symbol", dryRun, allowErrors, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
+        [Description("Symbol id to delete.")] string? symbolId = null,
+        [Description("Delete even when references exist. Default false.")] bool force = false,
+        [Description("Diff only, write nothing.")] bool dryRun = false,
+        [Description("Apply even if it introduces compile errors. Default false.")] bool allowErrors = false,
+        [Description(PolicyHelp)] bool allowPolicy = false,
+        [Description(VerboseHelp)] bool verbose = false,
+        [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Alias for symbolId.")] string? symbol = null,
+        [Description("Symbol ids deleted together as ONE compile-gated edit, at most 20; a reference inside another listed member does not count. Not with symbolId=.")] string[]? symbolIds = null,
+        CancellationToken cancellationToken = default)
+    {
+        var options = Options("delete_symbol", dryRun, allowErrors, verbose, allowPolicy: allowPolicy);
+
+        return symbolIds is { Length: > 0 }
+            ? DeletedMany(workspace, symbolId ?? symbol, symbolIds, force, options, cancellationToken)
+            : Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => SymbolEditService.DeleteAsync(loaded, resolved, force, options, cancellationToken), cancellationToken);
+    }
 
     [McpServerTool(Name = "rename_symbol")]
     [Description("Rename a symbol across the whole solution, including interface implementations, overrides and XML doc crefs. Use instead of a find-and-replace sweep. A successful rename answers in one line per changed file - plus every XAML or Razor site it could NOT rewrite; pass verbose=true for the diff.")]
@@ -285,6 +291,29 @@ public sealed class EditTools(ToolContext context)
                 typesOnly: typesOnly,
                 unresolved: (loaded, error) => Rejected(error, carry, loaded.Root));
     }
+
+    private Task<string> DeletedMany(
+        string? workspace,
+        string? single,
+        string[] symbolIds,
+        bool force,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var rejection = context.RejectWrite() ?? (single is { Length: > 0 } ? BothIds() : null);
+
+        return rejection is not null
+            ? Task.FromResult(rejection)
+            : context.WithWorkspaceAsync(
+                workspace,
+                null,
+                async loaded => Carried(await SymbolEditService.DeleteManyAsync(loaded, symbolIds, force, options, cancellationToken).ConfigureAwait(false), default, loaded.Root),
+                cancellationToken: cancellationToken);
+    }
+
+    private static string BothIds() => Errors.Invalid(
+        "symbolId= and symbolIds= were both passed",
+        "put every id in symbolIds=, or pass symbolId= alone").Render();
 
     private Task<string> Supplied(
     string? workspace,
@@ -385,7 +414,7 @@ public sealed class EditTools(ToolContext context)
         return null;
     }
 
-    private const string AddHelp = "New members added to the replaced member's type in the SAME compile-gated edit - the answer to the callee-after-caller rollback. They land at the END unless addBefore=/addAfter=/addPosition= places them; targets not sharing one container need addTo=.";
+    private const string AddHelp = "New members added to the replaced member's type in the SAME compile-gated edit - the answer to the callee-after-caller rollback. They land at the END unless addBefore=/addAfter=/addPosition= places them; addTo= sends them to any other type in the workspace, so an interface member lands beside its implementations.";
 
     private static string? RejectedAdd(string[]? add)
     {

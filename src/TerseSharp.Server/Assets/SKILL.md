@@ -120,6 +120,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` |
 | **Edit code** | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` |
 | **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"`; the anchor takes any spelling of the parameter list |
+| **Edit code** | removing several members, e.g. after extracting them into a new file | `delete_symbol(symbolIds: [...])` — ONE compile-gated edit; a reference inside another removed member does not block it |
 | **Edit code** | an interface member and every implementation | `add_member(typeSymbolIds: [...], declarations: [...])` — ONE compile-gated edit |
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
@@ -569,14 +570,18 @@ parameter the tool does not declare; one passed without `add=` is refused.
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **A NESTED TYPE's container is its declaring type**, so `symbolIds=["Outer.Nested", "Outer.Sibling"]
 with `add=` lands the members in `Outer` instead of being refused.
 **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
-type; it must name one of the targets' own containers, and a bare leaf name that matches two of them
-is refused naming both qualified names rather than resolved to the first. **`addTo=` is comma-separated**,
+type, or when the new members belong in a type the batch does not touch: it names **any type in the
+workspace**, resolved as `add_member`'s `typeSymbolId` is, so an interface member lands beside the
+implementations that satisfy it as ONE compile-gated edit - `symbolIds=["Impl.Count", "Stub.Count"]
+add=["int Capacity { get; }"] addTo="IRepository"`. A bare leaf name that matches two of the targets'
+containers is refused naming both qualified names rather than resolved to the first, and a name that
+resolves to no type is refused as `addTo=X names no type add= can land in`. **`addTo=` is comma-separated**,
 paired with `add=`: `add=[a, b] addTo="Alpha,Beta"` puts `a` in `Alpha` and `b` in `Beta`. One name
 takes every entry; any other count is refused.
 
 **`add_member` and `replace_symbol` accept several declarations in one call**, applied as a single
 compile-gated edit — so a set of members that reference each other needs no dependency ordering, and
-`replace_symbol` can split a member into overloads. `add_member` also takes `declarations=[...]`. On a member that is already expression-bodied,
+`replace_symbol` can split a member into overloads. A parameter list sent with only its whitespace changed keeps the file's own layout, so re-typing a signature costs no collateral diff. `add_member` also takes `declarations=[...]`. On a member that is already expression-bodied,
 `replace_symbol_body` accepts a bare expression as well as `=> expr` and a statement block.
 
 **`usings=` lands the import in the same edit, and is the first thing all three descriptions name.**
@@ -584,7 +589,8 @@ compile-gated edit — so a set of members that reference each other needs no de
 `add_member` take `usings: ["System.Collections.Immutable"]`, added to the file's using block —
 sorted System-first, one already present ignored — inside the **same** compile-gated write as the
 declaration. That is the answer to a `CS0246` rollback: pass the namespace instead of paying a
-rejected edit, an `edit_text force=true` on the file header and a `retryWith`.
+rejected edit, an `edit_text force=true` on the file header and a `retryWith`. Across a multi-file
+batch each entry lands only in the files whose new code needs it; one no file needs lands everywhere.
 
 **`replace_symbol` also edits several files as one compile-gated edit.** Pass `symbolIds` and
 `declarations` — one declaration per symbol, paired positionally, at most 20, and more than one entry

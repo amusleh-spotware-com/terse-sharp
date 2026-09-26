@@ -1190,4 +1190,59 @@ public sealed class RegionTail
         Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
         Assert.Contains("the new member is declared in no implementation: InMemoryOrderRepository, NullOrderRepository", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReplaceSymbol_WhoseParameterListDiffersOnlyInLayout_KeepsTheTargetsOwnLayout()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderRouter.Route",
+            ["declaration"] = "public bool Route(\n    Order order) => service.Submit(order) && order is not null;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public bool Route(Order order) => service.Submit(order) && order is not null;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("+        Order order)", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WhoseParameterListChangesMoreThanLayout_LandsTheSentList()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderRouter.Route",
+            ["declaration"] = "public bool Route(Order routed) => service.Submit(routed);",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public bool Route(Order routed) => service.Submit(routed);", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_WithSymbolIds_RemovesEveryMemberAsOneEdit()
+    {
+        var text = await server.CallAsync("delete_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Unused", "OrderService.NeverCalled" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("1 files changed", text, StringComparison.Ordinal);
+        Assert.Contains("-    public int Unused()", text, StringComparison.Ordinal);
+        Assert.Contains("-    private int NeverCalled()", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_WithSymbolIdsOneOfWhichIsStillReferenced_IsRefusedAndNamesIt()
+    {
+        var text = await server.CallAsync("delete_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Unused", "OrderService.Submit" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("'Submit' still has", text, StringComparison.Ordinal);
+    }
 }

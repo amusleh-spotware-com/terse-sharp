@@ -128,6 +128,157 @@ public static class SymbolEditService
             : await RemoveAsync(workspace, Promoted(found), options, cancellationToken).ConfigureAwait(false);
     }
 
+    public static async Task<Result<string>> DeleteManyAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> symbolIds,
+        bool force,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (symbolIds.Count is 0 or > MaxBatchedEdits)
+            return Result.Fail<string>(TooMany(symbolIds.Count));
+
+        var deletions = await DeletionsAsync(workspace, symbolIds, cancellationToken).ConfigureAwait(false);
+
+        if (!deletions.IsOk)
+            return Result.Fail<string>(deletions.Error!);
+
+        if (!force && await OutsideUsageAsync(workspace, deletions.Value!, cancellationToken).ConfigureAwait(false) is { } blocked)
+            return Result.Fail<string>(blocked);
+
+        return await RemovedManyAsync(workspace, deletions.Value!, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private readonly record struct Deletion(ISymbol Symbol, EditTarget Target);
+
+    private static async Task<Result<Deletion[]>> DeletionsAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> symbolIds,
+        CancellationToken cancellationToken)
+    {
+        var deletions = new List<Deletion>(symbolIds.Count);
+
+        foreach (var symbolId in symbolIds)
+        {
+            var deletion = await DeletionAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+
+            if (!deletion.IsOk)
+                return Result.Fail<Deletion[]>(AtEntry(deletion.Error!, deletions.Count));
+
+            deletions.Add(deletion.Value);
+        }
+
+        return Result.Ok(Outermost(deletions));
+    }
+
+    private static async Task<Result<Deletion>> DeletionAsync(
+        LoadedWorkspace workspace,
+        string symbolId,
+        CancellationToken cancellationToken)
+    {
+        var symbol = await SymbolLookup.ResolveAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+
+        if (!symbol.IsOk)
+            return Result.Fail<Deletion>(symbol.Error!);
+
+        var found = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
+
+        if (found is null)
+            return Result.Fail<Deletion>(Errors.SymbolNotFound(symbolId, []));
+
+        return Shared(found) is { } refusal
+            ? Result.Fail<Deletion>(refusal)
+            : Result.Ok(new Deletion(symbol.Value!, Promoted(found)));
+    }
+
+    private static TerseError AtEntry(TerseError error, int index) => error with
+    {
+        Message = string.Create(CultureInfo.InvariantCulture, $"symbolIds[{index}]: {error.Message}"),
+    };
+
+    private static Deletion[] Outermost(List<Deletion> deletions) =>
+    [
+        .. deletions
+        .DistinctBy(deletion => deletion.Target.Node)
+        .Where(deletion => !deletions.Exists(other => other.Target.Node != deletion.Target.Node && other.Target.Node.Contains(deletion.Target.Node))),
+];
+
+    private static async Task<TerseError?> OutsideUsageAsync(
+        LoadedWorkspace workspace,
+        Deletion[] deletions,
+        CancellationToken cancellationToken)
+    {
+        foreach (var deletion in deletions)
+        {
+            var usages = await OutsideCountAsync(workspace, deletion.Symbol, deletions, cancellationToken).ConfigureAwait(false);
+
+            if (usages > 0)
+                return UsageBlocked(deletion.Symbol, usages);
+        }
+
+        return null;
+    }
+
+    private static async Task<int> OutsideCountAsync(
+        LoadedWorkspace workspace,
+        ISymbol symbol,
+        IReadOnlyList<Deletion> deleted,
+        CancellationToken cancellationToken)
+    {
+        var references = await Microsoft.CodeAnalysis.FindSymbols.SymbolFinder
+            .FindReferencesAsync(symbol, workspace.Solution, cancellationToken)
+            .ConfigureAwait(false);
+
+        return references.Sum(reference => reference.Locations.Count(location => !location.IsImplicit && !Inside(location.Location, deleted)));
+    }
+
+    private static bool Inside(Location location, IReadOnlyList<Deletion> deleted)
+    {
+        foreach (var deletion in deleted)
+        {
+            if (deletion.Target.Node.SyntaxTree == location.SourceTree && deletion.Target.Node.FullSpan.Contains(location.SourceSpan))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static async Task<Result<string>> RemovedManyAsync(
+        LoadedWorkspace workspace,
+        Deletion[] deletions,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var solution = workspace.Solution;
+        var groups = deletions.GroupBy(deletion => deletion.Target.Document.Id).ToArray();
+
+        foreach (var group in groups)
+        {
+            var trimmed = await TrimmedAsync(solution, group, cancellationToken).ConfigureAwait(false);
+
+            if (!trimmed.IsOk)
+                return Result.Fail<string>(trimmed.Error!);
+
+            solution = trimmed.Value!;
+        }
+
+        return await EditGate.ApplyAsync(workspace, solution, [.. groups.Select(group => group.Key)], options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<Result<Solution>> TrimmedAsync(
+        Solution solution,
+        IGrouping<DocumentId, Deletion> group,
+        CancellationToken cancellationToken)
+    {
+        var document = group.First().Target.Document;
+        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+        var trimmed = root?.RemoveNodes(group.Select(deletion => deletion.Target.Node), SyntaxRemoveOptions.KeepNoTrivia);
+
+        return trimmed is null
+            ? Result.Fail<Solution>(Errors.DocumentNotFound(document.FilePath ?? document.Name))
+            : Result.Ok(solution.WithDocumentSyntaxRoot(group.Key, trimmed));
+    }
+
     private static Task<Result<string>?> RazorAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
@@ -144,17 +295,11 @@ public static class SymbolEditService
         string.Create(CultureInfo.InvariantCulture, $"'{symbol.Name}' still has {usages} usages"),
         "remove the usages first, or pass force=true");
 
-    private static async Task<int> UsageCountAsync(
+    private static Task<int> UsageCountAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
-        CancellationToken cancellationToken)
-    {
-        var references = await Microsoft.CodeAnalysis.FindSymbols.SymbolFinder
-            .FindReferencesAsync(symbol, workspace.Solution, cancellationToken)
-            .ConfigureAwait(false);
-
-        return references.Sum(reference => reference.Locations.Count(location => !location.IsImplicit));
-    }
+        CancellationToken cancellationToken) =>
+        OutsideCountAsync(workspace, symbol, [], cancellationToken);
 
     private static async Task<EditTarget?> TargetAsync(
         LoadedWorkspace workspace,
@@ -330,10 +475,47 @@ public static class SymbolEditService
     };
 
     private static SyntaxNode[] Rewritten(MemberDeclarationSyntax[] members, SyntaxNode original) =>
-[
-    members[0].WithTriviaFrom(original),
-    .. members.Skip(1).Select(member => (SyntaxNode)Separated(member, NeedsBlankLine(member))),
-];
+    [
+        LayoutKept(members[0], original).WithTriviaFrom(original),
+        .. members.Skip(1).Select(member => (SyntaxNode)Separated(member, NeedsBlankLine(member))),
+    ];
+
+    private static MemberDeclarationSyntax LayoutKept(MemberDeclarationSyntax sent, SyntaxNode original) =>
+        sent.RawKind == original.RawKind && ParameterListOf(sent) is { } fresh && KeptLayout(fresh, ParameterListOf(original)) is { } existing
+            ? sent.ReplaceNode(fresh, existing)
+            : sent;
+
+    private static BaseParameterListSyntax? KeptLayout(BaseParameterListSyntax fresh, BaseParameterListSyntax? existing) =>
+        existing is not null && OnlyLayoutDiffers(fresh, existing) ? existing.WithTrailingTrivia(fresh.GetTrailingTrivia()) : null;
+
+    private static BaseParameterListSyntax? ParameterListOf(SyntaxNode node) => node switch
+    {
+        BaseMethodDeclarationSyntax method => method.ParameterList,
+        TypeDeclarationSyntax type => type.ParameterList,
+        DelegateDeclarationSyntax @delegate => @delegate.ParameterList,
+        IndexerDeclarationSyntax indexer => indexer.ParameterList,
+        _ => null,
+    };
+
+    private static bool OnlyLayoutDiffers(SyntaxNode sent, SyntaxNode existing) =>
+        SyntaxFactory.AreEquivalent(sent, existing, topLevel: false) && SameCommentary(sent, existing);
+
+    private static bool SameCommentary(SyntaxNode sent, SyntaxNode existing)
+    {
+        using var left = Commentary(sent).GetEnumerator();
+        using var right = Commentary(existing).GetEnumerator();
+
+        while (left.MoveNext())
+        {
+            if (!right.MoveNext() || !left.Current.IsEquivalentTo(right.Current))
+                return false;
+        }
+
+        return !right.MoveNext();
+    }
+
+    private static IEnumerable<SyntaxTrivia> Commentary(SyntaxNode node) =>
+        node.DescendantTrivia().Where(trivia => !trivia.IsKind(SyntaxKind.WhitespaceTrivia) && !trivia.IsKind(SyntaxKind.EndOfLineTrivia));
 
     private static SyntaxNode? AsBlock(SyntaxNode node, string text) =>
             SyntaxFactory.ParseStatement(text) is BlockSyntax parsed && !parsed.ContainsDiagnostics
@@ -550,50 +732,143 @@ public static class SymbolEditService
     }
 
     private static async Task<Result<string>> BatchedAsync(
-                LoadedWorkspace workspace,
-                PlannedEdit[] planned,
-                EditOptions options,
-                CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        PlannedEdit[] planned,
+        EditOptions options,
+        CancellationToken cancellationToken)
     {
         if (options.Add.IsDefaultOrEmpty)
             return await SwappedManyAsync(workspace, planned, options, [], cancellationToken).ConfigureAwait(false);
 
-        var appended = AppendPlan(planned, options.Add, options.AddTo, options.Placement);
+        var routed = Routed(options.Add, options.AddTo);
 
-        return appended.IsOk
-            ? await SwappedManyAsync(workspace, planned, options, appended.Value!, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(appended.Error!);
+        return routed.IsOk
+            ? await RoutedAsync(workspace, planned, routed.Value!, options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(routed.Error!);
     }
 
     private static async Task<Result<string>> SwappedManyAsync(
-            LoadedWorkspace workspace,
-            IReadOnlyList<PlannedEdit> planned,
-            EditOptions options,
-            IReadOnlyList<AppendedMembers> appended,
-            CancellationToken cancellationToken)
+        LoadedWorkspace workspace,
+        IReadOnlyList<PlannedEdit> planned,
+        EditOptions options,
+        IReadOnlyList<AppendedMembers> appended,
+        CancellationToken cancellationToken)
     {
-        var solution = workspace.Solution;
-        var changed = new List<DocumentId>(planned.Count);
         var forced = !options.Usings.IsDefaultOrEmpty || appended.Count > 0;
+        var edits = planned.Where(edit => forced || !Identical(edit)).GroupBy(edit => edit.Target.Document.Id).ToArray();
 
-        foreach (var group in planned.Where(edit => forced || !Identical(edit)).GroupBy(edit => edit.Target.Document.Id))
-        {
-            var swapped = await GroupedAsync(solution, group, options.Usings, appended, cancellationToken).ConfigureAwait(false);
-
-            if (!swapped.IsOk)
-                return Result.Fail<string>(swapped.Error!);
-
-            solution = swapped.Value!;
-            changed.Add(group.Key);
-        }
-
-        if (changed.Count is 0)
+        if (edits.Length is 0)
             return Result.Ok(Unchanged(options.Tool));
 
-        var applied = await EditGate.ApplyAsync(workspace, solution, changed, options, cancellationToken).ConfigureAwait(false);
+        var landed = await LandedAsync(workspace.Solution, edits, options.Usings, appended, cancellationToken).ConfigureAwait(false);
+
+        if (!landed.IsOk)
+            return Result.Fail<string>(landed.Error!);
+
+        var applied = await EditGate.ApplyAsync(workspace, landed.Value!, [.. edits.Select(group => group.Key)], options, cancellationToken).ConfigureAwait(false);
 
         return Warned(applied, Dropped(planned) + Renamed(planned));
     }
+
+    private static async Task<Result<Solution>> SplicedAsync(
+        Solution solution,
+        IGrouping<DocumentId, PlannedEdit>[] edits,
+        Func<DocumentId, System.Collections.Immutable.ImmutableArray<string>> usings,
+        IReadOnlyList<AppendedMembers> appended,
+        CancellationToken cancellationToken)
+    {
+        var current = solution;
+
+        foreach (var group in edits)
+        {
+            var swapped = await GroupedAsync(current, group, usings(group.Key), appended, cancellationToken).ConfigureAwait(false);
+
+            if (!swapped.IsOk)
+                return swapped;
+
+            current = swapped.Value!;
+        }
+
+        return Result.Ok(current);
+    }
+
+    private static async Task<Result<Solution>> LandedAsync(
+        Solution solution,
+        IGrouping<DocumentId, PlannedEdit>[] edits,
+        System.Collections.Immutable.ImmutableArray<string> usings,
+        IReadOnlyList<AppendedMembers> appended,
+        CancellationToken cancellationToken)
+    {
+        var full = await SplicedAsync(solution, edits, _ => usings, appended, cancellationToken).ConfigureAwait(false);
+
+        if (!full.IsOk || usings.IsDefaultOrEmpty || edits.Length < 2)
+            return full;
+
+        var needed = await NeededUsingsAsync(full.Value!, edits, usings, appended, cancellationToken).ConfigureAwait(false);
+
+        return needed.Values.All(kept => kept.Count == usings.Length)
+            ? full
+            : await SplicedAsync(solution, edits, document => Landed(usings, needed, document), appended, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<Dictionary<DocumentId, List<string>>> NeededUsingsAsync(
+        Solution spliced,
+        IGrouping<DocumentId, PlannedEdit>[] edits,
+        System.Collections.Immutable.ImmutableArray<string> usings,
+        IReadOnlyList<AppendedMembers> appended,
+        CancellationToken cancellationToken)
+    {
+        var needed = new Dictionary<DocumentId, List<string>>(edits.Length);
+
+        foreach (var group in edits)
+            needed[group.Key] = await NeededInAsync(spliced, group, usings, appended, cancellationToken).ConfigureAwait(false);
+
+        return needed;
+    }
+
+    private static async Task<List<string>> NeededInAsync(
+        Solution spliced,
+        IGrouping<DocumentId, PlannedEdit> group,
+        System.Collections.Immutable.ImmutableArray<string> usings,
+        IReadOnlyList<AppendedMembers> appended,
+        CancellationToken cancellationToken)
+    {
+        var baseline = await ErrorCountAsync(spliced.GetDocument(group.Key), cancellationToken).ConfigureAwait(false);
+        var kept = new List<string>(usings.Length);
+
+        foreach (var entry in usings)
+        {
+            if (baseline is null || await ErrorsWithoutAsync(spliced, group, usings.Remove(entry), appended, cancellationToken).ConfigureAwait(false) is not { } without || without > baseline)
+                kept.Add(entry);
+        }
+
+        return kept;
+    }
+
+    private static async Task<int?> ErrorsWithoutAsync(
+        Solution spliced,
+        IGrouping<DocumentId, PlannedEdit> group,
+        System.Collections.Immutable.ImmutableArray<string> remaining,
+        IReadOnlyList<AppendedMembers> appended,
+        CancellationToken cancellationToken)
+    {
+        var trial = await GroupedAsync(spliced, group, remaining, appended, cancellationToken).ConfigureAwait(false);
+
+        return trial.IsOk ? await ErrorCountAsync(trial.Value!.GetDocument(group.Key), cancellationToken).ConfigureAwait(false) : null;
+    }
+
+    private static async Task<int?> ErrorCountAsync(Document? document, CancellationToken cancellationToken)
+    {
+        var model = document is null ? null : await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+
+        return model?.GetDiagnostics(cancellationToken: cancellationToken).Count(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error);
+    }
+
+    private static System.Collections.Immutable.ImmutableArray<string> Landed(
+        System.Collections.Immutable.ImmutableArray<string> usings,
+        Dictionary<DocumentId, List<string>> needed,
+        DocumentId document) =>
+        [.. usings.Where(entry => needed[document].Contains(entry) || !needed.Values.Any(kept => kept.Contains(entry)))];
 
     private static Task<Result<Solution>> GroupedAsync(
             Solution solution,
@@ -634,13 +909,11 @@ public static class SymbolEditService
                 IReadOnlyList<MemberDeclarationSyntax> Members,
                 MemberPlacement? Placement = null);
 
-    private static TerseError AddNotShared(BaseTypeDeclarationSyntax?[] types, string? addTo) => Errors.Invalid(
-            addTo is { Length: > 0 } || types is not [_]
-                ? Unshared(types, addTo)
-                : "add= appends to the type that contains the replaced member, and this target's container is " + Named(types[0]) + ", which cannot take member declarations",
-            addTo is { Length: > 0 }
-                ? "pass addTo= naming one of the containing types listed above, or add the members with add_member first and replace the members afterwards"
-                : "pass addTo= to name which of them takes the new members, send one call per containing type, or add the members with add_member first and replace the members afterwards");
+    private static TerseError AddNotShared(BaseTypeDeclarationSyntax?[] types) => Errors.Invalid(
+        types is not [_]
+            ? Unshared(types)
+            : "add= appends to the type that contains the replaced member, and this target's container is " + Named(types[0]) + ", which cannot take member declarations",
+        "pass addTo= to name which of them takes the new members, send one call per containing type, or add the members with add_member first and replace the members afterwards");
 
     private static string Named(BaseTypeDeclarationSyntax? type) => type switch
     {
@@ -664,18 +937,57 @@ public static class SymbolEditService
         return false;
     }
 
-    private static Result<AppendedMembers[]> AppendPlan(
-            IReadOnlyList<PlannedEdit> planned,
-            System.Collections.Immutable.ImmutableArray<string> add,
-            string? addTo,
-            MemberPlacement? placement)
+    private static async Task<Result<string>> RoutedAsync(
+        LoadedWorkspace workspace,
+        PlannedEdit[] planned,
+        AddRoute[] routes,
+        EditOptions options,
+        CancellationToken cancellationToken)
     {
-        var routed = Routed(add, addTo);
+        var types = planned.Select(edit => Container(edit.Target.Node)).ToArray();
+        var foreign = await ForeignAsync(workspace, [.. routes.Where(route => Foreign(planned, types, route))], options, cancellationToken).ConfigureAwait(false);
 
-        return routed.IsOk
-            ? RoutedPlans(planned, routed.Value!, placement)
-            : Result.Fail<AppendedMembers[]>(routed.Error!);
+        if (!foreign.IsOk)
+            return Result.Fail<string>(foreign.Error!);
+
+        var appended = RoutedPlans(planned, [.. routes.Where(route => !Foreign(planned, types, route))], options.Placement);
+
+        return appended.IsOk
+            ? await SwappedManyAsync(workspace, [.. planned, .. foreign.Value!], options, appended.Value!, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(appended.Error!);
     }
+
+    private static bool Foreign(IReadOnlyList<PlannedEdit> planned, BaseTypeDeclarationSyntax?[] types, AddRoute route) =>
+        route.Container is { Length: > 0 } container
+        && AmbiguousContainer(types, container) is null
+        && Chosen(planned, types, container) < 0;
+
+    private static async Task<Result<PlannedEdit[]>> ForeignAsync(
+        LoadedWorkspace workspace,
+        AddRoute[] routes,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var added = new PlannedEdit[routes.Length];
+
+        for (var index = 0; index < added.Length; index++)
+        {
+            var route = routes[index];
+            var one = await AdditionAsync(workspace, route.Container!, string.Join("\n\n", route.Members), options, cancellationToken).ConfigureAwait(false);
+
+            if (!one.IsOk)
+                return Result.Fail<PlannedEdit[]>(ForeignRefused(route.Container!, one.Error!));
+
+            added[index] = one.Value;
+        }
+
+        return Result.Ok(added);
+    }
+
+    private static TerseError ForeignRefused(string container, TerseError error) => error with
+    {
+        Message = "addTo=" + container + " names no type add= can land in: " + error.Message,
+    };
 
     private static Result<SyntaxNode> Grown(SyntaxNode current, AppendedMembers appended)
     {
@@ -769,10 +1081,8 @@ public static class SymbolEditService
             : null;
     }
 
-    private static string Unshared(BaseTypeDeclarationSyntax?[] types, string? addTo) =>
-        addTo is { Length: > 0 } wanted
-            ? "addTo=" + wanted + " names none of the containing types of these targets: " + string.Join(", ", types.Select(Named))
-            : "add= appends to the type that contains the replaced member, and these targets do not share one: " + string.Join(", ", types.Select(Named));
+    private static string Unshared(BaseTypeDeclarationSyntax?[] types) =>
+        "add= appends to the type that contains the replaced member, and these targets do not share one: " + string.Join(", ", types.Select(Named));
 
     private static TerseError Attributed(TerseError error, int index, string ids = "symbolIds") => error with
     {
@@ -934,9 +1244,9 @@ public static class SymbolEditService
     private readonly record struct AddTarget(DocumentId Document, TypeDeclarationSyntax Container);
 
     private static Result<AddTarget> Targeted(
-            IReadOnlyList<PlannedEdit> planned,
-            BaseTypeDeclarationSyntax?[] types,
-            AddRoute route)
+        IReadOnlyList<PlannedEdit> planned,
+        BaseTypeDeclarationSyntax?[] types,
+        AddRoute route)
     {
         if (AmbiguousContainer(types, route.Container) is { } ambiguous)
             return Result.Fail<AddTarget>(ambiguous);
@@ -944,7 +1254,7 @@ public static class SymbolEditService
         var chosen = Chosen(planned, types, route.Container);
 
         if (chosen < 0 || types[chosen] is not TypeDeclarationSyntax container)
-            return Result.Fail<AddTarget>(AddNotShared(types, route.Container));
+            return Result.Fail<AddTarget>(AddNotShared(types));
 
         var document = planned[chosen].Target.Document.Id;
 
