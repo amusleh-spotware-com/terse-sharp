@@ -2224,13 +2224,11 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     public async Task AnEditIntroducingAnInfoDiagnostic_CountsItInsteadOfAnsweringAsIfTheTierDidNotExist()
     {
         const string Probe = "src/Fixture.Trading/TerseInfoProbe.cs";
+        const string Unused = "namespace Fixture.Trading;\n\npublic sealed class TerseInfoProbe\n{\n    public int Probe()\n    {\n        var unused = 1;\n\n        return 2;\n    }\n}\n";
 
-        var written = await PastTheBuildHostAsync(new()
-        {
-            ["path"] = Probe,
-            ["force"] = true,
-            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseInfoProbe\n{\n    public int Probe()\n    {\n        var unused = 1;\n\n        return 2;\n    }\n}\n",
-        });
+        Dictionary<string, object?> delete = new() { ["path"] = Probe, ["delete"] = true, ["force"] = true };
+
+        var written = await RetriedPastTheBuildHostAsync(new() { ["path"] = Probe, ["force"] = true, ["content"] = Unused }, delete);
 
         try
         {
@@ -2239,19 +2237,21 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             Assert.Contains("analyze changed=true severity=info", written, StringComparison.Ordinal);
             Assert.DoesNotContain("CS0219", written, StringComparison.Ordinal);
 
-            var verbose = await PastTheBuildHostAsync(new()
-            {
-                ["path"] = Probe,
-                ["force"] = true,
-                ["verbose"] = true,
-                ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseInfoProbe\n{\n    public int Probe()\n    {\n        var spare = 1;\n\n        return 2;\n    }\n}\n",
-            });
+            var verbose = await RetriedPastTheBuildHostAsync(
+                new()
+                {
+                    ["path"] = Probe,
+                    ["force"] = true,
+                    ["verbose"] = true,
+                    ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseInfoProbe\n{\n    public int Probe()\n    {\n        var spare = 1;\n\n        return 2;\n    }\n}\n",
+                },
+                new() { ["path"] = Probe, ["force"] = true, ["content"] = Unused });
 
             Assert.Contains("CS0219", verbose, StringComparison.Ordinal);
         }
         finally
         {
-            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", delete);
         }
     }
 
@@ -2314,13 +2314,16 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("documents=", allowed, StringComparison.Ordinal);
     }
 
-    private async Task<string> PastTheBuildHostAsync(Dictionary<string, object?> arguments)
+    private async Task<string> RetriedPastTheBuildHostAsync(Dictionary<string, object?> arguments, Dictionary<string, object?> restore)
     {
         var text = await server.CallAsync("write_text", arguments);
 
-        return text.StartsWith("ERROR Transient", StringComparison.Ordinal)
-            ? await server.CallAsync("write_text", arguments)
-            : text;
+        if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
+            return text;
+
+        await server.CallAsync("write_text", restore);
+
+        return await server.CallAsync("write_text", arguments);
     }
 
     [Fact]
