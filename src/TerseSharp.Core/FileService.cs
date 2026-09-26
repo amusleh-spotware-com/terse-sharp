@@ -878,6 +878,7 @@ public static class FileService
             bool allowErrors,
             bool verbose,
             bool allowPolicy,
+            bool overwrite,
             CancellationToken cancellationToken)
     {
         if (Unforced(files, force) is { } unforced)
@@ -891,6 +892,9 @@ public static class FileService
 
             if (!prepared.IsOk)
                 return Result.Fail<string>(prepared.Error!);
+
+            if (!overwrite && ReplacedContent.Measure(prepared.Value.Before, prepared.Value.After) is { Unrelated: true } overlap)
+                return Result.Fail<string>(ReplacedContent.Refusal(file.Path, overlap));
 
             pending.Add(prepared.Value);
         }
@@ -1193,6 +1197,7 @@ public static class FileService
             allowErrors: false,
             request.Verbose,
             allowPolicy: false,
+            overwrite: true,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -1501,6 +1506,7 @@ public static class FileService
                 allowErrors: false,
                 request.Verbose,
                 allowPolicy: false,
+                overwrite: true,
                 cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(moved.Error!);
     }

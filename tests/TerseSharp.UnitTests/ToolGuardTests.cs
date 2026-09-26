@@ -1858,7 +1858,6 @@ public sealed class ToolGuardTests
     public void Inspect_ForAPipeFedPatternThatNamesDotNetSource_AllowsItBecauseItReadsStdin(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
 
-
     [Theory]
     [InlineData("grep -E \"error CS|Failed ToolGuardTests.cs\"")]
     [InlineData("gh run list | grep -rn \"OrderService.cs\"")]
@@ -1867,6 +1866,9 @@ public sealed class ToolGuardTests
     [InlineData("gh run list | grep \"$(cat Program.cs)\"")]
     [InlineData("gh run list | grep \"x\" > Program.cs")]
     [InlineData("gh run list | grep \"x\" < Program.cs")]
+    [InlineData("gh run list | sed 'r src/Foo.cs'")]
+    [InlineData("gh run list | awk 'BEGIN{system(\"cat Foo.cs\")}'")]
+    [InlineData("gh run list | grep -d recurse --regexp=Foo.cs")]
     public void Inspect_ForATextToolThatReachesDotNetSourceBesideAPipe_StillDeniesIt(string command) =>
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
 

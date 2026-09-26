@@ -789,7 +789,7 @@ context.RejectWrite() is { } rejection
             async loaded => Raced(loaded, targets, options.IfUnchangedSince) is { } raced
                 ? await raced.ConfigureAwait(false)
                 : NavigationTools.Unwrap(await FileService.WriteTextManyAsync(
-                    loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false)),
+                    loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false)),
             files.Any(file => SourceFile.IsCSharp(file.Path)),
             cancellationToken);
     }

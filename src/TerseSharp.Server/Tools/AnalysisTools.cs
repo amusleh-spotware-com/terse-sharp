@@ -359,10 +359,8 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
 
     private static string Defaulted(string? baseRef) => baseRef is null ? "defaulted" : "explicit";
 
-
     private static string Narrowing(string? baseRef, TouchedLines? touched) =>
         baseRef ?? (touched is null ? string.Empty : DefaultBaseRef);
-
 
     private static string? FirstScope(string?[]? paths) => paths is [{ Length: > 0 } first, ..] ? first : null;
 

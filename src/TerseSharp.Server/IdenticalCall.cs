@@ -21,7 +21,8 @@ public static class IdenticalCall
     private static bool IsStatusRead(CallToolRequestParams parameters) =>
         parameters.Arguments is { } arguments
         && arguments.TryGetValue("status", out var status)
-        && status.ValueKind is JsonValueKind.String;
+        && status.ValueKind is JsonValueKind.String
+    && status.GetString() is { Length: > 0 };
 
     internal static string? Record(string tool, string key, string verdict, long timestamp, int pulse)
     {

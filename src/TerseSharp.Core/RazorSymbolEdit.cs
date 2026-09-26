@@ -47,6 +47,9 @@ public static class RazorSymbolEdit
             : Result.Fail<string>(updated.Error!);
     }
 
+    public static async Task<bool> DeclaredInRazorAsync(ISymbol symbol, CancellationToken cancellationToken) =>
+        await DeclarationAsync(symbol, cancellationToken).ConfigureAwait(false) is { } syntax && Mapped(syntax) is not null;
+
     public static async Task<Result<string>?> TryAddAsync(
         LoadedWorkspace workspace,
         ISymbol containingType,

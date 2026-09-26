@@ -187,7 +187,6 @@ public static class RefactorService
             })
             .OfType<SyntaxNode>()];
 
-
     private static SyntaxNode Unqualified(SyntaxNode qualified) => qualified switch
     {
         QualifiedNameSyntax { Left: QualifiedNameSyntax container } name => name.WithLeft(container.Left),
@@ -214,10 +213,8 @@ public static class RefactorService
             ? found
             : SyntaxFactory.ElasticCarriageReturnLineFeed;
 
-
     private static bool IsNestedOnly(SyntaxKind modifier) =>
         modifier is SyntaxKind.PrivateKeyword or SyntaxKind.ProtectedKeyword or SyntaxKind.InternalKeyword or SyntaxKind.PublicKeyword or SyntaxKind.NewKeyword;
-
 
     private static SyntaxKind NamespaceAccessibility(INamedTypeSymbol nested) =>
         (nested.DeclaredAccessibility, nested.ContainingType.DeclaredAccessibility) is (Accessibility.Public, Accessibility.Public)

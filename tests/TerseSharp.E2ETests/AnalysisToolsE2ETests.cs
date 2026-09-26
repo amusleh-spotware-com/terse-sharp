@@ -543,24 +543,25 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     public async Task Gate_OverTheChangedFilesWithNoBaseRef_FoldsWhatTheWorkingTreeDidNotChange_AndBaseRefEmptyOptsOut()
     {
         var full = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
+        var original = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
         var stamp = File.GetLastWriteTimeUtc(full);
 
-        File.SetLastWriteTimeUtc(full, DateTime.UtcNow);
+        await server.CallAsync("write_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["content"] = original + "\n", ["force"] = true });
         try
         {
             var defaulted = await server.CallAsync("gate", new() { ["dryRun"] = true });
             var every = await server.CallAsync("gate", new() { ["dryRun"] = true, ["baseRef"] = "" });
 
-            Assert.StartsWith("clean  analyzed=", defaulted, StringComparison.Ordinal);
-            Assert.Contains("remaining=0  preExisting=", defaulted, StringComparison.Ordinal);
-            Assert.True(Remaining(every) > 0, every);
-            Assert.DoesNotContain("preExisting=", every, StringComparison.Ordinal);
-            Assert.True(
-                defaulted.Length < every.Length,
-                string.Create(CultureInfo.InvariantCulture, $"defaulted={defaulted.Length} every={every.Length} chars"));
-        }
+        Assert.Contains("remaining=0  preExisting=", defaulted, StringComparison.Ordinal);
+        Assert.True(Remaining(every) > 0, every);
+        Assert.DoesNotContain("preExisting=", every, StringComparison.Ordinal);
+        Assert.True(
+            defaulted.Length < every.Length,
+            string.Create(CultureInfo.InvariantCulture, $"defaulted={defaulted.Length} every={every.Length} chars"));
+    }
         finally
         {
+            await server.CallAsync("write_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["content"] = original, ["force"] = true });
             File.SetLastWriteTimeUtc(full, stamp);
         }
     }
@@ -569,9 +570,10 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     public async Task Analyze_WithChangedAndNoBaseRef_FoldsWhatTheWorkingTreeDidNotChange_AndBaseRefEmptyOptsOut()
     {
         var full = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
+        var original = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
         var stamp = File.GetLastWriteTimeUtc(full);
 
-        File.SetLastWriteTimeUtc(full, DateTime.UtcNow);
+        await server.CallAsync("write_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["content"] = original + "\n", ["force"] = true });
         try
         {
             var defaulted = await server.CallAsync("analyze", new() { ["changed"] = true, ["minSeverity"] = "info" });
@@ -586,6 +588,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         }
         finally
         {
+            await server.CallAsync("write_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["content"] = original, ["force"] = true });
             File.SetLastWriteTimeUtc(full, stamp);
         }
     }

@@ -113,7 +113,7 @@ internal static class ToolCall
     {
         ParameterAliases.Apply(method.GetCustomAttribute<McpServerToolAttribute>()?.Name, arguments);
 
-    if (Unrecognized(method, arguments) is { } unknown)
+        if (Unrecognized(method, arguments) is { } unknown)
             return Result.Fail<object?[]>(unknown);
 
         var parameters = method.GetParameters();

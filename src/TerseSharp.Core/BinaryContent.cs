@@ -19,8 +19,8 @@ public static class BinaryContent
                 fullPath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.ReadWrite,
-                ProbeBytes,
+            FileShare.ReadWrite | FileShare.Delete,
+            ProbeBytes,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
             var read = await stream.ReadAtLeastAsync(buffer.AsMemory(0, ProbeBytes), ProbeBytes, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
 

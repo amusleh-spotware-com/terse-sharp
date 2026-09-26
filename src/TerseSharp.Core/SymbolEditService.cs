@@ -181,6 +181,9 @@ public static class SymbolEditService
         if (!symbol.IsOk)
             return Result.Fail<Deletion>(symbol.Error!);
 
+        if (await RazorSymbolEdit.DeclaredInRazorAsync(symbol.Value!, cancellationToken).ConfigureAwait(false))
+            return Result.Fail<Deletion>(Errors.Invalid("'" + symbol.Value!.Name + "' is declared in a .razor file, which a symbolIds= batch does not edit", "delete it with delete_symbol symbolId= on its own"));
+
         var found = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
 
         if (found is null)

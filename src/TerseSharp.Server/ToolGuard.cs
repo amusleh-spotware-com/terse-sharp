@@ -1747,7 +1747,7 @@ public static class ToolGuard
         var name = command.Length > 0 ? Path.GetFileNameWithoutExtension(command[0]) : string.Empty;
         var patterns = PatternCommands.Contains(name, StringComparer.OrdinalIgnoreCase) ? 1 : 0;
 
-        if (name.Length is 0 || ListCommands.Contains(name, StringComparer.OrdinalIgnoreCase))
+        if (name.Length is 0 || Programmable(name) || ListCommands.Contains(name, StringComparer.OrdinalIgnoreCase))
             return false;
 
         for (var index = 1; index < command.Length; index++)
@@ -1767,8 +1767,11 @@ public static class ToolGuard
     }
 
     private static bool NamesAFile(string token) => token.StartsWith("--", StringComparison.Ordinal)
-        ? token.Contains("recurs", StringComparison.Ordinal) || token.StartsWith("--file", StringComparison.Ordinal)
-        : token.StartsWith('-') && token.AsSpan(1).IndexOfAny('r', 'R', 'f') >= 0;
+        ? token.Contains("recurs", StringComparison.Ordinal) || token.StartsWith("--file", StringComparison.Ordinal) || token.StartsWith("--dir", StringComparison.Ordinal)
+        : token.StartsWith('-') && token.AsSpan(1).IndexOfAny("rRfd") >= 0;
+
+    private static bool Programmable(string name) =>
+        name.Equals("sed", StringComparison.OrdinalIgnoreCase) || name.Equals("awk", StringComparison.OrdinalIgnoreCase);
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

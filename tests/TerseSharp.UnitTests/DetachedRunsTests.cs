@@ -9,7 +9,7 @@ public sealed class DetachedRunsTests
     [Fact]
     public async Task Status_WhilePending_AnswersRunning_AndOnceFinished_AnswersTheVerdict()
     {
-        using var runs = new DetachedRuns();
+        await using var runs = new DetachedRuns();
         var verdict = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var answer = runs.Start(_ => verdict.Task);
         var id = answer[Started.Length..answer.IndexOf('\n', StringComparison.Ordinal)];
@@ -25,7 +25,7 @@ public sealed class DetachedRunsTests
     [Fact]
     public async Task Status_ForARunThatThrew_AnswersTheRenderedErrorRatherThanRunningForever()
     {
-        using var runs = new DetachedRuns();
+        await using var runs = new DetachedRuns();
         var answer = runs.Start(_ => Task.FromException<string>(new InvalidOperationException("boom")));
         var settled = await SettledAsync(runs, answer[Started.Length..answer.IndexOf('\n', StringComparison.Ordinal)]);
 
@@ -36,7 +36,7 @@ public sealed class DetachedRunsTests
     [Fact]
     public async Task Status_ForAnIdNeverIssued_IsRefusedNamingItWithARemedy()
     {
-        using var runs = new DetachedRuns();
+        await using var runs = new DetachedRuns();
         var text = await runs.StatusAsync("t42");
 
         Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);

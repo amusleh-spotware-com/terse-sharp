@@ -757,9 +757,9 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("write_text", new()
         {
             ["path"] = "src/Fixture.Trading/Fixture.Trading.csproj",
-        ["content"] = "&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;&lt;/Project&gt;\n",
-        ["overwrite"] = true,
-        ["dryRun"] = true,
+            ["content"] = "&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;&lt;/Project&gt;\n",
+            ["overwrite"] = true,
+            ["dryRun"] = true,
         });
 
         Assert.Contains("WARNING", text, StringComparison.Ordinal);
@@ -2244,5 +2244,27 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("overwrite=true", refused, StringComparison.Ordinal);
         Assert.DoesNotContain("already exists and this write keeps", previewed, StringComparison.Ordinal);
         Assert.Contains("SomethingElse", previewed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_AFilesBatchOverAnUnrelatedExistingFile_IsRefusedUnlessOverwriteIsPassed()
+    {
+        const string Probe = "terse-overwrite-batch-probe.md";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Plan\n\nalpha step\nbeta step\ngamma step\ndelta step\n" });
+        try
+        {
+            var entry = new Dictionary<string, object> { ["path"] = Probe, ["content"] = "# Plan\n\nsomething else entirely\n" };
+            var refused = await server.CallAsync("write_text", new() { ["files"] = new object[] { entry } });
+            var replaced = await server.CallAsync("write_text", new() { ["files"] = new object[] { entry }, ["overwrite"] = true });
+
+            Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+            Assert.Contains("overwrite=true", refused, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", replaced, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
     }
 }

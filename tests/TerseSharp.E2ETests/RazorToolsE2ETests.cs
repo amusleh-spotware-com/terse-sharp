@@ -453,4 +453,18 @@ public sealed class RazorToolsE2ETests : IAsyncLifetime
                 string.Create(CultureInfo.InvariantCulture, $"{probe.Tool}={ToolCensus.Tokens(text)}/{ToolCensus.Budget(probe.Tool)}\n{text}"));
         }
     }
+
+    [Fact]
+    public async Task DeleteSymbol_WithSymbolIdsNamingARazorMember_IsRefusedWithTheSingleDeleteRemedy()
+    {
+        var text = await RazorAsync("delete_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Blazor.Components.Card.Reset" },
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("is declared in a .razor file", text, StringComparison.Ordinal);
+        Assert.Contains("delete_symbol symbolId=", text, StringComparison.Ordinal);
+    }
 }

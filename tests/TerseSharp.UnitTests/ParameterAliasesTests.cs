@@ -95,7 +95,7 @@ public sealed class ParameterAliasesTests
     {
         var tools = typeof(ParameterAliases).Assembly.GetTypes()
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
-            .Select(method => (Method: method, Name: method.GetCustomAttribute<McpServerToolAttribute>()?.Name))
+            .Select(method => (Method: method, method.GetCustomAttribute<McpServerToolAttribute>()?.Name))
             .Where(pair => pair.Name is not null)
             .ToDictionary(pair => pair.Name!, pair => pair.Method.GetParameters().Select(parameter => parameter.Name!).ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
 
