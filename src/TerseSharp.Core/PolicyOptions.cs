@@ -67,4 +67,6 @@ public sealed record PolicyOptions(
 
     private static PolicyLimit Defaulted(PolicyRule rule) =>
         new(PolicyRules.Of(rule).Action, PolicyRules.Of(rule).Default);
+
+    public IEnumerable<string> EnforcedIds() => PolicyRules.All.Where(info => Enforces(info.Rule)).Select(info => info.Id);
 }

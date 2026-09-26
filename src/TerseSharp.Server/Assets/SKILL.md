@@ -454,7 +454,7 @@ carrying every position**, because the positions are the fix list and the messag
 position names the declaration containing it** - `OrderService.cs:15:16 OrderService.Unused` - so the
 fix list is ids for `get_symbol_source`, not coordinates. A finding with no source tree keeps the bare
 position; `build` carries no tag, having released the workspace before it shells out. **An id you
-pass to `ids=` that no referenced analyzer declares comes back as `NOT_ENABLED <id>`**, so a sweep
+pass to `ids=` that no referenced analyzer declares and no enforced `.terse.json` rule emits comes back as `NOT_ENABLED <id>`**, so a sweep
 answering `0 diagnostics` can no longer mean "the rule never ran". `ids=` also reads a JSON-array spelling - `ids=["CS8019", "TERSE001"]` is the same filter as `ids=CS8019,TERSE001`.
 
 `analyze`'s `changed=true` set is carried across the unload-and-reload `build`/`run_tests` perform on
@@ -936,7 +936,7 @@ by its measured value, so neither improving nor worsening an already-violating m
 
 Fourteen rules, `TERSE100`-`TERSE113`: cognitive complexity, method statements, methods per type,
 constructor dependencies, parameter count, method-name length, meaningless type suffixes, naming per
-declaration kind, `async void`, condition operands, chained references (off by default), nesting depth,
+declaration kind (a `[Fact]`/`[Theory]`/`[Test]`-style method uses the `testMethod` key, which accepts `Method_Scenario_Outcome`), `async void`, condition operands, chained references (off by default), nesting depth,
 and **comments (`TERSE112`) and XML doc comments (`TERSE113`), the two rules that are ON at `warn` with
 no `.terse.json` at all**. `TERSE112` never flags a `///` block and `TERSE113` never flags a `//` one.
 Each is `reject`, `warn` or `off` and every one DEFAULTS to `warn`, so a rule only refuses an edit

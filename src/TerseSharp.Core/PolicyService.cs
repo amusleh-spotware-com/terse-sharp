@@ -201,7 +201,7 @@ public static class PolicyService
 
     private static Measure? MemberName(MemberDeclarationSyntax member, Scope scope) => member switch
     {
-        MethodDeclarationSyntax method => Named(method.Identifier, NamingKind.Method, scope),
+        MethodDeclarationSyntax method => Named(method.Identifier, IsTest(method) ? NamingKind.TestMethod : NamingKind.Method, scope),
         PropertyDeclarationSyntax property => Named(property.Identifier, NamingKind.Property, scope),
         EventDeclarationSyntax declared => Named(declared.Identifier, NamingKind.Event, scope),
         EnumMemberDeclarationSyntax enumerated => Named(enumerated.Identifier, NamingKind.EnumMember, scope),
@@ -215,6 +215,7 @@ public static class PolicyService
     {
         VariableDeclarationSyntax { Parent: EventFieldDeclarationSyntax } => NamingKind.Event,
         VariableDeclarationSyntax { Parent: BaseFieldDeclarationSyntax field } => FieldKind(field),
+        VariableDeclarationSyntax { Parent: LocalDeclarationStatementSyntax { IsConst: true } } => NamingKind.Constant,
         _ => NamingKind.Local,
     };
 
@@ -366,4 +367,31 @@ public static class PolicyService
     };
 
     private static string Unit(PolicyRule rule) => rule is PolicyRule.XmlDocs ? "XML doc line(s)" : "comment line(s)";
+
+    private static string Rightmost(NameSyntax name) => name switch
+    {
+        QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+        AliasQualifiedNameSyntax aliased => aliased.Name.Identifier.ValueText,
+        SimpleNameSyntax simple => simple.Identifier.ValueText,
+        _ => string.Empty,
+    };
+
+
+    private static bool IsTestAttribute(string name) =>
+        name is "Fact" or "Theory" or "Test" or "TestMethod" or "TestCase" or "DataTestMethod"
+            or "FactAttribute" or "TheoryAttribute" or "TestAttribute" or "TestMethodAttribute" or "TestCaseAttribute" or "DataTestMethodAttribute";
+
+    private static bool IsTest(MethodDeclarationSyntax method)
+    {
+        foreach (var list in method.AttributeLists)
+        {
+            foreach (var attribute in list.Attributes)
+            {
+                if (IsTestAttribute(Rightmost(attribute.Name)))
+                    return true;
+            }
+        }
+
+        return false;
+    }
 }

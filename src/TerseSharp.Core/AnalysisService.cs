@@ -98,8 +98,9 @@ public static class AnalysisService
             : [];
 
         var policy = await PolicyAsync(workspace, targets, documents, cancellationToken).ConfigureAwait(false);
+        var options = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(new Collected(found, analyzed, [.. extra, .. policy], ProjectDiagnostics.Unsupported(targets, ids, found), scope));
+        return Result.Ok(new Collected(found, analyzed, [.. extra, .. policy], ProjectDiagnostics.Unsupported(targets, ids, found, options.EnforcedIds()), scope));
     }
 
     private readonly record struct Collected(

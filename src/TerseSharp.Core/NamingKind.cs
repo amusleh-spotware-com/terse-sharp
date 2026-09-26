@@ -16,7 +16,8 @@ public enum NamingKind
     Constant,
     Parameter,
     Local,
-    EnumMember
+    EnumMember,
+    TestMethod
 }
 
 public sealed record NamingPattern(NamingKind Kind, string Expression, Regex Matcher)
@@ -53,6 +54,7 @@ public static class NamingDefaults
         [NamingKind.Parameter] = Camel,
         [NamingKind.Local] = Camel,
         [NamingKind.EnumMember] = Pascal,
+        [NamingKind.TestMethod] = "^[A-Z][A-Za-z0-9]*(_[A-Za-z0-9]+)*$",
     }.ToFrozenDictionary();
 
     public static FrozenDictionary<NamingKind, NamingPattern> Patterns { get; } = Expressions

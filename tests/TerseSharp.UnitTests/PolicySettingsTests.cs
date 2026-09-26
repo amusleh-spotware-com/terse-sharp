@@ -194,4 +194,27 @@ public sealed class PolicySettingsTests
     [Fact]
     public void All_CarriesNoRuleThatRejectsByDefault() =>
         Assert.DoesNotContain(PolicyRules.All, info => info.Action is PolicyAction.Reject);
+
+    [Fact]
+    public void Parse_WithATestMethodNamingPattern_ReplacesOnlyTestMethods()
+    {
+        var options = PolicySettings.Parse("""{"policy":{"naming":{"testMethod":"^Test[A-Za-z0-9_]*$"}}}""");
+
+        Assert.Equal("^Test[A-Za-z0-9_]*$", options.Naming[NamingKind.TestMethod].Expression);
+        Assert.Equal(NamingDefaults.Expressions[NamingKind.Method], options.Naming[NamingKind.Method].Expression);
+    }
+
+    [Fact]
+    public void EnforcedIds_ForARuleSetToOff_LeavesOnlyThatIdOut()
+    {
+        var options = PolicySettings.Parse("""{"policy":{"rules":{"naming":false}}}""");
+
+        Assert.DoesNotContain("TERSE107", options.EnforcedIds());
+        Assert.Contains("TERSE100", options.EnforcedIds());
+        Assert.Empty(PolicyOptions.Off.EnforcedIds());
+    }
+
+    [Fact]
+    public void Unsupported_ForAnIdTheActivePolicyEnforces_DoesNotCallItNotEnabled() =>
+        Assert.Equal("TERSE199", Assert.Single(ProjectDiagnostics.Unsupported([], ["TERSE107", "TERSE199"], [], ["TERSE107"])));
 }

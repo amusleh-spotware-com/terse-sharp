@@ -460,4 +460,47 @@ public sealed class PolicyServiceTests
         Assert.NotNull(options.Failure);
         Assert.False(options.Effective.Active);
     }
+
+    [Fact]
+    public void Inspect_ForATestMethodNamedMethodScenarioOutcome_IsNotANamingViolation() =>
+        Assert.Empty(Findings(PolicyRule.Naming, "class Sample { [Fact] public void Parse_WithAnEmptyFile_ReturnsNothing() { } }"));
+
+    [Fact]
+    public void Inspect_ForAMethodWithUnderscoresAndNoTestAttribute_IsStillANamingViolation()
+    {
+        var finding = Assert.Single(Findings(PolicyRule.Naming, "class Sample { [Obsolete] public void Parse_WithAnEmptyFile() { } }"));
+
+        Assert.Contains("method name 'Parse_WithAnEmptyFile'", finding.Measured, StringComparison.Ordinal);
+        Assert.Contains(NamingDefaults.Expressions[NamingKind.Method], finding.Allowed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForATestMethodBreakingTheTestMethodPattern_ReportsItAgainstThatPattern()
+    {
+        var finding = Assert.Single(Findings(PolicyRule.Naming, "class Sample { [Xunit.FactAttribute] public void parse__Empty() { } }"));
+
+        Assert.Contains("testMethod name 'parse__Empty'", finding.Measured, StringComparison.Ordinal);
+        Assert.Contains(NamingDefaults.Expressions[NamingKind.TestMethod], finding.Allowed, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Fact")]
+    [InlineData("Theory")]
+    [InlineData("Test")]
+    [InlineData("TestMethod")]
+    [InlineData("DataTestMethod")]
+    [InlineData("TestCase(1)")]
+    [InlineData("Xunit.Fact")]
+    [InlineData("global::Xunit.FactAttribute")]
+    public void Inspect_ForAMethodCarryingATestAttribute_JudgesItByTheTestMethodPattern(string attribute) =>
+        Assert.Empty(Findings(PolicyRule.Naming, "class Sample { [" + attribute + "] public void Post_WithNoEntries_Throws() { } }"));
+
+    [Fact]
+    public void Inspect_ForAPascalCaseConstLocal_JudgesItByTheConstantPattern() =>
+        Assert.Empty(Findings(PolicyRule.Naming, "class Sample { public int Run() { const int Limit = 3; return Limit; } }"));
+
+
+    [Fact]
+    public void Inspect_ForAPascalCaseMutableLocal_IsStillANamingViolation() =>
+        Assert.Contains("local name 'Limit'", Assert.Single(Findings(PolicyRule.Naming, "class Sample { public int Run() { var Limit = 3; return Limit; } }")).Measured, StringComparison.Ordinal);
 }

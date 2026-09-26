@@ -224,7 +224,7 @@ remedy: fix the code above, or pass allowPolicy=true to apply it anyway; the res
 
 Fourteen rules, `TERSE100`–`TERSE113` — cognitive complexity, method statements, methods per type,
 constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
-declaration kind, `async void`, condition operands, chained references, nesting depth, and **comments
+declaration kind (a `[Fact]`/`[Theory]`/`[Test]`/`[TestMethod]`/`[TestCase]` method is judged by its own `testMethod` pattern, which accepts `Method_Scenario_Outcome`), `async void`, condition operands, chained references, nesting depth, and **comments
 (`TERSE112`) plus XML doc comments (`TERSE113`) — the two rules enforced at `warn` with no
 `.terse.json` at all, because an agent writes 38.7 comment lines per 1000 it emits and every one of
 them is a line the next agent re-reads. A `///` block is `TERSE113` and never `TERSE112`, so the two

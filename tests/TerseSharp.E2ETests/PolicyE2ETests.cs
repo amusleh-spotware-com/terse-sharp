@@ -194,4 +194,42 @@ public sealed class PolicyE2ETests : IAsyncLifetime
                 ["allowPolicy"] = allowPolicy,
             },
             TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task WriteText_WithAMethodScenarioOutcomeTestName_PassesNamingOnlyWhileItCarriesATestAttribute()
+    {
+        const string probe = "src/Fixture.Policy/PolicyTestNameProbe.cs";
+        const string untested = "namespace Fixture.Policy;\n\npublic sealed class FactAttribute : System.Attribute\n{\n}\n\npublic sealed class LedgerProof\n{\n    public void Post_WithNoEntries_Balances() { }\n}\n";
+        const string tested = "namespace Fixture.Policy;\n\npublic sealed class FactAttribute : System.Attribute\n{\n}\n\npublic sealed class LedgerProof\n{\n    [Fact]\n    public void Post_WithNoEntries_Balances() { }\n}\n";
+
+        try
+        {
+            var rejected = await WrittenAsync(probe, untested, allowPolicy: false);
+            var applied = await WrittenAsync(probe, tested, allowPolicy: false);
+
+            Assert.Contains("TERSE107", rejected, StringComparison.Ordinal);
+            Assert.Contains("method name 'Post_WithNoEntries_Balances'", rejected, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.DoesNotContain("TERSE107", applied, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync(
+                "write_text",
+                new() { ["path"] = probe, ["delete"] = true, ["force"] = true },
+                TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task Analyze_WithAnIdTheProjectPolicyEnforces_DoesNotCallItNotEnabled()
+    {
+        var text = await server.CallAsync(
+            "analyze",
+            new() { ["path"] = "src/Fixture.Policy/Ledger.cs", ["ids"] = "TERSE107,CA9999" },
+            TestContext.Current.CancellationToken);
+
+        Assert.DoesNotContain("NOT_ENABLED TERSE107", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_ENABLED CA9999", text, StringComparison.Ordinal);
+    }
 }

@@ -75,12 +75,12 @@ internal static class ProjectDiagnostics
         }
     }
 
-    public static string[] Unsupported(IEnumerable<Project> projects, IReadOnlyList<string> ids, IEnumerable<Diagnostic> found)
+    public static string[] Unsupported(IEnumerable<Project> projects, IReadOnlyList<string> ids, IEnumerable<Diagnostic> found, IEnumerable<string> emitted)
     {
         if (ids.Count is 0)
             return [];
 
-        var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var declared = new HashSet<string>(emitted, StringComparer.OrdinalIgnoreCase);
 
         foreach (var project in projects)
         {
