@@ -54,7 +54,7 @@ public static class EditGate
             response.Note("dryRun");
 
         if (report is not null)
-            Announce(response, report, options.Verbose || options.DryRun, options.Tool);
+            Announce(response, report, options.Verbose || options.DryRun, options.Tool, options.DryRun);
 
         Policy(response, policy, options.DryRun);
 
@@ -71,7 +71,7 @@ public static class EditGate
     }
     private const int MaxNewWarnings = 5;
 
-    private static void Announce(ResponseBuilder response, GateReport report, bool verbose, string tool)
+    private static void Announce(ResponseBuilder response, GateReport report, bool verbose, string tool, bool dryRun)
     {
         if (Describe(report, verbose) is { Length: > 0 } counters)
             response.Note(counters);
@@ -85,17 +85,19 @@ public static class EditGate
         Informed(response, report, verbose);
 
         if (report.Unresolved.Length > 0)
-            Unresolved(response, report);
+            Unresolved(response, report, dryRun);
 
         if (report.NewErrors.Length > 0)
             Rejected(response, report, tool);
     }
 
-    private static void Unresolved(ResponseBuilder response, GateReport report)
+    private static void Unresolved(ResponseBuilder response, GateReport report, bool dryRun)
     {
+        var outcome = dryRun ? "would be applied" : "was applied";
+
         response.Note(string.Create(
             CultureInfo.InvariantCulture,
-            $"UNRESOLVED {report.Unresolved.Length} name(s) this project does not resolve; the edit was applied, not rolled back"));
+            $"UNRESOLVED {report.Unresolved.Length} name(s) this project does not resolve; the edit {outcome}, not rolled back"));
 
         foreach (var unresolved in report.Unresolved)
             response.Note(unresolved);

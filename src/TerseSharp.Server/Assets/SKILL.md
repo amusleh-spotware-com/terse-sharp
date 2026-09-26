@@ -760,7 +760,7 @@ refused.
    does **not** cover emit-time or source-generator errors, so `build` is worth one call **before you
    push, not after every edit**; the first *applied* gated edit of a process says so once as
    `gate=semantic …`.
-   An edit introducing a new compile error is rolled back and the error returned. `allowErrors: true` opts out — use it only mid-refactor on purpose.
+   An edit introducing a new compile error is rolled back and the error returned. **One exception, by design:** a `CS0246`/`CS0234` name that a NEW file, or a project that already fails on it, does not resolve lands and answers `UNRESOLVED N name(s) ... the edit was applied, not rolled back` (`would be applied` on a `dryRun`) - a new test file's `Mock<>` is what it exists for. Any other error in a new file is rolled back and nothing is written. `allowErrors: true` opts out — use it only mid-refactor on purpose.
    **A rollback keeps your text**: the error ends `retryWith=r3`; `replace_symbol`,
    `replace_symbol_body` and `add_member` take the token to replay what was rejected - after adding the
    missing callee, or with `allowErrors: true` - and the last 8 are held. A corrected

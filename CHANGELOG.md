@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **I598** `write_text` on a NEW `.cs` file: the description, `SKILL.md` and `CLAUDE.md` said every new error is rolled back, but a `CS0246`/`CS0234` that a new file cannot resolve lands and is reported `UNRESOLVED` (by design since **I79**). The description now says so, and a `dryRun` of such an edit says `the edit would be applied, not rolled back` instead of claiming `the edit was applied`. Covered by `WriteText_ADryRunOfANewFileWithAnUnresolvedName_SaysTheEditWouldLandAndWritesNothing`, `WriteText_ANewFileWhoseOnlyErrorIsAnUnresolvedName_LandsAndSaysItWasNotRolledBack`, `WriteText_ANewFileWithAnErrorThatIsNotAnUnresolvedName_IsRolledBackAndNeverWritten` and `WriteText_Description_SaysANewFileWithAnUnresolvedNameLandsInsteadOfRollingBack`.
+
 ## [0.68.0] - 2026-09-23
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**

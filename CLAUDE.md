@@ -249,7 +249,7 @@ alone.
 
 All mutations funnel through `EditGate.ApplyAsync`, which diffs only the changed documents, compares
 error counts before/after, **rolls back any edit that introduces a new compile error** (unless
-`allowErrors: true`) in the changed projects **and every project that transitively depends on them**,
+`allowErrors: true`, and except a `CS0246`/`CS0234` a newly added file or an already-failing project cannot resolve, which lands reported `UNRESOLVED`) in the changed projects **and every project that transitively depends on them**,
 and returns the unified diff plus a changed-line count — never file contents. Every mutation and
 every `dryRun` also reports `errors=N (+D) warnings=N (+D)`; a `dryRun` that *would* be rolled back
 says so and names the errors, because the delta alone is not a rollback oracle (one error can

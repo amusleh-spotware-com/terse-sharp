@@ -1897,6 +1897,74 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         }
     }
 
+    [Fact]
+    public async Task WriteText_ADryRunOfANewFileWithAnUnresolvedName_SaysTheEditWouldLandAndWritesNothing()
+    {
+        const string Probe = "src/Fixture.Trading/UnresolvedDryRunProbe.cs";
+        const string Content = "namespace Fixture.Trading;\n\npublic sealed class UnresolvedDryRunProbe\n{\n    public NoSuchTypeAnywhere? Value { get; }\n}\n";
+
+        var preview = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Content, ["force"] = true, ["dryRun"] = true });
+        var listing = await server.CallAsync("find_files", new() { ["glob"] = Probe });
+
+        Assert.Contains("UNRESOLVED 1 name(s)", preview, StringComparison.Ordinal);
+        Assert.Contains("the edit would be applied, not rolled back", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("the edit was applied", preview, StringComparison.Ordinal);
+        Assert.Contains("ABSENT", listing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_ANewFileWhoseOnlyErrorIsAnUnresolvedName_LandsAndSaysItWasNotRolledBack()
+    {
+        const string Probe = "src/Fixture.Trading/UnresolvedLandsProbe.cs";
+        const string Content = "namespace Fixture.Trading;\n\npublic sealed class UnresolvedLandsProbe\n{\n    public NoSuchTypeAnywhere? Value { get; }\n}\n";
+
+        try
+        {
+            var applied = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Content, ["force"] = true });
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("CS0246", applied, StringComparison.Ordinal);
+            Assert.Contains("the edit was applied, not rolled back", applied, StringComparison.Ordinal);
+            Assert.Contains("NoSuchTypeAnywhere", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_ANewFileWithAnErrorThatIsNotAnUnresolvedName_IsRolledBackAndNeverWritten()
+    {
+        const string Probe = "src/Fixture.Trading/UndefinedCallProbe.cs";
+        const string Content = "namespace Fixture.Trading;\n\npublic sealed class UndefinedCallProbe\n{\n    public int Value => noSuchHelperAnywhere(1);\n}\n";
+
+        try
+        {
+            var rejected = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Content, ["force"] = true });
+            var listing = await server.CallAsync("find_files", new() { ["glob"] = Probe });
+
+            Assert.Contains("CompileRegression", rejected, StringComparison.Ordinal);
+            Assert.Contains("CS0103", rejected, StringComparison.Ordinal);
+            Assert.Contains("ABSENT", listing, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_Description_SaysANewFileWithAnUnresolvedNameLandsInsteadOfRollingBack()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var description = tools.Single(tool => tool.Name == "write_text").Description;
+
+        Assert.Contains("UNRESOLVED", description, StringComparison.Ordinal);
+        Assert.Contains("CS0246", description, StringComparison.Ordinal);
+    }
+
     private static string WithoutTheOnceOffNotice(string text) => string.Join(
         '\n',
         text.Split('\n').Where(line => !line.StartsWith("compilations=realized", StringComparison.Ordinal)));
