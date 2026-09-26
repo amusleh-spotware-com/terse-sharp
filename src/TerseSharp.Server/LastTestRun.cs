@@ -25,16 +25,13 @@ public sealed record TestRunMemory(
             ? FailedTests.RemoveAll(new HashSet<string>(passedTests, StringComparer.Ordinal).Contains)
             : [];
 
-
     private bool SameInvocation(TestRunMemory run) =>
         Target.Equals(run.Target, StringComparison.Ordinal) && SameScope(Scope, run.Scope);
-
 
     private static bool SameScope(BuildScope left, BuildScope right) =>
         string.Equals(left.Configuration, right.Configuration, StringComparison.Ordinal)
         && string.Equals(left.TargetFramework, right.TargetFramework, StringComparison.Ordinal)
         && (left.Properties ?? []).SequenceEqual(right.Properties ?? [], StringComparer.Ordinal);
-
 
     private static ImmutableArray<string> Capped(ImmutableArray<string> tests, int limit) => tests switch
     {

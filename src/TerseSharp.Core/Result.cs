@@ -158,10 +158,8 @@ public static class Errors
             ? string.Create(CultureInfo.InvariantCulture, $"MSBuild's out-of-process build host dropped the call after the write reached disk with the requested content, so the same call again answers 0 files changed and reports no diagnostics. Do not retry - call {AnalyzeCall(landed)} for the diagnostics this call could not report")
             : string.Create(CultureInfo.InvariantCulture, $"MSBuild's out-of-process build host dropped the call after only some files reached disk. Retry with only the files not landed, then call {AnalyzeCall(landed)} for the diagnostics of the ones that did"));
 
-
     private static string LandedVerdict(IReadOnlyList<string> missing) =>
         missing is [] ? "retry would be a no-op" : string.Create(CultureInfo.InvariantCulture, $"not landed={string.Join(',', missing)}");
-
 
     private static string AnalyzeCall(IReadOnlyList<string> paths) =>
         paths is [var single]

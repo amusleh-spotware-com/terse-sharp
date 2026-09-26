@@ -4,9 +4,14 @@ namespace TerseSharp.Server;
 
 public static class TrailingNote
 {
-    public static void Append(CallToolResult result, string note) =>
-        result.Content.Add(new TextContentBlock { Text = Separated(result, note) });
+    public static void Append(CallToolResult result, string note)
+    {
+        if (result.Content is [.., TextContentBlock last])
+            result.Content[result.Content.Count - 1] = new TextContentBlock { Text = Separated(last.Text, note) };
+        else
+            result.Content.Add(new TextContentBlock { Text = note });
+    }
 
-    internal static string Separated(CallToolResult result, string note) =>
-        result.Content is [.., TextContentBlock { Text: [.., not '\n'] }] ? "\n" + note : note;
+    internal static string Separated(string payload, string note) =>
+        payload is [] or [.., '\n'] ? string.Concat(payload, note) : string.Concat(payload, "\n", note);
 }

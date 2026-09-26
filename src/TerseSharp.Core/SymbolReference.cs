@@ -71,7 +71,6 @@ public static class SymbolReference
         ?? MetadataConstructor(name, WellKnownMemberNames.StaticConstructorName)
         ?? name.LastIndexOf('.');
 
-
     private static int? MetadataConstructor(ReadOnlySpan<char> name, string constructor) =>
         name.Length > constructor.Length && name.EndsWith(constructor, StringComparison.Ordinal) && name[^(constructor.Length + 1)] is '.'
             ? name.Length - constructor.Length - 1

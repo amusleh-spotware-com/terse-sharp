@@ -46,13 +46,15 @@ public static class RepeatSteer
         if (request.Params is not { Name.Length: > 0 } parameters)
             return result;
 
-        if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
+        var answered = result.Content is [TextContentBlock { Text: var answer }, ..] ? answer : string.Empty;
+
+    if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
             TrailingNote.Append(result, repeat);
 
         if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name), Mode(parameters)) is { } note)
             TrailingNote.Append(result, note);
 
-        Answered(result.Content is [TextContentBlock { Text: var answer }, ..] ? answer : string.Empty);
+        Answered(answered);
 
         return result;
     };

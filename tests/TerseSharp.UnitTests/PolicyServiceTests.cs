@@ -499,7 +499,6 @@ public sealed class PolicyServiceTests
     public void Inspect_ForAPascalCaseConstLocal_JudgesItByTheConstantPattern() =>
         Assert.Empty(Findings(PolicyRule.Naming, "class Sample { public int Run() { const int Limit = 3; return Limit; } }"));
 
-
     [Fact]
     public void Inspect_ForAPascalCaseMutableLocal_IsStillANamingViolation() =>
         Assert.Contains("local name 'Limit'", Assert.Single(Findings(PolicyRule.Naming, "class Sample { public int Run() { var Limit = 3; return Limit; } }")).Measured, StringComparison.Ordinal);

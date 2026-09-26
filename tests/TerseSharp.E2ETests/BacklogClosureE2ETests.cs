@@ -2368,8 +2368,9 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         var blocks = second.Content.OfType<TextContentBlock>().Select(block => block.Text).ToArray();
         var concatenated = string.Concat(blocks);
 
-        Assert.True(blocks.Length >= 2, concatenated);
+        Assert.Single(blocks);
         Assert.Contains("\n2 get_file_outline calls in a row - these are ONE call: paths=", concatenated, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n\n2 get_file_outline", concatenated, StringComparison.Ordinal);
         Assert.All(
             concatenated.Split('\n').Where(line => line.Contains("calls in a row", StringComparison.Ordinal)),
             line => Assert.StartsWith("2 get_file_outline calls in a row", line, StringComparison.Ordinal));

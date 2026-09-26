@@ -1351,11 +1351,11 @@ public sealed class RegionTail
     [Fact]
     public async Task ReplaceSymbol_RolledBackBecauseItDroppedMembers_NamesThemInTheRejection()
     {
-    var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+        var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
 
-    var rejected = await server.CallAsync("replace_symbol", new()
-    {
-        ["symbolId"] = "T:Fixture.Trading.OrderService",
+        var rejected = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.OrderService",
             ["declaration"] = "public sealed class OrderService\n{\n    public bool SubmitTwice(Order order) => Submit(order) && Submit(order);\n}",
         });
 

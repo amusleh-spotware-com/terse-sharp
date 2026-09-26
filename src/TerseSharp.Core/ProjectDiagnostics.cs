@@ -102,7 +102,6 @@ internal static class ProjectDiagnostics
         && id.StartsWith("CS", StringComparison.OrdinalIgnoreCase)
         && !id.AsSpan(2).ContainsAnyExceptInRange('0', '9');
 
-
     private static bool IsDeadCodeId(string id) =>
         string.Equals(id, DeadCodeService.RuleId, StringComparison.OrdinalIgnoreCase);
 }

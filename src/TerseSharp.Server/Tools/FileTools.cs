@@ -212,7 +212,7 @@ bool verbose) =>
         [Description("Replace EVERY occurrence of oldText in one pass, by descending offset so no ordinal moves. Refused beside occurrence= or section=. Default false.")] bool replaceAll = false,
         [Description("With section=, lowercase: append writes after its last non-blank line, prepend under its heading. Empty replaces it.")] string? place = null,
         [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE them into.")] string? toPath = null,
-        [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched on its first cell: a row whose first cell LEADS with it (bold and backticks stripped) wins, else the one row whose first cell contains it - e.g. row=\"I286\".")] string? row = null,
+        [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched on its first cell - e.g. row=\"I286\".")] string? row = null,
         [Description("Several edits in one call: each takes oldText, newText and optionally section, occurrence, replaceAll, place, path and force. Entries sharing a path apply in order. Max 10 per file, 25 total.")] FileService.TextEdit[]? edits = null,
         [Description("Markdown only, with toPath=: several rows moved in ONE call, at most 25, each taking row and optionally newText.")] FileService.TextRow[]? rows = null,
         [Description("Return the N lines around each change in POST-edit state, numbered. 1-10; 0 adds nothing.")] int context = 0,

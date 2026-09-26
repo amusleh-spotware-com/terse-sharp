@@ -376,7 +376,6 @@ public static class PolicyService
         _ => string.Empty,
     };
 
-
     private static bool IsTestAttribute(string name) =>
         name is "Fact" or "Theory" or "Test" or "TestMethod" or "TestCase" or "DataTestMethod"
             or "FactAttribute" or "TheoryAttribute" or "TestAttribute" or "TestMethodAttribute" or "TestCaseAttribute" or "DataTestMethodAttribute";
