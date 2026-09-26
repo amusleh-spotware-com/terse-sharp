@@ -12,6 +12,7 @@ public sealed class ReplacedContentTests
     [InlineData("  alpha  \nbeta\n", "alpha\r\nbeta\r\n", false)]
     [InlineData("\n\n{\n}\n", "zeta\n", false)]
     [InlineData("", "zeta\n", false)]
+    [InlineData("alpha\nbeta\n", "", false)]
     public void Measure_RefusesOnlyAWriteThatKeepsUnderAQuarterOfTheContentLines(string before, string after, bool unrelated) =>
         Assert.Equal(unrelated, ReplacedContent.Measure(before, after).Unrelated);
 

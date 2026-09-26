@@ -3,7 +3,7 @@ using System.Diagnostics;
 
 namespace TerseSharp.Server;
 
-public sealed class DetachedRuns : IAsyncDisposable
+public sealed class DetachedRuns : IDisposable, IAsyncDisposable
 {
     private const int MaxRuns = 16;
     private readonly ConcurrentDictionary<string, DetachedRun> runs = new(StringComparer.Ordinal);
@@ -27,6 +27,12 @@ public sealed class DetachedRuns : IAsyncDisposable
         !runs.TryGetValue(id, out var run) ? Unknown(id)
         : run.Task.IsCompleted ? await run.Task.ConfigureAwait(false)
         : Running(id, run.Started);
+
+    public void Dispose()
+    {
+        stopping.Cancel();
+        stopping.Dispose();
+    }
 
     public async ValueTask DisposeAsync()
     {

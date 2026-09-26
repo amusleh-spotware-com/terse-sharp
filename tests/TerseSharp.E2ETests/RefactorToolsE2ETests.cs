@@ -239,13 +239,15 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task MoveTypeToNamespace_ForANestedTypeAndAnotherNamespace_RefusesAndNamesTheFileNamespace()
     {
-        await server.CallAsync("write_text", new() { ["path"] = LiftProbe, ["content"] = LiftProbeContent, ["force"] = true });
+        const string Probe = "src/Fixture.Trading/LiftRefusalProbe.cs";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = LiftProbeContent.Replace("LiftProbe", "LiftRefusalProbe", StringComparison.Ordinal), ["force"] = true });
 
         try
         {
             var text = await server.CallAsync("move_type_to_namespace", new()
             {
-                ["typeSymbolId"] = "T:Fixture.Trading.LiftProbe.Ledger",
+                ["typeSymbolId"] = "T:Fixture.Trading.LiftRefusalProbe.Ledger",
                 ["targetNamespace"] = "Fixture.Routing",
                 ["dryRun"] = true,
             });
@@ -256,7 +258,7 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
         }
         finally
         {
-            await server.CallAsync("write_text", new() { ["path"] = LiftProbe, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
 

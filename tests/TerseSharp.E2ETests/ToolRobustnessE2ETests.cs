@@ -25,6 +25,8 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
     [Fact]
     public async Task EveryTool_WithNoArguments_NeverCrashesTheServer()
     {
+        await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"), ["reload"] = true });
+
         foreach (var tool in await Surface())
             AssertHandled(tool.Name, await CallAsync(tool, []));
 

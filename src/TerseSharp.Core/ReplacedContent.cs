@@ -6,10 +6,9 @@ public static class ReplacedContent
 
     private const int KeptShareDenominator = 4;
 
-    public static Overlap Measure(string before, string after) =>
-        before.Length is 0 || string.Equals(before, after, StringComparison.Ordinal)
-            ? default
-            : Counted(before, Hashed(after));
+    public static Overlap Measure(string before, string after) => before.Length is 0 || after.Length is 0 || string.Equals(before, after, StringComparison.Ordinal)
+        ? default
+        : Counted(before, Hashed(after));
 
     public static TerseError Refusal(string path, Overlap overlap) => Errors.Invalid(
         string.Create(
