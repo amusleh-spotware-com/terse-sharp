@@ -8,6 +8,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-09-26
+
+> **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> A steer or identical-call note is now merged into the payload's last text block after one line break
+> instead of being sent as its own block. `build`/`run_tests` add `NOTE re-ran: stamp moved <what> a->b`
+> when a remembered call re-runs; a semantic call that compiles more projects adds
+> `compilations=realized in Nms (K more of T projects, C compiled now)`; `write_text` answers
+> `ERROR Transient ... landed=<paths>` when the build host dropped a write that already landed;
+> `terse call` writes `timing loadMs= callMs=` to stderr; `read_text tokens=true` on the shipped skill
+> ends `budget= used= left=`. `.terse.json` naming judges test methods by a new `testMethod` key and
+> `const` locals by `constant`; `rerun_failed` keeps a failure until a run passes it; the guard expands
+> variables assigned earlier in a command (and now denies `F=src/X.cs; cat "$F"`).
+
 ### Changed
 
 - **Response format: a semantic call that compiles projects no earlier call had compiled now says so, even when others were already compiled (I659).** The `compilations=realized` note was timed only when the workspace held no compilation at all, so after a cold load or an idle drop the first narrow call (`get_file_outline`, `get_symbol_source`) took it, and the wide `search_symbols` that then compiled every other project paid its seconds silently - 38 of 84 slow warm `search_symbols` calls in the I642 scan carried no note. Projects are now counted before and after each call on the snapshot it ran on, and a call that grew them appends `compilations=realized in Nms (K more of T projects, C compiled now)`, with `; after drop #D` once an idle drop released them. The one-off `(once per load, not per call)` form is kept for a call that compiles the whole solution from cold, and a call that compiles nothing new stays note-free. The background re-warm the row also proposed is not built (I667). Pinned by `SearchSymbols_ThatReachesAProjectNoEarlierCallCompiled_SaysHowManyMoreItRealized`, `Grew_OnAPartialRealization_SaysHowManyMoreOfHowManyProjectsAreCompiledNow` and `RealizedProjects_CountsOnlyTheProjectsWhoseCompilationWasBuilt`.
@@ -6836,7 +6849,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.69.1...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.70.0...HEAD
+[0.70.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.70.0
 [0.69.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.69.1
 [0.69.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.69.0
 [0.68.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.68.0
