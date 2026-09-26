@@ -961,4 +961,42 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.StartsWith("0 implementations", text, StringComparison.Ordinal);
         Assert.Contains("TryRoute is not virtual, abstract or an interface member, so nothing can override it", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetFileOutline_WithContainsNamingAConstant_ListsTheConstant()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/ProbeSaturation.cs", ["contains"] = "Probe001" });
+
+        Assert.Contains("  ProbeNames.Probe001  ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ProbeNames.Probe002", text, StringComparison.Ordinal);
+        Assert.Contains("  1 of ", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithContainsNamingAField_ListsTheFieldAndCountsIt()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["contains"] = "repo" });
+
+        Assert.Contains("  OrderService.repository  ", text, StringComparison.Ordinal);
+        Assert.Contains("  1 of 7 members", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.Submit", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithContainsNamingAField_ListsTheField()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:Fixture.Trading.OrderService", ["contains"] = "repo" });
+
+        Assert.Contains("  OrderService.repository  ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.PendingCount", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithoutContains_KeepsItsFormatAndListsNoField()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+
+        Assert.Contains("  OrderService.Submit  ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderService.repository", text, StringComparison.Ordinal);
+    }
 }

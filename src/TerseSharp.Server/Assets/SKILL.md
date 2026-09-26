@@ -40,7 +40,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` — parsed from its own text, tagged `HEURISTIC` |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` |
 | **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` |
-| **Navigate** | a type wider than the 40-member cap | `get_file_outline(path)` — answers the grouped member NAMES per accessibility, which is what `contains=` or a `symbolIds=` batch is chosen from |
+| **Navigate** | a type wider than the 40-member cap | `get_file_outline(path)` — answers the grouped member NAMES per accessibility, which is what `contains=` (members, fields and constants alike) or a `symbolIds=` batch is chosen from |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline; `verbose: true` or a line range for the text — and a verbose whole-file read prices itself against the outline it skipped |
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId, verbose: true)` on a **type** id — the default answers its member outline |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` |

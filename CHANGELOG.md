@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Fixed
+
+- **`get_file_outline` and `get_type_outline` `contains=` now match fields and constants.** A field declaration has no declared symbol of its own (it lives on each variable declarator), so the filter skipped every field and answered `1 of 47 members` for `contains="Pressure"` on a type declaring `PressureBytes` and `PressureFloor` - a false-empty answer the names-only view contradicted. Each matching declarator is now listed on its own line; the `N of M members` count is unchanged in meaning. Unfiltered outlines are unchanged and still list no fields. Pinned by `GetFileOutline_WithContainsNamingAField_ListsTheFieldAndCountsIt`, `GetFileOutline_WithContainsNamingAConstant_ListsTheConstant`, `GetTypeOutline_WithContainsNamingAField_ListsTheField` and `GetFileOutline_WithoutContains_KeepsItsFormatAndListsNoField`. (I656)
+
 ### Changed
 
 - `edit_text row=` first picks the table row whose first cell LEADS with the identifier - its first whitespace-delimited token, with `**` and backticks stripped - and falls back to the substring match only when no row leads with it. `row="I609"` now moves the `**I609**` row even when another row's first cell cites I609, instead of answering `matches the first cell of 2 table rows`. Two rows leading with the same identifier, or several rows that merely contain it, are still refused with the candidate lines. Pinned by `Matching_WhenOneRowLeadsWithTheIdentifierAndAnotherCitesIt_PicksTheRowItLeads` and `EditText_WithARowIdentifierThatLeadsOneFirstCellAndIsCitedInAnother_MovesTheRowItLeads`. (I649)

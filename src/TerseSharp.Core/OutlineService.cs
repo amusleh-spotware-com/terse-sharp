@@ -179,6 +179,30 @@ public static class OutlineService
         return reference;
     }
 
+    private static bool AppendFields(
+        ResponseBuilder response,
+        BaseFieldDeclarationSyntax field,
+        SemanticModel model,
+        OutlineFormat format,
+        List<string> references)
+    {
+        var appended = false;
+
+        foreach (var variable in field.Declaration.Variables)
+        {
+            if (model.GetDeclaredSymbol(variable) is not { } symbol || !Wanted(symbol, format.Contains))
+                continue;
+
+            var reference = Reference(symbol, format.Ids, Never);
+
+            references.Add(reference);
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"  {reference}  {Signature(symbol, format)} :{PositionFormat.LineRange(field)}"));
+            appended = true;
+        }
+
+        return appended;
+    }
+
     private static string Signature(ISymbol symbol, OutlineFormat format) => format.Signatures
         ? string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} {SymbolFormat.Describe(symbol, format.ParameterNames)} ")
         : string.Create(CultureInfo.InvariantCulture, $"{SymbolFormat.Accessibility(symbol)} ");
@@ -492,6 +516,13 @@ public static class OutlineService
             if (capped && shown >= MaxListedMembers)
             {
                 omitted += IsTypeDeclaration(member) ? 0 : 1;
+
+                continue;
+            }
+
+            if (format.Contains is { Length: > 0 } && member is BaseFieldDeclarationSyntax field)
+            {
+                shown += AppendFields(response, field, model, format, references) ? 1 : 0;
 
                 continue;
             }
