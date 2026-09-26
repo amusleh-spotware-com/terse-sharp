@@ -74,6 +74,70 @@ public sealed class PolicyGateTests
     }
 
     [Fact]
+    public async Task ApplyAsync_WithActionWarn_AnswersTheWarningAndOneLinePerFileInsteadOfTheDiff()
+    {
+        using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+
+        await ConfigureAsync(workspace, """{"policy":{"action":"warn"}}""");
+
+        var result = await AddAsync(workspace, "public int Go() => 1;", allowPolicy: false);
+
+        Assert.True(result.IsOk);
+        Assert.Contains("WARNING policy  TERSE105", result.Value!, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", result.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("@@", result.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ForAViolationWithAllowPolicy_AnswersTheOverrideAndOneLinePerFileInsteadOfTheDiff()
+    {
+        using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+
+        await ConfigureAsync(workspace, """{"policy":{"action":"reject"}}""");
+
+        var result = await AddAsync(workspace, "public int Go() => 1;", allowPolicy: true);
+
+        Assert.True(result.IsOk);
+        Assert.Contains("WARNING policy overridden", result.Value!, StringComparison.Ordinal);
+        Assert.Contains("changedLines=", result.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("@@", result.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_WithActionWarnAndVerbose_StillReturnsTheDiff()
+    {
+        using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+
+        await ConfigureAsync(workspace, """{"policy":{"action":"warn"}}""");
+
+        var type = await ContainingTypeAsync(workspace);
+        var result = await SymbolEditService.AddMemberAsync(
+            workspace.Workspace,
+            type,
+            "public int Go() => 1;",
+            new EditOptions("add_member", DryRun: false, AllowErrors: false, Verbose: true),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.IsOk);
+        Assert.Contains("WARNING policy  TERSE105", result.Value!, StringComparison.Ordinal);
+        Assert.Contains("@@", result.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ApplyAsync_WithAMalformedTerseJson_KeepsTheFullResponse()
+    {
+        using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+
+        await ConfigureAsync(workspace, "{\"policy\":");
+
+        var result = await AddAsync(workspace, "public int Go() => 1;", allowPolicy: false);
+
+        Assert.True(result.IsOk);
+        Assert.Contains("could not be read", result.Value!, StringComparison.Ordinal);
+        Assert.Contains("@@", result.Value, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ApplyAsync_ForACleanEditIntoAFileThatAlreadyViolates_DoesNotChargeThePreExistingViolation()
     {
         using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);

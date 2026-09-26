@@ -16,6 +16,4 @@ public sealed record PolicyVerdict(
     public bool Blocks => !Rejected.IsEmpty && (!Overridden || !AllowOverride);
 
     public bool Bypassed => !Rejected.IsEmpty && Overridden && AllowOverride;
-
-    public bool Quiet => Rejected.IsEmpty && Warned.IsEmpty && Notice is null;
 }

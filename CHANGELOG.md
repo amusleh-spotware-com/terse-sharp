@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **Response format (I612):** an applied edit whose only extra lines are `.terse.json` policy findings (`WARNING policy  …` or `WARNING policy overridden  …`) now answers in the condensed form - those lines plus one `<path>  changedLines=N` per file - instead of the whole unified diff. `verbose=true` restores the diff; a policy-file notice (unreadable `.terse.json`, unknown rule key) and a `dryRun` still print in full. Measured: `add_member` over 5 files with 19 `TERSE107` warnings answered ~5 500 tokens of diff. Covered by `ApplyAsync_WithActionWarn_AnswersTheWarningAndOneLinePerFileInsteadOfTheDiff`, `ApplyAsync_ForAViolationWithAllowPolicy_AnswersTheOverrideAndOneLinePerFileInsteadOfTheDiff`, `ApplyAsync_WithActionWarnAndVerbose_StillReturnsTheDiff` and `ApplyAsync_WithAMalformedTerseJson_KeepsTheFullResponse`.
+
 ### Fixed
 
 - **I598** `write_text` on a NEW `.cs` file: the description, `SKILL.md` and `CLAUDE.md` said every new error is rolled back, but a `CS0246`/`CS0234` that a new file cannot resolve lands and is reported `UNRESOLVED` (by design since **I79**). The description now says so, and a `dryRun` of such an edit says `the edit would be applied, not rolled back` instead of claiming `the edit was applied`. Covered by `WriteText_ADryRunOfANewFileWithAnUnresolvedName_SaysTheEditWouldLandAndWritesNothing`, `WriteText_ANewFileWhoseOnlyErrorIsAnUnresolvedName_LandsAndSaysItWasNotRolledBack`, `WriteText_ANewFileWithAnErrorThatIsNotAnUnresolvedName_IsRolledBackAndNeverWritten` and `WriteText_Description_SaysANewFileWithAnUnresolvedNameLandsInsteadOfRollingBack`.

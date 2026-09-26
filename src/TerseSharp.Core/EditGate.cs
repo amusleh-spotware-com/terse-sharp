@@ -309,13 +309,12 @@ public static class EditGate
         return response.ToString();
     }
 
-    private static bool Condensed(EditOptions options, DocumentDiff[] diffs, GateReport? report, PolicyVerdict policy) =>
-            !options.Verbose
-            && !options.DryRun
-            && diffs.Length is not 0
-            && policy.Quiet
-            && report is not { NewErrors.Length: > 0 }
-            && report is not { Unresolved.Length: > 0 };
+    private static bool Condensed(EditOptions options, DocumentDiff[] diffs, GateReport? report, PolicyVerdict policy) => !options.Verbose
+        && !options.DryRun
+        && diffs.Length is not 0
+        && policy.Notice is null
+        && report is not { NewErrors.Length: > 0 }
+        && report is not { Unresolved.Length: > 0 };
 
     private static async Task<string?> EndingAsync(
         LoadedWorkspace workspace,

@@ -79,7 +79,7 @@ replaced: `Read` against the real file on disk, `Grep` against a real `ripgrep` 
 
 **Success costs nothing.** Every mutating tool answers in one line per changed file — `verbose=true`
 returns the diff, `dryRun=true` previews it. Any caveat, rollback, timeout or zero-result run prints in
-full, because condensing a result that carried a warning is a wrong answer the agent cannot detect.
+full, because condensing a result that carried a caveat is a wrong answer the agent cannot detect. A `.terse.json` policy `WARNING` is payload, so it rides on the one-line answer.
 
 <details>
 <summary>Per-call breakdown, the pessimistic floor, and the two tools that lost</summary>

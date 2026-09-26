@@ -965,7 +965,7 @@ declaration kind, `async void`, condition operands, chained references (off by d
 and **comments (`TERSE112`) and XML doc comments (`TERSE113`), the two rules that are ON at `warn` with
 no `.terse.json` at all**. `TERSE112` never flags a `///` block and `TERSE113` never flags a `//` one.
 Each is `reject`, `warn` or `off` and every one DEFAULTS to `warn`, so a rule only refuses an edit
-where a `.terse.json` asked it to; a `warn` rule lets the edit land and answers `WARNING policy  ...`.
+where a `.terse.json` asked it to; a `warn` rule lets the edit land and answers `WARNING policy  ...` above the one-line-per-file success - a policy warning, overridden or not, is payload, not a caveat, so the diff stays behind `verbose=true`; a `.terse.json` that could not be read still prints in full.
 Cognitive complexity is a **percentage of a threshold** - default `150`% of `10`, so a score above 15
 fails: `cognitive complexity 21 (210% of threshold 10) exceeds 150% (15)`.
 
