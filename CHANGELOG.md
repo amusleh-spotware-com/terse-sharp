@@ -8,6 +8,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.69.1] - 2026-09-26
+
+The `v0.69.0` tag was pushed but never published: its release run went red on one E2E test before the
+pack step, so nothing reached nuget.org or the GitHub releases page. 0.69.1 ships exactly the 0.69.0 tool
+surface below, plus two test fixes. No tool, parameter, default or response format changed.
+
+### Fixed
+
+- `RunTests_RepeatedAfterAnExternalEditTheWatcherHasNotDrained_RunsAgainInsteadOfReplayingStale` no longer inherits
+  the run stamp from the tests before it. On the release runner a late watcher event from a neighbour moved
+  the stamp between its two priming calls, so the second one re-ran instead of replaying. The primer now repeats
+  the identical call, up to five times, until it replays; the post-edit assertion is unchanged, and
+  `RunTests_RepeatedWithNothingWrittenInBetween_AnswersUnchangedInsteadOfRunningAgain` still pins that the
+  second identical call replays on a quiet server.
+- `AnEditIntroducingAnInfoDiagnostic_CountsItInsteadOfAnsweringAsIfTheTierDidNotExist` restores the file before
+  retrying after `ERROR Transient`. A dropped build-host call had already landed the write on a windows runner,
+  so the identical retry answered `0 files changed` and could not report the diagnostic it introduced.
+
 ## [0.69.0] - 2026-09-26
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
@@ -6779,7 +6797,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.69.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.69.1...HEAD
+[0.69.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.69.1
 [0.69.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.69.0
 [0.68.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.68.0
 [0.67.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.67.0
