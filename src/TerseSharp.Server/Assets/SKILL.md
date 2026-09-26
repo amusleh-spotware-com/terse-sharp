@@ -125,7 +125,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
 | **Refactor** | hand-writing an interface from a class | `extract_interface(symbolId)` |
-| **Refactor** | cut-and-paste between files | `move_type_to_file` · `move_type_to_namespace` |
+| **Refactor** | cut-and-paste between files, un-nesting a type | `move_type_to_file` · `move_type_to_namespace` (a nested type id lifts it to namespace level in its own file) |
 | **Refactor** | editing a signature and every call site by hand | `change_signature(symbolId, …)` |
 | **Projects** | editing a `.csproj` by hand | `project_set_property` · `project_properties` · `project_add_reference` · `project_remove_reference` · `project_create` — untouched lines survive byte for byte |
 | **Projects** | editing `PackageReference` by hand | `package_list` · `package_add` · `package_remove` |

@@ -34,10 +34,10 @@ public sealed class RefactorTools(ToolContext context)
             loaded, resolved, Options("move_type_to_file", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_namespace")]
-    [Description("Change the namespace declared in the file containing a type. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Change the namespace declared in the file containing a type - or, given a NESTED type, lift it out of its container to namespace level in the same file: it lands internal (public only when it and its container are both public) and every Outer.Nested reference becomes Nested, in one compile-gated edit. A successful refactor answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> MoveTypeToNamespace(
         [Description("Symbol id of the type to move.")] string? typeSymbolId = null,
-        [Description("Target namespace, e.g. Trading.Orders.")] string targetNamespace = "",
+        [Description("Target namespace, e.g. Trading.Orders. For a nested type, omit it or pass the file's own namespace.")] string targetNamespace = "",
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,

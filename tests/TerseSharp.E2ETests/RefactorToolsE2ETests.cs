@@ -207,4 +207,84 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
         Assert.False(File.Exists(flattened), "move_type_to_file flattened the new file onto the project root: " + flattened);
         Assert.True(File.Exists(beside), "move_type_to_file reported a nested path it never wrote: " + beside);
     }
+
+    private const string LiftProbe = "src/Fixture.Trading/LiftProbe.cs";
+    private const string LiftProbeContent = "namespace Fixture.Trading;\n\npublic sealed class LiftProbe\n{\n    public int Count => LiftProbe.Ledger.Empty.Count;\n\n    private sealed record Ledger(int Count)\n    {\n        public static LiftProbe.Ledger Empty { get; } = new(0);\n    }\n}\n";
+
+    [Fact]
+    public async Task MoveTypeToNamespace_ForANestedPrivateRecord_LiftsItToNamespaceLevelAsInternalAndUnqualifiesItsReferences()
+    {
+        await server.CallAsync("write_text", new() { ["path"] = LiftProbe, ["content"] = LiftProbeContent, ["force"] = true });
+
+        try
+        {
+            var text = await server.CallAsync("move_type_to_namespace", new()
+            {
+                ["typeSymbolId"] = "T:Fixture.Trading.LiftProbe.Ledger",
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("-    private sealed record Ledger(int Count)", text, StringComparison.Ordinal);
+            Assert.Contains("+internal sealed record Ledger(int Count)", text, StringComparison.Ordinal);
+            Assert.Contains("public static Ledger Empty { get; } = new(0);", text, StringComparison.Ordinal);
+            Assert.Contains("+    public int Count => Ledger.Empty.Count;", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("would be rolled back", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = LiftProbe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task MoveTypeToNamespace_ForANestedTypeAndAnotherNamespace_RefusesAndNamesTheFileNamespace()
+    {
+        await server.CallAsync("write_text", new() { ["path"] = LiftProbe, ["content"] = LiftProbeContent, ["force"] = true });
+
+        try
+        {
+            var text = await server.CallAsync("move_type_to_namespace", new()
+            {
+                ["typeSymbolId"] = "T:Fixture.Trading.LiftProbe.Ledger",
+                ["targetNamespace"] = "Fixture.Routing",
+                ["dryRun"] = true,
+            });
+
+            Assert.StartsWith("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("lifted into its own file's namespace Fixture.Trading", text, StringComparison.Ordinal);
+            Assert.Contains("remedy: pass targetNamespace=Fixture.Trading or omit it", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = LiftProbe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task MoveTypeToNamespace_ForANestedPublicClassOfAPublicType_KeepsItPublic()
+    {
+        var text = await server.CallAsync("move_type_to_namespace", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.ExactSaturation.S001",
+            ["targetNamespace"] = "Fixture.Trading",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("-    public static class S001 { public const int Saturate = 1; }", text, StringComparison.Ordinal);
+        Assert.Contains("+public static class S001 { public const int Saturate = 1; }", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MoveTypeToNamespace_RenamingANamespace_WritesNoSpaceBeforeTheNewName()
+    {
+        var text = await server.CallAsync("move_type_to_namespace", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderRouter",
+            ["targetNamespace"] = "Fixture.Routing",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+namespace Fixture.Routing", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fixture.Routing ;", text, StringComparison.Ordinal);
+    }
 }

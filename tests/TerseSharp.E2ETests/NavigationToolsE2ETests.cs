@@ -952,4 +952,13 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain("public OrderService(IOrderRepository repository)", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindImplementations_ForANonVirtualMember_AnswersZeroWithTheReason()
+    {
+        var text = await server.CallAsync("find_implementations", new() { ["symbol"] = "RestGateway.TryRoute" });
+
+        Assert.StartsWith("0 implementations", text, StringComparison.Ordinal);
+        Assert.Contains("TryRoute is not virtual, abstract or an interface member, so nothing can override it", text, StringComparison.Ordinal);
+    }
 }

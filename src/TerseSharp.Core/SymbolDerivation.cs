@@ -20,7 +20,7 @@ public static class SymbolDerivation
                 .ConfigureAwait(false));
         }
 
-        if (symbol is IMethodSymbol or IPropertySymbol or IEventSymbol)
+        if (symbol is IMethodSymbol or IPropertySymbol or IEventSymbol && CanBeOverridden(symbol))
         {
             found.AddRange(await SymbolFinder
                 .FindOverridesAsync(symbol, solution, cancellationToken: cancellationToken)
@@ -29,6 +29,10 @@ public static class SymbolDerivation
 
         return [.. found.Distinct<ISymbol>(SymbolEqualityComparer.Default)];
     }
+
+    public static bool CanBeOverridden(ISymbol member) =>
+        member is { IsSealed: false, ContainingType: { IsSealed: false, IsValueType: false } }
+            and ({ IsVirtual: true } or { IsAbstract: true } or { IsOverride: true });
 
     public static string WhyEmpty(ISymbol symbol) => symbol switch
     {

@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FindSymbols;
 
 namespace TerseSharp.Core;
 
@@ -69,17 +70,159 @@ public static class RefactorService
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
         var (document, node) = located.Value;
+
+        return symbol switch
+        {
+            INamedTypeSymbol { ContainingType: not null } nested when LiftRefusal(nested, targetNamespace) is { } refusal => Result.Fail<string>(refusal),
+            INamedTypeSymbol { ContainingType: not null } nested => await LiftAsync(workspace, nested, (MemberDeclarationSyntax)node, options, cancellationToken).ConfigureAwait(false),
+            _ => await RenameNamespaceAsync(workspace, document, targetNamespace, options, cancellationToken).ConfigureAwait(false),
+        };
+    }
+
+    private static async Task<Result<string>> RenameNamespaceAsync(
+            LoadedWorkspace workspace,
+            Document document,
+            string targetNamespace,
+            EditOptions options,
+            CancellationToken cancellationToken)
+    {
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
         var declaration = root?.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>().FirstOrDefault();
 
         if (root is null || declaration is null)
             return Result.Fail<string>(Errors.Invalid("the file has no namespace declaration", "add one first"));
 
-        var renamed = declaration.WithName(SyntaxFactory.ParseName(targetNamespace).WithTrailingTrivia(SyntaxFactory.Space));
+        var renamed = declaration.WithName(SyntaxFactory.ParseName(targetNamespace).WithTriviaFrom(declaration.Name));
         var updated = workspace.Solution.WithDocumentSyntaxRoot(document.Id, root.ReplaceNode(declaration, renamed));
 
         return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
     }
+
+    private static async Task<Result<string>> LiftAsync(
+        LoadedWorkspace workspace,
+        INamedTypeSymbol nested,
+        MemberDeclarationSyntax node,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var references = await SymbolFinder.FindReferencesAsync(nested, workspace.Solution, cancellationToken).ConfigureAwait(false);
+        var sites = references.SelectMany(reference => reference.Locations).Where(site => !site.IsImplicit).ToLookup(site => site.Document.Id);
+        var declaring = workspace.Solution.GetDocumentId(node.SyntaxTree)!;
+        var solution = await UnqualifiedAsync(workspace.Solution, sites, declaring, cancellationToken).ConfigureAwait(false);
+        var lifted = await LiftedDocumentAsync(solution, node, sites[declaring], NamespaceAccessibility(nested), cancellationToken).ConfigureAwait(false);
+        DocumentId[] changed = [.. sites.Select(site => site.Key).Append(declaring).Distinct()];
+
+        return await EditGate.ApplyAsync(workspace, lifted, changed, options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static TerseError? LiftRefusal(INamedTypeSymbol nested, string targetNamespace) => nested switch
+    {
+        { ContainingType.ContainingType: not null } => Errors.Invalid(nested.Name + " is nested more than one level deep", "lift " + nested.ContainingType.Name + " first, then call again"),
+        { ContainingType.IsGenericType: true } => Errors.Invalid(nested.ContainingType.Name + " is generic, so " + nested.Name + " can use its type parameters", "declare " + nested.Name + " at namespace level with add_member path= instead"),
+        { DeclaringSyntaxReferences.Length: > 1 } => Errors.Invalid(nested.Name + " is partial across several declarations", "merge them into one first"),
+        _ when targetNamespace.Length > 0 && !targetNamespace.Equals(nested.ContainingNamespace.ToDisplayString(), StringComparison.Ordinal) =>
+            Errors.Invalid(nested.Name + " is nested, so it is lifted into its own file's namespace " + nested.ContainingNamespace.ToDisplayString(), "pass targetNamespace=" + nested.ContainingNamespace.ToDisplayString() + " or omit it, then call again on the lifted type to move it"),
+        _ when !nested.ContainingNamespace.GetTypeMembers(nested.Name, nested.Arity).IsEmpty => Errors.Invalid(nested.ContainingNamespace.ToDisplayString() + " already declares " + nested.Name, "rename_symbol one of them first"),
+        _ => null,
+    };
+
+    private static async Task<Solution> UnqualifiedAsync(
+        Solution solution,
+        ILookup<DocumentId, ReferenceLocation> sites,
+        DocumentId declaring,
+        CancellationToken cancellationToken)
+    {
+        var updated = solution;
+
+        foreach (var site in sites.Where(site => !site.Key.Equals(declaring) && site.First().Document is not SourceGeneratedDocument))
+        {
+            var root = await site.First().Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+
+            if (root is not null)
+                updated = updated.WithDocumentSyntaxRoot(site.Key, root.ReplaceNodes(Qualified(root, site), (_, rewritten) => Unqualified(rewritten)));
+        }
+
+        return updated;
+    }
+
+    private static async Task<Solution> LiftedDocumentAsync(
+        Solution solution,
+        MemberDeclarationSyntax node,
+        IEnumerable<ReferenceLocation> sites,
+        SyntaxKind accessibility,
+        CancellationToken cancellationToken)
+    {
+        var root = await node.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
+        var id = solution.GetDocumentId(node.SyntaxTree)!;
+
+        return solution.WithDocumentSyntaxRoot(id, LiftedRoot(root, node, Qualified(root, sites), accessibility));
+    }
+
+    private static SyntaxNode LiftedRoot(SyntaxNode root, MemberDeclarationSyntax node, SyntaxNode[] qualified, SyntaxKind accessibility)
+    {
+        var moving = new SyntaxAnnotation();
+        var anchor = new SyntaxAnnotation();
+        var container = node.Parent!;
+        var column = node.SyntaxTree.GetLineSpan(node.Span).StartLinePosition.Character;
+        SyntaxNode[] targets = [.. qualified, node, container];
+        var marked = root.ReplaceNodes(targets, (original, rewritten) =>
+            original == node ? rewritten.WithAdditionalAnnotations(moving)
+            : original == container ? rewritten.WithAdditionalAnnotations(anchor)
+            : Unqualified(rewritten));
+        var moved = marked.GetAnnotatedNodes(moving).OfType<MemberDeclarationSyntax>().Single();
+        var trimmed = marked.RemoveNode(moved, SyntaxRemoveOptions.KeepNoTrivia)!;
+        var outer = trimmed.GetAnnotatedNodes(anchor).Single();
+
+        return trimmed.InsertNodesAfter(outer, [Dedented(Lifted(moved, accessibility, EndOfLine(outer)), column)]);
+    }
+
+    private static SyntaxNode[] Qualified(SyntaxNode root, IEnumerable<ReferenceLocation> sites) =>
+        [.. sites
+            .Select(site => root.FindNode(site.Location.SourceSpan, getInnermostNodeForTie: true))
+            .Select(name => name.Parent switch
+            {
+                QualifiedNameSyntax qualified when qualified.Right == name => (SyntaxNode)qualified,
+                MemberAccessExpressionSyntax access when access.Name == name => access,
+                _ => null,
+            })
+            .OfType<SyntaxNode>()];
+
+
+    private static SyntaxNode Unqualified(SyntaxNode qualified) => qualified switch
+    {
+        QualifiedNameSyntax { Left: QualifiedNameSyntax container } name => name.WithLeft(container.Left),
+        QualifiedNameSyntax name => name.Right.WithTriviaFrom(name),
+        MemberAccessExpressionSyntax { Expression: MemberAccessExpressionSyntax container } access => access.WithExpression(container.Expression),
+        MemberAccessExpressionSyntax access => access.Name.WithTriviaFrom(access),
+        _ => qualified,
+    };
+
+    private static MemberDeclarationSyntax Lifted(MemberDeclarationSyntax declaration, SyntaxKind accessibility, SyntaxTrivia endOfLine)
+    {
+        var comments = declaration.GetLeadingTrivia().SkipWhile(trivia => trivia.IsKind(SyntaxKind.WhitespaceTrivia) || trivia.IsKind(SyntaxKind.EndOfLineTrivia));
+        var modifiers = declaration.Modifiers
+            .Where(modifier => !IsNestedOnly(modifier.Kind()))
+            .Prepend(SyntaxFactory.Token(accessibility).WithTrailingTrivia(SyntaxFactory.Space));
+
+        return declaration.WithoutLeadingTrivia()
+            .WithModifiers(SyntaxFactory.TokenList(modifiers))
+            .WithLeadingTrivia(comments.Prepend(endOfLine));
+    }
+
+    private static SyntaxTrivia EndOfLine(SyntaxNode node) =>
+        node.GetLastToken().TrailingTrivia.FirstOrDefault(trivia => trivia.IsKind(SyntaxKind.EndOfLineTrivia)) is { RawKind: not 0 } found
+            ? found
+            : SyntaxFactory.ElasticCarriageReturnLineFeed;
+
+
+    private static bool IsNestedOnly(SyntaxKind modifier) =>
+        modifier is SyntaxKind.PrivateKeyword or SyntaxKind.ProtectedKeyword or SyntaxKind.InternalKeyword or SyntaxKind.PublicKeyword or SyntaxKind.NewKeyword;
+
+
+    private static SyntaxKind NamespaceAccessibility(INamedTypeSymbol nested) =>
+        (nested.DeclaredAccessibility, nested.ContainingType.DeclaredAccessibility) is (Accessibility.Public, Accessibility.Public)
+            ? SyntaxKind.PublicKeyword
+            : SyntaxKind.InternalKeyword;
 
     public static async Task<Result<string>> ChangeSignatureAsync(
         LoadedWorkspace workspace,
@@ -221,4 +364,19 @@ public static class RefactorService
 
     private static string Parameters(IMethodSymbol method) =>
         string.Join(", ", method.Parameters.Select(parameter => $"{parameter.Type.ToDisplayString()} {parameter.Name}"));
+
+    private static MemberDeclarationSyntax Dedented(MemberDeclarationSyntax declaration, int column)
+    {
+        if (column is 0 || SpansLines(declaration))
+            return declaration;
+
+        var text = declaration.ToFullString().Replace("\n" + new string(' ', column), "\n", StringComparison.Ordinal);
+
+        return SyntaxFactory.ParseMemberDeclaration(text) is { } parsed ? parsed : declaration;
+    }
+
+    private static bool SpansLines(MemberDeclarationSyntax declaration) =>
+        declaration.DescendantTokens().Any(token =>
+            token.Kind() is SyntaxKind.StringLiteralToken or SyntaxKind.MultiLineRawStringLiteralToken or SyntaxKind.InterpolatedStringTextToken
+            && token.Text.Contains('\n', StringComparison.Ordinal));
 }
