@@ -40,6 +40,7 @@ public static class FileService
             bool allowErrors,
             bool verbose,
             bool allowPolicy,
+            bool overwrite,
             CancellationToken cancellationToken)
     {
         var resolved = Writable(workspace, path, force);
@@ -53,7 +54,7 @@ public static class FileService
             return refusal;
 
         return PathBoundary.Contains(workspace.Root, full)
-            ? await InsideAsync(workspace, path, full, content, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false)
+            ? await InsideAsync(workspace, path, full, content, dryRun, allowErrors, verbose, allowPolicy, overwrite, cancellationToken).ConfigureAwait(false)
             : await OutsideWriteAsync(workspace, full, content, dryRun, verbose, cancellationToken).ConfigureAwait(false);
     }
 
@@ -1385,18 +1386,24 @@ public static class FileService
                 bool allowErrors,
                 bool verbose,
                 bool allowPolicy,
+                bool overwrite,
                 CancellationToken cancellationToken)
     {
         var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
+
+        if (!overwrite && ReplacedContent.Measure(before, after) is { Unrelated: true } overlap)
+            return Result.Fail<string>(ReplacedContent.Refusal(path, overlap));
+
         var dropped = DroppedDeclarations.Warning(path, before, after);
+        var quiet = !dryRun && !verbose;
 
         if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
-            return gated.IsOk ? Result.Ok(DroppedDeclarations.Warned(gated.Value!, dropped)) : gated;
+            return gated.IsOk ? Result.Ok(ReplacedContent.Marked(DroppedDeclarations.Warned(gated.Value!, dropped), before, after, quiet)) : gated;
 
         if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, dryRun, verbose), dropped));
+        return Result.Ok(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, dryRun, verbose), dropped), before, after, quiet));
     }
 
     private static async Task<Result<string>> OutsideWriteAsync(

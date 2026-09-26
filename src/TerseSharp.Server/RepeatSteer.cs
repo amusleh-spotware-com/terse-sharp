@@ -57,12 +57,27 @@ public static class RepeatSteer
         return result;
     };
 
-    private static readonly string[] PerEntryOnly = ["startLine", "endLine", "tail", "section"];
+    private static readonly FrozenDictionary<string, string[]> PerEntryOnly = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["read_text"] = ["startLine", "endLine", "tail", "section"],
+        ["write_text"] = ["delete", "recursive", "ref"],
+    }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static bool Unbatchable(CallToolRequestParams parameters, string tool) =>
-        string.Equals(tool, "read_text", StringComparison.Ordinal)
+        PerEntryOnly.TryGetValue(tool, out var names)
         && parameters.Arguments is { } arguments
-        && Array.Exists(PerEntryOnly, arguments.ContainsKey);
+        && Carries(arguments, names);
+
+    private static bool Carries(IDictionary<string, JsonElement> arguments, string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (arguments.TryGetValue(name, out var value) && value.ValueKind is not (JsonValueKind.False or JsonValueKind.Null))
+                return true;
+        }
+
+        return false;
+    }
 
     private static bool Batched(CallToolRequestParams parameters, string tool) =>
         Plural.TryGetValue(tool, out var plural)

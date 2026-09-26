@@ -124,11 +124,11 @@ bool verbose) =>
                 cancellationToken);
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 10 files in ONE call under ONE compile gate, so a type and the consumer it breaks land together and a rollback writes nothing at all. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token HOLDING the content, so the retry is that token plus usings= or allowErrors=true rather than the whole file again; one no project globs stays ungated. force=true also lets a SINGLE write land outside every workspace root. delete=true on an EMPTY DIRECTORY removes it, and recursive=true removes the whole tree instead - replacing a shell rm -r, refused when the tree holds a file this workspace compiles unless force=true. Missing directories are created, line endings are kept, and the next call sees the file with no reload.")]
+    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 10 files under ONE compile gate. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token holding the content; one no project globs stays ungated. force=true also lets a SINGLE write land outside every workspace root. delete=true removes a file or an EMPTY directory; recursive=true removes the tree - a shell rm -r - refused over a file this workspace compiles unless force=true. Replacing a file answers overwrote existing  <name>, and a write keeping under a quarter of its content lines is refused unless overwrite=true. Missing directories are created and line endings kept.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative. An absolute path outside every workspace root is written only with force=true.")] string? path = null,
         [Description("Full new content. Omit only with delete=true, ref= or retryWith=; an empty write needs allowEmpty=true.")] string? content = null,
-        [Description("Several files in one call, at most 10, each taking path, content and optionally its own force, so one C# file among markdown ones needs no second batch; the top-level force= covers every entry. Not with a top-level path, content, ref or delete=true.")] FileService.FileWrite[]? files = null,
+        [Description("Up to 10 files, each {path, content, force}; the top-level force= covers every entry. Not with a top-level path, content, ref or delete=true.")] FileService.FileWrite[]? files = null,
         [Description("Delete the file instead of writing it. Refused on a path outside the workspace root, and on a .cs file without force=true.")] bool delete = false,
         [Description("With delete=true on a DIRECTORY, remove it and everything under it. Refused when the tree holds a file this workspace compiles unless force=true. Default false.")] bool recursive = false,
         [Description("Git ref to restore the file's content from, e.g. HEAD. Not with content, files or delete; the restored write is gated like any other.")] string? @ref = null,
@@ -142,6 +142,7 @@ bool verbose) =>
         [Description(StaleHelp)] string? ifUnchangedSince = null,
         [Description("Token from a previous rejected write, e.g. r3, printed alone on the LAST line of the rejection. It holds the content, so the retry names the token instead of re-sending the file - add usings= for a CS0246 rollback, or allowErrors=true. A path or content you pass outranks the held one; a .cs replay still needs force=true.")] string? retryWith = null,
         [Description("Namespaces added to the content this retry replays, e.g. System.Collections.Immutable. Ignored without retryWith=.")] string[]? usings = null,
+        [Description("Replace a file even when this write keeps under a quarter of its content lines; force=true does not lift that refusal.")] bool overwrite = false,
         CancellationToken cancellationToken = default)
     {
         if (@ref is { Length: > 0 } && (delete || content is not null || files is { Length: > 0 }))
@@ -151,7 +152,7 @@ bool verbose) =>
                 "pass ref with path alone to restore, or content alone to write new text").Render());
         }
 
-        var options = new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince);
+        var options = new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince, overwrite);
 
         if (retryWith is { Length: > 0 } token)
             return Replayed(token, workspace, path, content, usings, options, cancellationToken);
@@ -184,12 +185,12 @@ bool verbose) =>
             ? await raced.ConfigureAwait(false)
             : EditTools.Carried(
                 await FileService.WriteTextAsync(
-                    loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false),
+                    loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false),
                 new EditTools.Carry("write_text", [path], [content], Usings: usings),
                 loaded.Root), cancellationToken: cancellationToken);
     }
 
-    private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null);
+    private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null, bool Overwrite = false);
 
     [McpServerTool(Name = "edit_text")]
     [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. With toPath=, section= MOVES the section into another markdown file, row=\"I286\" moves ONE table row, and rows= moves up to 25. edits=[{oldText,newText}, ...] applies several edits in one call. Replaces one call per edit and, with rows=, one per row: an entry may carry its own path to edit ANOTHER file, and one whose anchor fails is reported on its own line while the rest land. Line endings are normalized first, so a CRLF file accepts an LF oldText. A match that is not unique is refused naming the closest lines; occurrence=N picks the Nth and replaceAll=true replaces EVERY one in a single pass - up to 500 - so an anchor that deliberately repeats costs one call instead of N. On a .cs file force=true applies it as a plain text edit - any snippet, an attribute or a using block as much as a statement inside a body - and it is NOT compile-gated, so analyze after.")]
@@ -864,7 +865,7 @@ context.RejectWrite() is { } rejection
         }
 
         return NavigationTools.Unwrap(await FileService.WriteTextAsync(
-            loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false));
+            loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, overwrite: true, cancellationToken).ConfigureAwait(false));
     }
 
     private static async Task<string> RowMovedAsync(
@@ -1161,7 +1162,7 @@ context.RejectWrite() is { } rejection
 
         return Guarded(workspace, target, async loaded => EditTools.Elsewhere(held.Root, loaded.Root)
             ?? EditTools.Carried(
-                await FileService.WriteTextAsync(loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false),
+                await FileService.WriteTextAsync(loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false),
                 new EditTools.Carry("write_text", [target], [content], Usings: usings),
                 loaded.Root),
             cancellationToken: cancellationToken);

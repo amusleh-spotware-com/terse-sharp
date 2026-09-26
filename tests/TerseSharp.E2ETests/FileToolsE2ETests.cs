@@ -706,6 +706,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             {
                 ["path"] = "appsettings.json",
                 ["content"] = "{ \"damaged\": true }\n",
+                ["overwrite"] = true,
             });
 
             Assert.DoesNotContain("ERROR", damaged, StringComparison.Ordinal);
@@ -756,8 +757,9 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("write_text", new()
         {
             ["path"] = "src/Fixture.Trading/Fixture.Trading.csproj",
-            ["content"] = "&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;&lt;/Project&gt;\n",
-            ["dryRun"] = true,
+        ["content"] = "&lt;Project Sdk=&quot;Microsoft.NET.Sdk&quot;&gt;&lt;/Project&gt;\n",
+        ["overwrite"] = true,
+        ["dryRun"] = true,
         });
 
         Assert.Contains("WARNING", text, StringComparison.Ordinal);
@@ -2178,5 +2180,69 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("read_text", new() { ["path"] = "appsettings.json", ["lines"] = "40-2" });
 
         Assert.Contains("'lines' value '40-2' is not a line or a line range", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_OverAnExistingFileItKeepsAlmostNothingOf_IsRefusedUnlessOverwriteIsPassed()
+    {
+        const string Probe = "terse-overwrite-probe.md";
+        const string Original = "# Plan\n\nalpha step\nbeta step\ngamma step\ndelta step\n";
+        const string Unrelated = "# Plan\n\nsomething else entirely\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Original });
+        try
+        {
+            var refused = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Unrelated });
+            var kept = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+            var forced = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Unrelated, ["force"] = true });
+            var replaced = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Unrelated, ["overwrite"] = true });
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+            Assert.Contains("terse-overwrite-probe.md already exists and this write keeps 1 of its 5 content lines", refused, StringComparison.Ordinal);
+            Assert.Contains("overwrite=true", refused, StringComparison.Ordinal);
+            Assert.Contains("alpha step", kept, StringComparison.Ordinal);
+            Assert.StartsWith("ERROR InvalidArgument", forced, StringComparison.Ordinal);
+            Assert.StartsWith("overwrote existing  terse-overwrite-probe.md  changedLines=", replaced, StringComparison.Ordinal);
+            Assert.Contains("something else entirely", after, StringComparison.Ordinal);
+            Assert.DoesNotContain("alpha step", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_ReplacingAnExistingFile_SaysSoInItsOneLineAndCreatingOneDoesNot()
+    {
+        const string Probe = "terse-overwrite-marker-probe.md";
+
+        try
+        {
+            var created = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Notes\n\nfirst line\nsecond line\n" });
+            var replaced = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Notes\n\nfirst line\nsecond line changed\n" });
+
+            Assert.StartsWith("terse-overwrite-marker-probe.md  changedLines=", created, StringComparison.Ordinal);
+            Assert.StartsWith("overwrote existing  terse-overwrite-marker-probe.md  changedLines=1", replaced, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_ForcingACSharpFileOverAnUnrelatedOne_IsStillRefusedWithoutOverwrite()
+    {
+        const string Unrelated = "namespace Fixture.Trading;\n\npublic sealed class SomethingElse\n{\n    public int Value => 1;\n}\n";
+
+        var refused = await server.CallAsync("write_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["content"] = Unrelated, ["force"] = true, ["dryRun"] = true });
+        var previewed = await server.CallAsync("write_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["content"] = Unrelated, ["force"] = true, ["overwrite"] = true, ["dryRun"] = true });
+
+        Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.Contains("overwrite=true", refused, StringComparison.Ordinal);
+        Assert.DoesNotContain("already exists and this write keeps", previewed, StringComparison.Ordinal);
+        Assert.Contains("SomethingElse", previewed, StringComparison.Ordinal);
     }
 }

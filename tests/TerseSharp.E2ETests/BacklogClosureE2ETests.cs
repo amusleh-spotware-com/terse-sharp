@@ -2322,4 +2322,31 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             ? await server.CallAsync("write_text", arguments)
             : text;
     }
+
+    [Fact]
+    public async Task ARunOfWriteTextDeletesOrRestores_DrawsNoFilesSteerItCannotExpress()
+    {
+        const string First = "terse-steer-delete-probe-one.txt";
+        const string Second = "terse-steer-delete-probe-two.txt";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new object[]
+            {
+            new Dictionary<string, object> { ["path"] = First, ["content"] = "one\n" },
+            new Dictionary<string, object> { ["path"] = Second, ["content"] = "two\n" },
+            },
+        });
+
+        var firstDelete = await server.CallRawAsync("write_text", new() { ["path"] = First, ["delete"] = true });
+        var secondDelete = await server.CallRawAsync("write_text", new() { ["path"] = Second, ["delete"] = true });
+        var firstRestore = await server.CallRawAsync("write_text", new() { ["path"] = "notes.md", ["ref"] = "HEAD" });
+        var secondRestore = await server.CallRawAsync("write_text", new() { ["path"] = "appsettings.json", ["ref"] = "HEAD" });
+
+        Assert.DoesNotContain("ERROR", firstDelete, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", secondDelete, StringComparison.Ordinal);
+        Assert.DoesNotContain("calls in a row", secondDelete, StringComparison.Ordinal);
+        Assert.DoesNotContain("calls in a row", firstRestore, StringComparison.Ordinal);
+        Assert.DoesNotContain("calls in a row", secondRestore, StringComparison.Ordinal);
+    }
 }

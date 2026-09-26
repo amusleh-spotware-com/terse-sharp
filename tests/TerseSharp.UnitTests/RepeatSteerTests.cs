@@ -292,6 +292,27 @@ public sealed class RepeatSteerTests
 
         Assert.Null(RepeatSteer.Steer("get_symbol_source", value: "OrderService.Submit"));
     }
+
+    [Theory]
+    [InlineData("delete", "true", true)]
+    [InlineData("recursive", "true", true)]
+    [InlineData("ref", "\"HEAD\"", true)]
+    [InlineData("delete", "false", false)]
+    [InlineData("content", "\"x\"", false)]
+    public void Unbatchable_ForAWriteTheFilesEntriesCannotExpress_SuppressesTheRunSteer(string argument, string json, bool expected)
+    {
+        var parameters = new ModelContextProtocol.Protocol.CallToolRequestParams
+        {
+            Name = "write_text",
+            Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
+            {
+                ["path"] = System.Text.Json.JsonDocument.Parse("\"obj\"").RootElement,
+                [argument] = System.Text.Json.JsonDocument.Parse(json).RootElement,
+            },
+        };
+
+        Assert.Equal(expected, RepeatSteer.Unbatchable(parameters, "write_text"));
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

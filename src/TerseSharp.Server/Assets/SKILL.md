@@ -112,7 +112,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` already handles it — dedented payloads still match |
 | **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` |
 | **Edit text** | re-sending a whole file after a `CS0246` rollback | `write_text(retryWith: "r3", usings: ["System.Collections.Immutable"], force: true)` — the content is held |
-| **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` — compile-gated when a project compiles it |
+| **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` — compile-gated when a project compiles it; a write keeping under a quarter of the file's content lines is refused unless `overwrite: true`, which `force` does not lift |
 | **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` |
 | **Edit code** | a new body that calls a private helper you have not written yet | `replace_symbol(symbolId, declaration, add: [...])` |
 | **Edit code** | a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` — one compile-gated edit across files |
@@ -625,7 +625,7 @@ otherwise `pass paths=[...]`, naming the plural parameter that tool declares. It
 used the plural parameter, and the counter
 resets on any different tool, on a call whose argument the previous answer named or that follows an
 `ERROR` or timeout, and on a `read_text` carrying `startLine`, `endLine`, `tail` or `section`, which
-`paths=` cannot express per entry. A steer can only ride on a response, so the first call of a run is
+`paths=` cannot express per entry, or on a `write_text` carrying `delete`, `recursive` or `ref`, which a `files=` entry cannot express. A steer can only ride on a response, so the first call of a run is
 never steered: whenever the next two calls are the same tool and independent, send them as one.
 
 **A whole markdown read ends with its section map** - `sections=N - address one with read_text or
@@ -746,7 +746,7 @@ own header. `search_text` / `search_regex` take `paths=[...]` - up to 10 globs O
    `@@` hunk per change. You already know what you wrote, so the diff is not
    repeated back to you, and there is no `N files changed` line above it, because the lines are the
    count. `edit_text` and `write_text` print the **file name alone**, because you
-   passed the path in. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
+   passed the path in; a `write_text` over a file that already had content opens with `overwrote existing  `, so an overwrite you took for a create is visible without the diff. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
    there is a non-zero count or delta to report. Pass `verbose=true` on any edit, refactor,
    `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*`
    write to get the full unified diff. **`dryRun: true` is never condensed** — there the diff *is* the
