@@ -47,10 +47,10 @@ public static class RepeatSteer
             return result;
 
         if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
-            result.Content.Add(new TextContentBlock { Text = repeat });
+            TrailingNote.Append(result, repeat);
 
-        if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name)) is { } note)
-            result.Content.Add(new TextContentBlock { Text = note });
+        if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name), Mode(parameters)) is { } note)
+            TrailingNote.Append(result, note);
 
         Answered(result.Content is [TextContentBlock { Text: var answer }, ..] ? answer : string.Empty);
 
@@ -84,7 +84,7 @@ public static class RepeatSteer
         && parameters.Arguments is { } arguments
         && arguments.ContainsKey(plural);
 
-    public static string? Steer(string tool, bool batched = false, bool unbatchable = false, string? value = null)
+    public static string? Steer(string tool, bool batched = false, bool unbatchable = false, string? value = null, string mode = "")
     {
         if (unbatchable || batched)
         {
@@ -96,7 +96,7 @@ public static class RepeatSteer
         if (Dependent(value))
             Reset();
 
-        var (count, seen, captured) = Counted(tool, value);
+        var (count, seen, captured) = Counted(tool, value, mode);
 
         return Repeated(tool, count, seen, captured);
     }
@@ -124,11 +124,11 @@ public static class RepeatSteer
             previous = answer;
     }
 
-    private static (int Count, string[] Seen, int Captured) Counted(string tool, string? value)
+    private static (int Count, string[] Seen, int Captured) Counted(string tool, string? value, string mode)
     {
         lock (Gate)
         {
-            if (!string.Equals(last, tool, StringComparison.Ordinal))
+            if (!string.Equals(last, tool, StringComparison.Ordinal) || !string.Equals(lastMode, mode, StringComparison.Ordinal))
             {
                 run = 0;
                 captured = 0;
@@ -137,6 +137,7 @@ public static class RepeatSteer
 
             run++;
             last = tool;
+            lastMode = mode;
 
             if (value is { Length: > 0 })
             {
@@ -218,6 +219,7 @@ public static class RepeatSteer
         lock (Gate)
         {
             last = string.Empty;
+            lastMode = string.Empty;
             run = 0;
             captured = 0;
             previous = string.Empty;
@@ -263,4 +265,22 @@ public static class RepeatSteer
 
     private const int MinNamedLength = 4;
     private const int VerdictSpan = 400;
+    private static string lastMode = string.Empty;
+    private static readonly string[] CallWide = ["dryRun", "workspace", "allowErrors", "verbose"];
+
+    public static string Mode(CallToolRequestParams parameters)
+    {
+        if (parameters.Arguments is not { } arguments)
+            return string.Empty;
+
+        StringBuilder? mode = null;
+
+        foreach (var name in CallWide)
+        {
+            if (arguments.TryGetValue(name, out var value) && value.ValueKind is not (JsonValueKind.False or JsonValueKind.Null))
+                (mode ??= new StringBuilder()).Append(name).Append('=').Append(value.GetRawText()).Append(';');
+        }
+
+        return mode?.ToString() ?? string.Empty;
+    }
 }

@@ -1,4 +1,6 @@
 
+using ModelContextProtocol.Protocol;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -2351,5 +2353,37 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("calls in a row", secondDelete, StringComparison.Ordinal);
         Assert.DoesNotContain("calls in a row", firstRestore, StringComparison.Ordinal);
         Assert.DoesNotContain("calls in a row", secondRestore, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASteerAppendedAfterAPayload_StartsOnItsOwnLineWhenTheClientConcatenatesTheBlocks()
+    {
+        await server.CallAsync("workspace_status", []);
+        await server.CallRawAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs" });
+
+        var second = await server.Client.CallToolAsync(
+            "get_file_outline",
+            new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Order.cs" },
+            cancellationToken: TestContext.Current.CancellationToken);
+        var blocks = second.Content.OfType<TextContentBlock>().Select(block => block.Text).ToArray();
+        var concatenated = string.Concat(blocks);
+
+        Assert.True(blocks.Length >= 2, concatenated);
+        Assert.Contains("\n2 get_file_outline calls in a row - these are ONE call: paths=", concatenated, StringComparison.Ordinal);
+        Assert.All(
+            concatenated.Split('\n').Where(line => line.Contains("calls in a row", StringComparison.Ordinal)),
+            line => Assert.StartsWith("2 get_file_outline calls in a row", line, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TwoCallsThatDifferInACallWideArgument_DrawNoSteerClaimingTheyAreOneCall()
+    {
+        await server.CallAsync("workspace_status", []);
+        await server.CallRawAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs", ["verbose"] = true });
+
+        var second = await server.CallRawAsync("read_text", new() { ["path"] = "src/Fixture.Trading/Order.cs" });
+
+        Assert.DoesNotContain("calls in a row", second, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderSide.cs", second, StringComparison.Ordinal);
     }
 }
