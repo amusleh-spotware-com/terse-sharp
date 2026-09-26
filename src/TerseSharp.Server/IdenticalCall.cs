@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using ModelContextProtocol.Protocol;
 
 namespace TerseSharp.Server;
@@ -13,9 +14,14 @@ public static class IdenticalCall
     private static readonly Dictionary<string, Seen> Calls = new(StringComparer.Ordinal);
 
     public static string? Note(string tool, CallToolRequestParams parameters, CallToolResult result) =>
-        Watched.Contains(tool)
+        Watched.Contains(tool) && !IsStatusRead(parameters)
             ? Record(tool, Key(tool, parameters), Verdict(result), Stopwatch.GetTimestamp(), EditPulse.Changed)
             : null;
+
+    private static bool IsStatusRead(CallToolRequestParams parameters) =>
+        parameters.Arguments is { } arguments
+        && arguments.TryGetValue("status", out var status)
+        && status.ValueKind is JsonValueKind.String;
 
     internal static string? Record(string tool, string key, string verdict, long timestamp, int pulse)
     {

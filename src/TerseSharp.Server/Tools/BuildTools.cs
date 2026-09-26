@@ -7,7 +7,7 @@ using ModelContextProtocol.Server;
 namespace TerseSharp.Server.Tools;
 
 [McpServerToolType]
-public sealed class BuildTools(ToolContext context, LastTestRun lastRun, UnchangedRun unchanged)
+public sealed class BuildTools(ToolContext context, LastTestRun lastRun, UnchangedRun unchanged, DetachedRuns detached)
 {
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
@@ -71,15 +71,15 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a call that already answered GREEN with nothing written since is not re-run: it answers run_tests UNCHANGED naming the previous verdict and its age, and force=true re-runs it anyway. A stopped run names the test still running. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict line, a per-project timeout, each built up front then run with --no-build, and a project that times out is named without stopping the rest. tests=[...] runs several tests, classes or namespaces in ONE call. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a call that already answered GREEN with nothing written since is not re-run: it answers run_tests UNCHANGED naming the previous verdict and its age, and force=true re-runs it anyway. A stopped run names the test still running. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict, a per-project timeout, built once then run with --no-build. tests=[...] runs several tests, classes or namespaces in ONE call. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. detach=true runs in the background and answers an id; status=<id> reads it.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test. Microsoft.Testing.Platform takes FullyQualifiedName only; anything else is refused naming test=.")] string? filter = null,
         [Description("Project path; empty runs every test project.")] string? project = null,
         [Description("Several test projects in one call, at most 10, each a name or a path to its .csproj, run concurrently under parallel. Not with project=.")] string?[]? projects = null,
-        [Description("Run only the test projects that transitively reference a project changed since the workspace loaded; falls back to the whole solution naming the reason. Ignored with project=. Default false.")] bool changed = false,
+        [Description("Run only the test projects that reference a project changed since the load; falls back to the whole solution, naming why. Ignored with project=.")] bool changed = false,
         [Description("How many projects of a batch run at once, 0-10. 0 is one per core, 1 is serial and stops at the first timeout.")] int parallel = 0,
-        [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] - parallelism INSIDE one assembly, which parallel does not touch. Refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
+        [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] Refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
         [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
@@ -91,64 +91,73 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter. A blank entry is refused by index; not with filter.")] string?[]? tests = null,
         [Description("Run even when this exact call already answered green and nothing has been written since. Default false.")] bool force = false,
-    CancellationToken cancellationToken = default) => Replayable(
-    "run_tests",
-    GreenVerdict,
-    Key(
-        "run_tests",
-            [test, Joined(tests), filter, project, Joined(projects), Flag(changed), Count(parallel), Joined(runSettings), configuration, targetFramework, Joined(properties), Flag(noBuild), Flag(includePassed), Count(slowest), Flag(verbose), Count(timeoutSeconds), workspace]),
-        force,
-        WatchedRun.From(() => context.WithTargetAsync(
-            workspace,
-            project,
-            target =>
-            {
-                if (SelfBuilt(target, !noBuild && projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
-                    return Task.FromResult(refused);
+        [Description("Run in the background and answer an id at once; it still holds the solution.")] bool detach = false,
+        [Description("Id detach=true answered: RUNNING with its age, or the verdict.")] string? status = null,
+        CancellationToken cancellationToken = default)
+    {
+        return status is { Length: > 0 }
+            ? detached.StatusAsync(status)
+            : detach ? Task.FromResult(detached.Start(Run)) : Run(cancellationToken);
 
-                var selection = Selection(test, tests, filter);
-
-                if (!selection.IsOk)
-                    return Task.FromResult(selection.Error!.Render());
-
-                var scope = Scoped(configuration, targetFramework, properties);
-
-                if (!scope.IsOk)
-                    return Task.FromResult(scope.Error!.Render());
-
-                var degree = Parallelism(parallel);
-
-                if (!degree.IsOk)
-                    return Task.FromResult(degree.Error!.Render());
-
-                var settings = Overrides(runSettings);
-
-                if (!settings.IsOk)
-                    return Task.FromResult(settings.Error!.Render());
-
-                return TestedAsync(
-                    target,
-                    project,
-                    projects,
-                    new TestRunRequest(
-                        target.SolutionPath,
-                        selection.Value,
-                        noBuild,
-                        includePassed,
-                        slowest,
-                        Seconds(timeoutSeconds),
-                        verbose,
-                        scope.Value,
-                        Parallel: degree.Value,
-                        RunSettings: settings.Value),
-                    changed,
-                    cancellationToken);
-            },
-            changed && WholeSolution(project, projects),
-            WholeSolution(project, projects),
+        Task<string> Run(CancellationToken token) => Replayable(
             "run_tests",
-            cancellationToken), Roots),
-        cancellationToken);
+            GreenVerdict,
+            Key(
+                "run_tests",
+                [test, Joined(tests), filter, project, Joined(projects), Flag(changed), Count(parallel), Joined(runSettings), configuration, targetFramework, Joined(properties), Flag(noBuild), Flag(includePassed), Count(slowest), Flag(verbose), Count(timeoutSeconds), workspace]),
+            force,
+            WatchedRun.From(() => context.WithTargetAsync(
+                workspace,
+                project,
+                target =>
+                {
+                    if (SelfBuilt(target, !noBuild && projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
+                        return Task.FromResult(refused);
+
+                    var selection = Selection(test, tests, filter);
+
+                    if (!selection.IsOk)
+                        return Task.FromResult(selection.Error!.Render());
+
+                    var scope = Scoped(configuration, targetFramework, properties);
+
+                    if (!scope.IsOk)
+                        return Task.FromResult(scope.Error!.Render());
+
+                    var degree = Parallelism(parallel);
+
+                    if (!degree.IsOk)
+                        return Task.FromResult(degree.Error!.Render());
+
+                    var settings = Overrides(runSettings);
+
+                    if (!settings.IsOk)
+                        return Task.FromResult(settings.Error!.Render());
+
+                    return TestedAsync(
+                        target,
+                        project,
+                        projects,
+                        new TestRunRequest(
+                            target.SolutionPath,
+                            selection.Value,
+                            noBuild,
+                            includePassed,
+                            slowest,
+                            Seconds(timeoutSeconds),
+                            verbose,
+                            scope.Value,
+                            Parallel: degree.Value,
+                            RunSettings: settings.Value),
+                        changed,
+                        token);
+                },
+                changed && WholeSolution(project, projects),
+                WholeSolution(project, projects),
+                "run_tests",
+                token), Roots),
+            token);
+    }
 
     [McpServerTool(Name = "rerun_failed")]
     [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. tests=[...] and exclude=[...] filter that remembered list instead of replaying it whole, which is how a red round whose expectations the same edit already re-pointed is re-verified selectively; a filtered re-run always ends by naming how many remembered failures it did NOT run. It always runs: it is never answered from the unchanged-run memo, because no argument of the call names the failure list it replays. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]

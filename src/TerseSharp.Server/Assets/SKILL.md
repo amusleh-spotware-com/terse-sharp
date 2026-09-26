@@ -112,7 +112,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` already handles it — dedented payloads still match |
 | **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` |
 | **Edit text** | re-sending a whole file after a `CS0246` rollback | `write_text(retryWith: "r3", usings: ["System.Collections.Immutable"], force: true)` — the content is held |
-| **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` — compile-gated when a project compiles it; a write keeping under a quarter of the file's content lines is refused unless `overwrite: true`, which `force` does not lift |
+| **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` — compile-gated when a project compiles it; replacing an unrelated file needs `overwrite: true` |
 | **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` |
 | **Edit code** | a new body that calls a private helper you have not written yet | `replace_symbol(symbolId, declaration, add: [...])` |
 | **Edit code** | a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` — one compile-gated edit across files |
@@ -120,7 +120,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` |
 | **Edit code** | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` |
 | **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"`; the anchor takes any spelling of the parameter list |
-| **Edit code** | removing several members, e.g. after extracting them into a new file | `delete_symbol(symbolIds: [...])` — ONE compile-gated edit; a reference inside another removed member does not block it |
+| **Edit code** | removing several members | `delete_symbol(symbolIds: [...])` — one gated edit |
 | **Edit code** | an interface member and every implementation | `add_member(typeSymbolIds: [...], declarations: [...])` — ONE compile-gated edit |
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
@@ -147,6 +147,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` |
 | **Build and test** | `Bash: dotnet test` / `vstest` | `run_tests` |
 | **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` — concurrent, per-project timeout |
+| **Build and test** | a run past the client's foreground limit, then a poll | `run_tests(detach: true)`, then `run_tests(status: "<id>")` |
 | **Build and test** | bounding parallelism **inside** one test assembly | `run_tests(runSettings: ["xUnit.MaxParallelThreads=1"])` |
 | **Build and test** | re-running what broke | `rerun_failed` |
 | **Build and test** | re-verifying SOME of what broke | `rerun_failed(tests: [...], exclude: [...])` |
@@ -215,7 +216,7 @@ one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
 
-**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes/hooks.md` - is allowed; `~/` and `$HOME` are expanded to your profile. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs, and so does `gh run view 1 --log-failed | grep "Failed OrderServiceTests.cs"` - a pattern is not an operand. A `2>&1` no longer forces a whole-command refusal, a `$( )` no longer shadows the real command, and a denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
+**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md` - is allowed. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs - a piped pattern is not an operand. A `2>&1` no longer forces a whole-command refusal, a `$( )` no longer shadows the real command, and a denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
 
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
 denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
@@ -223,7 +224,7 @@ denial is not a reason to try a different spelling of the same shell command —
 **The denial also hands you the answer**: a system reminder beside the tool result reads
 `Call this instead: <the complete call, with the arguments already filled in from what you tried>`.
 Run that call verbatim; it is chosen from the file kind, so a `.xaml` read routes to `xaml_outline`
-and a `.resx` read to `resx_get`, not to `get_file_outline`. The same install adds a `PostToolBatch` hook: after a response that carried ONE read-only terse call, a reminder asks you to request every independent call in one response - do it, that round trip is what it exists to delete.
+and a `.resx` read to `resx_get`, not to `get_file_outline`. A `PostToolBatch` hook reminds you, after a lone read-only terse call, to batch independent calls.
 
 `dotnet format` and `dotnet clean` are covered too, with the **exact** replacement per sub-command:
 `dotnet format analyzers` -> `cleanup fix=analyzers` (add `verify=true` for `--verify-no-changes`),
@@ -329,7 +330,7 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 `compilations=realized in Nms (once per load, not per call)` — a one-off, measured at about 7 s on a
 300-document solution, not the per-call cost of the tool that happened to pay it.
 **A workspace nobody has used for 15 minutes gives its compilations back** (`--idle-minutes`,
-`TERSE_IDLE_MINUTES`, `0` to disable), and past 60 % of the memory the GC may use (never below 2 GB) of heap so does every OTHER workspace idle a minute;
+`TERSE_IDLE_MINUTES`, `0` to disable), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
 what it needs for a second or two. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
@@ -337,7 +338,7 @@ be invisible to `find_usages` with every gate green; whatever was chosen is prin
 `targetFramework=`.
 Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory
 really does come back; it costs about a second, which is why it happens only when a workspace is
-genuinely dropped and why the unload-and-retry `build`/`run_tests` perform on a locked output skips it. That unload-and-retry is itself skipped when every holder MSBuild names is a live process other than this server and any MSBuild host it may have spawned (a test host, an IDE, another session), because unloading cannot release those locks: the answer then says `the workspace was NOT unloaded`, lists the holders, and the loaded compilations stay warm.
+genuinely dropped and why the unload-and-retry `build`/`run_tests` perform on a locked output skips it. It is skipped - `the workspace was NOT unloaded` - when every named holder is another live process, since unloading cannot release it.
 
 **The analyzers a solution builds from source
 no longer block your own build**: every analyzer and source-generator assembly is loaded from a
@@ -468,7 +469,7 @@ clean verdict is never a gate that ran over nothing; a scope matching no documen
 naming it instead of a verdict. It condenses to that single line
 only when every step was genuinely quiet, so a `VERIFY_FAILED`, an `UNFIXED`, a rolled-back step or a
 file the run rewrote is always shown. Under `dryRun=true` a tree that **would** change answers
-`FAILED`, which is what a pre-push check is for. Under `baseRef=` the format and cleanup steps write only the files the working tree changed against that ref, so a glob `path=` never reformats a file outside the change set. **Over its changed-file default `gate` is `baseRef=HEAD` on a git tree**: it reports only the findings on lines this task changed and ends the verdict `preExisting=N` for what it folded; `baseRef=""` reports every finding in the changed files. `gate paths=[...]` gates several files, directories or globs as ONE verdict over their union; an entry matching no document is refused by name. `dryRun=true` makes both write steps verify instead of write, so
+`FAILED`, which is what a pre-push check is for. Under `baseRef=` it writes only files the tree changed. **Its changed-file default is `baseRef=HEAD`** on a git tree, ending `preExisting=N`; `baseRef=""` lists every finding. `paths=[...]` gates several scopes as ONE verdict. `dryRun=true` makes both write steps verify instead of write, so
 nothing is modified; `verbose=true` adds each step's own report. It never replaces reading `build`
 before `run_tests`: those two stay separate on purpose, because a test result read before its build is
 the previous binary's.
@@ -570,18 +571,14 @@ parameter the tool does not declare; one passed without `add=` is refused.
 saying `5 of 12 shown` when there are more, so learning *which* three no longer costs an `analyze`. **A NESTED TYPE's container is its declaring type**, so `symbolIds=["Outer.Nested", "Outer.Sibling"]
 with `add=` lands the members in `Outer` instead of being refused.
 **`replace_symbol add=` takes `addTo=`** when the targets do not share one containing
-type, or when the new members belong in a type the batch does not touch: it names **any type in the
-workspace**, resolved as `add_member`'s `typeSymbolId` is, so an interface member lands beside the
-implementations that satisfy it as ONE compile-gated edit - `symbolIds=["Impl.Count", "Stub.Count"]
-add=["int Capacity { get; }"] addTo="IRepository"`. A bare leaf name that matches two of the targets'
-containers is refused naming both qualified names rather than resolved to the first, and a name that
-resolves to no type is refused as `addTo=X names no type add= can land in`. **`addTo=` is comma-separated**,
+type, or names **any other workspace type**, so an interface member lands beside its implementations
+as ONE compile-gated edit; a leaf name two targets' containers share is refused naming both. **`addTo=` is comma-separated**,
 paired with `add=`: `add=[a, b] addTo="Alpha,Beta"` puts `a` in `Alpha` and `b` in `Beta`. One name
 takes every entry; any other count is refused.
 
 **`add_member` and `replace_symbol` accept several declarations in one call**, applied as a single
 compile-gated edit — so a set of members that reference each other needs no dependency ordering, and
-`replace_symbol` can split a member into overloads. A parameter list sent with only its whitespace changed keeps the file's own layout, so re-typing a signature costs no collateral diff. `add_member` also takes `declarations=[...]`. On a member that is already expression-bodied,
+`replace_symbol` can split a member into overloads. A whitespace-only parameter-list difference keeps the file's layout. `add_member` also takes `declarations=[...]`. On a member that is already expression-bodied,
 `replace_symbol_body` accepts a bare expression as well as `=> expr` and a statement block.
 
 **`usings=` lands the import in the same edit, and is the first thing all three descriptions name.**
@@ -589,8 +586,8 @@ compile-gated edit — so a set of members that reference each other needs no de
 `add_member` take `usings: ["System.Collections.Immutable"]`, added to the file's using block —
 sorted System-first, one already present ignored — inside the **same** compile-gated write as the
 declaration. That is the answer to a `CS0246` rollback: pass the namespace instead of paying a
-rejected edit, an `edit_text force=true` on the file header and a `retryWith`. Across a multi-file
-batch each entry lands only in the files whose new code needs it; one no file needs lands everywhere.
+rejected edit, an `edit_text force=true` on the file header and a `retryWith`. A multi-file batch lands
+each entry only where it is needed.
 
 **`replace_symbol` also edits several files as one compile-gated edit.** Pass `symbolIds` and
 `declarations` — one declaration per symbol, paired positionally, at most 20, and more than one entry
@@ -617,16 +614,11 @@ the signature, the usage counts split src/test, the implementations, the XAML si
 used in; `find_usages(symbolId, impact: true)` answers the blast radius of changing it, and `tests: true`
 beside it names the test classes as ready `run_tests test=` arguments.
 
-**When the second consecutive call of one tool lands, the response gains one line - once per run, not
-on every call after it** —
-`2 read_text calls in a row - these are ONE call: paths=["src/A.cs", "src/B.cs"]` — the run's own
-DISTINCT arguments, already filled in, whenever every call of the run carried a short identifier one;
-otherwise `pass paths=[...]`, naming the plural parameter that tool declares. It is framing, never payload, it says nothing when the call already
-used the plural parameter, and the counter
-resets on any different tool, on a call whose argument the previous answer named or that follows an
-`ERROR` or timeout, and on a `read_text` carrying `startLine`, `endLine`, `tail` or `section`, which
-`paths=` cannot express per entry, or on a `write_text` carrying `delete`, `recursive` or `ref`, which a `files=` entry cannot express. A steer can only ride on a response, so the first call of a run is
-never steered: whenever the next two calls are the same tool and independent, send them as one.
+**The second consecutive call of one tool gains one line, once per run** - `2 read_text calls in a
+row - these are ONE call: paths=["src/A.cs", "src/B.cs"]`, the run's own arguments filled in. It is
+framing, never payload; the run resets on a different tool, after an `ERROR`, and on a call the plural
+cannot express per entry (`read_text` with a line range or `section`, `write_text` with `delete`,
+`recursive` or `ref`).
 
 **A whole markdown read ends with its section map** - `sections=N - address one with read_text or
 edit_text section="..."`, naming up to six of them - so the anchor a `read_text` was paid for is
@@ -679,11 +671,10 @@ directly in `.claude` are not: a session rewrites `settings.local.json` constant
 **A `.cs` file returned verbatim ends with `symbolIds=[...]`** when the read covered the whole file and
 it has at most ten members, so the *next* read is member-scoped. A line-ranged read gets nothing.
 
-**A markdown file over 8 000 characters asked for whole answers its SECTION MAP plus a steer**, not its text - a whole `.md` read averages 5 699 characters against 3 278 for a `.cs` path - and `verbose=true`, a line range, `ranges=`, `tail=`, `section=` or `columns=` opt back into the text.
+**A markdown file over 8 000 characters asked for whole answers its SECTION MAP plus a steer**, not its text - and `verbose=true`, a line range, `ranges=`, `tail=`, `section=` or `columns=` opt back into the text.
 
 **`read_text` on a `.cs` path asked for whole answers the outline, not the text** — no `startLine`,
-`endLine`, `tail`, `section` or `verbose`. Whole-file `.cs` reads were 71 % of everything this tool
-has ever returned and an outline is a third of the tokens. A `.cs` file that is not a document of this
+`endLine`, `tail`, `section` or `verbose`. An outline is a third of the tokens. A `.cs` file that is not a document of this
 workspace is read as text unchanged. `read_text` also accepts an **absolute path outside every
 workspace root**, tagged `outside-workspace`, so comparing a file against another repo needs no second
 `load_workspace` and no `workspace=` even with several loaded; every writer still refuses to leave the
@@ -692,12 +683,9 @@ default is set so a whole-file read stays inline in your client rather than bein
 that answers nothing, and the clip always names `next: startLine=`. A file whose bytes open with a
 Unicode byte order mark - UTF-16 LE or BE, UTF-32, UTF-8 - is decoded and served, not refused as
 binary, and a write back to it keeps that encoding; only a file carrying a real NUL code unit is
-refused. A file another process holds open for writing (a live log, a build output) is read, not
-refused; only a handle that shares no read access answers `ERROR FileLocked`, and no `read_text`
-argument changes that - `find_files stamps=true` still gives its size and last-write time.
-`read_text lines="40-200"` (or `"42"`) is the one-value spelling of `startLine`/`endLine`.
-`find_files root=` lists any absolute directory and `globs=` batches there too, each glob under its
-own header. `search_text` / `search_regex` take `paths=[...]` - up to 10 globs OR-ed into one file set.
+refused. A file another process holds open for writing is read; only a handle sharing no read access
+answers `ERROR FileLocked`. `lines="40-200"` is `startLine`/`endLine` as one value; `find_files
+root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-ed into one file set.
 
 ## Working rules
 
@@ -771,7 +759,7 @@ own header. `search_text` / `search_regex` take `paths=[...]` - up to 10 globs O
    does **not** cover emit-time or source-generator errors, so `build` is worth one call **before you
    push, not after every edit**; the first *applied* gated edit of a process says so once as
    `gate=semantic …`.
-   An edit introducing a new compile error is rolled back and the error returned. **One exception, by design:** a `CS0246`/`CS0234` name that a NEW file, or a project that already fails on it, does not resolve lands and answers `UNRESOLVED N name(s) ... the edit was applied, not rolled back` (`would be applied` on a `dryRun`) - a new test file's `Mock<>` is what it exists for. Any other error in a new file is rolled back and nothing is written. `allowErrors: true` opts out — use it only mid-refactor on purpose.
+   An edit introducing a new compile error is rolled back and the error returned. **One exception:** a `CS0246`/`CS0234` a NEW file cannot resolve lands as `UNRESOLVED` (`would be applied` on a `dryRun`); any other error in a new file is rolled back. `allowErrors: true` opts out — use it only mid-refactor on purpose.
    **A rollback keeps your text**: the error ends `retryWith=r3`; `replace_symbol`,
    `replace_symbol_body` and `add_member` take the token to replay what was rejected - after adding the
    missing callee, or with `allowErrors: true` - and the last 8 are held. A corrected
@@ -888,34 +876,10 @@ own header. `search_text` / `search_regex` take `paths=[...]` - up to 10 globs O
     `terse serve` rewrites the installed `SKILL.md` and the `terse guard` hook to match the new binary,
     so the skill you are reading always describes the binary you are talking to.
 
-14. **Independent calls go in one message.** Before every message that will carry a tool call, answer
-    one question: *is there another call I already know I need, whose arguments do NOT depend on this
-    one's result?* If yes, put them in the SAME message. Several `tool_use` blocks in one assistant
-    message run concurrently; one call per message pays a **6 136 ms** model gap each, and that gap is
-    dead loop no server change can shorten.
-
-    ```
-    GOOD - one message, three tool_use blocks, none depends on another:
-      changed_files
-      workspace_status
-      read_text path="CHANGELOG.md" section="## [Unreleased]"
-
-    GOOD - one message, two blocks, different targets:
-      search_text query="OrderId" glob="src/**/*.cs"
-      get_file_outline path="src/Trading/OrderService.cs"
-
-    BAD - three messages, three gaps, ~18 s of dead loop:
-      read_text path="a.md"  ->  read_text path="b.md"  ->  read_text path="c.md"
-    GOOD - one call:
-      read_text paths=["a.md", "b.md", "c.md"]
-    ```
-
-    **The one exception: when a call needs a value a previous call returns** — a symbol id from an
-    outline, a path from `changed_files`, a `retryWith` token from a rollback — call them
-    sequentially, and **never guess a parameter to make a call parallel**. In that same fortnight
-    **13 820** calls sat in runs of three or more of the same tool - each one a `paths=`/`edits=`/`files=`
-    batch not used, or a parallel message not sent. The argument you SEND costs too: a run of writes
-    re-sends its whole argument frame, and the four writers sent **19% of all tool output** that way.
+14. **Independent calls go in one message** - several `tool_use` blocks in one message run
+    concurrently (the hard gate above has the numbers); only a call that needs a value another returns
+    - a symbol id, a path, a `retryWith` token - waits, and a parameter is never guessed to make a call
+    parallel. Three calls of one tool in a row are a `paths=`/`edits=`/`files=` batch not sent.
 15. **A subagent does not inherit this skill — the brief carries it, or the delegate greps.** A spawn
     aimed at this workspace carries, inline: the mandate and ban list above, the workspace name, **the
     `changed_files` output and the `diff_symbols` ids as its scope**, and a call ceiling. A delegate
@@ -976,7 +940,7 @@ declaration kind, `async void`, condition operands, chained references (off by d
 and **comments (`TERSE112`) and XML doc comments (`TERSE113`), the two rules that are ON at `warn` with
 no `.terse.json` at all**. `TERSE112` never flags a `///` block and `TERSE113` never flags a `//` one.
 Each is `reject`, `warn` or `off` and every one DEFAULTS to `warn`, so a rule only refuses an edit
-where a `.terse.json` asked it to; a `warn` rule lets the edit land and answers `WARNING policy  ...` above the one-line-per-file success - a policy warning, overridden or not, is payload, not a caveat, so the diff stays behind `verbose=true`; a `.terse.json` that could not be read still prints in full.
+where a `.terse.json` asked it to; a `warn` rule lets the edit land and answers `WARNING policy  ...` above the one-line success; the diff stays behind `verbose=true`.
 Cognitive complexity is a **percentage of a threshold** - default `150`% of `10`, so a score above 15
 fails: `cognitive complexity 21 (210% of threshold 10) exceeds 150% (15)`.
 
@@ -1234,13 +1198,13 @@ a `Type.Member` whose member name saturates is resolved through the members of t
 answers `SymbolNotFound` listing its members instead of a saturation count; `OutOfWorkspace` means the path
 escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
 no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
-parameter means the argument names were wrong, and the remedy lists the ones the tool declares - though a spelling carried over from a sibling tool or from `Grep` binds instead: `typeName` (get_type_outline), `name` (load_workspace), `code`/`content` (add_member, replace_symbol), `contains` (list_projects), `-A`/`-B`/`-C` and `output_mode` (search_text, search_regex), unless the canonical parameter is passed too; an
+parameter means the argument names were wrong, and the remedy lists the ones the tool declares - though a sibling's or `Grep`'s spelling (`typeName`, `name`, `code`, `contains`, `-C`, `output_mode`) binds to its canonical parameter; an
 `InvalidArgument` carrying a `JsonException` also names the **array** parameter it could not convert
 and quotes the ~80 characters around the offending byte, so a 9 000-character `declarations=` is
 located without re-sending it - and a declaration that reaches the parser and fails there is answered
 the same way, `at offset 27 of 28: public int Unused() => 7 + ;`, prefixed with `declarations[1]:`
 when the call was batched;
-`RunInFlight` means this process is ALREADY running a build or test call for that solution - read that run's answer instead of starting a second one, which could only fail on its file locks; `ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
+`RunInFlight` means this process is ALREADY running a build or test call for that solution (a detached run included) - read that run's answer instead of starting a second one, which could only fail on its file locks; `ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
 host dropped the call - the project file was restored, a file the edit was adding may already be on
 disk, and the answer is to retry the same call rather than to report a defect.
 

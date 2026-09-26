@@ -345,4 +345,85 @@ public sealed class ChangedTestSelectionE2ETests
             await server.StopAsync();
         }
     }
+
+    private const string DetachedPrefix = "run_tests DETACHED id=";
+
+    private static string Id(string started) => started[DetachedPrefix.Length..started.IndexOf('\n', StringComparison.Ordinal)];
+
+    private static async Task<string> FinishedAsync(TerseServerProcess server, string id)
+    {
+        for (var attempt = 0; attempt < 600; attempt++)
+        {
+            var text = await CallAsync(server, "run_tests", new() { ["status"] = id });
+
+            if (!text.StartsWith("run_tests RUNNING", StringComparison.Ordinal))
+                return text;
+
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+        }
+
+        return "the detached run " + id + " was still RUNNING after 300 s";
+    }
+
+    [Fact]
+    public async Task RunTests_Detached_AnswersAnIdAtOnce_AndStatusReturnsTheFinishedVerdict()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var started = await CallAsync(server, "run_tests", new() { ["projects"] = new[] { "Selection.Core.Tests" }, ["detach"] = true });
+
+            Assert.StartsWith(DetachedPrefix, started, StringComparison.Ordinal);
+            Assert.StartsWith("run_tests PASSED", await FinishedAsync(server, Id(started)), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RunTests_StatusOfADetachedRunStillBuilding_AnswersRunningAndItsAge()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var started = await CallAsync(server, "run_tests", new()
+            {
+                ["projects"] = new[] { "Selection.Core.Tests" },
+                ["timeoutSeconds"] = 10,
+                ["properties"] = new[] { "TerseStallBuild=true" },
+                ["detach"] = true,
+            });
+            var id = Id(started);
+
+            Assert.StartsWith("run_tests RUNNING id=" + id + " ", await CallAsync(server, "run_tests", new() { ["status"] = id }), StringComparison.Ordinal);
+            Assert.DoesNotContain("run_tests RUNNING", await FinishedAsync(server, id), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RunTests_StatusOfAnUnknownId_IsRefusedWithARemedy()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var text = await CallAsync(server, "run_tests", new() { ["status"] = "t999" });
+
+            Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+            Assert.Contains("'t999'", text, StringComparison.Ordinal);
+            Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }
