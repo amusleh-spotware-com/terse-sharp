@@ -269,11 +269,29 @@ public static class ClientRegistrar
     private static JsonObject Guarded(JsonObject root)
     {
         var updated = (JsonObject)root.DeepClone();
+        var hooks = Hooks(updated);
 
-        Hooks(updated)["PreToolUse"] = GuardMatchers(Hooks(updated)["PreToolUse"] as JsonArray);
+        hooks["PreToolUse"] = GuardMatchers(hooks["PreToolUse"] as JsonArray);
+        hooks["PostToolBatch"] = BatchMatchers(hooks["PostToolBatch"] as JsonArray);
 
         return updated;
     }
+
+    private static JsonArray BatchMatchers(JsonArray? existing)
+    {
+        var kept = existing?.Select(Without).OfType<JsonNode>() ?? [];
+
+        return [.. kept, BatchEntry()];
+    }
+
+    private static JsonObject BatchEntry() => new()
+    {
+        ["hooks"] = new JsonArray(new JsonObject
+        {
+            ["type"] = "command",
+            ["command"] = "terse guard --post-batch",
+        }),
+    };
 
     private static JsonObject Settings(string path) => (File.Exists(path) ? Parse(path) : null) ?? [];
 

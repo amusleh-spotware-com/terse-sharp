@@ -479,4 +479,15 @@ public sealed class WorkspaceRegistryTests
         Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromMinutes(1), long.MaxValue));
         Assert.Equal(1, workspace.Drops);
     }
+
+    [Fact]
+    public void PressureBytes_OnThisMachine_IsSixtyPercentOfWhatTheGcMayUse() =>
+        Assert.Equal(Math.Max(2L << 30, GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 5 * 3), WorkspaceRegistry.PressureBytes);
+
+    [Theory]
+    [InlineData(0L, 2147483648L)]
+    [InlineData(1073741824L, 2147483648L)]
+    [InlineData(68719476736L, 41231686041L)]
+    public void Pressure_ScalesToSixtyPercentOfAvailableMemory_WithTwoGigabytesAsTheFloor(long available, long expected) =>
+        Assert.Equal(expected, WorkspaceRegistry.Pressure(available));
 }

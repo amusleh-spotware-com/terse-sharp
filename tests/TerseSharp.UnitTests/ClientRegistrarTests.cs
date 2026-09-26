@@ -314,4 +314,31 @@ public sealed class ClientRegistrarTests : IDisposable
         .GetConstructors()
         .Single()
         .Invoke([.. Enumerable.Range(0, length).Select(index => (object)value(index))]);
+
+    [Fact]
+    public async Task AssetsAsync_ForAGuardInstalledBeforeThePostToolBatchHook_ReportsItStale()
+    {
+        await WriteSettingsAsync("""{"hooks":{"PreToolUse":[{"matcher":"Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash","hooks":[{"type":"command","command":"terse guard"}]}]}}""");
+
+        var state = await ClientRegistrar.AssetsAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(state.GuardInstalled);
+        Assert.False(state.GuardCurrent);
+    }
+
+    [Fact]
+    public async Task InstallGuard_RegistersThePostToolBatchNudgeBesideThePreToolUseGuard_AndKeepsEveryOtherHook()
+    {
+        await WriteSettingsAsync("""{"hooks":{"PostToolBatch":[{"hooks":[{"type":"command","command":"other-batch-tool"}]}]}}""");
+
+        await ClientRegistrar.InstallGuard();
+        await ClientRegistrar.InstallGuard();
+
+        var hooks = LoadFrom(SettingsFile)["hooks"]!;
+        var batch = hooks["PostToolBatch"]!.AsArray();
+
+        Assert.Single(batch, entry => entry!["hooks"]![0]!["command"]!.GetValue<string>() is "terse guard --post-batch");
+        Assert.Contains(batch, entry => entry!["hooks"]![0]!["command"]!.GetValue<string>() is "other-batch-tool");
+        Assert.Single(hooks["PreToolUse"]!.AsArray(), entry => Matcher(entry) is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash");
+    }
 }

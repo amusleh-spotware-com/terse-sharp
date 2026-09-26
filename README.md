@@ -256,19 +256,19 @@ arguments filled in from the command it just denied** — which Claude Code plac
 the moment the agent is about to fall back beats a negation. The call it names follows the **direction**
 as well as the file kind, so a shell redirect that creates a file answers
 `write_text path="..." force=true`, never an outline. And the shell-text rows are scoped to the tree:
-a text command naming no .NET source whose every path operand lands outside it is allowed, because the
+a text command naming no .NET source whose every path operand lands outside it - `~/` and `$HOME` spellings included - is allowed, because the
 working directory is not a reason to refuse a file your solution does not contain. And **a batch is not denied whole for one
 covered command in it**: when a compound command mixes commands the server answers with commands it does
 not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at all, so
 the rest runs under your normal permission rules - unless all that would remain is `echo`/`printf`
-framing, which is denied whole rather than run without what it labels.
+framing, which is denied whole rather than run without what it labels. The same install adds a `PostToolBatch` hook: after a response that carried a single read-only terse-sharp call, it places one line after the results asking the next response to send every independent call at once.
 
 <details>
 <summary>Exactly what the guard denies, what it allows, and how to log or remove it</summary>
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that
-names a path operand at all, while a piped `head -40` reading stdin still runs. A denial names the
+names a path operand at all, while a piped `head -40` reading stdin still runs - even when its grep pattern names a `.cs` file. A denial names the
 replacing call with the command's own arguments translated (`git log --oneline -1` → `history
 maxResults=1`), a `2>&1` no longer forces a whole-command refusal, and a `$( )` no longer shadows the
 real command. It also covers `dotnet build`/`test`/`format`/`clean`, `dotnet watch build`/`test`,

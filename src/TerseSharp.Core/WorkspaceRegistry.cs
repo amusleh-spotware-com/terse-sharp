@@ -325,7 +325,11 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
             !workspace.CompilationsDropped
             && workspace.Idle >= (pressured ? MinimumIdle : idleFor);
 
-    private const long PressureBytes = 2L * 1024 * 1024 * 1024;
+    internal static readonly long PressureBytes = Pressure(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes);
+    private const long PressureFloor = 2L * 1024 * 1024 * 1024;
+
+    internal static long Pressure(long availableBytes) => Math.Max(PressureFloor, availableBytes / 5 * 3);
+
     private static readonly TimeSpan MinimumIdle = TimeSpan.FromMinutes(1);
 
     private static Result<WorkspaceLease>? Holding(LoadedWorkspace[] loaded, string pathHint, bool semantic)

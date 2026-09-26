@@ -132,7 +132,7 @@ public sealed class ToolGuardTests
 
     [Theory]
     [InlineData("cd src && cat Foo.cs")]
-    [InlineData("ls | grep Foo.cs")]
+    [InlineData("ls | grep x Foo.cs")]
     [InlineData("echo hi; cat App.csproj")]
     public void Inspect_ForATextReadLaterInACompoundCommand_Denies(string command) =>
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }).Denied);
@@ -1849,5 +1849,51 @@ public sealed class ToolGuardTests
 
         Assert.True(verdict.Denied);
         Assert.Equal("echo y | gh auth status", verdict.Rewrite);
+    }
+
+    [Theory]
+    [InlineData("gh run view 1 --log-failed 2>&1 | grep -E \"error CS|Failed ToolGuardTests.cs\" | head -60")]
+    [InlineData("gh run view 1 --log-failed | grep \"OrderService.cs\"")]
+    [InlineData("ps aux | grep -i \"Program.cs\" | head -5")]
+    public void Inspect_ForAPipeFedPatternThatNamesDotNetSource_AllowsItBecauseItReadsStdin(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
+
+
+    [Theory]
+    [InlineData("grep -E \"error CS|Failed ToolGuardTests.cs\"")]
+    [InlineData("gh run list | grep -rn \"OrderService.cs\"")]
+    [InlineData("gh run list | grep \"x\" src/App/OrderService.cs")]
+    [InlineData("gh run list | grep -f Patterns.cs")]
+    [InlineData("gh run list | grep \"$(cat Program.cs)\"")]
+    [InlineData("gh run list | grep \"x\" > Program.cs")]
+    [InlineData("gh run list | grep \"x\" < Program.cs")]
+    public void Inspect_ForATextToolThatReachesDotNetSourceBesideAPipe_StillDeniesIt(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
+
+    [Theory]
+    [InlineData("wc -c ~/terse-guard-probe/hooks.md")]
+    [InlineData("find ~/.claude/projects -name '*.jsonl'")]
+    [InlineData("cat $HOME/terse-guard-probe/notes.md")]
+    [InlineData("cat ${HOME}/terse-guard-probe/notes.md")]
+    public void Inspect_ForAHomeRelativePathOutsideTheTree_AllowsItLikeItsAbsoluteSpelling(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+        Assert.StartsWith("no-tool ", verdict.Allowance, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("cat notes/hooks.md")]
+    [InlineData("cat ~bob/notes/hooks.md")]
+    [InlineData("cat $HOMEDIR/notes/hooks.md")]
+    public void Inspect_ForAPathThatDoesNotExpandToTheUserProfile_StillCountsItAsInsideTheTree(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+        Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
     }
 }

@@ -255,7 +255,7 @@ VERIFY = {'run_tests', 'rerun_failed', 'build', 'analyze', 'cleanup', 'format', 
 EDIT = MUTATE | {'NotebookEdit', 'extract_interface', 'move_type_to_namespace'}
 BATCH = {'read_text': 'paths', 'write_text': 'files', 'edit_text': 'edits',
          'replace_symbol': 'symbolIds'}
-NARROW = ('project', 'filter', 'projects', 'test', 'path')
+NARROW = ('project', 'filter', 'projects', 'test', 'path', 'paths', 'changed', 'baseRef')
 CODE_KEYS = ('newText', 'new_string', 'content', 'body', 'source', 'code', 'members', 'declaration')
 PATH_KEYS = ('path', 'file_path', 'filePath', 'file', 'symbolId', 'symbol')
 TARGET_KEYS = ('path', 'file', 'filePath', 'symbolId', 'symbol', 'query', 'pattern', 'name', 'command')
@@ -281,6 +281,7 @@ CHANGED = re.compile(r'changedLines=(\d+)')
 INSERTS = {'add_member', 'xaml_add_element', 'razor_add_element'}
 REPLACERS = {'replace_symbol', 'replace_symbol_body', 'edit_text', 'xaml_set_property',
              'resx_set', 'razor_set_attribute', 'project_set_property'}
+WRITES = EDIT | INSERTS | REPLACERS | {'Bash'}
 
 LEGACY = (
     ('collection expression [] (IDE0300/IDE0301)',
@@ -532,11 +533,11 @@ for path, project, spilled in walk():
     pending, seen_calls, order, events, marks = {}, collections.Counter(), [], [], []
     failed_calls, call_at = {}, {}
     by_message = collections.Counter(); ms_by_message = collections.defaultdict(float)
-    msg_order = []; msg_calls = {}; arg_order = []; result_text = {}; session_tools = set()
+    msg_order = []; msg_calls = {}; arg_order = []; result_text = {}; result_at = {}; session_tools = set()
     edited = collections.Counter(); last_tool = None
-    user_turns = assistant_turns = session_edits = session_gates = session_steers = 0
+    user_turns = assistant_turns = session_edits = session_gates = session_steers = session_writes = 0
     last_result_at = None
-    seq = 0
+    seq = prev_read = 0
     for line in open(path, encoding='utf-8', errors='replace'):
         try:
             record = json.loads(line)
@@ -609,8 +610,10 @@ for path, project, spilled in walk():
                 written = stats.get('cache_creation_input_tokens') or 0
                 by_model[model]['cache_creation_input_tokens'] += written
             cache_write_total += written
-            if written and seq > 6:
+            cached = stats.get('cache_read_input_tokens') or 0
+            if written and seq > 6 and cached < prev_read:
                 cache_churn += written
+            prev_read = cached
             for key in ('attributionSkill', 'attributionMcpServer', 'attributionAgent'):
                 if record.get(key):
                     attributed_tokens[(key, record[key])] += (stats.get('output_tokens') or 0)
@@ -632,8 +635,11 @@ for path, project, spilled in walk():
                     user_turns += 1
                     prompts += 1
                     steered = False
+                    expanded = ('<command-name>' in spoken or '<command-message>' in spoken
+                                or spoken.lstrip().startswith(('Base directory for this skill:', '<task-notification>'))
+                                or '<agent-message' in spoken)
                     for label, pattern in CUES:
-                        if pattern.search(spoken):
+                        if not expanded and pattern.search(spoken):
                             cues[label] += 1
                             steered = True
                     if steered:
@@ -667,7 +673,9 @@ for path, project, spilled in walk():
                 pending[block.get('id')] = (tool, at, mid, arguments)
                 encoded = json.dumps(arguments, sort_keys=True)
                 input_chars[tool] += len(encoded)
-                seen_calls[(tool, encoded[:4000])] += 1
+                seen_calls[(tool, encoded[:4000], session_writes if tool in VERIFY else -1)] += 1
+                if tool in WRITES:
+                    session_writes += 1
                 order.append((tool, pick(arguments, TARGET_KEYS)))
                 arg_order.append((tool, arguments, block.get('id')))
                 call_at[block.get('id')] = at
@@ -734,6 +742,7 @@ for path, project, spilled in walk():
                 payloads.append((len(text), tool, project))
                 audit(text, project)
                 result_text[block.get('tool_use_id')] = text[:20000]
+                result_at[block.get('tool_use_id')] = at
                 bad = bool(block.get('is_error')) or text.lstrip().startswith('ERROR ')
                 if bad:
                     errors[tool] += 1
@@ -798,7 +807,7 @@ for path, project, spilled in walk():
     for message_id, spent in ms_by_message.items():
         if by_message.get(message_id, 0) == 1:
             serial_ms += spent
-    for (tool, _), count in seen_calls.items():
+    for (tool, _, _), count in seen_calls.items():
         if count > 1:
             dupes[tool] += count - 1
     for i in range(len(msg_order) - 1):
@@ -808,11 +817,15 @@ for path, project, spilled in walk():
         produced = result_text.get(first[1][0][2], '')
         wanted = []
         strings(second[1][0][1], wanted)
+        leading, trailing = first[1][0][0], second[1][0][0]
+        if leading in WRITES or trailing in VERIFY or (leading in VERIFY and trailing in WRITES):
+            continue
         if not wanted or not produced or any(value in produced for value in wanted):
             continue
-        unspent[(first[1][0][0], second[1][0][0])] += 1
-        if first[0] and second[0] and second[0] >= first[0]:
-            unspent_gap.append((second[0] - first[0]) * 1000)
+        unspent[(leading, trailing)] += 1
+        done = result_at.get(first[1][0][2])
+        if done and second[0] and second[0] >= done:
+            unspent_gap.append((second[0] - done) * 1000)
     for i in range(len(order) - 1):
         pair = (order[i][0], order[i + 1][0])
         if pair[0] != pair[1]:
@@ -862,7 +875,9 @@ for path, project, spilled in walk():
     events.sort()
     last = {}
     for when, tool, _, _ in events:
-        if tool in VERIFY:
+        if tool in WRITES:
+            last.clear()
+        elif tool in VERIFY:
             if tool in last:
                 repeat_gap.append(when - last[tool])
             last[tool] = when
@@ -1048,7 +1063,7 @@ print(f'  TOTAL {sum(verify_n.values())}x {verify_total / 3.6e6:.2f}h = '
       f'{verify_total * 100 / max(tool_ms, 1):.0f}% of tool time, '
       f'{sum(verify_n.values()) / max(cycles, 1):.1f} verification calls per task cycle')
 print(f'  scoped vs whole: {dict(sorted(scoped.items()))}')
-print(f'  identical verification re-run in one session: n={len(repeat_gap):,}  '
+print(f'  verification re-run with no write or Bash between: n={len(repeat_gap):,}  '
       f'median gap={q(repeat_gap, .5) / 60:.1f} min  under 5 min apart={sum(1 for g in repeat_gap if g < 300):,}')
 
 print('\n== duplicate calls (identical args, one session) = pure wasted round trips')
@@ -1207,8 +1222,8 @@ and the next run must be comparable.
    input-side volume (33.30 B vs 387.9 M). Summing four counters unweighted is not a cost model. It
    reports a **base-input-equivalent** total rather than dollars, because a price it cannot prove is
    exactly the confident wrong answer this repo bans. It also reports the **hit rate** and the
-   **mid-session re-prime** volume, because a cache write after the sixth message of a session means
-   the stable prefix was broken — tool-schema churn, a reordered block, a rewritten history — and the
+   **mid-session re-prime** volume, because a cache write after the sixth message of a session **whose
+   `cache_read` fell against the previous message** means the stable prefix was broken — tool-schema churn, a reordered block, a rewritten history — and the
    invalidation is asymmetric: the broken prefix loses the 10% read rate *and* re-pays the 25% write
    premium over the whole prefix.
 4. **It counts the payload that leaves the transcript.** `toolUseResult.persistedOutputSize` (52
@@ -1236,7 +1251,10 @@ and the next run must be comparable.
      the second call's string arguments appears anywhere in the first call's result**. That is a
      computable proof of independence, so the pair could have been one message and its whole model gap
      was paid for nothing. A shared literal — a workspace name, a common path — counts as a dependency,
-     so the detector **under-reports by construction**, which is the safe direction. It groups calls by
+     but textual independence cannot see that a verification reads what a write left on disk, so a
+     pair whose first call writes (a mutating tool or `Bash`), whose second verifies, or that is a
+     verdict followed by a write is dropped before the textual test. Its gap is measured from the first
+     call's **result**, never from its message start, so tool time is not counted as gap. It groups calls by
      API `message.id` **before** pairing them: the JSONL splits one message of N `tool_use` blocks into
      N records, so a detector that walks records would compare a message's own parallel siblings —
      which are independent by definition — and report the corpus's best behaviour as its worst;
@@ -1245,7 +1263,9 @@ and the next run must be comparable.
      no call in the run passed it. This is the highest-value class the script produces: the capability
      shipped, the agent did not use it, so the lever is `(e)` teaching and costs no server change at
      all;
-   - **redundant share** — identical arguments inside one session, against MCP-Bench's `<10%` bar.
+   - **redundant share** — identical arguments inside one session, against MCP-Bench's `<10%` bar. A
+     verification call counts only when no write or `Bash` ran between the two: an identical `build`
+     after an edit is the correct re-run, the instrument `CLAUDE.md`'s definition of done uses.
 
 7. **It reads `tool_result.content` as text, not as JSON.** The content arrives as a **list of
    blocks**, and the old line `text = content if isinstance(content, str) else json.dumps(content)`
