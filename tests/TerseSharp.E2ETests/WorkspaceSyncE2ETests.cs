@@ -446,8 +446,8 @@ public sealed class WorkspaceSyncE2ETests
 
         await solution.CallAsync("load_workspace", new() { ["reload"] = true });
         var first = await solution.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
-        var reaching = await solution.CallAsync("search_symbols", new() { ["query"] = "DeliberateOutcomesTests" });
-        var again = await solution.CallAsync("search_symbols", new() { ["query"] = "DeliberateOutcomesTests" });
+        var reaching = await solution.CallAsync("search_symbols", new() { ["query"] = "DeliberateOutcomesTests", ["path"] = "tests/Fixture.Trading.Tests/DeliberateOutcomesTests.cs" });
+        var again = await solution.CallAsync("search_symbols", new() { ["query"] = "DeliberateOutcomesTests", ["path"] = "tests/Fixture.Trading.Tests/DeliberateOutcomesTests.cs" });
 
         Assert.Contains("DeliberateOutcomesTests", reaching, StringComparison.Ordinal);
         Assert.Contains("compilations=realized in ", reaching, StringComparison.Ordinal);
