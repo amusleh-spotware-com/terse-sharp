@@ -160,7 +160,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     }
 
     [McpServerTool(Name = "rerun_failed")]
-    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the tests that failed in the previous run_tests call, in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. tests=[...] and exclude=[...] filter that remembered list instead of replaying it whole, which is how a red round whose expectations the same edit already re-pointed is re-verified selectively; a filtered re-run always ends by naming how many remembered failures it did NOT run. It always runs: it is never answered from the unchanged-run memo, because no argument of the call names the failure list it replays. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
+    [Description("Replaces re-running Bash dotnet test --filter by hand. Re-runs only the remembered failures - every test a run_tests call failed that no later run has passed, so a narrower green run_tests test= never erases them - in the same workspace and target, and by default under the same configuration, targetFramework and properties that run used. tests=[...] and exclude=[...] filter that remembered list instead of replaying it whole, which is how a red round whose expectations the same edit already re-pointed is re-verified selectively; a filtered re-run always ends by naming how many remembered failures it did NOT run. It always runs: it is never answered from the unchanged-run memo, because no argument of the call names the failure list it replays. A green re-run answers in one line, and a build that failed under the re-run returns its error-severity diagnostics only, never its warnings.")]
     public Task<string> RerunFailed(
         [Description("Run existing binaries; skip the build.")] bool noBuild = false,
         [Description("Build configuration, passed to dotnet as -c. Empty reuses the configuration of the run that produced the failures.")] string? configuration = null,
@@ -183,7 +183,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             {
                 return Task.FromResult(Errors.Invalid(
                     "no failing test is remembered for this workspace",
-                    "call run_tests in this workspace first; a green run leaves nothing to re-run").Render());
+                    "call run_tests in this workspace first; a remembered failure is forgotten only once a later run passes it").Render());
             }
 
             var chosen = Chosen(memory.FailedTests, tests, exclude);
@@ -354,7 +354,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 workspace.Root,
                 request.Target,
                 result.Report.Failures.Select(failure => failure.Name),
-                request.Scope);
+                request.Scope,
+                result.Report.PassedTests.Select(test => test.Name));
 
             return new LockedRun(result.Response, result.Locked);
         }, cancellationToken);

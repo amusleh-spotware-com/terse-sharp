@@ -149,7 +149,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` — concurrent, per-project timeout |
 | **Build and test** | a run past the client's foreground limit, then a poll | `run_tests(detach: true)`, then `run_tests(status: "<id>")` |
 | **Build and test** | bounding parallelism **inside** one test assembly | `run_tests(runSettings: ["xUnit.MaxParallelThreads=1"])` |
-| **Build and test** | re-running what broke | `rerun_failed` |
+| **Build and test** | re-running what broke - a failure stays remembered until a run passes it | `rerun_failed` |
 | **Build and test** | re-verifying SOME of what broke | `rerun_failed(tests: [...], exclude: [...])` |
 | **Build and test** | `dotnet test --list-tests` | `list_tests(contains)` |
 | **Build and test** | `Bash: dotnet clean` | `clean` |

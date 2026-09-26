@@ -529,13 +529,13 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task RerunFailed_RepeatedWithNothingWrittenInBetween_StillRunsBecauseItsArgumentsDoNotNameItsFailureList()
     {
-        await RunAsync(new() { ["project"] = TestProject, ["test"] = FailingTest, ["timeoutSeconds"] = 460 });
+        await RunAsync(new() { ["project"] = TestProject, ["timeoutSeconds"] = 460 });
 
         var first = await server.CallAsync("rerun_failed", new() { ["noBuild"] = true, ["timeoutSeconds"] = 460 });
         var second = await server.CallAsync("rerun_failed", new() { ["noBuild"] = true, ["timeoutSeconds"] = 460 });
 
-        Assert.Contains("failed=1", first, StringComparison.Ordinal);
-        Assert.Contains("failed=1", second, StringComparison.Ordinal);
+        Assert.Contains("failed=3", first, StringComparison.Ordinal);
+        Assert.Contains("failed=3", second, StringComparison.Ordinal);
         Assert.DoesNotContain("UNCHANGED", second, StringComparison.Ordinal);
     }
 
@@ -623,5 +623,19 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
             answer = await server.CallAsync("run_tests", new(arguments));
 
         return answer;
+    }
+
+    [Fact]
+    public async Task RerunFailed_AfterANarrowerGreenRun_StillReplaysTheWiderRunsFailures()
+    {
+        await RunAsync(new() { ["project"] = TestProject });
+        var narrower = await RunAsync(new() { ["project"] = TestProject, ["test"] = PassingTest, ["timeoutSeconds"] = 450 });
+
+        var text = await server.CallAsync("rerun_failed", new() { ["noBuild"] = true });
+
+        Assert.Contains("PASSED", narrower, StringComparison.Ordinal);
+        Assert.Contains("passed=0 failed=3 skipped=0 total=3", text, StringComparison.Ordinal);
+        Assert.Contains("FAIL Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("no failing test is remembered", text, StringComparison.Ordinal);
     }
 }
