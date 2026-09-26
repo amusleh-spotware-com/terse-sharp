@@ -346,7 +346,7 @@ current directory, finds your `.sln` / `.slnx` / `.slnf` / `.csproj` and loads i
 terse install --client cursor   # not detected? claude-code | cursor | vscode | windsurf
 terse install --skill --guard   # teach your agent the tools, and block Read/Grep on C# (recommended)
 terse doctor                    # SDK, MSBuild, workspace load, client registration, per-phase latency
-terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.cs"}'
+terse call get_file_outline --workspace App.slnx --json '{"path":"src/App/Order.cs"}'  # answer on stdout; timing loadMs= callMs= on stderr
 ```
 
 No IDE, no licence, no Node, no Python, no API key, no network call to answer a question. Inside a session,

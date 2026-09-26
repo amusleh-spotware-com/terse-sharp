@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -13,11 +14,12 @@ internal static class ToolCall
         string? workspace,
         string? json,
         TextWriter output,
+        TextWriter timing,
         CancellationToken cancellationToken)
     {
         try
         {
-            return await CalledAsync(tool, workspace, json, output, cancellationToken).ConfigureAwait(false);
+            return await CalledAsync(tool, workspace, json, output, timing, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -35,6 +37,7 @@ internal static class ToolCall
             string? workspace,
             string? json,
             TextWriter output,
+            TextWriter timing,
             CancellationToken cancellationToken)
     {
         var methods = Methods();
@@ -61,9 +64,15 @@ internal static class ToolCall
 
         await using var provider = services.BuildServiceProvider();
         var context = provider.GetRequiredService<ToolContext>();
+        var load = TimeSpan.Zero;
 
         if (workspace is { Length: > 0 })
+        {
+            var loadStarted = Stopwatch.GetTimestamp();
+
             await context.Registry.LoadAsync(workspace, cancellationToken).ConfigureAwait(false);
+            load = Stopwatch.GetElapsedTime(loadStarted);
+        }
 
         var arguments = Parsed(json);
 
@@ -86,8 +95,12 @@ internal static class ToolCall
         await AdvertiseAsync(provider, context, cancellationToken).ConfigureAwait(false);
 
         var instance = ActivatorUtilities.CreateInstance(provider, method.DeclaringType!);
+        var callStarted = Stopwatch.GetTimestamp();
+        var answer = await Text(method.Invoke(instance, bound.Value!)).ConfigureAwait(false);
+        var measured = new CallTiming(load, Stopwatch.GetElapsedTime(callStarted));
 
-        await output.WriteLineAsync(await Text(method.Invoke(instance, bound.Value!)).ConfigureAwait(false)).ConfigureAwait(false);
+        await output.WriteLineAsync(answer).ConfigureAwait(false);
+        await timing.WriteLineAsync(measured.ToString()).ConfigureAwait(false);
 
         return 0;
     }

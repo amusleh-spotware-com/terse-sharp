@@ -104,7 +104,16 @@ public sealed class InstallCommandE2ETests : IDisposable
 
     private string ClaudeConfig => Path.Combine(ConfigDirectory, ".claude.json");
 
-    private async Task<string> RunAsync(params string[] arguments)
+    private Task<string> RunAsync(params string[] arguments) => ReadAsync(Start(arguments));
+
+    private static async Task<string> ReadAsync(ProcessStartInfo start)
+    {
+        var (output, error) = await SeparatedAsync(start);
+
+        return output + error;
+    }
+
+    private ProcessStartInfo Start(string[] arguments)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -121,10 +130,10 @@ public sealed class InstallCommandE2ETests : IDisposable
         start.Environment["TERSE_HOME"] = home;
         start.Environment["CLAUDE_CONFIG_DIR"] = ConfigDirectory;
 
-        return await ReadAsync(start);
+        return start;
     }
 
-    private static async Task<string> ReadAsync(ProcessStartInfo start)
+    private static async Task<(string Output, string Error)> SeparatedAsync(ProcessStartInfo start)
     {
         using var process = Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
 
@@ -133,7 +142,50 @@ public sealed class InstallCommandE2ETests : IDisposable
 
         await process.WaitForExitAsync(TestContext.Current.CancellationToken);
 
-        return await output + await error;
+        return (await output, await error);
+    }
+
+    [Fact]
+    public async Task Call_WithAWorkspace_ReportsLoadAndCallTimeOnStandardErrorAndLeavesTheAnswerUntouched()
+    {
+        var (output, error) = await SeparatedAsync(Start(
+        [
+            "call",
+        "get_file_outline",
+        "--workspace",
+        Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+        "--json",
+        "{\"path\": \"src/Fixture.Trading/OrderService.cs\"}",
+    ]));
+
+        var fields = Assert.Single(
+            error.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            line => line.StartsWith("timing ", StringComparison.Ordinal)).Split(' ');
+
+        Assert.Equal(3, fields.Length);
+        Assert.StartsWith("loadMs=", fields[1], StringComparison.Ordinal);
+        Assert.StartsWith("callMs=", fields[2], StringComparison.Ordinal);
+        Assert.True(long.Parse(fields[1]["loadMs=".Length..], CultureInfo.InvariantCulture) > 0);
+        Assert.True(long.Parse(fields[2]["callMs=".Length..], CultureInfo.InvariantCulture) >= 0);
+        Assert.Contains("public bool Submit(Order order)", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("timing", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Call_WithoutAWorkspace_ReportsZeroLoadTime()
+    {
+        var (_, error) = await SeparatedAsync(Start(["call", "list_workspaces"]));
+
+        Assert.Contains("timing loadMs=0 callMs=", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Call_RefusedBeforeItRuns_ReportsNoTiming()
+    {
+        var (output, error) = await SeparatedAsync(Start(["call", "grep_everything"]));
+
+        Assert.Contains("no tool is named 'grep_everything'", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("timing", error, StringComparison.Ordinal);
     }
 
     [Fact]

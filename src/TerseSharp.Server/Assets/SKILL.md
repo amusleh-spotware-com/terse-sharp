@@ -1184,7 +1184,7 @@ from a project's own output; read the `holder` lines before stopping anything.
 
 **One lock is refused before it happens**: when the loaded solution builds the assembly this server
 runs from — a `terse call` probe out of a repo's own `bin/` — the build and test tools refuse up front
-naming `MSB3026`. Run the probe from a copy outside the solution.
+naming `MSB3026`. Run the probe from a copy outside the solution. Its stderr ends `timing loadMs=N callMs=N` - compare `callMs` across a change.
 
 ## When a tool refuses
 

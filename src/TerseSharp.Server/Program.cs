@@ -65,6 +65,7 @@ call.SetAction((result, cancellationToken) =>
         result.GetValue(workspaceOption),
         result.GetValue(jsonOption),
         Console.Out,
+        Console.Error,
         cancellationToken));
 
 doctor.SetAction(async (result, cancellationToken) =>
