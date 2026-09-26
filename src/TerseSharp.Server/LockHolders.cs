@@ -38,6 +38,52 @@ internal static partial class LockHolders
         return builder.ToString();
     }
 
+    internal static bool UnloadCannotRelease(string output) => UnloadCannotRelease(output, Environment.ProcessId, NameOf);
+
+    internal static bool UnloadCannotRelease(string output, int self, Func<int, string?> nameOf)
+    {
+        var named = 0;
+
+        try
+        {
+            foreach (Match match in Holder().Matches(output))
+            {
+                if (!int.TryParse(match.Groups[2].ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var pid))
+                    continue;
+
+                if (pid == self || nameOf(pid) is not { } name || MayBeThisServers(name))
+                    return false;
+
+                named++;
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+
+        return named > 0;
+    }
+
+    private static bool MayBeThisServers(ReadOnlySpan<char> name) =>
+        name.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("BuildHost", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("MSBuild", StringComparison.OrdinalIgnoreCase);
+
+    private static string? NameOf(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+
+            return process.ProcessName;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     private static async Task<string> ResolvedAsync(int pid, string root, CancellationToken cancellationToken)
     {
         try

@@ -200,9 +200,10 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
         Path.Combine(FixtureRoot, "src", "Fixture.Generator", "GreetingGenerator.cs");
 
     [Fact]
-    public async Task ALockedOutput_WithASecondWorkspaceLoaded_IsStillRetriedAgainstTheWorkspaceTheCallResolvedTo()
+    public async Task ALockedOutput_HeldByAnotherProcess_WithASecondWorkspaceLoaded_LeavesBothLoadedAndRetriesNothing()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows makes FileShare.None a mandatory lock, so only there can a held handle stop MSBuild's copy");
+        Assert.SkipWhen(HostedByDotnet(), "a holder named dotnet may be this server's own MSBuild host, so the unload-and-retry path is taken instead");
 
         await ArmedAsync();
 
@@ -219,13 +220,23 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
             using var held = File.Open(AnalyzerAssembly, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
             var text = await CallAsync("build", new() { ["workspace"] = "GeneratorSolution" });
+            var workspaces = await CallAsync("list_workspaces", []);
 
-            Assert.DoesNotContain("was not retried", text, StringComparison.Ordinal);
-            Assert.Contains("the workspace was unloaded and the build retried", text, StringComparison.Ordinal);
+            Assert.Contains("the workspace was NOT unloaded and the build was not retried", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("the workspace was unloaded and the build retried", text, StringComparison.Ordinal);
+            Assert.Contains("GeneratorSolution", workspaces, StringComparison.Ordinal);
+            Assert.Contains("Fixture.Generator", workspaces, StringComparison.Ordinal);
         }
         finally
         {
             await CallAsync("unload_workspace", new() { ["path"] = second });
         }
+    }
+
+    private static bool HostedByDotnet()
+    {
+        using var self = Process.GetCurrentProcess();
+
+        return self.ProcessName.Equals("dotnet", StringComparison.OrdinalIgnoreCase);
     }
 }

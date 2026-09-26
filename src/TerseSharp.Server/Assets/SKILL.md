@@ -337,7 +337,7 @@ be invisible to `find_usages` with every gate green; whatever was chosen is prin
 `targetFramework=`.
 Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory
 really does come back; it costs about a second, which is why it happens only when a workspace is
-genuinely dropped and why the unload-and-retry `build`/`run_tests` perform on a locked output skips it.
+genuinely dropped and why the unload-and-retry `build`/`run_tests` perform on a locked output skips it. That unload-and-retry is itself skipped when every holder MSBuild names is a live process other than this server and any MSBuild host it may have spawned (a test host, an IDE, another session), because unloading cannot release those locks: the answer then says `the workspace was NOT unloaded`, lists the holders, and the loaded compilations stay warm.
 
 **The analyzers a solution builds from source
 no longer block your own build**: every analyzer and source-generator assembly is loaded from a

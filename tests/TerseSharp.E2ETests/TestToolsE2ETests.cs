@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -264,9 +266,10 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task RunTests_WhenTheOutputIsLocked_WarnsAndReportsTheRetryInsteadOfRawMSBuildOutput()
+    public async Task RunTests_WhenTheOutputIsLockedByAnotherProcess_WarnsAndKeepsTheWorkspaceLoadedInsteadOfUnloadingIt()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows refuses to overwrite an open file");
+        Assert.SkipWhen(HostedByDotnet(), "a holder named dotnet may be this server's own MSBuild host, so the unload-and-retry path is taken instead");
 
         var project = Path.Combine(TerseServerFixture.FixtureRoot, "tests", "Fixture.Trading.Tests");
         var output = Path.Combine(project, "bin", "Debug", "net10.0", "Fixture.Trading.Tests.dll");
@@ -282,10 +285,18 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
             var text = await RunAsync(new() { ["project"] = TestProject });
 
             Assert.Contains("WARNING a locked output file blocked the operation", text, StringComparison.Ordinal);
-            Assert.Contains("NOTE the workspace was unloaded and the test run retried", text, StringComparison.Ordinal);
+            Assert.Contains("the workspace was NOT unloaded and the test run was not retried", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOTE the workspace was unloaded", text, StringComparison.Ordinal);
         }
 
         Assert.Contains("passed=3 failed=3 skipped=1 total=7", await RunAsync(new() { ["project"] = TestProject }), StringComparison.Ordinal);
+    }
+
+    private static bool HostedByDotnet()
+    {
+        using var self = Process.GetCurrentProcess();
+
+        return self.ProcessName.Equals("dotnet", StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

@@ -280,6 +280,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         if (!first.Locked)
             return first.Response;
 
+        if (LockHolders.UnloadCannotRelease(first.Response))
+            return first.Response + await ForeignHolderAsync(operation, first.Response, target.Root, cancellationToken).ConfigureAwait(false);
+
         if (!context.Registry.Unload(target.SolutionPath, reclaim: false))
             return first.Response;
 
@@ -304,6 +307,15 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         return string.Create(
             CultureInfo.InvariantCulture,
             $"\nNOTE the workspace was unloaded and the {operation} retried, and the output is still locked. Analyzer and source-generator assemblies are normally mapped from a shadow copy under the per-user analyzer cache rather than from a project's own output, so they are the least likely holder - but a copy that could not be made falls back to mapping the file in place, so they are not ruled out either. This server is pid {Environment.ProcessId}, and an MSBuild BuildHost this or an earlier terse load spawned out of this tree's own bin/ is also in play. {Guidance(named.Length, holders.Length, root.Length > 0)}{holders}");
+    }
+
+    private static async Task<string> ForeignHolderAsync(string operation, string output, string root, CancellationToken cancellationToken)
+    {
+        var holders = await LockHolders.DescribeAsync(output, root, cancellationToken).ConfigureAwait(false);
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"\nNOTE the output is locked only by processes that are neither this terse server (pid {Environment.ProcessId}) nor an MSBuild host it could have spawned, so the workspace was NOT unloaded and the {operation} was not retried - unloading could not release those locks, and the loaded compilations stay warm for the next query. Wait for or stop the holder below, then retry.{holders}");
     }
 
     private const string ReloadFailed =
