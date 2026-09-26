@@ -1206,7 +1206,7 @@ the same way, `at offset 27 of 28: public int Unused() => 7 + ;`, prefixed with 
 when the call was batched;
 `RunInFlight` means this process is ALREADY running a build or test call for that solution (a detached run included) - read that run's answer instead of starting a second one, which could only fail on its file locks; `ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
 host dropped the call - the project file was restored, a file the edit was adding may already be on
-disk, and the answer is to retry the same call rather than to report a defect.
+disk, and the answer is to retry the same call rather than to report a defect - unless it says `landed=<paths>`: then call the `analyze` it names, and retry only a `not landed=` file.
 
 Read the `remedy:` and fix the call. Falling back to `Read`/`Grep` is the one outcome this server
 exists to prevent.

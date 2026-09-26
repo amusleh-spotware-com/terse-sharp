@@ -184,8 +184,13 @@ bool verbose) =>
         return Guarded(workspace, path, async loaded => Raced(loaded, [path], options.IfUnchangedSince) is { } raced
             ? await raced.ConfigureAwait(false)
             : EditTools.Carried(
-                await FileService.WriteTextAsync(
-                    loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false),
+                await LandedWrites.GuardedAsync(
+                    loaded.Root,
+                    [new FileService.FileWrite(path, content)],
+                    options.DryRun,
+                    () => FileService.WriteTextAsync(
+                        loaded, path, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
+                    cancellationToken).ConfigureAwait(false),
                 new EditTools.Carry("write_text", [path], [content], Usings: usings),
                 loaded.Root), cancellationToken: cancellationToken);
     }
@@ -788,8 +793,13 @@ context.RejectWrite() is { } rejection
             files[0].Path,
             async loaded => Raced(loaded, targets, options.IfUnchangedSince) is { } raced
                 ? await raced.ConfigureAwait(false)
-                : NavigationTools.Unwrap(await FileService.WriteTextManyAsync(
-                    loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false)),
+                : NavigationTools.Unwrap(await LandedWrites.GuardedAsync(
+                    loaded.Root,
+                    files,
+                    options.DryRun,
+                    () => FileService.WriteTextManyAsync(
+                        loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
+                    cancellationToken).ConfigureAwait(false)),
             files.Any(file => SourceFile.IsCSharp(file.Path)),
             cancellationToken);
     }

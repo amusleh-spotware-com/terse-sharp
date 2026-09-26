@@ -151,6 +151,23 @@ public static class Errors
         string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),
         "MSBuild's out-of-process build host dropped the call; the project file was restored, and a file the edit was adding may already be on disk. Retry the same call - and send interdependent new files as one write_text files=[...] batch, which needs only one evaluation");
 
+    public static TerseError TransientLanded(Exception exception, IReadOnlyList<string> landed, IReadOnlyList<string> missing) => new(
+        TerseErrorCode.Transient,
+        string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}  landed={string.Join(',', landed)}  {LandedVerdict(missing)}"),
+        missing is []
+            ? string.Create(CultureInfo.InvariantCulture, $"MSBuild's out-of-process build host dropped the call after the write reached disk with the requested content, so the same call again answers 0 files changed and reports no diagnostics. Do not retry - call {AnalyzeCall(landed)} for the diagnostics this call could not report")
+            : string.Create(CultureInfo.InvariantCulture, $"MSBuild's out-of-process build host dropped the call after only some files reached disk. Retry with only the files not landed, then call {AnalyzeCall(landed)} for the diagnostics of the ones that did"));
+
+
+    private static string LandedVerdict(IReadOnlyList<string> missing) =>
+        missing is [] ? "retry would be a no-op" : string.Create(CultureInfo.InvariantCulture, $"not landed={string.Join(',', missing)}");
+
+
+    private static string AnalyzeCall(IReadOnlyList<string> paths) =>
+        paths is [var single]
+            ? string.Create(CultureInfo.InvariantCulture, $"analyze path={single}")
+            : string.Create(CultureInfo.InvariantCulture, $"analyze paths=[\"{string.Join("\",\"", paths)}\"]");
+
     public static TerseError RunInFlight(string tool, ActiveRun holder) => new(
         TerseErrorCode.RunInFlight,
         string.Create(
