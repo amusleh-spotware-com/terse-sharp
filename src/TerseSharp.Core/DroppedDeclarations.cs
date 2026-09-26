@@ -71,8 +71,8 @@ internal static class DroppedDeclarations
         if (target is not BaseTypeDeclarationSyntax type)
             return null;
 
-        var kept = new HashSet<string>(replacements.OfType<BaseTypeDeclarationSyntax>().SelectMany(Inner), StringComparer.Ordinal);
-        var dropped = Inner(type).Where(name => !kept.Contains(name)).Distinct(StringComparer.Ordinal).Select(name => type.Identifier.ValueText + "." + name).ToArray();
+        var kept = new HashSet<string>(replacements.OfType<BaseTypeDeclarationSyntax>().SelectMany(Inner).Select(Unsigned), StringComparer.Ordinal);
+        var dropped = Inner(type).Where(name => !kept.Contains(Unsigned(name))).Distinct(StringComparer.Ordinal).Select(name => type.Identifier.ValueText + "." + name).ToArray();
 
         return dropped.Length is 0
             ? null
@@ -87,4 +87,6 @@ internal static class DroppedDeclarations
 
         return type.DescendantNodes().OfType<MemberDeclarationSyntax>().SelectMany(Names).Select(name => name[prefix..]);
     }
+
+    private static string Unsigned(string name) => name.IndexOf('(', StringComparison.Ordinal) is var open and >= 0 ? name[..open] : name;
 }

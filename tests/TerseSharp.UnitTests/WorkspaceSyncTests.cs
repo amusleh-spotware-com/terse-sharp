@@ -471,4 +471,27 @@ public sealed class WorkspaceSyncTests
             TestContext.Current.CancellationToken));
         Assert.Equal(absorbed, (await loaded.Workspace.Solution.GetDocument(id)!.GetTextAsync(TestContext.Current.CancellationToken)).ToString());
     }
+
+    [Fact]
+    public async Task SyncAsync_WhenTheFileMovesBetweenTheAbsorbAndTheApply_KeepsTheNewerTextAndAbsorbsItNext()
+    {
+        using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        await loaded.MaterialiseAsync(TestContext.Current.CancellationToken);
+        var path = loaded.Files.OrderServicePath;
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var newer = original + "// newer than the absorbed text\n";
+
+        await File.WriteAllTextAsync(path, original + "// external\n", TestContext.Current.CancellationToken);
+        loaded.Sync.Notice(path);
+        loaded.Workspace.BeforeApply = () => File.WriteAllTextAsync(path, newer, TestContext.Current.CancellationToken);
+        await loaded.SyncAsync(null, TestContext.Current.CancellationToken);
+        loaded.Workspace.BeforeApply = null;
+
+        Assert.Equal(newer, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+
+        loaded.Sync.Notice(path);
+        await loaded.SyncAsync(null, TestContext.Current.CancellationToken);
+
+        Assert.Equal(newer, await TextOfAsync(loaded));
+    }
 }

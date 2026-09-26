@@ -6,7 +6,8 @@ public sealed record TestRunMemory(
     string WorkspaceRoot,
     string Target,
     ImmutableArray<string> FailedTests,
-    BuildScope Scope = default)
+    BuildScope Scope = default,
+    bool Unfiltered = false)
 {
     public bool Covers(string workspaceRoot) =>
         WorkspaceRoot.Equals(workspaceRoot, PathBoundary.Comparison) && !FailedTests.IsDefaultOrEmpty;
@@ -15,6 +16,7 @@ public sealed record TestRunMemory(
         Outstanding(run.WorkspaceRoot, passedTests) switch
         {
             [] => run with { FailedTests = Capped(run.FailedTests, limit) },
+            _ when run.Unfiltered && SameInvocation(run) => run with { FailedTests = Capped(run.FailedTests, limit) },
             var outstanding when run.FailedTests.IsDefaultOrEmpty => this with { FailedTests = outstanding },
             var outstanding when SameInvocation(run) => run with { FailedTests = Capped([.. outstanding.Union(run.FailedTests, StringComparer.Ordinal)], limit) },
             _ => run with { FailedTests = Capped(run.FailedTests, limit) },
@@ -50,9 +52,9 @@ public sealed class LastTestRun
 
     public TestRunMemory Memory => Volatile.Read(ref memory);
 
-    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests, BuildScope scope = default, IEnumerable<string>? passedTests = null)
+    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests, BuildScope scope = default, IEnumerable<string>? passedTests = null, bool unfiltered = false)
     {
-        var run = new TestRunMemory(workspaceRoot, target, [.. failedTests.Take(MaxRememberedTests)], scope);
+        var run = new TestRunMemory(workspaceRoot, target, [.. failedTests.Take(MaxRememberedTests)], scope, unfiltered);
 
         lock (gate)
             Volatile.Write(ref memory, Volatile.Read(ref memory).After(run, passedTests ?? [], MaxRememberedTests));

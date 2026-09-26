@@ -492,6 +492,9 @@ public sealed class PolicyServiceTests
     [InlineData("TestCase(1)")]
     [InlineData("Xunit.Fact")]
     [InlineData("global::Xunit.FactAttribute")]
+    [InlineData("SkippableFact")]
+    [InlineData("WpfTheory")]
+    [InlineData("TestCaseSource(nameof(Cases))")]
     public void Inspect_ForAMethodCarryingATestAttribute_JudgesItByTheTestMethodPattern(string attribute) =>
         Assert.Empty(Findings(PolicyRule.Naming, "class Sample { [" + attribute + "] public void Post_WithNoEntries_Throws() { } }"));
 

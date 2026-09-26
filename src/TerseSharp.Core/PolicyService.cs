@@ -377,8 +377,7 @@ public static class PolicyService
     };
 
     private static bool IsTestAttribute(string name) =>
-        name is "Fact" or "Theory" or "Test" or "TestMethod" or "TestCase" or "DataTestMethod"
-            or "FactAttribute" or "TheoryAttribute" or "TestAttribute" or "TestMethodAttribute" or "TestCaseAttribute" or "DataTestMethodAttribute";
+        name.EndsWith("Attribute", StringComparison.Ordinal) ? IsTestAttribute(name[..^"Attribute".Length]) : name is "Fact" or "Theory" or "Test" or "TestMethod" or "TestCase" or "TestCaseSource" or "DataTestMethod" or "SkippableFact" or "SkippableTheory" or "StaFact" or "StaTheory" or "WpfFact" or "WpfTheory" or "UITestMethod";
 
     private static bool IsTest(MethodDeclarationSyntax method)
     {

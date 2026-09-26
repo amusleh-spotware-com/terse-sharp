@@ -48,7 +48,7 @@ public static class RepeatSteer
 
         var answered = result.Content is [TextContentBlock { Text: var answer }, ..] ? answer : string.Empty;
 
-    if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
+        if (IdenticalCall.Note(parameters.Name, parameters, result) is { } repeat)
             TrailingNote.Append(result, repeat);
 
         if (Steer(parameters.Name, Batched(parameters, parameters.Name), Unbatchable(parameters, parameters.Name), Argument(parameters, parameters.Name), Mode(parameters)) is { } note)

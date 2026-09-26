@@ -1949,4 +1949,16 @@ public sealed class ToolGuardTests
         Assert.Contains("get_file_outline", verdict.Routing, StringComparison.Ordinal);
         Assert.Null(verdict.Rewrite);
     }
+
+    [Theory]
+    [InlineData("F=/tmp/x.log; cat \"$F\"")]
+    [InlineData("F=/tmp/x.log; tail -5 \"$F\"")]
+    [InlineData("LOG=build.log; tail -5 \"$LOG\"")]
+    public void Inspect_ForAVariableHoldingNoDotNetSource_KeepsTheVerdictTheUnexpandedCommandHad(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
 }

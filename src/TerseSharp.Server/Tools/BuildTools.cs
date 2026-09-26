@@ -355,7 +355,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 request.Target,
                 result.Report.Failures.Select(failure => failure.Name),
                 request.Scope,
-                result.Report.PassedTests.Select(test => test.Name));
+                result.Report.PassedTests.Select(test => test.Name),
+                request.Filter is not { Length: > 0 });
 
             return new LockedRun(result.Response, result.Locked);
         }, cancellationToken);

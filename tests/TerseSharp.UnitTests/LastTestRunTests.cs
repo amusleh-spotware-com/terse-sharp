@@ -170,4 +170,24 @@ public sealed class LastTestRunTests
         Assert.Equal(200, after.FailedTests.Length);
         Assert.Equal("Ns.Tests.Old0", after.FailedTests[0]);
     }
+
+    [Fact]
+    public void After_AGreenUnfilteredRunOfTheSameTargetThatNoLongerContainsTheFailure_ForgetsIt()
+    {
+        var red = new TestRunMemory(Root, "all.slnx", ["Ns.Tests.Deleted"]);
+
+        var after = red.After(new TestRunMemory(Root, "all.slnx", [], Unfiltered: true), ["Ns.Tests.Other"], 200);
+
+        Assert.False(after.Covers(Root));
+    }
+
+    [Fact]
+    public void After_AGreenFilteredRunOfTheSameTargetThatNeverRanTheFailure_KeepsIt()
+    {
+        var red = new TestRunMemory(Root, "all.slnx", ["Ns.Tests.One"]);
+
+        var after = red.After(new TestRunMemory(Root, "all.slnx", []), ["Ns.Tests.Other"], 200);
+
+        Assert.Equal(["Ns.Tests.One"], after.FailedTests);
+    }
 }

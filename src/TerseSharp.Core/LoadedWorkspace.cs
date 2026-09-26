@@ -680,6 +680,9 @@ public sealed class LoadedWorkspace : IDisposable
     {
         var rebased = await AbsorbedAsync(solution, cancellationToken).ConfigureAwait(false);
 
+        if (BeforeApply is { } racing)
+            await racing().ConfigureAwait(false);
+
         lock (historyGate)
         {
             if (!Applied(rebased, current))
@@ -690,4 +693,6 @@ public sealed class LoadedWorkspace : IDisposable
             return true;
         }
     }
+
+    internal Func<Task>? BeforeApply { get; set; }
 }

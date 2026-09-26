@@ -1886,9 +1886,23 @@ public static class ToolGuard
         return (verdict.Denied, expanded.Denied) switch
         {
             (true, false) => expanded,
-            (false, true) => Blocking(Stages(resolved), resolved, cwd),
+            (false, true) when NamesSource(resolved) && !NamesSource(command) => Blocking(Stages(resolved), resolved, cwd),
             _ => verdict,
         };
+    }
+
+    private static bool NamesSource(string command)
+    {
+        foreach (var token in Tokenized(command))
+        {
+            foreach (var extension in Extensions)
+            {
+                if (token.AsSpan().TrimEnd(';').EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+
+        return false;
     }
 }
 

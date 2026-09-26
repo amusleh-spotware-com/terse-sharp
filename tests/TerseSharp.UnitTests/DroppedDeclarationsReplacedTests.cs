@@ -30,4 +30,10 @@ public sealed class DroppedDeclarationsReplacedTests
 
     private static RecordDeclarationSyntax Target() =>
         CSharpSyntaxTree.ParseText(Nested).GetRoot().DescendantNodes().OfType<RecordDeclarationSyntax>().Single();
+
+    [Fact]
+    public void Replaced_AMemberWhoseSignatureChanged_IsNotReportedAsDropped() =>
+        Assert.Null(DroppedDeclarations.Replaced(
+            Target(),
+            [SyntaxFactory.ParseMemberDeclaration("private readonly record struct Anchor(int First, int Count)\n{\n    public Anchor With(long index) => this;\n\n    public bool Adjacent => Count > 0;\n}")!]));
 }
