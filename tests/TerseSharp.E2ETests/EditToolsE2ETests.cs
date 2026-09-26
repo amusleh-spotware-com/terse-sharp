@@ -1245,4 +1245,45 @@ public sealed class RegionTail
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("'Submit' still has", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task DeleteSymbol_WithSymbolIdsWhereOneIsReferencedOnlyInsideAnother_DeletesBothAsOneEdit()
+    {
+        const string Probe = "src/Fixture.Trading/BatchDeleteProbe.cs";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "BatchDeleteProbe.cs");
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class BatchDeleteProbe\n{\n    public static int Entry() => OnlyEntryCalls();\n\n    private static int OnlyEntryCalls() => 1;\n\n    public static int Kept() => 2;\n}\n",
+            ["force"] = true,
+        });
+
+        try
+        {
+            var alone = await server.CallAsync("delete_symbol", new()
+            {
+                ["symbolIds"] = new[] { "BatchDeleteProbe.OnlyEntryCalls" },
+                ["dryRun"] = true,
+            });
+
+            var batched = await server.CallAsync("delete_symbol", new()
+            {
+                ["symbolIds"] = new[] { "BatchDeleteProbe.OnlyEntryCalls", "BatchDeleteProbe.Entry" },
+            });
+
+            var remaining = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.Contains("ERROR InvalidArgument", alone, StringComparison.Ordinal);
+            Assert.Contains("'OnlyEntryCalls' still has 1 usages", alone, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", batched, StringComparison.Ordinal);
+            Assert.DoesNotContain("OnlyEntryCalls", remaining, StringComparison.Ordinal);
+            Assert.DoesNotContain("Entry()", remaining, StringComparison.Ordinal);
+            Assert.Contains("public static int Kept() => 2;", remaining, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }
