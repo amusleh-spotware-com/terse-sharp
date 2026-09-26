@@ -258,7 +258,7 @@ arguments filled in from the command it just denied** — which Claude Code plac
 the moment the agent is about to fall back beats a negation. The call it names follows the **direction**
 as well as the file kind, so a shell redirect that creates a file answers
 `write_text path="..." force=true`, never an outline. And the shell-text rows are scoped to the tree:
-a text command naming no .NET source whose every path operand lands outside it - `~/` and `$HOME` spellings included - is allowed, because the
+a text command naming no .NET source whose every path operand lands outside it - `~/`, `$HOME` and a `$VAR` assigned earlier in the same command included - is allowed, because the
 working directory is not a reason to refuse a file your solution does not contain. And **a batch is not denied whole for one
 covered command in it**: when a compound command mixes commands the server answers with commands it does
 not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at all, so

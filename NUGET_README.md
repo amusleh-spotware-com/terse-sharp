@@ -211,7 +211,7 @@ arguments filled in from the command it just denied** — which Claude Code plac
 `Call this instead: get_file_outline path="src/App/OrderService.cs"`. The call it names follows the
 **direction** as well as the file kind, so a shell redirect that creates a file answers
 `write_text path="..." force=true`, never an outline; and the shell-text rows are scoped to the tree, so
-a text command naming no .NET source whose every path operand lands outside it - `~/` and `$HOME` spellings included - is allowed. And **a batch is not denied whole
+a text command naming no .NET source whose every path operand lands outside it - `~/`, `$HOME` and a `$VAR` assigned earlier in the same command included - is allowed. And **a batch is not denied whole
 for one covered command in it**: when a compound command mixes commands the server answers with commands
 it does not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at
 all, so the rest runs under your normal permission rules. The rewrite is only attempted where it is

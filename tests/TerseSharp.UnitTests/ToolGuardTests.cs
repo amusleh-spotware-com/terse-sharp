@@ -1855,6 +1855,10 @@ public sealed class ToolGuardTests
     [InlineData("gh run view 1 --log-failed 2>&1 | grep -E \"error CS|Failed ToolGuardTests.cs\" | head -60")]
     [InlineData("gh run view 1 --log-failed | grep \"OrderService.cs\"")]
     [InlineData("ps aux | grep -i \"Program.cs\" | head -5")]
+    [InlineData("gh run view 1 --log-failed | grep -e \"error CS\" -e \"OrderService.cs failed\" | head -40")]
+    [InlineData("gh run view 1 --log-failed | grep --regexp \"error CS\" --regexp \"OrderService.cs\" | head -40")]
+    [InlineData("gh run view 1 --log-failed | grep -ie \"error CS\" -e \"Program.cs\"")]
+    [InlineData("gh run view 36233328021 --log-failed 2>&1 | grep -A 25 \"RunsAgainInsteadOfReplayingStale \\[FAIL\\]\" | cut -c 60- | head -40")]
     public void Inspect_ForAPipeFedPatternThatNamesDotNetSource_AllowsItBecauseItReadsStdin(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
 
@@ -1869,6 +1873,10 @@ public sealed class ToolGuardTests
     [InlineData("gh run list | sed 'r src/Foo.cs'")]
     [InlineData("gh run list | awk 'BEGIN{system(\"cat Foo.cs\")}'")]
     [InlineData("gh run list | grep -d recurse --regexp=Foo.cs")]
+    [InlineData("gh run list | grep -e x -e y src/App/OrderService.cs")]
+    [InlineData("gh run list | grep -e x Program.cs")]
+    [InlineData("gh run list | grep -e x -f Patterns.cs")]
+    [InlineData("gh run list | cat -e Program.cs")]
     public void Inspect_ForATextToolThatReachesDotNetSourceBesideAPipe_StillDeniesIt(string command) =>
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Environment.CurrentDirectory).Denied, command);
 
@@ -1897,5 +1905,48 @@ public sealed class ToolGuardTests
 
         Assert.True(verdict.Denied, command);
         Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("S=\"SCRATCH\"; wc -l \"$S/release-fail.log\"")]
+    [InlineData("S=SCRATCH; wc -l ${S}/release-fail.log && tail -5 \"$S/release-fail.log\"")]
+    [InlineData("S=\"SCRATCH\"\nwc -l \"$S/release-fail.log\"")]
+    public void Inspect_ForAVariableAssignedAPathOutsideTheTreeEarlierInTheCommand_AllowsTheReadThatUsesIt(string template)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch");
+        var command = template.Replace("SCRATCH", scratch, StringComparison.Ordinal);
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+        Assert.Equal("no-tool wc", verdict.Allowance);
+    }
+
+    [Theory]
+    [InlineData("S=SCRATCH; cat '$S/notes.md'")]
+    [InlineData("S=SCRATCH cat \"$S/notes.md\"")]
+    [InlineData("cat \"$S/notes.md\"; S=SCRATCH")]
+    [InlineData("echo x || S=SCRATCH; cat \"$S/notes.md\"")]
+    [InlineData("S=$(mktemp -d); cat \"$S/notes.md\"")]
+    [InlineData("S=SCRATCH; cat \"$S/OrderService.cs\"")]
+    public void Inspect_ForAVariableThatDoesNotSoundlyExpandOutsideTheTree_StillDeniesTheRead(string template)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch");
+        var command = template.Replace("SCRATCH", scratch, StringComparison.Ordinal);
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+    }
+
+    [Fact]
+    public void Inspect_ForAVariableAssignedADotNetSourcePath_DeniesTheReadThatUsesItWithoutARewrite()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "F=src/App/OrderService.cs; cat \"$F\"" }, root);
+
+        Assert.True(verdict.Denied, verdict.Reason);
+        Assert.Contains("get_file_outline", verdict.Routing, StringComparison.Ordinal);
+        Assert.Null(verdict.Rewrite);
     }
 }

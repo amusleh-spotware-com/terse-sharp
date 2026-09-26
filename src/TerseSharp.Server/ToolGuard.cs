@@ -147,7 +147,7 @@ public static class ToolGuard
         if (command is null)
             return Allowed;
 
-        var replaced = Compound(command, cwd);
+        var replaced = Assigned(command, cwd);
 
         return replaced.Denied || !Sleeping(command) ? replaced : Napping();
     }
@@ -1745,10 +1745,12 @@ public static class ToolGuard
 
         var command = Tokenized(Masked(segment));
         var name = command.Length > 0 ? Path.GetFileNameWithoutExtension(command[0]) : string.Empty;
-        var patterns = PatternCommands.Contains(name, StringComparer.OrdinalIgnoreCase) ? 1 : 0;
 
         if (name.Length is 0 || Programmable(name) || ListCommands.Contains(name, StringComparer.OrdinalIgnoreCase))
             return false;
+
+        var patterns = PatternCommands.Contains(name, StringComparer.OrdinalIgnoreCase) ? 1 : 0;
+        var grep = GrepCommands.Contains(name, StringComparer.OrdinalIgnoreCase);
 
         for (var index = 1; index < command.Length; index++)
         {
@@ -1756,6 +1758,14 @@ public static class ToolGuard
 
             if (NamesAFile(token))
                 return false;
+
+            if (grep && Regexp(token))
+            {
+                patterns = 0;
+                index++;
+
+                continue;
+            }
 
             if (token.StartsWith('-') || IsCount(token) || patterns-- > 0)
                 continue;
@@ -1772,6 +1782,114 @@ public static class ToolGuard
 
     private static bool Programmable(string name) =>
         name.Equals("sed", StringComparison.OrdinalIgnoreCase) || name.Equals("awk", StringComparison.OrdinalIgnoreCase);
+
+    private static readonly string[] GrepCommands = ["grep", "rg", "egrep", "fgrep"];
+
+    private static bool Regexp(string token) => token is "-e" or "--regexp" or ['-', not '-', .., 'e'];
+
+    private static readonly SearchValues<char> NameChars = SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+    private static readonly SearchValues<char> Unassignable = SearchValues.Create(" \t|<>()&`$;");
+    private static readonly SearchValues<char> Unexpandable = SearchValues.Create("$`\"'");
+
+    private static bool IsName(ReadOnlySpan<char> name) => name.Length > 0 && !char.IsAsciiDigit(name[0]) && !name.ContainsAnyExcept(NameChars);
+
+    private static (Range Name, int Width) Reference(ReadOnlySpan<char> text)
+    {
+        if (text is not ['$', var next, ..])
+            return (default, 0);
+
+        if (next is '{')
+            return text.IndexOf('}') is var close and > 2 ? (2..close, close + 1) : (default, 0);
+
+        var length = text[1..].IndexOfAnyExcept(NameChars) is var stop and >= 0 ? stop : text.Length - 1;
+
+        return length > 0 && !char.IsAsciiDigit(next) ? (1..(length + 1), length + 1) : (default, 0);
+    }
+
+    private static void Recorded(string statement, Dictionary<string, string> values)
+    {
+        var trimmed = statement.Trim();
+        var equals = trimmed.IndexOf('=', StringComparison.Ordinal);
+
+        if (equals <= 0 || !IsName(trimmed.AsSpan(0, equals)) || Masked(trimmed).AsSpan().IndexOfAny(Unassignable) >= 0)
+            return;
+
+        var value = trimmed.AsSpan(equals + 1).Trim(Wrappers.AsSpan());
+
+        if (value.Length > 0 && value.IndexOfAny(Unexpandable) < 0)
+            values[trimmed[..equals]] = value.ToString();
+    }
+
+    private static string Filled(string text, Dictionary<string, string> values)
+    {
+        if (values.Count is 0 || !text.Contains('$'))
+            return text;
+
+        var lookup = values.GetAlternateLookup<ReadOnlySpan<char>>();
+        var builder = new StringBuilder(text.Length);
+        var quote = '\0';
+
+        for (var index = 0; index < text.Length; index++)
+        {
+            quote = Quote(quote, text[index]);
+            var rest = text.AsSpan(index);
+            var (name, width) = quote is '\'' ? (default(Range), 0) : Reference(rest);
+
+            if (width > 0 && lookup.TryGetValue(rest[name], out var value))
+            {
+                builder.Append(value);
+                index += width - 1;
+
+                continue;
+            }
+
+            builder.Append(text[index]);
+        }
+
+        return builder.ToString();
+    }
+
+    private static bool Sequential(string lead) => lead.AsSpan().Trim() is "" or ";" or "&&";
+
+    private static string? Resolved(string command)
+    {
+        if (!command.Contains('$') || !command.Contains('=') || command.Contains("<<", StringComparison.Ordinal))
+            return null;
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var builder = new StringBuilder(command.Length);
+
+        foreach (var pipeline in Pipelines(command))
+        {
+            var text = Filled(pipeline.Text, values);
+
+            builder.Append(pipeline.Lead).Append(text);
+
+            if (Sequential(pipeline.Lead))
+                Recorded(text, values);
+        }
+
+        var resolved = builder.ToString();
+
+        return resolved.Equals(command, StringComparison.Ordinal) ? null : resolved;
+    }
+
+    private static GuardVerdict Assigned(string command, string? cwd)
+    {
+        var verdict = Compound(command, cwd);
+
+        if (Resolved(command) is not { } resolved)
+            return verdict;
+
+        var expanded = Compound(resolved, cwd);
+
+        return (verdict.Denied, expanded.Denied) switch
+        {
+            (true, false) => expanded,
+            (false, true) => Blocking(Stages(resolved), resolved, cwd),
+            _ => verdict,
+        };
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);
