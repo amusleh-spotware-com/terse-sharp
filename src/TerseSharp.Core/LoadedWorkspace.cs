@@ -670,4 +670,17 @@ public sealed class LoadedWorkspace : IDisposable
             Sync.Bumped(ChangeKind.Files);
         }
     }
+
+    public static int RealizedProjects(Solution solution)
+    {
+        var realized = 0;
+
+        foreach (var project in solution.Projects)
+        {
+            if (!project.SupportsCompilation || project.TryGetCompilation(out _))
+                realized++;
+        }
+
+        return realized;
+    }
 }

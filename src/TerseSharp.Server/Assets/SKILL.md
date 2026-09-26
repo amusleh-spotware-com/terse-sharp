@@ -328,7 +328,7 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold`, and the first semantic call that realizes them appends
 `compilations=realized in Nms (once per load, not per call)` — a one-off, measured at about 7 s on a
-300-document solution, not the per-call cost of the tool that happened to pay it.
+300-document solution, not the per-call cost of the tool that happened to pay it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation.
 **A workspace nobody has used for 15 minutes gives its compilations back** (`--idle-minutes`,
 `TERSE_IDLE_MINUTES`, `0` to disable), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes

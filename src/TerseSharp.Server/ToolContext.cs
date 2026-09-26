@@ -254,16 +254,19 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
     private static async Task<string> AttributedAsync(LoadedWorkspace loaded, Func<Task<string>> action)
     {
-        if (loaded.CompilationsRealized)
+        var snapshot = loaded.Solution;
+        var total = snapshot.ProjectIds.Count;
+        var before = LoadedWorkspace.RealizedProjects(snapshot);
+
+        if (before >= total)
             return await action().ConfigureAwait(false);
 
         var stopwatch = Stopwatch.StartNew();
         var answer = await action().ConfigureAwait(false);
+        var compiled = Math.Min(total, Math.Max(LoadedWorkspace.RealizedProjects(snapshot), LoadedWorkspace.RealizedProjects(loaded.Solution)));
 
-        return loaded.CompilationsRealized
-            && !answer.StartsWith("ERROR", StringComparison.Ordinal)
-            && loaded.TakeRealizedNotice()
-            ? answer + "\n" + Realized(stopwatch.ElapsedMilliseconds, loaded.Drops, loaded.DroppedAfter)
+        return compiled > before && !answer.StartsWith("ERROR", StringComparison.Ordinal)
+            ? answer + "\n" + Realization(loaded, before, compiled, total, stopwatch.ElapsedMilliseconds)
             : answer;
     }
 
@@ -386,6 +389,15 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             : string.Create(
                 CultureInfo.InvariantCulture,
                 $"compilations=realized in {milliseconds}ms (again - drop #{drops} released them after {(int)droppedAfter.TotalMinutes}m idle; --idle-minutes or TERSE_IDLE_MINUTES=0 keeps them)");
+
+    internal static string Grew(long milliseconds, int realized, int compiled, int total, int drops) => drops is 0
+        ? string.Create(CultureInfo.InvariantCulture, $"compilations=realized in {milliseconds}ms ({realized} more of {total} projects, {compiled} compiled now)")
+        : string.Create(CultureInfo.InvariantCulture, $"compilations=realized in {milliseconds}ms ({realized} more of {total} projects, {compiled} compiled now; after drop #{drops})");
+
+    private static string Realization(LoadedWorkspace loaded, int before, int compiled, int total, long milliseconds) =>
+        before is 0 && compiled == total && loaded.TakeRealizedNotice()
+            ? Realized(milliseconds, loaded.Drops, loaded.DroppedAfter)
+            : Grew(milliseconds, compiled - before, compiled, total, loaded.Drops);
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

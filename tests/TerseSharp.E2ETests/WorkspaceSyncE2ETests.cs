@@ -434,6 +434,29 @@ public sealed class WorkspaceSyncE2ETests
     }
 
     [Fact]
+    public async Task SearchSymbols_ThatReachesAProjectNoEarlierCallCompiled_SaysHowManyMoreItRealized()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+        watch: false,
+        TestContext.Current.CancellationToken,
+        root => File.WriteAllTextAsync(
+            Path.Combine(root, "FixtureSolution.slnx"),
+            "<Solution>\n  <Project Path=\"src/Fixture.Trading/Fixture.Trading.csproj\" />\n  <Project Path=\"tests/Fixture.Trading.Tests/Fixture.Trading.Tests.csproj\" />\n</Solution>\n",
+            TestContext.Current.CancellationToken));
+
+        await solution.CallAsync("load_workspace", new() { ["reload"] = true });
+        var first = await solution.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderService.cs" });
+        var reaching = await solution.CallAsync("search_symbols", new() { ["query"] = "DeliberateOutcomesTests" });
+        var again = await solution.CallAsync("search_symbols", new() { ["query"] = "DeliberateOutcomesTests" });
+
+        Assert.Contains("DeliberateOutcomesTests", reaching, StringComparison.Ordinal);
+        Assert.Contains("compilations=realized in ", reaching, StringComparison.Ordinal);
+        Assert.Contains("(1 more of 2 projects, 2 compiled now)", reaching, StringComparison.Ordinal);
+        Assert.Contains("(1 more of 2 projects, 1 compiled now)", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("compilations=", again, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WorkspaceStatus_WhenDiskNoLongerMatchesTheWorkspace_NamesTheDivergedDocument()
     {
         await using var solution = await StartAsync(watch: false);
