@@ -301,8 +301,7 @@ because the hook is installed user-wide, so `git -C ../notes status` is allowed.
 `add`, `commit`, `push`, and every `git tag` that creates, annotates or deletes) are allowed — nothing
 here replaces those. A denied command also tells the agent not to retry it in `Bash`.
 
-Malformed hook input allows the call, so a guard fault can never wedge a session; remove the guard by
-deleting the `terse guard` entry from Claude Code's `settings.json`. `TERSE_GUARD_LOG=<path>` appends one
+Malformed hook input allows the call, so a guard fault can never wedge a session; `terse uninstall` removes the guard with the server entry - both hooks, and nothing else in Claude Code's `settings.json`. `TERSE_GUARD_LOG=<path>` appends one
 JSON line per decision — tool, verdict, routing, reason, `cwd`, session and transcript path, plus
 `standDown` when a project's `.terse.json` turned a denial back into an allow. Opt-in, best-effort; a
 write failure never changes the verdict.

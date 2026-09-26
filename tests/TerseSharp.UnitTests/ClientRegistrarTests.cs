@@ -341,4 +341,79 @@ public sealed class ClientRegistrarTests : IDisposable
         Assert.Contains(batch, entry => entry!["hooks"]![0]!["command"]!.GetValue<string>() is "other-batch-tool");
         Assert.Single(hooks["PreToolUse"]!.AsArray(), entry => Matcher(entry) is "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash");
     }
+
+    [Fact]
+    public async Task Unregister_RemovesEveryTerseGuardHook_AndKeepsEveryOtherHookIntact()
+    {
+        await ClientRegistrar.Register("claude-code", null);
+        await WriteSettingsAsync("""
+        {"hooks":{
+          "PreToolUse":[
+            {"matcher":"Bash","hooks":[{"type":"command","command":"user-pre"}]},
+            {"matcher":"Read","hooks":[{"type":"command","command":"terse guard"},{"type":"command","command":"user-mixed"}]},
+            {"matcher":"Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash","hooks":[{"type":"command","command":"terse guard"}]}],
+          "PostToolBatch":[{"hooks":[{"type":"command","command":"terse guard --post-batch"}]}],
+          "Stop":[{"hooks":[{"type":"command","command":"user-stop"}]}]}}
+        """);
+
+        var message = await ClientRegistrar.Unregister("claude-code");
+        var hooks = LoadFrom(SettingsFile)["hooks"]!.AsObject();
+        var pre = hooks["PreToolUse"]!.AsArray();
+        string[] expected = ["user-pre", "user-mixed"];
+
+        Assert.Contains("removed guard from " + SettingsFile, message, StringComparison.Ordinal);
+        Assert.DoesNotContain("terse guard", File.ReadAllText(SettingsFile), StringComparison.Ordinal);
+        Assert.Null(hooks["PostToolBatch"]);
+        Assert.Equal(expected, pre.Select(entry => entry!["hooks"]![0]!["command"]!.GetValue<string>()));
+        Assert.Single(pre[1]!["hooks"]!.AsArray());
+        Assert.Equal("Read", Matcher(pre[1]));
+        Assert.Equal("user-stop", hooks["Stop"]![0]!["hooks"]![0]!["command"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Unregister_WhenNoGuardIsInstalled_LeavesTheSettingsFileUntouched()
+    {
+        const string settings = """{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"user-stop"}]}]}}""";
+        await WriteSettingsAsync(settings);
+
+        var message = await ClientRegistrar.Unregister("claude-code");
+
+        Assert.DoesNotContain("guard", message, StringComparison.Ordinal);
+        Assert.Equal(settings, File.ReadAllText(SettingsFile));
+    }
+
+    [Fact]
+    public async Task Unregister_ForAnotherClient_LeavesTheGuardInstalled()
+    {
+        await ClientRegistrar.InstallGuard();
+        var before = File.ReadAllText(SettingsFile);
+
+        await ClientRegistrar.Unregister("cursor");
+
+        Assert.Equal(before, File.ReadAllText(SettingsFile));
+    }
+
+    [Fact]
+    public async Task Unregister_WhenTheSettingsAreNotValidJson_SaysSoAndLeavesThemUntouched()
+    {
+        await WriteSettingsAsync(Malformed);
+
+        var message = await ClientRegistrar.Unregister("claude-code");
+
+        Assert.Contains("skipped guard (not a JSON object", message, StringComparison.Ordinal);
+        Assert.Equal(Malformed, File.ReadAllText(SettingsFile));
+    }
+
+    [Fact]
+    public async Task Unregister_WhenAnotherHookHasANonStringCommand_KeepsItAndStillRemovesTheGuard()
+    {
+        await WriteSettingsAsync("""{"hooks":{"Stop":[{"hooks":[{"type":"command","command":5}]}],"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"terse guard"}]}]}}""");
+
+        await ClientRegistrar.Unregister("claude-code");
+
+        var hooks = LoadFrom(SettingsFile)["hooks"]!.AsObject();
+
+        Assert.Null(hooks["PreToolUse"]);
+        Assert.Equal(5, hooks["Stop"]![0]!["hooks"]![0]!["command"]!.GetValue<int>());
+    }
 }

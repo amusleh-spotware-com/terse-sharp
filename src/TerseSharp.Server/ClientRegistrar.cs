@@ -112,7 +112,9 @@ public static class ClientRegistrar
 
     private static bool IsGuard(JsonNode? hook) =>
         hook is JsonObject declared
-        && declared["command"]?.GetValue<string>()?.Contains("terse guard", StringComparison.Ordinal) is true;
+        && declared["command"] is JsonValue value
+        && value.TryGetValue<string>(out var command)
+        && command.Contains("terse guard", StringComparison.Ordinal);
 
     private static JsonObject GuardEntry() => new()
     {
@@ -134,10 +136,14 @@ public static class ClientRegistrar
 
     public static async Task<string> Unregister(string? client)
     {
-        var lines = new List<string>();
+        var targets = Select(client);
+        var lines = new List<string>(targets.Length + 1);
 
-        foreach (var target in Select(client))
+        foreach (var target in targets)
             lines.Add(await Remove(target).ConfigureAwait(false));
+
+        if (targets.Any(target => target.Name is ClaudeCode) && await RemoveGuard().ConfigureAwait(false) is { } guard)
+            lines.Add(guard);
 
         return Joined([.. lines]);
     }
@@ -199,6 +205,56 @@ public static class ClientRegistrar
 
         return "removed from " + target.Name;
     }
+
+    private static async Task<string?> RemoveGuard()
+    {
+        var path = SettingsPath();
+
+        if (!File.Exists(path))
+            return null;
+
+        if (Parse(path) is not { } root)
+            return "skipped guard (not a JSON object: " + path + ")";
+
+        if (Unguarded(root) is not { } updated)
+            return null;
+
+        await SaveAsync(path, updated).ConfigureAwait(false);
+
+        return "removed guard from " + path;
+    }
+
+    private static JsonObject? Unguarded(JsonObject root)
+    {
+        if (root["hooks"] is not JsonObject hooks || !hooks.Any(pair => pair.Value is JsonArray matchers && matchers.Any(HoldsGuard)))
+            return null;
+
+        var updated = (JsonObject)root.DeepClone();
+        var cleaned = new JsonObject();
+
+        foreach (var (name, value) in hooks)
+        {
+            if (Stripped(value) is { } kept)
+                cleaned[name] = kept;
+        }
+
+        updated["hooks"] = cleaned;
+
+        return updated;
+    }
+
+    private static JsonNode? Stripped(JsonNode? value)
+    {
+        if (value is not JsonArray matchers)
+            return value?.DeepClone();
+
+        var kept = matchers.Select(Without).OfType<JsonNode>().ToArray();
+
+        return kept.Length is 0 && matchers.Count > 0 ? null : new JsonArray(kept);
+    }
+
+    private static bool HoldsGuard(JsonNode? entry) =>
+        entry is JsonObject matcher && matcher["hooks"] is JsonArray declared && declared.Any(IsGuard);
     private static string Skipped(ClientTarget target, string reason) =>
         "skipped " + target.Name + " (" + reason + ": " + target.ConfigPath + ")";
 

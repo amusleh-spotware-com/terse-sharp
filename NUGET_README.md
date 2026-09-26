@@ -219,7 +219,7 @@ provably sound: every top-level separator is `&&`, `;` or a newline, and a pipel
 is dropped whole, its redirects with it — a plain `>`, `>>`, `2>` or `<` binds to the command it
 follows and no longer forces a refusal. A command carrying `||`, a background `&`, a subshell, a heredoc, a substitution, a
 comment, any backslash escape, a mixed `;`/`&&` run or a shell keyword is denied whole, as before - and
-so is a batch whose only surviving parts would be `echo`/`printf` framing. The same install adds a `PostToolBatch` hook: after a response that carried a single read-only terse-sharp call, it places one line after the results asking the next response to send every independent call at once.
+so is a batch whose only surviving parts would be `echo`/`printf` framing. The same install adds a `PostToolBatch` hook: after a response that carried a single read-only terse-sharp call, it places one line after the results asking the next response to send every independent call at once. `terse uninstall` removes both hooks along with the server entry.
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text tools
 (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that names a
