@@ -438,4 +438,37 @@ public sealed class WorkspaceSyncTests
 
         Assert.Equal(before + 1, sync.Events);
     }
+
+    [Fact]
+    public async Task AdoptAsync_WhenTheFileMovedOnBeforeTheApply_NeverWritesTheOlderText()
+    {
+        using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        await loaded.MaterialiseAsync(TestContext.Current.CancellationToken);
+        var path = loaded.Files.OrderServicePath;
+        var id = loaded.Workspace.Solution.GetDocumentIdsWithFilePath(path)[0];
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var updated = loaded.Workspace.Solution.WithDocumentText(id, Microsoft.CodeAnalysis.Text.SourceText.From(original + "// absorbed\n"));
+        var newer = original + "// newer\n";
+
+        await File.WriteAllTextAsync(path, newer, TestContext.Current.CancellationToken);
+
+        Assert.False(await loaded.Workspace.AdoptAsync(updated, static () => false, TestContext.Current.CancellationToken));
+        Assert.Equal(newer, await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task AdoptAsync_WhenTheFileIsStillCurrent_AdoptsTheAbsorbedText()
+    {
+        using var loaded = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+        await loaded.MaterialiseAsync(TestContext.Current.CancellationToken);
+        var path = loaded.Files.OrderServicePath;
+        var id = loaded.Workspace.Solution.GetDocumentIdsWithFilePath(path)[0];
+        var absorbed = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken) + "// absorbed\n";
+
+        Assert.True(await loaded.Workspace.AdoptAsync(
+            loaded.Workspace.Solution.WithDocumentText(id, Microsoft.CodeAnalysis.Text.SourceText.From(absorbed)),
+            static () => true,
+            TestContext.Current.CancellationToken));
+        Assert.Equal(absorbed, (await loaded.Workspace.Solution.GetDocument(id)!.GetTextAsync(TestContext.Current.CancellationToken)).ToString());
+    }
 }

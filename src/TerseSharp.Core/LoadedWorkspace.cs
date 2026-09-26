@@ -163,20 +163,8 @@ public sealed class LoadedWorkspace : IDisposable
         return false;
     }
 
-    public async Task<bool> AdoptAsync(Solution solution, CancellationToken cancellationToken)
-    {
-        var rebased = await AbsorbedAsync(solution, cancellationToken).ConfigureAwait(false);
-
-        lock (historyGate)
-        {
-            if (!Applied(rebased))
-                return false;
-
-            Solution = solution;
-
-            return true;
-        }
-    }
+    public Task<bool> AdoptAsync(Solution solution, CancellationToken cancellationToken) =>
+        AdoptAsync(solution, static () => true, cancellationToken);
 
     public void DropSnapshots(IReadOnlyList<string> paths)
     {
@@ -531,25 +519,7 @@ public sealed class LoadedWorkspace : IDisposable
             ? AddedAsync(source, target, id, cancellationToken)
             : ChangedAsync(source, target, id, cancellationToken);
 
-    private bool Applied(Solution rebased)
-    {
-        var applied = false;
-
-        try
-        {
-            lock (ProjectGlobs.EvaluationGate)
-            {
-                applied = workspace.TryApplyChanges(rebased);
-            }
-        }
-        finally
-        {
-            if (!applied)
-                Solution = Forked();
-        }
-
-        return applied;
-    }
+    private bool Applied(Solution rebased) => Applied(rebased, static () => true);
 
     public bool CompilationsDropped { get; private set; }
 
@@ -682,5 +652,42 @@ public sealed class LoadedWorkspace : IDisposable
         }
 
         return realized;
+    }
+
+    private bool Applied(Solution rebased, Func<bool> current)
+    {
+        var attempted = false;
+        var applied = false;
+
+        try
+        {
+            lock (ProjectGlobs.EvaluationGate)
+            {
+                attempted = current();
+                applied = attempted && workspace.TryApplyChanges(rebased);
+            }
+        }
+        finally
+        {
+            if (attempted && !applied)
+                Solution = Forked();
+        }
+
+        return applied;
+    }
+
+    public async Task<bool> AdoptAsync(Solution solution, Func<bool> current, CancellationToken cancellationToken)
+    {
+        var rebased = await AbsorbedAsync(solution, cancellationToken).ConfigureAwait(false);
+
+        lock (historyGate)
+        {
+            if (!Applied(rebased, current))
+                return false;
+
+            Solution = solution;
+
+            return true;
+        }
     }
 }

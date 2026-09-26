@@ -250,8 +250,10 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         if (Shifted(changed))
             return [];
 
-        if (await workspace.AdoptAsync(updated, cancellationToken).ConfigureAwait(false))
+        if (await workspace.AdoptAsync(updated, () => changed.All(Stable), cancellationToken).ConfigureAwait(false))
             kinds.Add(ChangeKind.Code);
+        else if (Shifted(changed))
+            return [];
         else
             Rebuild();
 
