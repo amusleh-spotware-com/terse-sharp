@@ -84,4 +84,18 @@ public sealed class SymbolReferenceTests
     [InlineData("Reconcile(Order)", 1)]
     public void Parse_ForAnEmptyParameterSlot_KeepsItsArity(string text, int expected) =>
         Assert.Equal(expected, SymbolReference.Parse(text)!.Value.Parameters!.Count);
+
+    [Theory]
+    [InlineData("BuildTools..ctor", "BuildTools", ".ctor")]
+    [InlineData("Fixture.Trading.Scattered..ctor(int)", "Fixture.Trading.Scattered", ".ctor")]
+    [InlineData("Registry..cctor", "Registry", ".cctor")]
+    [InlineData("BuildTools.#ctor", "BuildTools", ".ctor")]
+    [InlineData("Parser.ctor", "Parser", "ctor")]
+    public void Parse_ForAMetadataConstructorName_SplitsBeforeTheConstructorsOwnDot(string text, string container, string member)
+    {
+        var query = SymbolReference.Parse(text)!.Value;
+
+        Assert.Equal(container, query.ContainingType);
+        Assert.Equal(member, query.Member);
+    }
 }

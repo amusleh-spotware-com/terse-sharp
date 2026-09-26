@@ -907,6 +907,33 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task GetSymbolSource_WithAMetadataConstructorName_ReturnsTheConstructorTheHashFormReturns()
+    {
+        var metadata = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderService..ctor" });
+        var hash = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderService.#ctor" });
+
+        Assert.DoesNotContain("ERROR", metadata, StringComparison.Ordinal);
+        Assert.Contains("public OrderService(IOrderRepository repository) => this.repository = repository;", metadata, StringComparison.Ordinal);
+        Assert.Contains("public OrderService(IOrderRepository repository) => this.repository = repository;", hash, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_OnAPrimaryConstructor_ReturnsTheTypeHeaderThroughItsParameterList()
+    {
+        var metadata = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Scattered..ctor" });
+        var hash = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Scattered.#ctor" });
+        var bare = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Scattered.#ctor", ["comments"] = false });
+
+        foreach (var text in (string[])[metadata, hash, bare])
+        {
+            Assert.Contains("Awkward.cs:40-40", text, StringComparison.Ordinal);
+            Assert.Contains("public sealed class Scattered(int offset)", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Pick", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Between", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public async Task GetSymbolSource_OnAMemberTheTypeDoesNotDeclare_OffersItsConstructorAmongTheNearest()
     {
         var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "OrderRouter.Constructor" });

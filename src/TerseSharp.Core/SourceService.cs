@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.Core;
 
@@ -13,9 +14,7 @@ public static class SourceService
         SourceFormat format,
         CancellationToken cancellationToken)
     {
-        var references = symbol.DeclaringSyntaxReferences;
-
-        if (references.Length is 0)
+        if (symbol.DeclaringSyntaxReferences.Length is 0)
         {
             return MetadataSearch.IsMetadata(symbol)
                 ? Result.Ok(Metadata(symbol, format))
@@ -24,8 +23,7 @@ public static class SourceService
 
         var response = new ResponseBuilder("get_symbol_source", SymbolId.From(symbol).Value).Verbose(format.Verbose);
 
-        foreach (var reference in references)
-            await AppendAsync(root, response, reference, format, cancellationToken).ConfigureAwait(false);
+        await AppendAsync(root, response, symbol, format, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(response.ToString());
     }
@@ -33,18 +31,56 @@ public static class SourceService
     private static async Task AppendAsync(
             string root,
             ResponseBuilder response,
-            SyntaxReference reference,
+            ISymbol symbol,
             SourceFormat format,
             CancellationToken cancellationToken)
     {
-        var node = Declaration(await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false));
-        var span = node.GetLocation().GetLineSpan();
-        var source = format.Comments ? node.ToFullString() : CommentStripper.Without(node);
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            var rendered = await RenderedAsync(symbol, reference, format, cancellationToken).ConfigureAwait(false);
 
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{PositionFormat.Relative(root, span.Path)}:{span.StartLinePosition.Line + 1}-{span.EndLinePosition.Line + 1}"));
-        response.Line(format.Verbose ? source.Trim() : TextCompressor.Source(source));
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{PositionFormat.Relative(root, rendered.Span.Path)}:{rendered.Span.StartLinePosition.Line + 1}-{rendered.Span.EndLinePosition.Line + 1}"));
+            response.Line(format.Verbose ? rendered.Source.Trim() : TextCompressor.Source(rendered.Source));
+        }
+    }
+
+    private readonly record struct RenderedSource(FileLinePositionSpan Span, string Source);
+
+    private static async Task<RenderedSource> RenderedAsync(
+        ISymbol symbol,
+        SyntaxReference reference,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        var syntax = await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
+
+        return symbol is IMethodSymbol { MethodKind: MethodKind.Constructor } && syntax is TypeDeclarationSyntax { ParameterList: not null } type
+            ? await HeaderAsync(type, format, cancellationToken).ConfigureAwait(false)
+            : Whole(Declaration(syntax), format);
+    }
+
+    private static RenderedSource Whole(SyntaxNode node, SourceFormat format) =>
+        new(node.GetLocation().GetLineSpan(), format.Comments ? node.ToFullString() : CommentStripper.Without(node));
+
+    private static async Task<RenderedSource> HeaderAsync(
+        TypeDeclarationSyntax type,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        var end = HeaderEnd(type);
+        var text = await type.SyntaxTree.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var shown = TextSpan.FromBounds(format.Comments ? type.FullSpan.Start : type.SpanStart, end);
+
+        return new(type.SyntaxTree.GetLineSpan(TextSpan.FromBounds(type.SpanStart, end), cancellationToken), text.ToString(shown));
+    }
+
+    private static int HeaderEnd(TypeDeclarationSyntax type)
+    {
+        var body = type.OpenBraceToken.RawKind is not 0 ? type.OpenBraceToken : type.SemicolonToken;
+
+        return body.RawKind is not 0 ? body.GetPreviousToken().Span.End : type.Span.End;
     }
 
     public static string Describe(string root, ISymbol symbol, bool verbose) =>
@@ -94,16 +130,13 @@ public static class SourceService
             return true;
         }
 
-        var references = resolved.Value!.DeclaringSyntaxReferences;
-
-        if (references.Length is 0)
+        if (resolved.Value!.DeclaringSyntaxReferences.Length is 0)
         {
             response.Note(Metadata(resolved.Value!, format));
             return true;
         }
 
-        foreach (var reference in references)
-            await AppendAsync(workspace.Root, response, reference, format, cancellationToken).ConfigureAwait(false);
+        await AppendAsync(workspace.Root, response, resolved.Value!, format, cancellationToken).ConfigureAwait(false);
 
         return true;
     }

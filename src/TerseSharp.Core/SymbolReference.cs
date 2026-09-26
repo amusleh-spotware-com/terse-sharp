@@ -56,7 +56,7 @@ public static class SymbolReference
         var trimmed = text.Trim();
         var open = trimmed.IndexOf('(', StringComparison.Ordinal);
         var name = open < 0 ? trimmed : trimmed[..open];
-        var separator = name.LastIndexOf('.');
+        var separator = Separator(name);
 
         return name.Length is 0
             ? null
@@ -65,6 +65,17 @@ public static class SymbolReference
                 Member(separator < 0 ? name : name[(separator + 1)..]),
                 open < 0 ? null : Split(trimmed[open..]));
     }
+
+    private static int Separator(ReadOnlySpan<char> name) =>
+        MetadataConstructor(name, WellKnownMemberNames.InstanceConstructorName)
+        ?? MetadataConstructor(name, WellKnownMemberNames.StaticConstructorName)
+        ?? name.LastIndexOf('.');
+
+
+    private static int? MetadataConstructor(ReadOnlySpan<char> name, string constructor) =>
+        name.Length > constructor.Length && name.EndsWith(constructor, StringComparison.Ordinal) && name[^(constructor.Length + 1)] is '.'
+            ? name.Length - constructor.Length - 1
+            : null;
 
     public static bool Matches(ISymbol symbol, SymbolQuery query) =>
         MatchesContainer(symbol, query.ContainingType) && MatchesParameters(symbol, query.Parameters);

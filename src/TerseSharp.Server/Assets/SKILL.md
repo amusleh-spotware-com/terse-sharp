@@ -709,7 +709,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
    A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
    guess**. Constructors, operators, indexers, generics and explicit interface implementations keep
-   their documentation id in outlines, because a name cannot address them. Every one of those tools
+   their documentation id in outlines, because a name cannot address them. `Type.#ctor` and `Type..ctor` address constructors; a primary one answers its type header. Every one of those tools
    also accepts `symbol:` as an alias for `symbolId:`, and none of them declares the parameter
    required — a call with neither answers `ERROR InvalidArgument` naming `symbolId`.
    `add_member` addresses a *containing type*, so its canonical name is `typeSymbolId:` — but it
