@@ -190,4 +190,13 @@ public sealed class LastTestRunTests
 
         Assert.Equal(["Ns.Tests.One"], after.FailedTests);
     }
+
+    [Theory]
+    [InlineData(null, false, 12, true)]
+    [InlineData("", false, 12, true)]
+    [InlineData("FullyQualifiedName~One", false, 12, false)]
+    [InlineData(null, true, 12, false)]
+    [InlineData(null, false, 0, false)]
+    public void Whole_IsTrueOnlyForAnUnfilteredSingleTargetRunThatReportedTests(string? filter, bool subset, int total, bool expected) =>
+        Assert.Equal(expected, TestRunMemory.Whole(filter, subset ? ["a.csproj"] : default, total));
 }

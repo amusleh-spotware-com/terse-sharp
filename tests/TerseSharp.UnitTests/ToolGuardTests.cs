@@ -1951,6 +1951,18 @@ public sealed class ToolGuardTests
     }
 
     [Theory]
+    [InlineData("F=src/App/OrderService.cs; echo x.cs; cat \"$F\"")]
+    [InlineData("F=src/App/OrderService.cs; git add src/App/Other.cs; cat \"$F\"")]
+    [InlineData("F=src/App/OrderService.cs; echo src/App/OrderService.cs ; cat \"$F\"")]
+    public void Inspect_ForAVariableHoldingDotNetSourceBesideAnotherSourceToken_StillDeniesTheRead(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+    }
+
+    [Theory]
     [InlineData("F=/tmp/x.log; cat \"$F\"")]
     [InlineData("F=/tmp/x.log; tail -5 \"$F\"")]
     [InlineData("LOG=build.log; tail -5 \"$LOG\"")]

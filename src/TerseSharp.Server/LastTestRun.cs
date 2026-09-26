@@ -41,6 +41,9 @@ public sealed record TestRunMemory(
         { Length: var length } when length > limit => ImmutableArray.Create(tests, 0, limit),
         _ => tests,
     };
+
+    public static bool Whole(string? filter, ImmutableArray<string> targets, int total) =>
+        filter is not { Length: > 0 } && targets.IsDefaultOrEmpty && total > 0;
 }
 
 public sealed class LastTestRun

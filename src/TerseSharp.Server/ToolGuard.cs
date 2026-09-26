@@ -1886,7 +1886,7 @@ public static class ToolGuard
         return (verdict.Denied, expanded.Denied) switch
         {
             (true, false) => expanded,
-            (false, true) when NamesSource(resolved) && !NamesSource(command) => Blocking(Stages(resolved), resolved, cwd),
+            (false, true) when IntroducesSource(command, resolved) => Blocking(Stages(resolved), resolved, cwd),
             _ => verdict,
         };
     }
@@ -1904,6 +1904,9 @@ public static class ToolGuard
 
         return false;
     }
+
+    private static bool IntroducesSource(string command, string resolved) =>
+        Stages(resolved).Zip(Stages(command)).Any(pair => NamesSource(pair.First.Text) && !NamesSource(pair.Second.Text));
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);
