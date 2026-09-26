@@ -44,7 +44,7 @@ public static class AnalysisService
             new Narrowed(touched, baseRef, all.Length - found.Length));
     }
 
-    public static async Task<Result<string[]>> FindingsAsync(
+    public static async Task<Result<GateFindings>> FindingsAsync(
         LoadedWorkspace workspace,
         string? path,
         DiagnosticSeverity minimum,
@@ -56,14 +56,17 @@ public static class AnalysisService
         var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
-            return Result.Fail<string[]>(collected.Error!);
+            return Result.Fail<GateFindings>(collected.Error!);
 
-        var found = Introduced(Filter(collected.Value.Found, collected.Value.Scope, minimum, []), touched);
+        var all = Filter(collected.Value.Found, collected.Value.Scope, minimum, []);
+        var found = Introduced(all, touched);
+        string[] every = [.. collected.Value.Extra];
+        var extra = Introduced(every, touched);
         var declaration = await DiagnosticDeclarations.ResolverAsync(found, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(Grouped(
-            DiagnosticFold.Findings(workspace.Root, found, DiagnosticFormat.Head, declaration),
-            Introduced([.. collected.Value.Extra], touched)));
+        return Result.Ok(new GateFindings(
+            Grouped(DiagnosticFold.Findings(workspace.Root, found, DiagnosticFormat.Head, declaration), extra),
+            all.Length - found.Length + every.Length - extra.Length));
     }
 
     private static async Task<Result<Collected>> CollectedAsync(

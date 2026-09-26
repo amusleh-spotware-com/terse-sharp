@@ -454,11 +454,11 @@ position names the declaration containing it** - `OrderService.cs:15:16 OrderSer
 fix list is ids for `get_symbol_source`, not coordinates. A finding with no source tree keeps the bare
 position; `build` carries no tag, having released the workspace before it shells out. **An id you
 pass to `ids=` that no referenced analyzer declares comes back as `NOT_ENABLED <id>`**, so a sweep
-answering `0 diagnostics` can no longer mean "the rule never ran".
+answering `0 diagnostics` can no longer mean "the rule never ran". `ids=` also reads a JSON-array spelling - `ids=["CS8019", "TERSE001"]` is the same filter as `ids=CS8019,TERSE001`.
 
 `analyze`'s `changed=true` set is carried across the unload-and-reload `build`/`run_tests` perform on
 a locked output, so an analyze after a build no longer answers `no document under that scope was
-modified`; the end-of-task gate over a task's touched files is **one** call, not one per file.
+modified`; the end-of-task gate over a task's touched files is **one** call, not one per file. With no `baseRef=`, `changed=true` is `baseRef=HEAD` on a git tree: findings on lines this task did not change fold into one `pre-existing` count, and `baseRef=""` lists them.
 `sinceLast=true` reports only what appeared since the previous run of the same scope, plus what was
 fixed. `cleanup` never rewrites generated code, and `clean` is not covered by `undo_last_change`.
 `gate` answers **one verdict line** - `clean` or `FAILED` - and, when it is not clean, each step's
@@ -468,7 +468,7 @@ clean verdict is never a gate that ran over nothing; a scope matching no documen
 naming it instead of a verdict. It condenses to that single line
 only when every step was genuinely quiet, so a `VERIFY_FAILED`, an `UNFIXED`, a rolled-back step or a
 file the run rewrote is always shown. Under `dryRun=true` a tree that **would** change answers
-`FAILED`, which is what a pre-push check is for. `dryRun=true` makes both write steps verify instead of write, so
+`FAILED`, which is what a pre-push check is for. Under `baseRef=` the format and cleanup steps write only the files the working tree changed against that ref, so a glob `path=` never reformats a file outside the change set. **Over its changed-file default `gate` is `baseRef=HEAD` on a git tree**: it reports only the findings on lines this task changed and ends the verdict `preExisting=N` for what it folded; `baseRef=""` reports every finding in the changed files. `gate paths=[...]` gates several files, directories or globs as ONE verdict over their union; an entry matching no document is refused by name. `dryRun=true` makes both write steps verify instead of write, so
 nothing is modified; `verbose=true` adds each step's own report. It never replaces reading `build`
 before `run_tests`: those two stay separate on purpose, because a test result read before its build is
 the previous binary's.

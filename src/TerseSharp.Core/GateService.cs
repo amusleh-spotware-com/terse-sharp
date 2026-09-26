@@ -22,11 +22,11 @@ public static class GateService
         var after = await FindingsAsync(workspace, request, cancellationToken).ConfigureAwait(false);
 
         return after.IsOk
-            ? Result.Ok(Render(request, analyzed, before.Value!, after.Value!, formatted, cleaned))
+            ? Result.Ok(Render(request, analyzed, before.Value.Reported.Count, after.Value, formatted, cleaned))
             : Result.Fail<string>(after.Error!);
     }
 
-    private static Task<Result<string[]>> FindingsAsync(
+    private static Task<Result<GateFindings>> FindingsAsync(
         LoadedWorkspace workspace,
         GateRequest request,
         CancellationToken cancellationToken) => AnalysisService.FindingsAsync(
@@ -44,27 +44,27 @@ public static class GateService
         FixMode mode,
         string tool,
         CancellationToken cancellationToken) => FormatService.RunAsync(
-        workspace,
-        new FixScope(request.Path, request.Changed),
-        new FixRequest(mode, [], DiagnosticSeverity.Info, request.DryRun),
-        new EditOptions(tool, DryRun: false, AllowErrors: false, request.Verbose),
-        cancellationToken);
+    workspace,
+    new FixScope(request.Path, request.Changed, request.Touched),
+    new FixRequest(mode, [], DiagnosticSeverity.Info, request.DryRun),
+    new EditOptions(tool, DryRun: false, AllowErrors: false, request.Verbose),
+    cancellationToken);
 
     private static string Render(
         GateRequest request,
         int analyzed,
-        string[] before,
-        string[] after,
+        int before,
+        GateFindings after,
         Result<string> formatted,
         Result<string> cleaned)
     {
         var response = new ResponseBuilder("gate", Scope(request)).Verbose(request.Verbose);
         var quiet = Quiet(formatted) && Quiet(cleaned);
-        var clean = after.Length is 0 && formatted.IsOk && cleaned.IsOk && (!request.DryRun || quiet);
+        var clean = after.Reported.Count is 0 && formatted.IsOk && cleaned.IsOk && (!request.DryRun || quiet);
 
         response.Line(string.Create(
             CultureInfo.InvariantCulture,
-            $"{(clean ? "clean" : "FAILED")}  analyzed={analyzed} fixed={Math.Max(before.Length - after.Length, 0)} remaining={after.Length}{(request.DryRun ? "  dryRun" : string.Empty)}"));
+            $"{(clean ? "clean" : "FAILED")}  analyzed={analyzed} fixed={Math.Max(before - after.Reported.Count, 0)} remaining={after.Reported.Count}{PreExisting(request, after)}{(request.DryRun ? "  dryRun" : string.Empty)}"));
 
         if (clean && quiet && !request.Verbose)
             return response.ToString();
@@ -72,11 +72,16 @@ public static class GateService
         Step(response, "format", formatted);
         Step(response, "cleanup", cleaned);
 
-        foreach (var line in after)
+        foreach (var line in after.Reported)
             response.Line(line);
 
         return response.ToString();
     }
+
+    private static string PreExisting(GateRequest request, GateFindings after) =>
+        request.Touched is null || after.PreExisting is 0
+            ? string.Empty
+            : string.Create(CultureInfo.InvariantCulture, $"  preExisting={after.PreExisting}");
 
     private static bool Quiet(Result<string> result) =>
         result.IsOk
@@ -99,3 +104,5 @@ public static class GateService
             ? DocumentScope.Editable(workspace).Count()
             : DocumentScope.Select(workspace, request.Path, request.Changed).Length;
 }
+
+public readonly record struct GateFindings(IReadOnlyList<string> Reported, int PreExisting);

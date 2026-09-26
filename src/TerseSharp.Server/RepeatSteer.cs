@@ -30,6 +30,8 @@ public static class RepeatSteer
         ["analyze"] = "paths",
         ["format"] = "paths",
         ["cleanup"] = "paths",
+        ["gate"] = "paths",
+        ["delete_symbol"] = "symbolIds",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();

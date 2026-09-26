@@ -461,8 +461,8 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     [Fact]
     public async Task Gate_OnItsWidestScope_CostsFarLessThanTheFourCallsItReplaces()
     {
-        var gated = await server.CallAsync("gate", new() { ["solution"] = true, ["dryRun"] = true, ["verbose"] = true });
         var analyzed = await server.CallAsync("analyze", new() { ["minSeverity"] = "info" });
+        var gated = await server.CallAsync("gate", new() { ["solution"] = true, ["dryRun"] = true, ["verbose"] = true });
         var formatted = await server.CallAsync("format", new() { ["verify"] = true });
         var cleaned = await server.CallAsync("cleanup", new() { ["verify"] = true, ["fix"] = "all" });
 

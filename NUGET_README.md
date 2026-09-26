@@ -133,7 +133,7 @@ cleanup verify=true fix=ci
 `analyze` reaches the info-severity CA/IDE rules a build never prints — `CA1822`, `CA1859`, `CA1806`,
 `CA1865` — `format` and `cleanup` apply the fixable set through the same compile-gated path, and
 `get_diagnostics` sweeps the whole solution for the consumer you broke - `baseRef=HEAD` keeps only the
-lines your change touched. `cleanup fix=all` **withholds
+lines your change touched, and `analyze changed=true` applies it by default on a git tree. `cleanup fix=all` **withholds
 a fix that would rewrite the shape of an externally visible member** — `CA1822`'s instance-to-static
 flip breaks a Razor template or a data binding while every compiler gate stays green — and reports it
 `UNFIXED` instead. `cleanup verify=true` never withholds, so a verify cannot hide a red CI leg. `build` answers a green build in
@@ -378,7 +378,7 @@ nothing.
 | **Workspace** | `load_workspace` · `workspace_status` · `list_workspaces` · `unload_workspace` · `list_projects` |
 | **Navigation** — replaces `Read`/`Grep` | `search_symbols` · `get_symbol` · `get_file_outline` · `get_type_outline` · `get_symbol_source` · `find_usages` · `find_implementations` (`get_symbol usages=true` and `find_usages impact=true` answer what a symbol IS and what a change would reach) |
 | **What grep can't reach** | `find_registrations` (DI: open generics, factories, `Add*` extensions) · `list_endpoints` (ASP.NET Core `Map*` + Blazor `@page`) |
-| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` (`fix=ci` runs both CI rule sets in ONE pass and tags each named file with the one that would change it) · `gate` (all four in the mandated order, one verdict line) · `clean` · `get_diagnostics` |
+| **Analyze & clean** — replaces `dotnet format` | `analyze` · `format` · `cleanup` (`fix=ci` runs both CI rule sets in ONE pass and tags each named file with the one that would change it) · `gate` (all four in the mandated order, one verdict line, scoped to the lines your change touched; `paths=` gates several scopes as ONE verdict) · `clean` · `get_diagnostics` |
 | **Edit** — replaces `Edit` on a `.cs` | `replace_symbol_body` · `replace_symbol` (`addBefore=` / `addAfter=` / `addPosition=` to place the helpers `add=` brings; a type's header alone re-heads it and keeps its members) · `add_member` (`before=` / `after=` / `position=` to place it, not append it) · `delete_symbol` (`symbolIds=` deletes several in one gated edit) · `rename_symbol` |
 | **Refactor** | `extract_interface` · `move_type_to_file` · `move_type_to_namespace` · `change_signature` · `undo_last_change` |
 | **Projects & solutions** — `package_list` replaces `dotnet list package` | `solution_projects` · `solution_add_project` · `solution_remove_project` · `project_create` · `project_properties` (MSBuild's **evaluated** properties, each with the file that set it) · `project_set_property` · `project_add_reference` · `project_remove_reference` · `package_list` (`vulnerable=` / `outdated=`) · `package_add` · `package_remove` |

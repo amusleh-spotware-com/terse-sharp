@@ -12,7 +12,7 @@ public enum FixMode
     Ci,
 }
 
-public readonly record struct FixScope(string? Path, bool ChangedOnly);
+public readonly record struct FixScope(string? Path, bool ChangedOnly, TouchedLines? Touched = null);
 
 public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, DiagnosticSeverity Severity, bool Verify)
 {

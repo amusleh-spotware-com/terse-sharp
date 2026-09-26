@@ -45,12 +45,12 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration - signature, attributes and doc comment - by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them - how a member splits into overloads. A type's bodiless header re-heads it. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands with the callers it breaks. add= adds the private helpers the declaration calls, placed by addBefore=/addAfter=/addPosition=. A rollback names a retryWith token holding what was rejected, so the retry costs a token, not the payload.")]
+    [Description("Replace a whole member declaration - signature, attributes and doc comment - by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them - how a member splits into overloads. A type's bodiless header re-heads it. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands with the callers it breaks. add= adds the private helpers the declaration calls, placed by addBefore=/addAfter=/addPosition=. A rollback names a retryWith token holding what was rejected.")]
     public Task<string> ReplaceSymbol(
                         [Description("Symbol id of the member.")] string? symbolId = null,
                         [Description("One complete member declaration, or several in sequence.")] string declaration = "",
                         [Description(AddHelp)] string[]? add = null,
-                        [Description("Type add= lands in - any type in the workspace, addressed as add_member's typeSymbolId is; comma-separated routes each add= entry to its own.")] string? addTo = null,
+                        [Description("Type add= lands in - any workspace type; comma-separated routes each add= entry to its own.")] string? addTo = null,
                         [Description("Diff only, write nothing.")] bool dryRun = false,
                         [Description("Apply even if it introduces compile errors.")] bool allowErrors = false,
                         [Description(PolicyHelp)] bool allowPolicy = false,

@@ -94,6 +94,12 @@ public sealed class TouchedLines
     }
 
     private static string Keyed(string path) => path.Replace('\\', '/');
+
+    public bool Touches(string? path) =>
+        path is { Length: > 0 } && Holds(Keyed(Path.GetFullPath(path)));
+
+
+    private bool Holds(string keyed) => whole.Contains(keyed) || hunks.ContainsKey(keyed);
 }
 
 public readonly record struct RecordPosition(string Path, int Line);

@@ -19,7 +19,7 @@ public static class FormatService
         var documents = Scoped(workspace, scope);
 
         if (documents.Length is 0)
-            return Result.Fail<string>(Empty(scope));
+            return scope.Touched is null ? Result.Fail<string>(Empty(scope)) : Result.Ok(Untouched);
 
         if (request.Mode is FixMode.Ci)
             return await CiAsync(workspace, documents, request, options, cancellationToken).ConfigureAwait(false);
@@ -200,8 +200,16 @@ public static class FormatService
             .Select(diagnostic => root.FindNode(diagnostic.Location.SourceSpan))
             .OfType<UsingDirectiveSyntax>()];
 
-    private static DocumentId[] Scoped(LoadedWorkspace workspace, FixScope scope) =>
-        DocumentScope.Select(workspace, scope.Path, scope.ChangedOnly);
+    private const string Untouched = "0 files changed - no document in scope differs from the baseRef";
+
+    private static DocumentId[] Scoped(LoadedWorkspace workspace, FixScope scope)
+    {
+        var documents = DocumentScope.Select(workspace, scope.Path, scope.ChangedOnly);
+
+        return scope.Touched is not { } touched
+            ? documents
+            : [.. documents.Where(id => touched.Touches(workspace.Solution.GetDocument(id)?.FilePath))];
+    }
 
     private static TerseError Empty(FixScope scope) => scope.ChangedOnly
         ? Errors.Invalid(
