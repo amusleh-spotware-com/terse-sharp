@@ -532,4 +532,44 @@ public sealed class FileServiceTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Matching_WhenOneRowLeadsWithTheIdentifierAndAnotherCitesIt_PicksTheRowItLeads()
+    {
+        string[] lines = ["| Finding |", "|---|", "| **I609** [failures] one |", "| **I644** [round trips] cites I609 |"];
+
+        Assert.Equal<int>([2], FileService.Matching(lines, "I609"));
+    }
+
+    [Fact]
+    public void Matching_WithTheBoldTokenItself_StillPicksTheRowItLeads()
+    {
+        string[] lines = ["| Finding |", "|---|", "| **I609** [failures] one |", "| **I644** [round trips] cites **I609** |"];
+
+        Assert.Equal<int>([2], FileService.Matching(lines, "**I609**"));
+    }
+
+    [Fact]
+    public void Matching_WhenNoRowLeadsWithTheIdentifier_FallsBackToTheOneRowThatContainsIt()
+    {
+        string[] lines = ["| Finding |", "|---|", "| **I609** [failures] one |", "| **I644** [round trips] two |"];
+
+        Assert.Equal<int>([2], FileService.Matching(lines, "[failures]"));
+    }
+
+    [Fact]
+    public void Matching_WhenNoRowLeadsAndSeveralContainTheIdentifier_ReturnsThemAllSoTheMoveIsRefused()
+    {
+        string[] lines = ["| Finding |", "|---|", "| **I910** one |", "| **I911** two |"];
+
+        Assert.Equal<int>([2, 3], FileService.Matching(lines, "I91"));
+    }
+
+    [Fact]
+    public void Matching_WhenTwoRowsLeadWithTheSameIdentifier_ReturnsBothRatherThanGuessing()
+    {
+        string[] lines = ["| Finding |", "|---|", "| **I609** first |", "| **I609** duplicate |", "| **I644** cites I609 |"];
+
+        Assert.Equal<int>([2, 3], FileService.Matching(lines, "I609"));
+    }
 }

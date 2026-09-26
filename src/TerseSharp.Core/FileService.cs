@@ -1251,17 +1251,36 @@ public static class FileService
         return end < 0 ? body.Trim() : body[..end].Trim();
     }
 
-    private static List<int> Matching(string[] lines, ReadOnlySpan<char> identifier)
+    private static bool Leads(ReadOnlySpan<char> cell, ReadOnlySpan<char> identifier)
+    {
+        var end = cell.IndexOfAny(' ', '\t');
+        var token = end < 0 ? cell : cell[..end];
+
+        return token.SequenceEqual(identifier) || token.Trim("*`").SequenceEqual(identifier);
+    }
+
+    private static List<int> Rows(string[] lines, ReadOnlySpan<char> identifier, bool leading)
     {
         var matched = new List<int>(2);
 
         for (var index = 0; index < lines.Length; index++)
         {
-            if (IsTableRow(lines[index]) && !IsDelimiterRow(lines[index]) && FirstCell(lines[index]).Contains(identifier, StringComparison.Ordinal))
+            if (IsTableRow(lines[index]) && !IsDelimiterRow(lines[index]) && Addresses(FirstCell(lines[index]), identifier, leading))
                 matched.Add(index);
         }
 
         return matched;
+    }
+
+    private static bool Addresses(ReadOnlySpan<char> cell, ReadOnlySpan<char> identifier, bool leading) => leading
+        ? Leads(cell, identifier)
+        : cell.Contains(identifier, StringComparison.Ordinal);
+
+    internal static List<int> Matching(string[] lines, ReadOnlySpan<char> identifier)
+    {
+        var leading = Rows(lines, identifier, leading: true);
+
+        return leading.Count > 0 ? leading : Rows(lines, identifier, leading: false);
     }
 
     private static int LastRowLine(string[] lines)

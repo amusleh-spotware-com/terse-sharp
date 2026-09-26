@@ -1042,7 +1042,7 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["path"] = Source,
-            ["content"] = "# Backlog\n\n## Open\n\n| Finding |\n|---|\n| **I410** first |\n| **I432** cites I410 |\n",
+            ["content"] = "# Backlog\n\n## Open\n\n| Finding |\n|---|\n| **I410** first |\n| **I432** cites I410 |\n| **I433** cites I410 too |\n",
         },
         new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -1054,11 +1054,12 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
 
         try
         {
-            var ambiguous = await server.CallAsync("edit_text", new() { ["path"] = Source, ["row"] = "I410", ["toPath"] = Target });
+            var ambiguous = await server.CallAsync("edit_text", new() { ["path"] = Source, ["row"] = "I41", ["toPath"] = Target });
 
-            Assert.Contains("matches the first cell of 2 table rows", ambiguous, StringComparison.Ordinal);
+            Assert.Contains("matches the first cell of 3 table rows", ambiguous, StringComparison.Ordinal);
             Assert.Contains("line 7: **I410** first", ambiguous, StringComparison.Ordinal);
             Assert.Contains("line 8: **I432** cites I410", ambiguous, StringComparison.Ordinal);
+            Assert.Contains("line 9: **I433** cites I410 too", ambiguous, StringComparison.Ordinal);
             Assert.Contains("pass row=\"**I410**\"", ambiguous, StringComparison.Ordinal);
         }
         finally
@@ -1532,6 +1533,48 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         finally
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithARowIdentifierThatLeadsOneFirstCellAndIsCitedInAnother_MovesTheRowItLeads()
+    {
+        const string Source = "terse-i649-leading.md";
+        const string Target = "terse-i649-leading-archive.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[]
+            {
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Source,
+                ["content"] = "# Backlog\n\n## Open\n\n| Finding |\n|---|\n| **I410** first |\n| **I432** cites I410 |\n",
+            },
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["path"] = Target,
+                ["content"] = "# Archive\n\n## Closed\n\n| Finding |\n|---|\n| **I800** old |\n",
+            },
+        },
+        });
+
+        try
+        {
+            var moved = await server.CallAsync("edit_text", new() { ["path"] = Source, ["row"] = "I410", ["toPath"] = Target });
+            var source = await server.CallAsync("read_text", new() { ["path"] = Source });
+            var target = await server.CallAsync("read_text", new() { ["path"] = Target });
+
+            Assert.DoesNotContain("ERROR", moved, StringComparison.Ordinal);
+            Assert.DoesNotContain("**I410** first", source, StringComparison.Ordinal);
+            Assert.Contains("**I432** cites I410", source, StringComparison.Ordinal);
+            Assert.Contains("| **I410** first |", target, StringComparison.Ordinal);
+            Assert.DoesNotContain("**I432**", target, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Source, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
         }
     }
 }

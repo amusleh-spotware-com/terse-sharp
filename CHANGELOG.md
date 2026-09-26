@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- `edit_text row=` first picks the table row whose first cell LEADS with the identifier - its first whitespace-delimited token, with `**` and backticks stripped - and falls back to the substring match only when no row leads with it. `row="I609"` now moves the `**I609**` row even when another row's first cell cites I609, instead of answering `matches the first cell of 2 table rows`. Two rows leading with the same identifier, or several rows that merely contain it, are still refused with the candidate lines. Pinned by `Matching_WhenOneRowLeadsWithTheIdentifierAndAnotherCitesIt_PicksTheRowItLeads` and `EditText_WithARowIdentifierThatLeadsOneFirstCellAndIsCitedInAnother_MovesTheRowItLeads`. (I649)
+
 ## [0.69.1] - 2026-09-26
 
 The `v0.69.0` tag was pushed but never published: its release run went red on one E2E test before the
