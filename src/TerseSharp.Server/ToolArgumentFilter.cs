@@ -10,6 +10,8 @@ internal static class ToolArgumentFilter
 {
     public static McpRequestFilter<CallToolRequestParams, CallToolResult> Structured => next => async (request, cancellationToken) =>
 {
+    ParameterAliases.Apply(request.Params?.Name, request.Params?.Arguments);
+
     if (Unrecognized(request) is { } rejected)
         return Failed(rejected);
     try

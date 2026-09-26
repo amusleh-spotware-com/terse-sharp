@@ -1234,7 +1234,7 @@ a `Type.Member` whose member name saturates is resolved through the members of t
 answers `SymbolNotFound` listing its members instead of a saturation count; `OutOfWorkspace` means the path
 escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
 no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
-parameter means the argument names were wrong, and the remedy lists the ones the tool declares; an
+parameter means the argument names were wrong, and the remedy lists the ones the tool declares - though a spelling carried over from a sibling tool or from `Grep` binds instead: `typeName` (get_type_outline), `name` (load_workspace), `code`/`content` (add_member, replace_symbol), `contains` (list_projects), `-A`/`-B`/`-C` and `output_mode` (search_text, search_regex), unless the canonical parameter is passed too; an
 `InvalidArgument` carrying a `JsonException` also names the **array** parameter it could not convert
 and quotes the ~80 characters around the offending byte, so a 9 000-character `declarations=` is
 located without re-sending it - and a declaration that reaches the parser and fails there is answered

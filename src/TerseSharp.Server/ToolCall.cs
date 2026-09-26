@@ -111,7 +111,9 @@ internal static class ToolCall
 
     private static Result<object?[]> Bind(MethodInfo method, JsonObject arguments, CancellationToken cancellationToken)
     {
-        if (Unrecognized(method, arguments) is { } unknown)
+        ParameterAliases.Apply(method.GetCustomAttribute<McpServerToolAttribute>()?.Name, arguments);
+
+    if (Unrecognized(method, arguments) is { } unknown)
             return Result.Fail<object?[]>(unknown);
 
         var parameters = method.GetParameters();

@@ -612,4 +612,33 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.Contains("NoSuchDocument.cs' matches no document", text, StringComparison.Ordinal);
         Assert.Contains("remedy:", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ObservedSiblingSpellings_BindToTheirCanonicalParameter_InsteadOfAnsweringInvalidArgument()
+    {
+        var outline = await server.CallAsync("get_type_outline", new() { ["typeName"] = "OrderService" });
+        var counted = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "src/**/*.cs", ["output_mode"] = "count" });
+        var canonicalOutline = await server.CallAsync("get_type_outline", new() { ["symbol"] = "OrderService" });
+        var countOnly = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "src/**/*.cs", ["countOnly"] = true });
+        var projects = await server.CallAsync("list_projects", new() { ["contains"] = "Trading" });
+        var grepContext = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "src/**/*.cs", ["-C"] = 1 });
+        var added = await server.CallAsync("add_member", new() { ["typeSymbolId"] = "OrderService", ["code"] = "public int AliasProbe() => 1;", ["dryRun"] = true });
+        var context = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "src/**/*.cs", ["context"] = 1 });
+
+        Assert.Equal(canonicalOutline, outline);
+        Assert.Contains("Fixture.Trading", projects, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidArgument", projects, StringComparison.Ordinal);
+        Assert.Equal(countOnly, counted);
+        Assert.Equal(context, grepContext);
+        Assert.Contains("AliasProbe", added, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidArgument", added, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnAliasBesideItsCanonicalParameter_IsStillRefusedByName()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbol"] = "OrderService", ["typeName"] = "Order" });
+
+        Assert.Contains("unrecognized typeName", text, StringComparison.Ordinal);
+    }
 }

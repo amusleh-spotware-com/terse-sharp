@@ -378,4 +378,19 @@ public sealed class InstallCommandE2ETests : IDisposable
         .Split('\n')
         .Select(line => line.TrimEnd('\r'))
         .Single(line => line.StartsWith("advertised=", StringComparison.Ordinal))["advertised=".Length..];
+
+    [Fact]
+    public async Task Call_WithAnObservedSiblingSpelling_BindsItExactlyAsTheServerWould()
+    {
+        var output = await RunAsync(
+            "call",
+            "list_projects",
+            "--workspace",
+            Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"),
+            "--json",
+            "{\"contains\": \"Trading\"}");
+
+        Assert.DoesNotContain("InvalidArgument", output, StringComparison.Ordinal);
+        Assert.Contains("Fixture.Trading", output, StringComparison.Ordinal);
+    }
 }
