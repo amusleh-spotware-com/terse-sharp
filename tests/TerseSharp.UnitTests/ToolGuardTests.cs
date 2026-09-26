@@ -1963,6 +1963,18 @@ public sealed class ToolGuardTests
     }
 
     [Theory]
+    [InlineData("G=\"a;b\"; F=src/App/OrderService.cs; cat $G; cat \"$F\"")]
+    [InlineData("G=\"a | b\"; F=src/App/OrderService.cs; echo $G; cat \"$F\"")]
+    [InlineData("G=\"a&&b\"; F=src/App/OrderService.cs; echo $G; wc -l \"$F\"")]
+    public void Inspect_ForAVariableWhoseValueCarriesASeparator_StillDeniesTheSourceReadAfterIt(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+    }
+
+    [Theory]
     [InlineData("F=/tmp/x.log; cat \"$F\"")]
     [InlineData("F=/tmp/x.log; tail -5 \"$F\"")]
     [InlineData("LOG=build.log; tail -5 \"$LOG\"")]

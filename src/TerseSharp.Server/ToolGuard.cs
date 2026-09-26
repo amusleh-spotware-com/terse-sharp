@@ -1816,7 +1816,7 @@ public static class ToolGuard
 
         var value = trimmed.AsSpan(equals + 1).Trim(Wrappers.AsSpan());
 
-        if (value.Length > 0 && value.IndexOfAny(Unexpandable) < 0)
+        if (value.Length > 0 && value.IndexOfAny(Unexpandable) < 0 && value.IndexOfAny(Unassignable) < 0)
             values[trimmed[..equals]] = value.ToString();
     }
 
@@ -1905,8 +1905,14 @@ public static class ToolGuard
         return false;
     }
 
-    private static bool IntroducesSource(string command, string resolved) =>
-        Stages(resolved).Zip(Stages(command)).Any(pair => NamesSource(pair.First.Text) && !NamesSource(pair.Second.Text));
+    private static bool IntroducesSource(string command, string resolved)
+    {
+        var after = Stages(resolved);
+        var before = Stages(command);
+
+        return after.Length != before.Length
+            || after.Zip(before).Any(pair => NamesSource(pair.First.Text) && !NamesSource(pair.Second.Text));
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);
