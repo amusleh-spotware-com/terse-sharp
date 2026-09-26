@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **Response format: `build` and `run_tests` name what moved when they re-run a call they remember (I663).** A repeat of a call that already answered green, re-run instead of replayed as `UNCHANGED` because the run stamp moved, now ends with one line `NOTE re-ran: stamp moved <component> <before>-><after>` - the component is `pulse`, `loaded`, `LoadedUtc`, `generations` or `workspace`, e.g. `NOTE re-ran: stamp moved generations 41->42`. It never appears on the first run of a key, on `force=true`, or on a replay, and it is unconditional: the v0.69.0 release run failed on a replay miss whose cause only `TERSE_UNCHANGED_TRACE=1` could have named, and CI does not set it. That variable still adds its `memo:` line. Pinned by `RunTests_RepeatedAfterAnExternalEditTheWatcherHasNotDrained_RunsAgainInsteadOfReplayingStale`, `RerunNote_ForARememberedKeyWhoseGenerationsMoved_NamesTheComponentInOneLine` and `Named_WhenOnlyTheGenerationsMoved_NamesGenerationsWithBothCounts`.
+
 ### Added
 
 - **`read_text tokens=true` on the server's own `src/TerseSharp.Server/Assets/SKILL.md` ends with `budget=27200 used=N left=N`** (or `over=N`), the exact number `TheShippedSkill_StaysWithinItsTokenBudget` asserts, now read from one Core constant `SkillBudget.Tokens`. A skill trim is sized in one call instead of a build plus an E2E run per attempt. Covered by `ReadText_WithTokensOnTheShippedSkill_AnswersTheBudgetThisCensusEnforces` and `Stamp_CountsTheSkillAsCiChecksItOut_IgnoringCarriageReturns`. (I662)

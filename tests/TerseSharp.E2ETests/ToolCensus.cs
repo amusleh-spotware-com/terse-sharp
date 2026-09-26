@@ -341,7 +341,8 @@ internal static class ToolCensus
     public static bool IsFraming(string line) =>
         line.Length is 0
         || line.StartsWith("repeat #", StringComparison.Ordinal)
-        || line.Contains("calls in a row", StringComparison.Ordinal);
+        || line.Contains("calls in a row", StringComparison.Ordinal)
+        || line.StartsWith("NOTE re-ran: stamp moved ", StringComparison.Ordinal);
 
     public const int SchemaTokenCap = 1024;
     public const int MaxSchemaOverrides = 0;

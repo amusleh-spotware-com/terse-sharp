@@ -691,7 +691,10 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         if (!force && unchanged.Replay(tool, key, stamp, now) is { } previous)
             return previous;
 
-        return await Memoized(green, key, stamp, run.InvokeAsync, Miss(force, key, stamp)).ConfigureAwait(false);
+        var note = force ? null : unchanged.RerunNote(key, stamp);
+        var text = await Memoized(green, key, stamp, run.InvokeAsync, Miss(force, key, stamp)).ConfigureAwait(false);
+
+        return StampMove.Appended(text, note);
     }
 
     private async Task<string> Memoized(string green, string key, string stamp, Func<Task<string>> run, string miss)

@@ -605,9 +605,10 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
                 await Task.Delay(100, TestContext.Current.CancellationToken);
             }
 
-            Assert.StartsWith("run_tests PASSED", repeat, StringComparison.Ordinal);
-        }
-        finally
+        Assert.StartsWith("run_tests PASSED", repeat, StringComparison.Ordinal);
+        Assert.Single(repeat.Split('\n'), line => line.StartsWith("NOTE re-ran: stamp moved ", StringComparison.Ordinal));
+    }
+    finally
         {
             await File.WriteAllBytesAsync(source, bytes, TestContext.Current.CancellationToken);
             File.SetLastWriteTimeUtc(source, stamp);

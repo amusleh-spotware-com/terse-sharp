@@ -136,7 +136,7 @@ that merely shortens a response, and both beat a faster server.
 **And the waiting itself is shorter.** A bare `run_tests` over a solution builds **once**, then runs each
 test assembly directly where its runner allows — no MSBuild evaluation and no VSTest host per project —
 measured **38 % faster** over five alternating pairs. A green `run_tests` repeated with nothing written
-since is not re-run at all: it answers `UNCHANGED` with the previous verdict and its age. From the second
+since is not re-run at all: it answers `UNCHANGED` with the previous verdict and its age; a repeat that re-runs anyway names what moved in one `NOTE re-ran:` line. From the second
 consecutive call of the same tool, the response adds one 14-token line naming the plural you should have
 passed.
 

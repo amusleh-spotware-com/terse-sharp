@@ -68,4 +68,28 @@ public sealed class UnchangedRunTests
 
     [Fact]
     public void MemoRefusal_ForASingleLineGreenVerdict_AnswersNothing() => Assert.Null(UnchangedRun.MemoRefusal("build ok", "build ok  errors=0 warnings=0"));
+
+    [Fact]
+    public void RerunNote_ForARememberedKeyWhoseGenerationsMoved_NamesTheComponentInOneLine()
+    {
+        var runs = new UnchangedRun();
+
+        runs.Remember("key", "pulse=1 loaded=1 C:/r@2026-09-26T00:00:00.0000000Z=41", "run_tests PASSED", 0);
+
+        Assert.Equal(
+            "NOTE re-ran: stamp moved generations 41->42",
+            runs.RerunNote("key", "pulse=1 loaded=1 C:/r@2026-09-26T00:00:00.0000000Z=42"));
+    }
+
+    [Fact]
+    public void RerunNote_ForAKeyNeverRememberedOrAnUnmovedStamp_AnswersNothing()
+    {
+        var runs = new UnchangedRun();
+
+        Assert.Null(runs.RerunNote("key", "pulse=1"));
+
+        runs.Remember("key", "pulse=1", "run_tests PASSED", 0);
+
+        Assert.Null(runs.RerunNote("key", "pulse=1"));
+    }
 }

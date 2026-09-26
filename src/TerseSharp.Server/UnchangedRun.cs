@@ -68,6 +68,16 @@ public sealed class UnchangedRun
         }
     }
 
+    public string? RerunNote(string key, string stamp)
+    {
+        lock (gate)
+        {
+            return runs.TryGetValue(key, out var seen) && !string.Equals(seen.Stamp, stamp, StringComparison.Ordinal)
+                ? string.Create(CultureInfo.InvariantCulture, $"NOTE re-ran: stamp moved {StampMove.Named(seen.Stamp, stamp)}")
+                : null;
+        }
+    }
+
     public static string? MemoRefusal(string green, string verdict) =>
         !verdict.StartsWith(green, StringComparison.Ordinal)
             ? string.Create(CultureInfo.InvariantCulture, $"the verdict does not open with '{green}'")
