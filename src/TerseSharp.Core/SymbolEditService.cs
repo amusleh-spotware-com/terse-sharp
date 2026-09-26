@@ -78,7 +78,7 @@ public static class SymbolEditService
         if (target is null || target.Node is not TypeDeclarationSyntax type)
             return Result.Fail<string>(Errors.Invalid("the target is not a type declaration", "pass a type or enum symbol id"));
 
-        var members = MemberDeclaration.ParseAll(declaration);
+        var members = MemberDeclaration.ParseAll(MemberDeclaration.Reindented(declaration, MemberColumn(type)));
 
         return members.IsOk
             ? await AddedAsync(workspace, target, type, members.Value!, options, cancellationToken).ConfigureAwait(false)
@@ -1094,8 +1094,12 @@ public static class SymbolEditService
                 $"{(error.Code is TerseErrorCode.InvalidArgument ? "declarations" : ids)}[{index}]: {error.Message}"),
     };
 
-    private static Result<string> Warned(Result<string> applied, string warning) =>
-        applied.IsOk && warning.Length > 0 ? Result.Ok(applied.Value + warning) : applied;
+    private static Result<string> Warned(Result<string> applied, string warning) => (warning.Length, applied.IsOk) switch
+    {
+        (0, _) => applied,
+        (_, true) => Result.Ok(applied.Value + warning),
+        _ => Result.Fail<string>(applied.Error! with { Message = applied.Error!.Message + warning }),
+    };
 
     private static string Dropped(IReadOnlyList<PlannedEdit> planned)
     {
@@ -1112,9 +1116,9 @@ public static class SymbolEditService
             }
         }
 
-        return names.Count is 0
-            ? string.Empty
-            : "\nWARNING attributes dropped: " + string.Join(", ", names);
+        var attributes = names.Count is 0 ? string.Empty : "\nWARNING attributes dropped: " + string.Join(", ", names);
+
+        return attributes + DroppedMembers(planned);
     }
 
     private static List<string> Attributes(IReadOnlyList<SyntaxNode> nodes)
@@ -1595,6 +1599,13 @@ public static class SymbolEditService
         closeBrace.LeadingTrivia.Any(SyntaxKind.EndOfLineTrivia)
         || closeBrace.GetPreviousToken().TrailingTrivia.Any(SyntaxKind.EndOfLineTrivia);
 
+    private const int MemberIndent = 4;
+
+    private static int MemberColumn(TypeDeclarationSyntax type) =>
+        type.Members.FirstOrDefault(member => StartsALine(member.GetFirstToken())) is { } member
+            ? member.GetLocation().GetLineSpan().StartLinePosition.Character
+            : type.GetLocation().GetLineSpan().StartLinePosition.Character + MemberIndent;
+
     private static readonly AnchorTier[] AnchorTiers = [AnchorTier.Exact, AnchorTier.Spacing, AnchorTier.Structural, AnchorTier.Name];
 
     public static async Task<Result<string>> AddMembersAsync(
@@ -1662,7 +1673,7 @@ public static class SymbolEditService
 
     private static Result<PlannedEdit> Insertion(EditTarget target, TypeDeclarationSyntax type, string declaration, EditOptions options)
     {
-        var members = MemberDeclaration.ParseAll(MemberDeclaration.Reindented(declaration, type.GetLocation().GetLineSpan().StartLinePosition.Character));
+        var members = MemberDeclaration.ParseAll(MemberDeclaration.Reindented(declaration, MemberColumn(type)));
 
         if (!members.IsOk)
             return Result.Fail<PlannedEdit>(members.Error!);
@@ -1689,6 +1700,9 @@ public static class SymbolEditService
         { After: { Length: > 0 } after } => "addAfter=" + after,
         _ => "the requested placement",
     };
+
+    private static string DroppedMembers(IReadOnlyList<PlannedEdit> planned) => string.Concat(
+        planned.Select(edit => DroppedDeclarations.Replaced(edit.Target.Node, edit.Nodes) is { } warning ? "\n" + warning : string.Empty));
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node);

@@ -65,4 +65,26 @@ internal static class DroppedDeclarations
         member.Parent is BaseTypeDeclarationSyntax container
             ? Qualified(container, container.Identifier.ValueText) + "." + name
             : name;
+
+    public static string? Replaced(SyntaxNode target, IReadOnlyList<SyntaxNode> replacements)
+    {
+        if (target is not BaseTypeDeclarationSyntax type)
+            return null;
+
+        var kept = new HashSet<string>(replacements.OfType<BaseTypeDeclarationSyntax>().SelectMany(Inner), StringComparer.Ordinal);
+        var dropped = Inner(type).Where(name => !kept.Contains(name)).Distinct(StringComparer.Ordinal).Select(name => type.Identifier.ValueText + "." + name).ToArray();
+
+        return dropped.Length is 0
+            ? null
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"WARNING this replace drops {dropped.Length} member(s) the type declared: {Named(dropped)} - a header alone, with no body and no ';', re-heads the type and keeps every member");
+    }
+
+    private static IEnumerable<string> Inner(BaseTypeDeclarationSyntax type)
+    {
+        var prefix = Qualified(type, type.Identifier.ValueText).Length + 1;
+
+        return type.DescendantNodes().OfType<MemberDeclarationSyntax>().SelectMany(Names).Select(name => name[prefix..]);
+    }
 }

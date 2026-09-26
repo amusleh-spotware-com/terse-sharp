@@ -1286,4 +1286,81 @@ public sealed class RegionTail
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    private const string NestedInitializer = "public static object Probed()\n{\n    var map = new System.Collections.Generic.Dictionary<string, string[]>\n    {\n        [\"ids\"] = new[]\n        {\n            \"a\",\n            \"b\",\n        },\n        [\"flag\"] = new[] { \"c\" },\n    };\n\n    return map;\n}";
+
+    [Fact]
+    public async Task AddMember_WithANestedMultiLineInitializer_KeepsItsLayoutRelativeToTheMember()
+    {
+        var preview = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = NestedInitializer,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+                \"a\",", preview, StringComparison.Ordinal);
+        Assert.Contains("+            },", preview, StringComparison.Ordinal);
+        Assert.Contains("+            [\"flag\"] = new[] { \"c\" },", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsAndANestedMultiLineInitializer_KeepsItsLayoutRelativeToTheMember()
+    {
+        var preview = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.OrderService" },
+            ["declarations"] = new[] { NestedInitializer },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+                \"a\",", preview, StringComparison.Ordinal);
+        Assert.Contains("+            },", preview, StringComparison.Ordinal);
+        Assert.Contains("+            [\"flag\"] = new[] { \"c\" },", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_OnAPositionalRecordSentWithoutItsBody_NamesTheMembersItDrops()
+    {
+        var preview = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.Tag",
+            ["declaration"] = "public readonly record struct Tag(string Name);",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("WARNING this replace drops 1 member(s) the type declared: Tag.IsEmpty", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_OnAPositionalRecordSentAsAHeaderAlone_KeepsTheBodyAndWarnsNothing()
+    {
+        var preview = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.Tag",
+            ["declaration"] = "[System.Serializable]\npublic readonly record struct Tag(string Name)",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", preview, StringComparison.Ordinal);
+        Assert.Contains("+[System.Serializable]", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("-    public bool IsEmpty", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("drops", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_RolledBackBecauseItDroppedMembers_NamesThemInTheRejection()
+    {
+    var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+
+    var rejected = await server.CallAsync("replace_symbol", new()
+    {
+        ["symbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = "public sealed class OrderService\n{\n    public bool SubmitTwice(Order order) => Submit(order) && Submit(order);\n}",
+        });
+
+        Assert.Contains("ERROR", rejected, StringComparison.Ordinal);
+        Assert.Contains("WARNING this replace drops 6 member(s) the type declared: OrderService.repository, OrderService.#ctor(IOrderRepository), OrderService.PendingCount, OrderService.Submit(Order), OrderService.Unused(), OrderService.NeverCalled()", rejected, StringComparison.Ordinal);
+        Assert.Equal(before, await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken));
+    }
 }

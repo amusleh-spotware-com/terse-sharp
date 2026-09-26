@@ -542,7 +542,7 @@ on a `.cs` file nobody has written yet names `write_text path=… force=true` �
 them** — `WARNING attributes dropped: McpServerTool, Description`. The edit still applies, because
 dropping an attribute is sometimes the intent, but an un-advertised tool is exactly what a clean
 build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, or use
-`replace_symbol_body`. On a TYPE, a bodiless header of the same kind re-heads it and keeps its members.
+`replace_symbol_body`. On a TYPE, a bodiless header of the same kind re-heads it and keeps its members; a replace that loses members warns naming them, rollback included.
 
 **`add_member` formats only what it inserted** - no collateral hunks, and an anchored insert leaves the
 close brace alone.
