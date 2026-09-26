@@ -43,7 +43,7 @@ public sealed partial class DocsCoverageE2ETests(TerseServerFixture server)
         Path.Combine("src", "TerseSharp.Server", "Assets", "SKILL.md"));
 
         var text = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
-        var tokens = ToolCensus.Tokens(text);
+        var tokens = TerseSharp.Core.SkillBudget.Used(text);
 
         Assert.True(
             tokens <= SkillTokenBudget,
@@ -92,4 +92,30 @@ public sealed partial class DocsCoverageE2ETests(TerseServerFixture server)
 
     [GeneratedRegex(@"≤\s?(?<n>\d{1,3}(?:,\d{3})+|\d{4,})\s?tokens|(?<n>\d{1,3}(?:,\d{3})+|\d{4,})-token ceiling")]
     private static partial Regex TokenClaim();
+
+    [Fact]
+    public async Task ReadText_WithTokensOnTheShippedSkill_AnswersTheBudgetThisCensusEnforces()
+    {
+        var path = Path.Combine(TerseServerFixture.RepositoryRoot, "src", "TerseSharp.Server", "Assets", "SKILL.md");
+        var used = TerseSharp.Core.SkillBudget.Used(await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        var skill = await server.CallAsync("read_text", new() { ["path"] = path, ["tokens"] = true, ["lines"] = "1" });
+        var readme = await server.CallAsync("read_text", new()
+        {
+            ["path"] = Path.Combine(TerseServerFixture.RepositoryRoot, "README.md"),
+            ["tokens"] = true,
+            ["lines"] = "1",
+        });
+        var remaining = SkillTokenBudget - used;
+        var expected = remaining >= 0
+            ? string.Create(CultureInfo.InvariantCulture, $"budget={SkillTokenBudget} used={used} left={remaining}")
+            : string.Create(CultureInfo.InvariantCulture, $"budget={SkillTokenBudget} used={used} over={-remaining}");
+
+        Assert.Equal(expected, BudgetLine(skill));
+        Assert.DoesNotContain("budget=", readme, StringComparison.Ordinal);
+    }
+
+    private static string BudgetLine(string text) => text
+        .Split('\n')
+        .Select(line => line.TrimEnd('\r'))
+        .Single(line => line.StartsWith("budget=", StringComparison.Ordinal));
 }

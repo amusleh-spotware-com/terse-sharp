@@ -8,7 +8,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`read_text tokens=true` on the server's own `src/TerseSharp.Server/Assets/SKILL.md` ends with `budget=27200 used=N left=N`** (or `over=N`), the exact number `TheShippedSkill_StaysWithinItsTokenBudget` asserts, now read from one Core constant `SkillBudget.Tokens`. A skill trim is sized in one call instead of a build plus an E2E run per attempt. Covered by `ReadText_WithTokensOnTheShippedSkill_AnswersTheBudgetThisCensusEnforces` and `Stamp_CountsTheSkillAsCiChecksItOut_IgnoringCarriageReturns`. (I662)
+
 ### Fixed
+
+- **The shipped-skill token budget no longer counts carriage returns.** On a CRLF checkout `TheShippedSkill_StaysWithinItsTokenBudget` counted every `\r`: 27 216 measured on Windows against a 27 200 budget that ubuntu CI's LF checkout passed. It now measures LF-normalized text, as CI does. The raw `tokens=N` line of `read_text` is unchanged. (I662)
 
 - **`get_file_outline` and `get_type_outline` `contains=` now match fields and constants.** A field declaration has no declared symbol of its own (it lives on each variable declarator), so the filter skipped every field and answered `1 of 47 members` for `contains="Pressure"` on a type declaring `PressureBytes` and `PressureFloor` - a false-empty answer the names-only view contradicted. Each matching declarator is now listed on its own line; the `N of M members` count is unchanged in meaning. Unfiltered outlines are unchanged and still list no fields. Pinned by `GetFileOutline_WithContainsNamingAField_ListsTheFieldAndCountsIt`, `GetFileOutline_WithContainsNamingAConstant_ListsTheConstant`, `GetTypeOutline_WithContainsNamingAField_ListsTheField` and `GetFileOutline_WithoutContains_KeepsItsFormatAndListsNoField`. (I656)
 

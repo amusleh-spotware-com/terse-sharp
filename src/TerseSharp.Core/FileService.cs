@@ -233,7 +233,7 @@ public static class FileService
     {
         var answer = Rendered(path, label, text, request);
 
-        return answer.IsOk ? Result.Ok(answer.Value! + Stamps(request)) : answer;
+        return answer.IsOk ? Result.Ok(answer.Value! + Stamps(request) + SkillBudget.Stamp(path, request.Tokens, text)) : answer;
     }
 
     private static LineRange Tailed(string text, ReadRequest request)
@@ -1603,7 +1603,7 @@ public static class FileService
             + (request.Tokens ? "\n" + Counted(request.Characters) : string.Empty)
             + (request.Stamp ? "\n" + Marked(request.Ticks) : string.Empty);
 
-    public static string Counted(int characters) => string.Create(CultureInfo.InvariantCulture, $"tokens={(characters + 3) / 4}");
+    public static string Counted(int characters) => string.Create(CultureInfo.InvariantCulture, $"tokens={SkillBudget.Estimated(characters)}");
 
     public static async Task<int?> CharacterLengthAsync(string? full, CancellationToken cancellationToken)
     {

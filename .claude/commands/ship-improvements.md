@@ -171,7 +171,10 @@ Per plan, in order:
 4. `analyze` the touched files at `severity=info`. Fix what this row introduced. Ignore the
    repo-wide `.terse.json` policy rows it did not author.
 5. **DOCS, same row, all four**: `CHANGELOG.md` under `## [Unreleased]` naming the covering tests
-   verbatim, `src/TerseSharp.Server/Assets/SKILL.md`, `README.md`, `NUGET_README.md`. A renamed test
+   verbatim, `src/TerseSharp.Server/Assets/SKILL.md`, `README.md`, `NUGET_README.md`. Size a SKILL.md
+   change in ONE call: `read_text path=src/TerseSharp.Server/Assets/SKILL.md tokens=true lines="1"` ends
+   `budget=N used=N left=N` (or `over=N`), the exact number `TheShippedSkill_StaysWithinItsTokenBudget`
+   asserts. Never run the test to learn it. A renamed test
    breaks `ChangelogReferenceTests` against the *previous* release's section too — follow the rename
    there as well.
 6. **Move the row out of `## Open`** with `edit_text rows=[…] toPath="IMPROVEMENTS-ARCHIVE.md"`,
@@ -200,7 +203,7 @@ Ledger task is `completed`; every shipped row has a test observed failing first 
 ## P3 — Build and test (scoped per wave, whole suite ONCE)
 
 1. `build`. **Read it** before any test result.
-2. Per wave: `run_tests changed=true`, or the affected projects.
+2. Per wave: ONE `run_tests tests=[...]` naming every new or changed test class of every row in the wave (at most 10 entries; past that, `run_tests changed=true`). Never run one slice per row: in the 0.69.0 run, 9 per-row E2E slices of 30-400 s were each repeated by the final whole-suite run (I662).
 3. **The whole-solution `run_tests` runs ONCE, after the last wave.** The previous run spent ~40
    minutes on four full-suite runs; that is the single largest avoidable cost in this command.
 4. On `The pipe is being closed`, a mass E2E collapse or a locked binary: a stale `terse`/`testhost`
