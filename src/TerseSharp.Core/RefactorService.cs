@@ -43,18 +43,71 @@ public static class RefactorService
         if (Path.GetFileNameWithoutExtension(document.FilePath ?? string.Empty).Equals(symbol.Name, StringComparison.Ordinal))
             return Result.Fail<string>(Errors.Invalid("the type already lives in its own file", "nothing to move"));
 
-        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-        var trimmed = root?.RemoveNode(node, SyntaxRemoveOptions.KeepNoTrivia);
-
-        if (trimmed is null)
+        if (await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is not CompilationUnitSyntax root)
             return Result.Fail<string>(Errors.DocumentNotFound(document.FilePath ?? document.Name));
 
-        var moved = workspace.Solution.WithDocumentSyntaxRoot(document.Id, trimmed);
-        var created = AddSibling(moved, document, symbol.Name, Unit(root!, (MemberDeclarationSyntax)node));
+        if (!OtherTypes(root, node).Any())
+            return await RenamedAsync(workspace, document, symbol.Name, options, cancellationToken).ConfigureAwait(false);
+
+        var moved = workspace.Solution.WithDocumentSyntaxRoot(document.Id, root.RemoveNode(node, SyntaxRemoveOptions.KeepNoTrivia)!);
+        var created = AddSibling(moved, document, symbol.Name, Kept(root, node));
 
         return await EditGate
             .ApplyAsync(workspace, created.Solution, [document.Id, created.Id], options, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    private static IEnumerable<MemberDeclarationSyntax> OtherTypes(CompilationUnitSyntax root, SyntaxNode node) => root
+        .DescendantNodes(child => child is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax)
+        .OfType<MemberDeclarationSyntax>()
+        .Where(member => member is not BaseNamespaceDeclarationSyntax && member != node);
+
+    private static CompilationUnitSyntax Kept(CompilationUnitSyntax root, SyntaxNode node)
+    {
+        var others = root
+            .DescendantNodes(child => child is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax)
+            .OfType<MemberDeclarationSyntax>()
+            .Where(member => member is BaseNamespaceDeclarationSyntax space ? !space.Span.Contains(node.Span) : member != node);
+
+        var kept = (CompilationUnitSyntax)root.RemoveNodes(others, SyntaxRemoveOptions.KeepNoTrivia)!;
+
+        return kept.WithAttributeLists([]);
+    }
+
+    private static async Task<Result<string>> RenamedAsync(
+        LoadedWorkspace workspace,
+        Document document,
+        string name,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var id = DocumentId.CreateNewId(document.Project.Id);
+        var full = Path.Combine(Path.GetDirectoryName(document.FilePath ?? string.Empty) ?? string.Empty, name + ".cs");
+        var solution = workspace.Solution
+            .RemoveDocument(document.Id)
+            .AddDocument(id, name + ".cs", text, DocumentPlacement.Folders(document.Project, full), full);
+        var applied = await EditGate.ApplyAsync(workspace, solution, [document.Id, id], options, cancellationToken).ConfigureAwait(false);
+
+        return applied.IsOk ? Result.Ok(applied.Value + Retired(workspace, document, options.DryRun)) : applied;
+    }
+
+    private static string Retired(LoadedWorkspace workspace, Document document, bool dryRun)
+    {
+        if (document.FilePath is not { Length: > 0 } old)
+            return string.Empty;
+
+        var relative = PositionFormat.Relative(workspace.Root, old);
+
+        if (!dryRun && File.Exists(old))
+        {
+            File.Delete(old);
+            workspace.ForgetHistory("move_type_to_file moved " + relative + " whole, which undo cannot restore - move the type back with move_type_to_file");
+        }
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"\n{(dryRun ? "would delete" : "deleted")}  {relative} - the type was its only declaration, so the file moved whole, trivia included");
     }
 
     public static async Task<Result<string>> MoveTypeToNamespaceAsync(
@@ -279,7 +332,7 @@ public static class RefactorService
 
         var (document, _) = located.Value;
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-        var created = AddSibling(workspace.Solution, document, name, Unit(root!, declaration));
+        var created = AddSibling(workspace.Solution, document, name, Unit(root!, declaration).NormalizeWhitespace());
 
         return await EditGate.ApplyAsync(workspace, created.Solution, [created.Id], options, cancellationToken).ConfigureAwait(false);
     }
@@ -288,7 +341,7 @@ public static class RefactorService
         Solution solution,
         Document sibling,
         string name,
-        CompilationUnitSyntax unit)
+        SyntaxNode unit)
     {
         var id = DocumentId.CreateNewId(sibling.Project.Id);
         var directory = Path.GetDirectoryName(sibling.FilePath ?? string.Empty) ?? string.Empty;
@@ -297,7 +350,7 @@ public static class RefactorService
         var updated = solution.AddDocument(
             id,
             name + ".cs",
-            unit.NormalizeWhitespace(),
+            unit,
             folders: DocumentPlacement.Folders(sibling.Project, full),
             filePath: full);
 

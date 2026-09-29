@@ -99,6 +99,9 @@ public static class ReferenceService
             string.Create(CultureInfo.InvariantCulture, $"usages in {files} files"),
             "a more specific symbol, or raise maxResults=");
 
+        if (ProjectLoadScope(workspace) is { } scope)
+            response.Note(scope);
+
         var grouped = await GroupAsync(workspace.Root, locations.Take(shown), containers, cancellationToken).ConfigureAwait(false);
 
         foreach (var group in grouped.GroupBy(entry => entry.Group))
@@ -118,6 +121,14 @@ public static class ReferenceService
 
         return response.ToString();
     }
+
+    internal static string? ProjectLoadScope(LoadedWorkspace workspace) =>
+            Path.GetExtension(workspace.SolutionPath.AsSpan()) is var extension
+            && (extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase) || extension.Equals(".vbproj", StringComparison.OrdinalIgnoreCase))
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"scope=project load - only the {workspace.Solution.ProjectIds.Count} project(s) {Path.GetFileName(workspace.SolutionPath)} pulls in were searched; a caller in any other project, a test project included, is not counted - load the .sln/.slnx for the whole answer")
+                : null;
 
     private static async Task<List<UsageEntry>> GroupAsync(
         string root,

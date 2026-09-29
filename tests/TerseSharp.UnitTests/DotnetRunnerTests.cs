@@ -1039,4 +1039,56 @@ public sealed class DotnetRunnerTests
         Assert.Contains("already at the 3600 s maximum", text, StringComparison.Ordinal);
         Assert.DoesNotContain("retry with timeoutSeconds=", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void RenderNoResults_ForARunThatTimedOutBeforeAnyTestStarted_SaysItWasStillBuilding()
+    {
+        var run = new ProcessRun(-1, "  Fixture.Trading -> C:/repo/bin/Fixture.Trading.dll", 300100, TimedOut: true);
+
+        var text = DotnetRunner.RenderNoResults("A.csproj", run, verbose: false);
+
+        Assert.Contains("no test results were produced - still BUILDING: no test run had started, so no test hung", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderNoResults_ForARunThatTimedOutWhileTestsRan_SaysTestsWereRunning()
+    {
+        var run = new ProcessRun(-1, "Test run for C:/repo/bin/A.Tests.dll (.NETCoreApp,Version=v10.0)\nStarting test execution, please wait...", 300100, TimedOut: true);
+
+        var text = DotnetRunner.RenderNoResults("A.csproj", run, verbose: false);
+
+        Assert.Contains("no test results were produced - tests were running when the deadline hit", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("BUILDING", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForABatchWhoseBuildTookMostOfTheWallClock_SplitsBuildAndTestTimeAndMeasuresConcurrencyOverTheTests()
+    {
+        var report = new TestRunReport(10, 0, 0, 10, 8000, [], [])
+        {
+            Projects = [new("A", 5, 0, 0, 5, 4000), new("B", 5, 0, 0, 5, 4000)],
+        };
+
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(0, string.Empty, 12000, BuildMilliseconds: 10000),
+            report,
+            new TestRunRequest("sln", null, false, false, 0, TimeSpan.FromSeconds(600)),
+            "C:/repo");
+
+        Assert.Contains("elapsedMs=12000 buildMs=10000 testMs=2000 concurrency=4.0x", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderNoResults_ForATimedOutRunThatBuiltNothing_NeverClaimsItWasStillBuilding()
+    {
+        var run = new ProcessRun(-1, string.Empty, 300100, TimedOut: true);
+        var prepared = new ProcessRun(-1, string.Empty, 300100, TimedOut: true, BuildMilliseconds: 40000);
+
+        var skipped = DotnetRunner.RenderNoResults("A.csproj", run, verbose: false, noBuild: true);
+        var batched = DotnetRunner.RenderNoResults("A.slnx", prepared, verbose: false);
+
+        Assert.Contains("the build had finished but the test host printed no start line before the deadline", skipped, StringComparison.Ordinal);
+        Assert.Contains("the build had finished but the test host printed no start line before the deadline", batched, StringComparison.Ordinal);
+        Assert.DoesNotContain("BUILDING", skipped + batched, StringComparison.Ordinal);
+    }
 }

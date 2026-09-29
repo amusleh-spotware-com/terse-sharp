@@ -63,4 +63,12 @@ public sealed class GitToolsTests
 
         return GitTools.MergedTags(local.ToString(), "9c1d2e3444444444444444444444444444444444\trefs/tags/v9.9.9");
     }
+
+    [Theory]
+    [InlineData("main", new[] { "main" })]
+    [InlineData("desktop/dev..HEAD", new[] { "desktop/dev", "HEAD" })]
+    [InlineData("v1.0...main", new[] { "v1.0", "main" })]
+    [InlineData("main..", new[] { "main" })]
+    public void RangeEnds_SplitsARevisionRangeIntoTheRefsGitMustResolve(string reference, string[] expected) =>
+            Assert.Equal(expected, GitTools.RangeEnds(reference));
 }

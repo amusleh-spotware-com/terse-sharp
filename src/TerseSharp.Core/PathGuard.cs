@@ -2,7 +2,14 @@ namespace TerseSharp.Core;
 
 public static class PathGuard
 {
-    public static Result<string> Resolve(LoadedWorkspace workspace, string path) => Resolve(workspace.Root, path);
+    public static Result<string> Resolve(LoadedWorkspace workspace, string path)
+    {
+        var full = Full(workspace.Root, path);
+
+        return workspace.Contains(full)
+            ? Result.Ok(full)
+            : Result.Fail<string>(Errors.OutOfWorkspace(full));
+    }
 
     public static Result<string> Resolve(string root, string path)
     {

@@ -2026,7 +2026,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             ["dryRun"] = true,
         });
 
-        Assert.Contains("WARNING this overwrite drops 2 declaration(s) the file declared: OrderService.Unused(), OrderService.NeverCalled()", text, StringComparison.Ordinal);
+        Assert.Contains("WARNING this overwrite drops 2 declaration(s) the file on disk held just before this write: OrderService.Unused(), OrderService.NeverCalled()", text, StringComparison.Ordinal);
     }
 
     [Fact]

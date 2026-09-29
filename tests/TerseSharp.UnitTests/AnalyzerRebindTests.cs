@@ -93,4 +93,19 @@ public sealed class AnalyzerRebindTests
 
         public override ImmutableArray<DiagnosticAnalyzer> GetAnalyzersForAllLanguages() => [];
     }
+
+    [Fact]
+    public void Rebound_ForAnUnresolvedAnalyzerReferenceWhoseFileNowExists_DropsIt()
+    {
+        using var workspace = new AdhocWorkspace();
+
+        var existing = typeof(AnalyzerRebindTests).Assembly.Location;
+        var project = workspace.AddProject("Checkout", LanguageNames.CSharp);
+        var solution = project.Solution.AddAnalyzerReference(project.Id, new UnresolvedAnalyzerReference(existing));
+
+        var rebound = AnalyzerRebind.Rebound(solution, ShadowCopyAnalyzerLoader.Shared);
+
+        Assert.Empty(rebound.GetProject(project.Id)!.AnalyzerReferences);
+        Assert.Equal([existing], AnalyzerRebind.Unresolved(solution).Paths);
+    }
 }

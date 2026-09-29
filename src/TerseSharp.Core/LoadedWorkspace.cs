@@ -33,7 +33,7 @@ public sealed class LoadedWorkspace : IDisposable
         dropped = seed.UndoNote;
         Sync = new WorkspaceSync(Root, seed.Generations);
         Indexes = new WorkspaceIndexes(Root, Sync);
-        watcher = WorkspaceWatcher.Create(Root, Sync, seed.Watch);
+        watcher = WorkspaceWatcher.Create(Root, ProjectDirectories(), Sync, seed.Watch);
         lineEnding = new Lazy<string>(() => DetectLineEnding(SourceSample() ?? load.SolutionPath));
     }
 
@@ -90,7 +90,44 @@ public sealed class LoadedWorkspace : IDisposable
     private bool noticeForThisCall;
     private bool droppedNotice;
 
-    public bool Contains(string path) => PathBoundary.Contains(Root, path);
+    public bool Contains(string path) => PathBoundary.Contains(Root, path) || InsideAProject(path);
+
+    private bool InsideAProject(string path)
+    {
+        if (!Path.IsPathFullyQualified(path))
+            return false;
+
+        foreach (var directory in ProjectDirectories())
+        {
+            if (PathBoundary.Contains(directory, path))
+                return true;
+        }
+
+        return false;
+    }
+
+    private string[] ProjectDirectories()
+    {
+        var solution = Solution;
+
+        if (projectDirectories is { } cached && ReferenceEquals(cached.Solution, solution))
+            return cached.Directories;
+
+        string[] candidates = [.. solution.Projects
+            .Select(project => Path.GetDirectoryName(project.FilePath))
+            .OfType<string>()
+            .Where(directory => !PathBoundary.Contains(Root, directory))
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+        string[] outermost = [.. candidates.Where(directory => !Array.Exists(candidates, other => other != directory && PathBoundary.Contains(other, directory)))];
+
+        projectDirectories = new ProjectDirectorySnapshot(solution, outermost);
+
+        return outermost;
+    }
+
+    private ProjectDirectorySnapshot? projectDirectories;
+
+    private sealed record ProjectDirectorySnapshot(Solution Solution, string[] Directories);
 
     public WorkspaceLease Lease()
     {
@@ -173,6 +210,18 @@ public sealed class LoadedWorkspace : IDisposable
 
         lock (historyGate)
             Discard(paths);
+    }
+
+    public void ForgetHistory(string cause)
+    {
+        lock (historyGate)
+        {
+            if (history.Count is 0)
+                return;
+
+            dropped = Describe(history.Count, cause);
+            history.Clear();
+        }
     }
 
     public async Task<string> UndoAsync(CancellationToken cancellationToken)

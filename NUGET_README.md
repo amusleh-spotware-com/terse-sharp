@@ -241,6 +241,10 @@ call with the command's own arguments translated — `git log --oneline -1` answ
 Git rows fire only when the directory the command addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`,
 because the hook is installed user-wide. Plain `.css`, `.js`, `dotnet restore`/`pack`/`publish`/`run`, and
 git mutation (`blame`, `add`, `commit`, `push`, `tag` creation) are allowed — nothing here replaces those.
+So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`) unless the file is .NET source in
+the tree, and a diff flag no tool serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`); `-w`
+routes to `ignoreWhitespace=true` and `-U<n>` to `diff_text unified=<n>`. `.git/` internals are never source, and on Windows a Git-Bash `/tmp/...`
+or `/c/...` path is judged as the directory it names.
 Malformed hook input allows the call, so a guard fault can never wedge a session. `TERSE_GUARD_LOG=<path>`
 appends one JSON line per decision.
 
@@ -402,9 +406,11 @@ reversible with `undo_last_change`. The `.resx`, `.xaml`, Razor and project/pack
 surgical file writes outside undo, so preview those with `dryRun`. `--read-only` makes every mutating tool
 refuse and touch nothing.
 
-Four solutions stay loaded at once (`--max-workspaces`, `TERSE_MAX_WORKSPACES`), an idle one gives its
-compilations back after 15 minutes (`--idle-minutes`), `--no-watch` turns the file watcher off, and
-responses are bounded and declare their truncation. Every answer names its worktree and branch, and an
+Four solutions stay loaded at once (`--max-workspaces`, `TERSE_MAX_WORKSPACES`), compilations are given
+back once the server has served no call for 15 minutes (`--idle-minutes`), `--no-watch` turns the file watcher off, and
+responses are bounded and declare their truncation. A `.terse.json` `build` section -
+`{"build": {"configuration": "Debug", "projects": {"App.Tests": "Debug"}}}` - fills the configuration a
+`build`, `run_tests` or `list_tests` call omits, and the verdict says so. Every answer names its worktree and branch, and an
 ambiguous request lists the candidates instead of guessing.
 
 No licence, no IDE, no language server — anything that speaks MCP over stdio works. Git is read-only, and

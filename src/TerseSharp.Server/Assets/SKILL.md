@@ -125,7 +125,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
 | **Refactor** | hand-writing an interface from a class | `extract_interface(symbolId)` |
-| **Refactor** | cut-and-paste between files, un-nesting a type | `move_type_to_file` · `move_type_to_namespace` (a nested type id lifts it to namespace level in its own file) |
+| **Refactor** | cut-and-paste between files, un-nesting a type | `move_type_to_file` (a file's only type moves the file whole) · `move_type_to_namespace` (a nested type id lifts it to namespace level in its own file) |
 | **Refactor** | editing a signature and every call site by hand | `change_signature(symbolId, …)` |
 | **Projects** | editing a `.csproj` by hand | `project_set_property` · `project_properties` · `project_add_reference` · `project_remove_reference` · `project_create` — untouched lines survive byte for byte |
 | **Projects** | editing `PackageReference` by hand | `package_list` · `package_add` · `package_remove` |
@@ -216,7 +216,7 @@ one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
 
-**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md`, `S=<dir outside the tree>; wc -l "$S/f.log"` - is allowed; a `$VAR` assigned earlier in the command is expanded first. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs - a piped pattern - every `-e` included - is not an operand. A `2>&1` no longer forces a whole-command refusal, a `$( )` no longer shadows the real command, and a denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
+**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md`, `S=<dir outside the tree>; wc -l "$S/f.log"` - is allowed; a `$VAR` assigned earlier in the command is expanded first, a Git-Bash `/tmp/...` or `/c/...` path is mapped on Windows, and `.git/` internals are never source. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs - a piped pattern - every `-e` included - is not an operand. A denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
 
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
 denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
@@ -234,16 +234,9 @@ check, so never shell out for them - and **`cleanup verify=true fix=ci` is both 
 (`vulnerable=true`, `outdated=true`, same restored graph). `dotnet restore`, `pack`,
 `publish`, `run` and `tool` are **not** covered: nothing here replaces them.
 
-**A bare `sleep` is denied too, `powershell -Command "Start-Sleep ..."` included, and nothing replaces it.** A segment whose COMMAND WORD is `sleep`,
-outside a `while`/`until`/`for` loop, is refused. `docker run … sleep 3600` and `python sleep.py` are
-untouched. Background work
-re-invokes you when it finishes, so when you need its result and have nothing else to do, **end the
-turn** — stopping is free, sleeping is billed. The one allowed shape is the pause inside a loop that
-also detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; done`.
+**A bare `sleep` is denied too, `Start-Sleep` included, and nothing replaces it** - background work re-invokes you, so **end the turn**. The one allowed shape is the pause inside a loop that detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; done`.
 
-**POLLING BY TOOL is the same breach, and the guard now says so at the call.** Reading `TaskOutput`/`TaskList`
-for a result the harness delivers by itself cost **14.08 h/week**. A check *after* a notification is
-fine; waiting on one is not.
+**POLLING BY TOOL is the same breach**: `TaskOutput`/`TaskList` for a result the harness delivers itself cost **14.08 h/week**; check after a notification, never wait on one.
 
 **One replaced command no longer kills a batch.** The guard strips those commands, rewrites the
 rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
@@ -264,16 +257,14 @@ raising a number you chose; the steer returns as soon as you drop the argument.
 `diff_text` — **all three take `staged=true`**, and all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. A diff of a path
-that is not `.cs` routes to `diff_text`, which is what can answer it. Running them in
+that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, and so does a diff flag no tool serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`). Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
 `git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`, and a `git tag` **listing** —
 bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. A tag listing of
 **origin** — `git ls-remote --tags` — is `history tags=true remote=true`, which merges both lists and
-tags every row `local=yes|no remote=yes|no`, putting the rows only the remote has FIRST so the cap
-cannot drop the ones a release check is looking for; `--heads` (even beside `--tags`), another remote
-and a bare `git ls-remote` are left alone. Still on the shell: `git blame`
+tags every row `local=yes|no remote=yes|no`; `--heads`, another remote and a bare `git ls-remote` are left alone. Still on the shell: `git blame`
 — measured at **one** call in 683 sessions — anything that mutates the index or history (`git add`,
 `git commit`, `git push`, and every `git tag` that creates, annotates or deletes one), and a
 **scripted extraction** such as
@@ -329,8 +320,8 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 `compilations=cold`, and the first semantic call that realizes them appends
 `compilations=realized in Nms (once per load, not per call)` — a one-off, measured at about 7 s on a
 300-document solution, not the per-call cost of the tool that happened to pay it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation.
-**A workspace nobody has used for 15 minutes gives its compilations back** (`--idle-minutes`,
-`TERSE_IDLE_MINUTES`, `0` to disable), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
+**Compilations are given back once the server has served no call for 15 minutes** (`--idle-minutes`,
+`TERSE_IDLE_MINUTES`, `0` to disable; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
 what it needs for a second or two. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
@@ -830,6 +821,8 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    not counted: no build writes there, so it cannot raise `MSB3027`.
 7. **Several worktrees or repos open?** Pass `workspace:`. An ambiguous request returns
    `AmbiguousWorkspace` listing the candidates rather than guessing — never assume it picked right.
+   A write outside every root and a pathless `history`/`changed_files`/`diff_text` use the workspace
+   holding the server's directory, and name it; a `.csproj` load also takes its referenced projects' paths.
 8. **A tool never answers something it cannot prove.** `UNRESOLVED_CONTEXT`, `HEURISTIC`,
    `AmbiguousSymbol`, `SaturatedName` all mean *the server declined to guess*, not that the thing does
    not exist. Narrow the question; do not treat it as a negative result.
@@ -1083,16 +1076,15 @@ server ships. Component and parameter answers are then unavailable rather than e
 `run_tests PASSED  passed=478 skipped=0 total=478 durationMs=122371 elapsedMs=476900` — where
 `durationMs` is summed test time and `elapsedMs` is wall clock — so running the suite after every
 change is nearly free. **A suite pathologically slow for its own size names itself**: past 5 000 ms per test the verdict gains
-` slowAssembly=<name> <n>ms/test`. That is a 31x regression announcing itself, not a big-suite warning.
+` slowAssembly=<name> <n>ms/test`.
 It needs **at least five executed tests** in that project, below which the mean is all fixed cost.
 A run that spanned **more than one project** appends `concurrency=<summed/wall>x` plus
 `Name:total/durationMs`
 per project to that same line - and a run that already prints its counters in full adds the slowest
-test when concurrency is under 2x
-(`… durationMs=122371  TerseSharp.UnitTests:310/12043ms  TerseSharp.E2ETests:168/110328ms`). A
+test when concurrency is under 2x. A
 single-project run is unchanged. A run that **built** also carries that build's own verdict on the
 same line - `build=ok errors=0 warnings=0` - so reading the build result before the test
-result costs no second call; `noBuild=true` carries nothing. `build` behaves the same way
+result costs no second call; `noBuild=true` carries nothing. A batch built first adds `buildMs= testMs=`, and `concurrency=` measures the test phase alone; a run stopped with no result says whether it was still BUILDING. `.terse.json` `{"build":{"configuration":"Debug","projects":{"X.Tests":"Debug"}}}` fills an omitted `configuration`, marked `(.terse.json)`. `build` behaves the same way
 (`build ok  errors=0 warnings=0  elapsedMs=4235`), warnings included: a build that succeeds is one
 line however many warnings it produced, and a build that fails lists errors only. `warnings=` counts
 what that build emitted, so a build that recompiled nothing reports `0`.

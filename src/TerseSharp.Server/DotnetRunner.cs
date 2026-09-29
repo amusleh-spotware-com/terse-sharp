@@ -40,7 +40,7 @@ public static partial class DotnetRunner
 
     private static string QuietTest(TestRunReport report, ProcessRun run, string target) => string.Create(
     CultureInfo.InvariantCulture,
-    $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}{Pathological(report, target)}") + PerProject(report);
+    $"run_tests PASSED  passed={report.Passed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} elapsedMs={run.ElapsedMilliseconds}{Phases(run)}{Concurrency(report, run)}{Pathological(report, target)}") + PerProject(report);
 
     internal static bool IsLockedOutput(int exitCode, string output) =>
         exitCode is not 0 && LockedOutput().IsMatch(output);
@@ -213,7 +213,7 @@ public static partial class DotnetRunner
     internal static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request, string root)
     {
         if (report.Total is 0 && run.ExitCode is not 0)
-            return RenderNoResults(request.Target, run, request.Verbose, root, request.Timeout);
+            return RenderNoResults(request.Target, run, request.Verbose, root, request.Timeout, request.NoBuild);
 
         if (IsGreen(run, report) && !request.WantsDetail)
             return QuietTest(report, run, request.Target) + ScopeNote(report, request);
@@ -252,12 +252,12 @@ public static partial class DotnetRunner
         ? string.Create(CultureInfo.InvariantCulture, $"NOTE the filter matched tests in 1 of {searched} test projects, but the whole solution was run - pass project=\"{only}\" to build and run only that one")
         : string.Create(CultureInfo.InvariantCulture, $"NOTE the filter matched tests in {matched.Length} of {searched} test projects, but the whole solution was run - pass projects=[{string.Join(", ", matched.Select(name => "\"" + name + "\""))}] to build and run only those");
 
-    internal static string RenderNoResults(string target, ProcessRun run, bool verbose, string root = "", TimeSpan deadline = default)
+    internal static string RenderNoResults(string target, ProcessRun run, bool verbose, string root = "", TimeSpan deadline = default, bool noBuild = false)
     {
         var response = new ResponseBuilder("run_tests", target).Verbose(verbose);
 
         response.Note(run.TimedOut
-            ? string.Create(CultureInfo.InvariantCulture, $"FAILED timed out after {run.ElapsedMilliseconds} ms, no test results were produced")
+            ? string.Create(CultureInfo.InvariantCulture, $"FAILED timed out after {run.ElapsedMilliseconds} ms, no test results were produced{TimeoutPhase(run, noBuild)}")
             : string.Create(CultureInfo.InvariantCulture, $"FAILED exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}, no test results were produced"));
 
         AppendCommand(response, run);
@@ -268,12 +268,37 @@ public static partial class DotnetRunner
 
         return response.ToString();
     }
+
+    private static string Phases(ProcessRun run) => run.BuildMilliseconds > 0
+        ? string.Create(CultureInfo.InvariantCulture, $" buildMs={run.BuildMilliseconds} testMs={run.ElapsedMilliseconds - run.BuildMilliseconds}")
+        : string.Empty;
+
+    internal static string TimeoutPhase(ProcessRun run, bool noBuild = false) => (TestPhaseStarted(run.Output), noBuild || run.BuildMilliseconds > 0) switch
+    {
+        (true, _) => " - tests were running when the deadline hit",
+        (false, true) => " - the build had finished but the test host printed no start line before the deadline",
+        _ => " - still BUILDING: no test run had started, so no test hung; a retry reuses what this run already compiled",
+    };
+
+    internal static bool TestPhaseStarted(string output)
+    {
+        foreach (var marker in TestPhaseMarkers)
+        {
+            if (output.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static readonly string[] TestPhaseMarkers = ["Test run for ", "Starting test execution", "Running tests from ", "Discovering: ", "Passed!", "Failed!"];
+
     internal static string RenderTestNames(string target, ProcessRun run, string? contains, string root = "") =>
         RenderTestNames(target, run, TestNameList.Parse(run.Output, contains), root);
 
     private static string Counters(TestRunReport report, ProcessRun run, string target) => string.Create(
         CultureInfo.InvariantCulture,
-        $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}{Concurrency(report, run)}{Slowest(report, run)}{Pathological(report, target)}") + PerProject(report);
+        $"passed={report.Passed} failed={report.Failed} skipped={report.Skipped} total={report.Total} durationMs={report.DurationMs} exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}{Phases(run)}{Concurrency(report, run)}{Slowest(report, run)}{Pathological(report, target)}") + PerProject(report);
 
     private static void AppendWarnings(ResponseBuilder response, ProcessRun run, TestRunReport report, string? filter, TimeSpan deadline)
     {
@@ -649,7 +674,7 @@ public static partial class DotnetRunner
     private static KeyValuePair<string, string>[] ResultsEnvironment(string resultsDirectory) =>
         [new(ResultsDirectoryVariable, resultsDirectory)];
 
-    private static ProcessRun Batched(ProcessRun?[] runs, long elapsedMilliseconds)
+    private static ProcessRun Batched(ProcessRun?[] runs, long buildMilliseconds, long testMilliseconds)
     {
         var merged = default(ProcessRun);
 
@@ -661,7 +686,7 @@ public static partial class DotnetRunner
 
         return merged is null
             ? new ProcessRun(0, string.Empty, 0)
-            : merged with { ElapsedMilliseconds = elapsedMilliseconds };
+            : merged with { ElapsedMilliseconds = buildMilliseconds + testMilliseconds, BuildMilliseconds = buildMilliseconds };
     }
 
     private static long Elapsed(ProcessRun?[] runs)
@@ -725,7 +750,7 @@ public static partial class DotnetRunner
                 break;
         }
 
-        return (Batched(runs, Elapsed(runs)), Unfinished(targets, runs, resultsDirectory));
+        return (Batched(runs, 0, Elapsed(runs)), Unfinished(targets, runs, resultsDirectory));
     }
 
     private static async Task<(ProcessRun Run, List<string> Missing)> ConcurrentAsync(
@@ -743,7 +768,7 @@ public static partial class DotnetRunner
         await Parallel.ForAsync(0, targets.Length, options, async (index, token) =>
             runs[index] = await SlottedAsync(workspace, request, resultsDirectory, index, token).ConfigureAwait(false)).ConfigureAwait(false);
 
-        return (Batched(runs, preparedMilliseconds + stopwatch.ElapsedMilliseconds), Unfinished(targets, runs, resultsDirectory));
+        return (Batched(runs, preparedMilliseconds, stopwatch.ElapsedMilliseconds), Unfinished(targets, runs, resultsDirectory));
     }
 
     private static async Task<PreparedBuild> PreparedAsync(
@@ -1002,9 +1027,9 @@ public static partial class DotnetRunner
         HangWindow(deadline) is { } window && run.ElapsedMilliseconds >= (long)window.TotalMilliseconds;
 
     private static string Concurrency(TestRunReport report, ProcessRun run) =>
-            report.Projects.Length < 2 || run.ElapsedMilliseconds <= 0 || report.DurationMs <= 0
+            report.Projects.Length < 2 || run.ElapsedMilliseconds - run.BuildMilliseconds <= 0 || report.DurationMs <= 0
                 ? string.Empty
-                : string.Create(CultureInfo.InvariantCulture, $" concurrency={(double)report.DurationMs / run.ElapsedMilliseconds:F1}x");
+                : string.Create(CultureInfo.InvariantCulture, $" concurrency={(double)report.DurationMs / (run.ElapsedMilliseconds - run.BuildMilliseconds):F1}x");
 
     private static string Slowest(TestRunReport report, ProcessRun run)
     {
@@ -1231,7 +1256,8 @@ internal sealed record ProcessRun(
     string StandardError = "",
     bool Drained = true,
     bool Stopped = false,
-    string Command = "");
+    string Command = "",
+    long BuildMilliseconds = 0);
 
 internal readonly record struct TestRunResult(string Response, TestRunReport Report, bool Locked);
 

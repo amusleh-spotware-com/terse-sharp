@@ -12,7 +12,7 @@ public sealed class ResxTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (100).")] int maxResults = 0) =>
         context.WithWorkspace(workspace, null, loaded =>
-            NavigationTools.Unwrap(ResxService.Files(loaded, filter, NavigationTools.Cap(maxResults, 100))));
+            NavigationTools.Unwrap(ResxService.Files(loaded, filter, NavigationTools.Cap(maxResults, 100))), semantic: false);
 
     [McpServerTool(Name = "resx_get", ReadOnly = true)]
     [Description("Keys of one .resx family with their values per culture. A key missing from a culture is printed MISSING rather than omitted. Use instead of Read on a .resx file.")]
@@ -30,8 +30,8 @@ public sealed class ResxTools(ToolContext context)
             cultures ?? "neutral",
             prefix,
             key,
-            values,
-            NavigationTools.Cap(maxResults, 200))));
+        values,
+        NavigationTools.Cap(maxResults, 200))), semantic: false);
 
     [McpServerTool(Name = "resx_find", ReadOnly = true)]
     [Description("Search every .resx/.resw in the workspace by key, value or comment. Use instead of Grep over resource files.")]
@@ -46,8 +46,8 @@ public sealed class ResxTools(ToolContext context)
             query,
             scope ?? "key",
             culture,
-            NavigationTools.Cap(maxResults, 100),
-            maxResults > 0)));
+        NavigationTools.Cap(maxResults, 100),
+        maxResults > 0)), semantic: false);
 
     [McpServerTool(Name = "resx_usages", ReadOnly = true)]
     [Description("Every reference to a resource key: the generated designer property resolved through Roslyn (EXACT), plus GetString, localizer indexers, x:Uid and Razor literals (HEURISTIC). Reports composedLookups so 'no usages' is never claimed as proof when keys are built at runtime.")]
@@ -125,7 +125,7 @@ public sealed class ResxTools(ToolContext context)
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Max results (200).")] int maxResults = 0) =>
         context.WithWorkspace(workspace, path, loaded => NavigationTools.Unwrap(
-            ResxValidation.Validate(loaded, path, rules, includeUnused, NavigationTools.Cap(maxResults, 200))));
+            ResxValidation.Validate(loaded, path, rules, includeUnused, NavigationTools.Cap(maxResults, 200))), semantic: false);
 
     private static Result<string>? Mixed(string? key, string? value, string? entries) =>
         key is { Length: > 0 } || value is { Length: > 0 } || entries is { Length: > 0 }

@@ -263,10 +263,14 @@ CancellationToken cancellationToken = default) =>
         AppendLoadDiagnostics(response, result, verbose);
 
         if (loaded is { CompilationsRealized: false })
-            response.Note("compilations=cold - the first semantic call realizes them and pays for it once");
+            response.Note("compilations=cold - the first semantic call realizes them and pays for it once" + Kept(registry.IdleFor));
 
         return response.ToString();
     }
+
+    internal static string Kept(TimeSpan idleFor) => idleFor > TimeSpan.Zero
+        ? string.Create(CultureInfo.InvariantCulture, $"; kept until the server serves no call for {(int)idleFor.TotalMinutes}m, then released - --idle-minutes=0 or TERSE_IDLE_MINUTES=0 keeps them; memory pressure releases another workspace's sooner")
+        : "; kept for the life of the server";
 
     private static string Loaded(WorkspaceLoadResult result, bool verbose) => verbose
         ? string.Create(

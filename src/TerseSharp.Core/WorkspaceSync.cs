@@ -71,7 +71,9 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         if (WorkspaceFiles.Matches(extension, RazorExtensions))
             return ChangeKind.Razor;
 
-        return WorkspaceFiles.Matches(extension, ResourceExtensions) ? ChangeKind.Resx : null;
+        return WorkspaceFiles.Matches(extension, ResourceExtensions) ? ChangeKind.Resx
+            : Path.GetFileName(path.AsSpan()).Equals(TerseConfigFile.FileName, StringComparison.OrdinalIgnoreCase) ? ChangeKind.Files
+            : null;
     }
 
     public void Notice(string path)
@@ -106,7 +108,7 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
 
     public async Task<bool> SyncAsync(LoadedWorkspace workspace, string? pathHint, CancellationToken cancellationToken)
     {
-        Verify(workspace, pathHint);
+        await ObserveAsync(workspace, pathHint, cancellationToken).ConfigureAwait(false);
 
         if (Reloading)
             return true;
@@ -125,6 +127,47 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
             gate.Release();
         }
     }
+
+    private async Task ObserveAsync(LoadedWorkspace workspace, string? pathHint, CancellationToken cancellationToken)
+    {
+        Verify(workspace, pathHint);
+
+        if (await HeadMovedAsync(workspace.Git, cancellationToken).ConfigureAwait(false))
+            Rebuild();
+    }
+
+    private async Task<bool> HeadMovedAsync(GitContext git, CancellationToken cancellationToken)
+    {
+        if (git.HeadPath is not { } path || FileStamp.Of(path) is var stamp && Seen(stamp))
+            return false;
+
+        try
+        {
+            var head = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+
+            return !head.AsSpan().Trim().SequenceEqual(git.Head);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private bool Seen(FileStamp stamp)
+    {
+        lock (headGate)
+        {
+            if (headStamp == stamp)
+                return true;
+
+            headStamp = stamp;
+
+            return false;
+        }
+    }
+
+    private readonly Lock headGate = new();
+    private FileStamp headStamp;
 
     public void Dispose() => gate.Dispose();
 

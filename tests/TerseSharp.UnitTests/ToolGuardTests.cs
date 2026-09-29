@@ -1985,4 +1985,124 @@ public sealed class ToolGuardTests
 
         Assert.False(verdict.Denied, verdict.Reason);
     }
+
+    [Theory]
+    [InlineData("git diff -U0 -- fixtures > {0}sel.patch")]
+    [InlineData("git show HEAD~1:README.md > {0}old.md")]
+    [InlineData("git show HEAD~1:src/TerseSharp.Core/Result.cs > {0}old.cs")]
+    [InlineData("git diff -U0 -- fixtures >> {0}sel.patch && git apply --cached --unidiff-zero {0}sel.patch")]
+    public void Inspect_ForAGitReadWhoseOutputIsRedirectedToAFileOutsideTheSource_AllowsItBecauseNoToolWritesAPatch(string template)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var command = string.Format(CultureInfo.InvariantCulture, template, Path.GetTempPath().Replace('\\', '/'));
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("git show HEAD~1:README.md > src/Old.cs")]
+    [InlineData("git diff -U0 -- fixtures")]
+    [InlineData("git show HEAD~1:README.md 2> err.txt")]
+    public void Inspect_ForAGitReadThatStillReachesTheContextOrWritesSource_StillDeniesIt(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+    }
+
+    [Theory]
+    [InlineData("git diff --ignore-cr-at-eol --numstat")]
+    [InlineData("git diff --check")]
+    [InlineData("git diff --word-diff -- README.md")]
+    [InlineData("git diff -b --stat")]
+    public void Inspect_ForAGitDiffFlagNoToolServes_AllowsIt(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Fact]
+    public void Inspect_ForAGitDiffIgnoringWhitespace_RoutesToTheToolThatNowTakesIgnoreWhitespace()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var counting = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff -w --numstat" }, root);
+        var text = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff -w -U0 -- README.md" }, root);
+
+        Assert.True(counting.Denied);
+        Assert.Equal("changed_files ignoreWhitespace=true", counting.Routing);
+        Assert.True(text.Denied);
+        Assert.Equal("diff_text path=README.md ignoreWhitespace=true unified=0", text.Routing);
+    }
+
+    [Theory]
+    [InlineData("ls .git/rebase-merge")]
+    [InlineData("cat .git/rebase-merge/done")]
+    [InlineData("head -3 .git/HEAD")]
+    public void Inspect_ForATextReadOfGitInternals_AllowsItBecauseTheyAreNotSolutionSource(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("cat /tmp/mine.md")]
+    [InlineData("awk '{print $1}' /tmp/sel.patch")]
+    [InlineData("grep -c '^@@' /tmp/sel.patch")]
+    public void Inspect_ForAGitBashTempPath_AllowsItOnEveryOperatingSystem(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Fact]
+    public void Inspect_ForAGitBashDrivePathIntoTheTree_DeniesItOnWindowsWhereItNamesTheTree()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var posix = "/" + char.ToLowerInvariant(root[0]) + root[2..].Replace('\\', '/') + "/README.md";
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat " + posix }, root);
+
+        Assert.Equal(OperatingSystem.IsWindows(), verdict.Denied);
+    }
+
+    [Fact]
+    public void Routing_ForAnAwkScriptOverATreeFile_NamesReadTextOnThatFileInsteadOfTheScriptAsAQuery()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "awk '{print $1}' README.md" }, root);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("read_text path=\"README.md\"", verdict.Routing);
+    }
+
+    [Theory]
+    [InlineData("git diff -w", "diff_text ignoreWhitespace=true")]
+    [InlineData("git diff -U0 -- src/X.cs", "diff_text path=src/X.cs unified=0")]
+    [InlineData("git diff --cached -w -- src/X.cs", "diff_text staged=true path=src/X.cs ignoreWhitespace=true")]
+    [InlineData("git diff -- src/X.cs", "diff_symbols path=src/X.cs")]
+    public void Routing_ForAWhitespaceOrContextDiff_NamesTheToolThatDeclaresThoseParameters(string command, string routing)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal(routing, verdict.Routing);
+    }
+
+    [Fact]
+    public void Routing_ForACountingDiffWithAContextCount_NamesDiffTextWhichDeclaresUnified()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git diff --stat -U0" }, root);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("diff_text unified=0", verdict.Routing);
+    }
 }

@@ -490,4 +490,35 @@ public sealed class WorkspaceRegistryTests
     [InlineData(68719476736L, 41231686041L)]
     public void Pressure_ScalesToSixtyPercentOfAvailableMemory_WithTwoGigabytesAsTheFloor(long available, long expected) =>
         Assert.Equal(expected, WorkspaceRegistry.Pressure(available));
+
+    [Fact]
+    public async Task DropIdleCompilations_WhileACallIsBeingServedOrWasServedWithinTheWindow_DropsNothing()
+    {
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.All()[0].LastUsedUtc = DateTimeOffset.UtcNow.AddHours(-2);
+
+        using (registry.Serve())
+            Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromMinutes(15), Unpressured));
+
+        Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromMinutes(15), Unpressured));
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
+    }
+
+    [Fact]
+    public async Task Resolve_ByAPathARootHoldsAndAProjectLoadOnlyReferences_PicksTheWorkspaceWhoseRootHoldsIt()
+    {
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.TestProjectPath, TestContext.Current.CancellationToken);
+
+        var source = Path.Combine(Path.GetDirectoryName(Fixtures.SolutionPath)!, "src", "Fixture.Trading", "OrderService.cs");
+
+        using var lease = registry.Resolve(null, source).Value!;
+
+        Assert.Equal(Fixtures.SolutionPath, lease.Workspace.SolutionPath, ignoreCase: true);
+        Assert.True(registry.All().Single(workspace => workspace != lease.Workspace).Contains(source));
+    }
 }

@@ -480,7 +480,9 @@ bool? semantic = null,
 CancellationToken cancellationToken = default) =>
 context.RejectWrite() is { } rejection
     ? Task.FromResult(rejection)
-    : context.WithWorkspaceAsync(workspace, path, action, semantic ?? SourceFile.IsCSharp(path), cancellationToken);
+    : context.OutsideEveryWorkspace(path)
+        ? context.WithUnboundWorkspaceAsync(workspace, action)
+        : context.WithWorkspaceAsync(workspace, path, action, semantic ?? SourceFile.IsCSharp(path), cancellationToken);
 
     private static int Lines(int requested) => requested <= 0 ? 2000 : Math.Min(requested, 20000);
 
@@ -790,7 +792,7 @@ context.RejectWrite() is { } rejection
 
         return Guarded(
             workspace,
-            files[0].Path,
+            files[Math.Max(0, Array.FindIndex(files, file => !context.OutsideEveryWorkspace(file.Path)))].Path,
             async loaded => Raced(loaded, targets, options.IfUnchangedSince) is { } raced
                 ? await raced.ConfigureAwait(false)
                 : NavigationTools.Unwrap(await LandedWrites.GuardedAsync(
@@ -948,14 +950,14 @@ context.RejectWrite() is { } rejection
             return null;
 
         var full = Path.GetFullPath(path);
-        var owner = context.Registry.All().FirstOrDefault(loaded => PathBoundary.Contains(loaded.Root, full));
+        var owner = context.Registry.All().FirstOrDefault(loaded => loaded.Contains(full));
 
         if (owner is null)
             return null;
 
         var resolved = context.Registry.Resolve(workspace, path, semantic: false);
 
-        return resolved.IsOk && PathBoundary.Contains(resolved.Value!.Workspace.Root, full)
+        return resolved.IsOk && resolved.Value!.Workspace.Contains(full)
             ? null
             : Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'{full}' is inside the loaded workspace at {owner.Root}, not the one this call resolved to"),

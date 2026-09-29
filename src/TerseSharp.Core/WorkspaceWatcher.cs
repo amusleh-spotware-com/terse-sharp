@@ -1,35 +1,67 @@
 namespace TerseSharp.Core;
 
-internal sealed class WorkspaceWatcher(FileSystemWatcher? watcher) : IDisposable
+internal sealed class WorkspaceWatcher(FileSystemWatcher[] watchers) : IDisposable
 {
     private const int BufferBytes = 64 * 1024;
 
-    public static WorkspaceWatcher Create(string root, WorkspaceSync sync, bool enabled)
+    public static WorkspaceWatcher Create(string root, IReadOnlyList<string> projectRoots, WorkspaceSync sync, bool enabled)
     {
-        if (!enabled)
-        {
-            sync.Off();
+        if (enabled)
+            return Started(root, projectRoots, sync);
 
-            return new WorkspaceWatcher(null);
-        }
+        sync.Off();
+
+        return new WorkspaceWatcher([]);
+    }
+
+    private static WorkspaceWatcher Started(string root, IReadOnlyList<string> projectRoots, WorkspaceSync sync)
+    {
+        var started = new List<FileSystemWatcher>(1 + projectRoots.Count);
 
         try
         {
-            var started = Start(root, sync);
-
+            StartAll(root, projectRoots, sync, started);
             sync.Watching();
 
-            return new WorkspaceWatcher(started);
+            return new WorkspaceWatcher([.. started]);
         }
         catch (Exception exception) when (IsUnavailable(exception))
         {
+            started.ForEach(watcher => watcher.Dispose());
             sync.Degrade(exception.Message);
 
-            return new WorkspaceWatcher(null);
+            return new WorkspaceWatcher([]);
         }
     }
 
-    public void Dispose() => watcher?.Dispose();
+    public void Dispose()
+    {
+        foreach (var watcher in watchers)
+            watcher.Dispose();
+    }
+
+    private static void StartAll(string root, IReadOnlyList<string> projectRoots, WorkspaceSync sync, List<FileSystemWatcher> started)
+    {
+        started.Add(Start(root, sync));
+
+        foreach (var projectRoot in projectRoots)
+        {
+            if (Watched(projectRoot, sync) is { } watcher)
+                started.Add(watcher);
+        }
+    }
+
+    private static FileSystemWatcher? Watched(string projectRoot, WorkspaceSync sync)
+    {
+        try
+        {
+            return Directory.Exists(projectRoot) ? Start(projectRoot, sync) : null;
+        }
+        catch (Exception exception) when (IsUnavailable(exception))
+        {
+            return null;
+        }
+    }
 
     private static FileSystemWatcher Start(string root, WorkspaceSync sync)
     {

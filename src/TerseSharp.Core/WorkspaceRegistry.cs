@@ -78,7 +78,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     public Result<WorkspaceLease> Resolve(string? workspaceHint, string? pathHint) =>
         Resolve(workspaceHint, pathHint, semantic: true);
 
-    public Result<WorkspaceLease> Resolve(string? workspaceHint, string? pathHint, bool semantic)
+    public Result<WorkspaceLease> Resolve(string? workspaceHint, string? pathHint, bool semantic, string? workingDirectory = null)
     {
         lock (map)
         {
@@ -90,8 +90,36 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
             if (!string.IsNullOrWhiteSpace(workspaceHint))
                 return ByHint(loaded, workspaceHint, semantic);
 
-            return ByPath(loaded, pathHint, semantic) ?? Single(loaded, semantic);
+            return ByPath(loaded, pathHint, semantic) ?? Housed(loaded, workingDirectory, semantic) ?? Single(loaded, semantic);
         }
+    }
+
+    public Result<WorkspaceLease> ResolveUnbound(string? workspaceHint, string? workingDirectory)
+    {
+        lock (map)
+        {
+            var loaded = workspaces.Values.ToArray();
+
+            if (loaded.Length is 0)
+                return Result.Fail<WorkspaceLease>(Errors.NotLoaded());
+
+            if (!string.IsNullOrWhiteSpace(workspaceHint))
+                return ByHint(loaded, workspaceHint, semantic: false);
+
+            return Housed(loaded, workingDirectory, semantic: false) ?? Ok(MostRecent(loaded)!, semantic: false);
+        }
+    }
+
+    private static Result<WorkspaceLease>? Housed(LoadedWorkspace[] loaded, string? workingDirectory, bool semantic)
+    {
+        if (loaded.Length < 2 || workingDirectory is not { Length: > 0 } directory)
+            return null;
+
+        var housing = loaded
+            .Where(workspace => PathBoundary.Contains(workspace.Root, directory))
+            .MaxBy(workspace => workspace.Root.Length);
+
+        return housing is null ? null : Ok(housing, semantic);
     }
 
     public void Dispose()
@@ -187,7 +215,8 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         if (string.IsNullOrWhiteSpace(pathHint))
             return null;
 
-        var matches = loaded.Where(workspace => workspace.Contains(pathHint)).ToArray();
+        var rooted = loaded.Where(workspace => PathBoundary.Contains(workspace.Root, pathHint)).ToArray();
+        var matches = rooted.Length > 0 ? rooted : [.. loaded.Where(workspace => workspace.Contains(pathHint))];
 
         if (matches.Length > 0)
             return Ok(matches.MaxBy(workspace => workspace.Root.Length)!, semantic);
@@ -313,12 +342,42 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         if (idleFor <= TimeSpan.Zero)
             return 0;
 
-        var dropped = Dropped(Snapshot(), idleFor, managedBytes >= PressureBytes);
+        var pressured = managedBytes >= PressureBytes;
+
+        if (!pressured && Serving(idleFor))
+            return 0;
+
+        var dropped = Dropped(Snapshot(), idleFor, pressured);
 
         if (dropped > 0)
             Reclaim();
 
         return dropped;
+    }
+
+    public ServedCall Serve()
+    {
+        Interlocked.Increment(ref inFlight);
+
+        return new ServedCall(this);
+    }
+
+    private void Served()
+    {
+        Interlocked.Exchange(ref lastServedTicks, DateTimeOffset.UtcNow.UtcTicks);
+        Interlocked.Decrement(ref inFlight);
+    }
+
+    private bool Serving(TimeSpan idleFor) =>
+        Volatile.Read(ref inFlight) > 0
+        || DateTimeOffset.UtcNow.UtcTicks - Volatile.Read(ref lastServedTicks) < idleFor.Ticks;
+
+    private int inFlight;
+    private long lastServedTicks;
+
+    public readonly struct ServedCall(WorkspaceRegistry registry) : IDisposable
+    {
+        public void Dispose() => registry.Served();
     }
 
     private static bool Releasable(LoadedWorkspace workspace, TimeSpan idleFor, bool pressured) =>
@@ -331,6 +390,8 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     internal static long Pressure(long availableBytes) => Math.Max(PressureFloor, availableBytes / 5 * 3);
 
     private static readonly TimeSpan MinimumIdle = TimeSpan.FromMinutes(1);
+
+    public TimeSpan IdleFor { get; init; }
 
     private static Result<WorkspaceLease>? Holding(LoadedWorkspace[] loaded, string pathHint, bool semantic)
     {

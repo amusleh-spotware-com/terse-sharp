@@ -6,6 +6,7 @@ namespace TerseSharp.Core;
 
 public static class FileService
 {
+    private const string CondensedMarker = "condensed=true - blank lines dropped, a number shown only after a gap; verbose=true numbers every line";
     public const int MaxResponseCharacters = 128 * 1024;
 
     public const int DefaultResponseCharacters = 40 * 1024;
@@ -53,7 +54,7 @@ public static class FileService
         if (SourceFile.Reject(path, full, force) is { } refusal)
             return refusal;
 
-        return PathBoundary.Contains(workspace.Root, full)
+        return workspace.Contains(full)
             ? await InsideAsync(workspace, path, full, content, dryRun, allowErrors, verbose, allowPolicy, overwrite, cancellationToken).ConfigureAwait(false)
             : await OutsideWriteAsync(workspace, full, content, dryRun, verbose, cancellationToken).ConfigureAwait(false);
     }
@@ -297,6 +298,9 @@ public static class FileService
         var response = new ResponseBuilder("read_text", path).Verbose(request.Verbose);
 
         response.Summary(selection.CoveredLines, ReachableLines(selection), "lines");
+
+        if (selection.NextLine is 0 && selection.Lines.Count < selection.CoveredLines)
+            response.Note(CondensedMarker);
 
         if (!request.Verbose && IsOutside(path))
             response.Note(OutsideMarker);
@@ -830,7 +834,7 @@ public static class FileService
         bool force,
         CancellationToken cancellationToken)
     {
-        var resolved = PathGuard.Resolve(workspace, file.Path);
+        var resolved = Writable(workspace, file.Path, force || file.Force);
 
         if (!resolved.IsOk)
             return Result.Fail<PendingWrite>(resolved.Error!);
@@ -928,10 +932,14 @@ public static class FileService
         if (entry.Document is not null)
             return string.Empty;
 
-        if (!dryRun)
-            await WriteAsync(workspace, entry.Full, entry.After, cancellationToken).ConfigureAwait(false);
+        var inside = workspace.Contains(entry.Full);
 
-        return DiffResponse("write_text", entry.Path, entry.Before, entry.After, dryRun, verbose);
+        if (!dryRun && inside)
+            await WriteAsync(workspace, entry.Full, entry.After, cancellationToken).ConfigureAwait(false);
+        else if (!dryRun && !string.Equals(entry.Before, entry.After, StringComparison.Ordinal))
+            await AtomicWrite.TextAsync(entry.Full, entry.After, cancellationToken).ConfigureAwait(false);
+
+        return DiffResponse("write_text", inside ? entry.Path : entry.Full, entry.Before, entry.After, dryRun, verbose, inside ? null : entry.Full);
     }
 
     public static long? ByteLength(string? full) =>
@@ -1383,7 +1391,7 @@ public static class FileService
 
         var full = Path.GetFullPath(path);
 
-        if (PathBoundary.Contains(workspace.Root, full))
+        if (workspace.Contains(full))
             return Result.Ok(full);
 
         return force ? Result.Ok(full) : Result.Fail<string>(Errors.OutsideWrite(full));

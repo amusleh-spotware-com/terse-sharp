@@ -161,7 +161,7 @@ public static class ToolGuard
             return "build";
 
         if (driver.Equals("git", StringComparison.OrdinalIgnoreCase))
-            return Git(tokens, cwd);
+            return StdoutFile(segment) is { } target && !WritesSource(target, cwd) ? null : Git(tokens, cwd);
 
         if (!driver.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
             return null;
@@ -207,7 +207,7 @@ public static class ToolGuard
         "diff-cached" => "use diff_symbols staged=true, then diff_text staged=true for the hunk text it cannot show - or changed_files staged=true for the --name-only and --stat answer, one line per file",
         "diff-counts" => "use changed_files, with path= for the pathspec this command names - one line per file with the added and deleted counts and the status letter, which is exactly what --stat, --numstat, --name-only and --name-status ask for",
         "diff-cached-counts" => "use changed_files staged=true, with path= for the pathspec this command names - one line per staged file with the added and deleted counts and the status letter",
-        "diff-text" => "use diff_text for that path - it returns the hunk text itself, which is the whole answer for a file that declares no C# symbols",
+        "diff-text" => "use diff_text for that path - it returns the hunk text itself, which is the whole answer for a file that declares no C# symbols, and takes ignoreWhitespace=true for -w and unified=<n> for -U<n>",
         "diff-cached-text" => "use diff_text staged=true for that path - it returns the hunk text itself, which is the whole answer for a file that declares no C# symbols",
         "ls-files" => "use find_files tracked=true",
         "ls-remote-tags" => "use history tags=true remote=true, which merges origin's tag list into the local one and tags every row local=yes|no remote=yes|no",
@@ -385,7 +385,7 @@ public static class ToolGuard
         return subcommand switch
         {
             "status" when IsDotNetTree(directed) => "status",
-            "diff" when IsDotNetTree(directed) => Cached(tokens),
+            "diff" when IsDotNetTree(directed) && !Unserved(tokens) => Cached(tokens),
             "ls-files" when IsDotNetTree(directed) && Unflagged(tokens, "ls-files") => "ls-files",
             "ls-remote" when IsDotNetTree(directed) && RemoteTagListing(tokens) => "ls-remote-tags",
             "log" when IsDotNetTree(directed) && !Shaped(tokens) => "log",
@@ -597,8 +597,21 @@ public static class ToolGuard
                 return Call(OutlineTool(bare), "path", bare);
         }
 
-        return Call("search_text", "query", segment);
+        var operand = PathOperands(segment) is [var first, ..] ? Bare(first) : "<path>";
+
+        return TextKind(segment) switch
+        {
+            "Grep" when SearchesAPattern(segment) => "search_text query=\"<the literal>\" glob=\"" + operand + "\"",
+            "Glob" => Call("find_files", "glob", operand),
+            "Edit" => Call("edit_text", "path", operand),
+            _ => Call("read_text", "path", operand),
+        };
     }
+
+    private static bool SearchesAPattern(string segment) =>
+        PatternSearchers.Contains(Path.GetFileNameWithoutExtension(Command(segment).FirstOrDefault() ?? string.Empty), StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] PatternSearchers = ["grep", "rg", "findstr", "select-string", "sls"];
 
     private static string BuildRouting(string subcommand) => subcommand switch
     {
@@ -1141,11 +1154,15 @@ public static class ToolGuard
     private static string DiffArguments(string segment)
     {
         string? baseRef = null;
+        var tokens = Tokens(segment);
 
-        foreach (var token in Tokens(segment))
+        foreach (var token in tokens)
             baseRef ??= RefOperand(token);
 
-        return Appended("baseRef", baseRef) + Appended("path", DiffPath(segment));
+        return Appended("baseRef", baseRef)
+            + Appended("path", DiffPath(segment))
+            + Appended("ignoreWhitespace", Array.Exists(tokens, token => token is "-w" or "--ignore-all-space") ? "true" : null)
+            + Appended("unified", Unified(segment));
     }
 
     private static string CommitArgument(string segment)
@@ -1458,6 +1475,12 @@ public static class ToolGuard
     {
         var path = Expanded(operand);
 
+        if (IsGitInternal(path))
+            return false;
+
+        if (OperatingSystem.IsWindows() && path.StartsWith('/') && !path.StartsWith("//", StringComparison.Ordinal))
+            return PosixOnWindows(path) is { } native && PathBoundary.Contains(root, native);
+
         return !Path.IsPathFullyQualified(path) || PathBoundary.Contains(root, path);
     }
 
@@ -1653,7 +1676,7 @@ public static class ToolGuard
         if (Counting(segment))
             return subcommand + "-counts";
 
-        return Unmappable(segment) ? subcommand + "-text" : subcommand;
+        return Unmappable(segment) || Reshaped(segment) ? subcommand + "-text" : subcommand;
     }
 
     private static bool Unmappable(string segment) =>
@@ -1913,6 +1936,100 @@ public static class ToolGuard
         return after.Length != before.Length
             || after.Zip(before).Any(pair => NamesSource(pair.First.Text) && !NamesSource(pair.Second.Text));
     }
+
+    private static string? StdoutFile(string segment)
+    {
+        var tokens = segment.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var quote = '\0';
+
+        for (var index = 0; index < tokens.Length; index++)
+        {
+            var opened = quote;
+
+            quote = Closed(quote, tokens[index]);
+
+            if (opened is '\0' && StdoutWidth(tokens[index]) is > 0 and var width && StdoutTarget(tokens, index, width) is { } target)
+                return target;
+        }
+
+        return null;
+    }
+
+    private static bool WritesSource(string target, string? cwd) =>
+        IsDotNet(target) && TreeRoot(cwd) is { } root && Inside(root, target);
+
+    private static string? TreeRoot(string? cwd) =>
+        Marker(cwd) is { } marker && Path.GetDirectoryName(marker) is { Length: > 0 } root ? root : null;
+
+    private static char Closed(char quote, string token)
+    {
+        foreach (var character in token)
+            quote = Quote(quote, character);
+
+        return quote;
+    }
+
+    private static string? StdoutTarget(string[] tokens, int index, int width)
+    {
+        var target = Bare(tokens[index].Length > width ? tokens[index][width..] : index + 1 < tokens.Length ? tokens[index + 1] : string.Empty);
+
+        return target.Length > 0 && target[0] is not '&' && !Sinks.Contains(target, StringComparer.OrdinalIgnoreCase) ? target : null;
+    }
+
+    private static int StdoutWidth(ReadOnlySpan<char> token)
+    {
+        var length = RedirectOperatorLength(token);
+
+        return length > 0 && token[..length] is ">" or ">>" or "1>" or "1>>" or "&>" or "&>>" ? length : 0;
+    }
+
+    private static bool Unserved(string[] tokens) =>
+        Array.Exists(tokens, token => UnservedDiffFlags.Contains(token, StringComparer.Ordinal)
+            || token.StartsWith("--word-diff", StringComparison.Ordinal)
+            || token.StartsWith("--color-words", StringComparison.Ordinal));
+
+    private static readonly string[] UnservedDiffFlags =
+        ["-b", "--ignore-space-change", "--ignore-space-at-eol", "--ignore-cr-at-eol", "--ignore-blank-lines", "--check", "--binary", "--full-index"];
+
+    private static string? Unified(string segment)
+    {
+        foreach (var token in segment.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var value = token.StartsWith("--unified=", StringComparison.Ordinal) ? token.AsSpan(10)
+                : token.StartsWith("-U", StringComparison.Ordinal) ? token.AsSpan(2)
+                : [];
+
+            if (!value.IsEmpty && int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var lines))
+                return lines.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return null;
+    }
+
+    private static bool Reshaped(string segment) =>
+            Array.Exists(Tokens(segment), token => token is "-w" or "--ignore-all-space") || Unified(segment) is not null;
+
+    private static bool IsGitInternal(string path)
+    {
+        foreach (var part in path.AsSpan().SplitAny(PathSeparators))
+        {
+            if (path.AsSpan(part).SequenceEqual(".git"))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string? PosixOnWindows(string path) => path.AsSpan() switch
+    {
+        ['/', 't', 'm', 'p'] => Path.GetTempPath(),
+        ['/', 't', 'm', 'p', '/', .. var rest] => Path.Join(Path.GetTempPath(), rest),
+        ['/', var drive] when char.IsAsciiLetter(drive) => drive + @":\",
+        ['/', var drive, '/', .. var rest] when char.IsAsciiLetter(drive) => Path.Join(drive + @":\", rest),
+        _ => null,
+    };
+
+    private static readonly char[] PathSeparators = ['/', '\\'];
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

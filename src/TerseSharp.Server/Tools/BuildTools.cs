@@ -15,7 +15,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. A repeat of a build that already answered ok, with nothing written since, answers build UNCHANGED naming the previous verdict and its age, and force=true re-runs it. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity; configuration, targetFramework and properties scope the build.")]
     public Task<string> Build(
         [Description("Project path; empty builds the solution.")] string? project = null,
-        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
+        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the .terse.json build default, else the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty builds every framework a multi-targeted project declares.")] string? targetFramework = null,
         [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Return every diagnostic, warnings included, and the full report even when the build succeeds. Default false, which answers a successful build in one line and hides warnings on a failed one. The warnings= count reports what this build emitted, so a build that recompiled nothing reports 0.")] bool verbose = false,
@@ -31,16 +31,43 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
 
-            var scope = Scoped(configuration, targetFramework, properties);
+            return DefaultedAsync(target, configuration, [project], chosen =>
+            {
+                var scope = Scoped(chosen, targetFramework, properties);
 
-            return scope.IsOk
-                ? Contained(target, project, resolved => BuildWithRecoveryAsync(
-                    target, resolved, scope.Value, verbose, cancellationToken))
-                : Task.FromResult(scope.Error!.Render());
+                return scope.IsOk
+                    ? Contained(target, project, resolved => BuildWithRecoveryAsync(
+                        target, resolved, scope.Value, verbose, cancellationToken))
+                    : Task.FromResult(scope.Error!.Render());
+            }, cancellationToken);
         },
         cancellationToken: cancellationToken,
         spawns: "build"), Roots),
         cancellationToken);
+
+    private static async Task<string> DefaultedAsync(
+        WorkspaceTarget target,
+        string? configuration,
+        IReadOnlyList<string?> projects,
+        Func<string?, Task<string>> run,
+        CancellationToken cancellationToken)
+    {
+        if (configuration is { Length: > 0 })
+            return await run(configuration).ConfigureAwait(false);
+
+        var chosen = (await BuildDefaults.LoadAsync(target.Root, cancellationToken).ConfigureAwait(false)).For(projects);
+        var answer = await run(chosen).ConfigureAwait(false);
+
+        return chosen is null ? answer : Configured(answer, chosen);
+    }
+
+    internal static string Configured(string answer, string configuration)
+    {
+        var marker = "  configuration=" + configuration + " (.terse.json)";
+        var end = answer.IndexOf('\n', StringComparison.Ordinal);
+
+        return end < 0 ? answer + marker : string.Concat(answer.AsSpan(0, end), marker, answer.AsSpan(end));
+    }
 
     [McpServerTool(Name = "clean", Destructive = true)]
     [Description("Replaces Bash dotnet clean. Deletes the bin and obj directories of the workspace or of one project and reports how many files and bytes were freed, never raw MSBuild output. Unlike dotnet clean it also removes obj, and when the loaded workspace's own MSBuild file locks block the delete it unloads, retries and reloads. path= cleans a solution or project that is NOT loaded - a fixture, a sibling repository - so reproducing a cold build needs no load and no shell. A clean with nothing locked reports counters only; verbose=true adds the per-directory list. Not covered by undo_last_change.")]
@@ -80,7 +107,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Run only the test projects that reference a project changed since the load; falls back to the whole solution, naming why. Ignored with project=.")] bool changed = false,
         [Description("How many projects of a batch run at once, 0-10. 0 is one per core, 1 is serial and stops at the first timeout.")] int parallel = 0,
         [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] Refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
-        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
+        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the .terse.json build default, else the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty runs every framework a multi-targeted test project declares.")] string? targetFramework = null,
         [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Run existing binaries; skip the build, including a batch's per-project build.")] bool noBuild = false,
@@ -119,11 +146,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     if (!selection.IsOk)
                         return Task.FromResult(selection.Error!.Render());
 
-                    var scope = Scoped(configuration, targetFramework, properties);
-
-                    if (!scope.IsOk)
-                        return Task.FromResult(scope.Error!.Render());
-
                     var degree = Parallelism(parallel);
 
                     if (!degree.IsOk)
@@ -134,23 +156,30 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                     if (!settings.IsOk)
                         return Task.FromResult(settings.Error!.Render());
 
-                    return TestedAsync(
-                        target,
-                        project,
-                        projects,
-                        new TestRunRequest(
-                            target.SolutionPath,
-                            selection.Value,
-                            noBuild,
-                            includePassed,
-                            slowest,
-                            Seconds(timeoutSeconds),
-                            verbose,
-                            scope.Value,
-                            Parallel: degree.Value,
-                            RunSettings: settings.Value),
-                        changed,
-                        token);
+                    return DefaultedAsync(target, configuration, projects is { Length: > 0 } ? projects : [project], chosen =>
+                    {
+                        var scope = Scoped(chosen, targetFramework, properties);
+
+                        return scope.IsOk
+                            ? TestedAsync(
+                                target,
+                                project,
+                                projects,
+                                new TestRunRequest(
+                                    target.SolutionPath,
+                                    selection.Value,
+                                    noBuild,
+                                    includePassed,
+                                    slowest,
+                                    Seconds(timeoutSeconds),
+                                    verbose,
+                                    scope.Value,
+                                    Parallel: degree.Value,
+                                    RunSettings: settings.Value),
+                                changed,
+                                token)
+                            : Task.FromResult(scope.Error!.Render());
+                    }, token);
                 },
                 changed && WholeSolution(project, projects),
                 WholeSolution(project, projects),
@@ -218,7 +247,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     public Task<string> ListTests(
         [Description("Substring filter on the name.")] string? contains = null,
         [Description("Project name or path; empty lists every test project.")] string? project = null,
-        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the SDK default, which is Debug.")] string? configuration = null,
+        [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the .terse.json build default, else the SDK default, which is Debug.")] string? configuration = null,
         [Description("Target framework, passed to dotnet as -f, e.g. net10.0. Empty lists every framework a multi-targeted test project declares.")] string? targetFramework = null,
         [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
@@ -229,22 +258,25 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
 
-            var scope = Scoped(configuration, targetFramework, properties);
+            return DefaultedAsync(target, configuration, [project], chosen =>
+            {
+                var scope = Scoped(chosen, targetFramework, properties);
 
-            return scope.IsOk
-                ? Contained(target, project, resolved => RecoveredAsync(target, "test listing", async () =>
-                {
-                    var run = await DotnetRunner.ListTestNamesAsync(
-                        target,
-                        resolved ?? target.SolutionPath,
-                        contains,
-                        scope.Value,
-                        Seconds(timeoutSeconds),
-                        cancellationToken).ConfigureAwait(false);
+                return scope.IsOk
+                    ? Contained(target, project, resolved => RecoveredAsync(target, "test listing", async () =>
+                    {
+                        var run = await DotnetRunner.ListTestNamesAsync(
+                            target,
+                            resolved ?? target.SolutionPath,
+                            contains,
+                            scope.Value,
+                            Seconds(timeoutSeconds),
+                            cancellationToken).ConfigureAwait(false);
 
-                    return new LockedRun(run.Response, run.Locked);
-                }, cancellationToken))
-                : Task.FromResult(scope.Error!.Render());
+                        return new LockedRun(run.Response, run.Locked);
+                    }, cancellationToken))
+                    : Task.FromResult(scope.Error!.Render());
+            }, cancellationToken);
         },
         cancellationToken: cancellationToken,
         spawns: "list_tests");

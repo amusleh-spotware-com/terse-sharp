@@ -494,4 +494,10 @@ public sealed class WorkspaceSyncTests
 
         Assert.Equal(newer, await TextOfAsync(loaded));
     }
+
+    [Theory]
+    [InlineData(".terse.json")]
+    [InlineData("src/App/.terse.json")]
+    public void Classify_ForATerseConfigFile_ReturnsFilesSoAnInPlaceEditMovesTheRunStamp(string path) =>
+            Assert.Equal(ChangeKind.Files, WorkspaceSync.Classify(path));
 }

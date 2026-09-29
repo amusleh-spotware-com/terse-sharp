@@ -102,6 +102,54 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         }).ConfigureAwait(false);
     }
 
+    public async Task<string> WithUnboundWorkspaceAsync(string? workspace, Func<LoadedWorkspace, Task<string>> action)
+    {
+        await ready.ConfigureAwait(false);
+
+        return await ToolBoundary.RunAsync(async () =>
+        {
+            var resolved = Registry.ResolveUnbound(workspace, Environment.CurrentDirectory);
+
+            if (!resolved.IsOk)
+                return resolved.Error!.Render();
+
+            using var lease = resolved.Value!;
+
+            return await action(lease.Workspace).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+    }
+
+    public async Task<string> WithWorkingWorkspaceAsync(string? workspace, string? pathHint, Func<LoadedWorkspace, Task<string>> action)
+    {
+        await ready.ConfigureAwait(false);
+
+        return await ToolBoundary.RunAsync(async () =>
+        {
+            var resolved = Registry.Resolve(workspace, pathHint, semantic: false, Environment.CurrentDirectory);
+
+            if (!resolved.IsOk)
+                return resolved.Error!.Render();
+
+            using var lease = resolved.Value!;
+            var answer = await action(lease.Workspace).ConfigureAwait(false);
+
+            return HousedBy(workspace, pathHint, lease.Workspace) is { } note ? answer + "\n" + note : answer;
+        }).ConfigureAwait(false);
+    }
+
+    private string? HousedBy(string? workspace, string? pathHint, LoadedWorkspace chosen) =>
+        Chose(workspace, pathHint, chosen)
+            ? string.Create(
+                CultureInfo.InvariantCulture,
+                $"workspace={Path.GetFileName(chosen.SolutionPath)} ({chosen.Git.WorktreeName}) - {Registry.All().Count} are loaded and this one holds the server's working directory; pass workspace= for another")
+            : null;
+
+    private bool Chose(string? workspace, string? pathHint, LoadedWorkspace chosen) =>
+        string.IsNullOrWhiteSpace(workspace) && Registry.All().Count > 1 && !Hinted(pathHint, chosen);
+
+    private static bool Hinted(string? pathHint, LoadedWorkspace chosen) =>
+        pathHint is { Length: > 0 } && chosen.Contains(PathGuard.Full(chosen.Root, pathHint));
+
     public string? RejectWrite() => ReadOnly
         ? new TerseError(TerseErrorCode.ReadOnly, "the server is running with --read-only", "restart without --read-only").Render()
         : null;
@@ -237,7 +285,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
     public bool OutsideEveryWorkspace(string path) =>
             Path.IsPathRooted(path)
-            && Registry.All().All(loaded => !PathBoundary.Contains(loaded.Root, Path.GetFullPath(path)));
+            && Registry.All().All(loaded => !loaded.Contains(Path.GetFullPath(path)));
 
     private static ImmutableArray<string> ProjectPaths(LoadedWorkspace workspace)
     {

@@ -299,7 +299,12 @@ Git rows fire only when the directory the command actually addresses sits under 
 because the hook is installed user-wide, so `git -C ../notes status` is allowed. Plain `.css`, `.js`,
 `dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git mutation (`blame`,
 `add`, `commit`, `push`, and every `git tag` that creates, annotates or deletes) are allowed — nothing
-here replaces those. A denied command also tells the agent not to retry it in `Bash`.
+here replaces those. So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`,
+`git show <ref>:<path> > old.md`) unless the file is .NET source in the tree, and a diff flag no tool
+serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`); `-w` routes to `ignoreWhitespace=true`
+and `-U<n>` to `diff_text unified=<n>`. `.git/` internals are never source, and on Windows a Git-Bash
+`/tmp/…` or `/c/…` path is judged as the directory it names. A denied command also tells the agent not
+to retry it in `Bash`.
 
 Malformed hook input allows the call, so a guard fault can never wedge a session; `terse uninstall` removes the guard with the server entry - both hooks, and nothing else in Claude Code's `settings.json`. `TERSE_GUARD_LOG=<path>` appends one
 JSON line per decision — tool, verdict, routing, reason, `cwd`, session and transcript path, plus
@@ -530,10 +535,14 @@ touch nothing.
 <summary>Huge solutions? Parallel worktrees?</summary>
 
 Four solutions stay loaded at once (`--max-workspaces`, `TERSE_MAX_WORKSPACES` — a big solution costs
-gigabytes, so set `1` if you only ever work in one), an idle one gives its compilations back after 15
-minutes (`--idle-minutes`), `--no-watch` turns the file watcher off, and responses are bounded and declare
+gigabytes, so set `1` if you only ever work in one), compilations are given back once the server has
+served no call for 15 minutes (`--idle-minutes`), `--no-watch` turns the file watcher off, and responses are bounded and declare
 their truncation — a 5,000-type solution answers in the same shape as a 50-type one. Every answer names
-its worktree and branch, and an ambiguous request lists the candidates instead of guessing.
+its worktree and branch, and an ambiguous request lists the candidates instead of guessing - except a
+write outside every root and a pathless `history`/`changed_files`/`diff_text`, which use the workspace
+holding the server's working directory and name it. A `.terse.json` `build` section -
+`{"build": {"configuration": "Debug", "projects": {"App.Tests": "Debug"}}}` - fills the configuration a
+`build`, `run_tests` or `list_tests` call omits, and the verdict says so.
 </details>
 
 <details>

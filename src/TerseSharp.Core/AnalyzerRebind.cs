@@ -46,6 +46,9 @@ public static class AnalyzerRebind
             : null;
 
     private static bool Unresolvable(AnalyzerReference reference) =>
+        reference is UnresolvedAnalyzerReference || Missing(reference);
+
+    private static bool Missing(AnalyzerReference reference) =>
         reference is not AnalyzerFileReference
         && reference.FullPath is { Length: > 0 } path
         && !File.Exists(path);

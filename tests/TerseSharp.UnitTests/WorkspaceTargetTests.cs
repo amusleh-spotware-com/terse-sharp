@@ -140,4 +140,29 @@ public sealed class WorkspaceTargetTests
             Directory.Delete(sandbox, recursive: true);
         }
     }
+
+    [Fact]
+    public void ResolveProject_ForAnAbsolutePathToALoadedProjectOutsideTheRoot_ResolvesItInsteadOfRefusingIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-target", "tests", "App.Tests");
+        var sibling = Path.Combine(Path.GetTempPath(), "terse-target", "src", "App", "App.csproj");
+        var target = new WorkspaceTarget(Path.Combine(root, "App.Tests.csproj"), root, [Path.Combine(root, "App.Tests.csproj"), sibling]);
+
+        var resolved = target.ResolveProject(sibling);
+
+        Assert.True(resolved.IsOk, resolved.Error?.Render());
+        Assert.Equal(sibling, resolved.Value);
+    }
+
+    [Fact]
+    public void ResolveProject_ForAnAbsolutePathOutsideTheRootThatNoLoadedProjectNames_StillRefusesIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-target", "tests", "App.Tests");
+        var target = new WorkspaceTarget(Path.Combine(root, "App.Tests.csproj"), root, [Path.Combine(root, "App.Tests.csproj")]);
+
+        var resolved = target.ResolveProject(Path.Combine(Path.GetTempPath(), "terse-target", "src", "Other", "Other.csproj"));
+
+        Assert.False(resolved.IsOk);
+        Assert.StartsWith("ERROR OutOfWorkspace", resolved.Error!.Render(), StringComparison.Ordinal);
+    }
 }

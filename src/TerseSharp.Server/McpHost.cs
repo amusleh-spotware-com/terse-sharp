@@ -20,7 +20,7 @@ public static class McpHost
         var builder = Host.CreateApplicationBuilder();
         var overrides = await ToolSettings.LoadAsync(Directory.GetCurrentDirectory(), cancellationToken).ConfigureAwait(false);
         var surface = ToolProfile.Resolve(tools) with { Overrides = overrides };
-        var context = new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch), readOnly, surface);
+        var context = new ToolContext(new WorkspaceRegistry(maxWorkspaces, watch) { IdleFor = idleFor }, readOnly, surface);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
@@ -33,6 +33,12 @@ public static class McpHost
             .WithToolsFromAssembly()
             .WithRequestFilters(filters =>
             {
+                filters.AddCallToolFilter(next => async (request, token) =>
+            {
+                using var served = context.Registry.Serve();
+
+                return await next(request, token).ConfigureAwait(false);
+            });
                 filters.AddCallToolFilter(ToolArgumentFilter.Structured);
                 filters.AddCallToolFilter(RepeatSteer.Filter());
                 filters.AddListToolsFilter(AdvertisedCost.Filter());

@@ -19,9 +19,26 @@ public readonly record struct WorkspaceTarget(
 
     public Result<string> ResolveProject(string project)
     {
+        if (Loaded(PathGuard.Full(Root, project)) is { } loaded)
+            return Result.Ok(loaded);
+
         var resolved = PathGuard.Resolve(Root, project);
 
         return resolved.IsOk && !Exists(resolved.Value!) ? Named(project) : resolved;
+    }
+
+    private string? Loaded(string full)
+    {
+        if (ProjectPaths.IsDefaultOrEmpty)
+            return null;
+
+        foreach (var path in ProjectPaths)
+        {
+            if (string.Equals(path, full, StringComparison.OrdinalIgnoreCase))
+                return path;
+        }
+
+        return null;
     }
 
     private static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);

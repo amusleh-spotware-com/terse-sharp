@@ -20,7 +20,7 @@ internal static class DroppedDeclarations
             ? null
             : string.Create(
                 CultureInfo.InvariantCulture,
-                $"WARNING this overwrite drops {dropped.Length} declaration(s) the file declared: {Named(dropped)} - dryRun=true shows the diff, write_text ref=HEAD restores the file");
+                $"WARNING this overwrite drops {dropped.Length} declaration(s) the file on disk held just before this write: {Named(dropped)} - dryRun=true shows the diff, write_text ref=HEAD restores the file");
     }
 
     public static string Warned(string text, string? warning) => warning is null ? text : text + "\n" + warning;

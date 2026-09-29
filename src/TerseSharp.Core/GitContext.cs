@@ -15,7 +15,7 @@ public sealed record GitContext(string Branch, string WorktreeName)
             var gitPath = Path.Combine(directory.FullName, ".git");
 
             if (Directory.Exists(gitPath) || File.Exists(gitPath))
-                return new GitContext(ReadBranch(gitPath), directory.Name);
+                return Read(gitPath, directory.Name);
 
             directory = directory.Parent;
         }
@@ -24,16 +24,17 @@ public sealed record GitContext(string Branch, string WorktreeName)
     }
 
     [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "One-shot bootstrap read of .git/HEAD at workspace load, outside the request path.")]
-    private static string ReadBranch(string gitPath)
+    private static GitContext Read(string gitPath, string worktreeName)
     {
         var headFile = Directory.Exists(gitPath) ? Path.Combine(gitPath, "HEAD") : ResolveLinkedHead(gitPath);
 
         if (headFile is null || !File.Exists(headFile))
-            return "-";
+            return new GitContext("-", worktreeName);
 
         var head = File.ReadAllText(headFile).Trim();
+        var branch = head.StartsWith("ref: refs/heads/", StringComparison.Ordinal) ? head[16..] : head;
 
-        return head.StartsWith("ref: refs/heads/", StringComparison.Ordinal) ? head[16..] : head;
+        return new GitContext(branch, worktreeName) { HeadPath = headFile, Head = head };
     }
 
     [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "One-shot bootstrap read of a linked worktree's .git file at workspace load, outside the request path.")]
@@ -45,4 +46,8 @@ public sealed record GitContext(string Branch, string WorktreeName)
             ? Path.Combine(content[8..].Trim(), "HEAD")
             : null;
     }
+
+    public string? HeadPath { get; init; }
+
+    public string Head { get; init; } = string.Empty;
 }

@@ -490,7 +490,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             "probe");
     }
 
-    private static async Task RunGitAsync(string root, params string[] arguments)
+    internal static async Task RunGitAsync(string root, params string[] arguments)
     {
         var start = new System.Diagnostics.ProcessStartInfo("git")
         {
