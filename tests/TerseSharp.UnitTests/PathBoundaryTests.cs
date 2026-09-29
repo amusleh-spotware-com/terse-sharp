@@ -53,4 +53,34 @@ public sealed class PathBoundaryTests
         Assert.Equal(OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase, PathBoundary.Comparison);
         Assert.Equal(!OperatingSystem.IsLinux(), PathBoundary.Comparer.Equals("src/A.md", "src/a.md"));
     }
+
+    [Fact]
+    public void RealPath_ThroughALinkedAncestorSeveralLevelsUp_ResolvesToTheTargetSpelling()
+    {
+        var scratch = Directory.CreateTempSubdirectory("terse-realpath-");
+
+        try
+        {
+            var target = Directory.CreateDirectory(Path.Combine(scratch.FullName, "target", "deep", "er"));
+            var link = Path.Combine(scratch.FullName, "link");
+
+            try
+            {
+                Directory.CreateSymbolicLink(link, Path.Combine(scratch.FullName, "target"));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Assert.Skip("this account may not create a directory symbolic link: " + exception.Message);
+            }
+
+            var real = PathBoundary.RealPath(Path.Combine(link, "deep", "er", "App.slnx"));
+
+            Assert.Equal(Path.Combine(PathBoundary.RealPath(target.FullName), "App.slnx"), real, ignoreCase: !OperatingSystem.IsLinux());
+            Assert.DoesNotContain(Path.DirectorySeparatorChar + "link" + Path.DirectorySeparatorChar, real, StringComparison.Ordinal);
+        }
+        finally
+        {
+            scratch.Delete(recursive: true);
+        }
+    }
 }

@@ -115,8 +115,9 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         if (loaded.Length < 2 || workingDirectory is not { Length: > 0 } directory)
             return null;
 
+        var real = PathBoundary.RealPath(directory);
         var housing = loaded
-            .Where(workspace => PathBoundary.Contains(workspace.Root, directory))
+            .Where(workspace => PathBoundary.Contains(workspace.Root, directory) || PathBoundary.Contains(PathBoundary.RealPath(workspace.Root), real))
             .MaxBy(workspace => workspace.Root.Length);
 
         return housing is null ? null : Ok(housing, semantic);

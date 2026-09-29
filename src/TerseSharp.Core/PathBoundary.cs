@@ -22,20 +22,40 @@ public static class PathBoundary
 
     public static string RealPath(string path)
     {
+        var full = Path.GetFullPath(path);
+
         try
         {
-            var file = Path.GetFullPath(path);
-            var directory = Path.GetDirectoryName(file);
-
-            return directory is { Length: > 0 } parent && Directory.ResolveLinkTarget(parent, returnFinalTarget: true) is { } target
-                ? Path.Combine(target.FullName, Path.GetFileName(file))
-                : file;
+            return Resolved(full);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return Path.GetFullPath(path);
+            return full;
         }
     }
+
+    private static string Resolved(string full)
+    {
+        var root = Path.GetPathRoot(full) ?? string.Empty;
+        var current = root;
+
+        foreach (var range in full.AsSpan(root.Length).SplitAny(Separators))
+        {
+            var part = full.AsSpan(root.Length)[range];
+
+            if (!part.IsEmpty)
+                current = Linked(Path.Join(current, part));
+        }
+
+        return current;
+    }
+
+    private static string Linked(string path) =>
+        new DirectoryInfo(path) is { LinkTarget: not null } link && link.ResolveLinkTarget(returnFinalTarget: true) is { } target
+            ? target.FullName
+            : path;
+
+    private static readonly char[] Separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
 
     public static StringComparer Comparer { get; } = OperatingSystem.IsLinux()
             ? StringComparer.Ordinal
