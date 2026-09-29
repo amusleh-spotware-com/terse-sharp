@@ -2,6 +2,8 @@ namespace TerseSharp.Core;
 
 public static class PathBoundary
 {
+    private const int MaxLinkHops = 16;
+
     public static StringComparison Comparison { get; } = OperatingSystem.IsLinux()
         ? StringComparison.Ordinal
         : StringComparison.OrdinalIgnoreCase;
@@ -26,7 +28,7 @@ public static class PathBoundary
 
         try
         {
-            return Resolved(full);
+            return Resolved(full, MaxLinkHops);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -34,7 +36,7 @@ public static class PathBoundary
         }
     }
 
-    private static string Resolved(string full)
+    private static string Resolved(string full, int hops)
     {
         var root = Path.GetPathRoot(full) ?? string.Empty;
         var current = root;
@@ -44,15 +46,15 @@ public static class PathBoundary
             var part = full.AsSpan(root.Length)[range];
 
             if (!part.IsEmpty)
-                current = Linked(Path.Join(current, part));
+                current = Linked(Path.Join(current, part), hops);
         }
 
         return current;
     }
 
-    private static string Linked(string path) =>
-        new DirectoryInfo(path) is { LinkTarget: not null } link && link.ResolveLinkTarget(returnFinalTarget: true) is { } target
-            ? target.FullName
+    private static string Linked(string path, int hops) =>
+        hops > 0 && new DirectoryInfo(path) is { LinkTarget: not null } link && link.ResolveLinkTarget(returnFinalTarget: true) is { } target
+            ? Resolved(target.FullName, hops - 1)
             : path;
 
     private static readonly char[] Separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
