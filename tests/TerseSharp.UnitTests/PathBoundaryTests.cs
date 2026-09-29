@@ -83,4 +83,38 @@ public sealed class PathBoundaryTests
             scratch.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void RealPath_ForASymlinkedSolutionFile_KeepsTheLinksOwnDirectoryBecauseMsBuildResolvesProjectsFromThere()
+    {
+        var scratch = Directory.CreateTempSubdirectory("terse-realpath-leaf-");
+
+        try
+        {
+            var original = Path.Combine(Directory.CreateDirectory(Path.Combine(scratch.FullName, "a")).FullName, "App.slnx");
+            var linked = Path.Combine(Directory.CreateDirectory(Path.Combine(scratch.FullName, "b")).FullName, "App.slnx");
+
+            File.WriteAllText(original, "<Solution />");
+            CreateFileLinkOrSkip(linked, original);
+
+            Assert.Equal(Path.Combine(PathBoundary.RealDirectory(Path.GetDirectoryName(linked)!), "App.slnx"), PathBoundary.RealPath(linked), ignoreCase: !OperatingSystem.IsLinux());
+            Assert.NotEqual(PathBoundary.RealPath(original), PathBoundary.RealPath(linked), StringComparer.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            scratch.Delete(recursive: true);
+        }
+    }
+
+    private static void CreateFileLinkOrSkip(string link, string target)
+    {
+        try
+        {
+            File.CreateSymbolicLink(link, target);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Skip("this account may not create a file symbolic link: " + exception.Message);
+        }
+    }
 }

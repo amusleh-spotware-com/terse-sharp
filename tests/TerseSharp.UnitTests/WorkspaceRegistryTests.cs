@@ -521,4 +521,22 @@ public sealed class WorkspaceRegistryTests
         Assert.Equal(Fixtures.SolutionPath, lease.Workspace.SolutionPath, ignoreCase: true);
         Assert.True(registry.All().Single(workspace => workspace != lease.Workspace).Contains(source));
     }
+
+    [Fact]
+    public async Task Resolve_WithTwoWorkspacesAndAWorkingDirectoryOutsideEveryRoot_FallsBackInsteadOfThrowing()
+    {
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.TestProjectPath, TestContext.Current.CancellationToken);
+
+        var elsewhere = Path.GetTempPath();
+        var bound = registry.Resolve(null, null, semantic: false, elsewhere);
+
+        using var unbound = registry.ResolveUnbound(null, elsewhere).Value!;
+
+        Assert.False(bound.IsOk);
+        Assert.StartsWith("ERROR AmbiguousWorkspace", bound.Error!.Render(), StringComparison.Ordinal);
+        Assert.Contains(unbound.Workspace, registry.All());
+    }
 }

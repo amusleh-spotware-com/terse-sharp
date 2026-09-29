@@ -26,6 +26,15 @@ public static class PathBoundary
     {
         var full = Path.GetFullPath(path);
 
+        return Path.GetDirectoryName(full) is { Length: > 0 } parent
+            ? Path.Join(RealDirectory(parent), Path.GetFileName(full.AsSpan()))
+            : full;
+    }
+
+    public static string RealDirectory(string directory)
+    {
+        var full = Path.GetFullPath(directory);
+
         try
         {
             return Resolved(full, MaxLinkHops);
