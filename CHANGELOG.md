@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.71.1] - 2026-10-01
+
 ### Changed
 
 - **The MCP connection no longer waits for the solution to load.** `tools/list` used to await the whole workspace preload before it could narrow the advertised surface, so on a large solution the client sat at "connecting" for the entire MSBuild load - measured on a 132-project, 33 050-document solution: `initialize` 0.59 s, `tools/list` **43.6 s**, past Claude Code's default connection timeout. While the preload runs, `tools/list` now answers from a file-kind scan of the solution's directory - the same `.xaml`/`.razor`/`.resx` test the loaded index applies, stopping at the first file of each kind - and the post-load answer, which also asks whether the Razor generator ran, sends `notifications/tools/list_changed` only when it differs from what the scan advertised. Same solution: `tools/list` **0.61 s**, of which the scan is ~35 ms. A solution directory that no longer exists advertises every family rather than claiming none; a subdirectory the scan may not read is skipped, exactly as the loaded index skips it. Pinned by `ToolsList_WhileTheWorkspaceIsStillLoading_AnswersFromAFileScanInsteadOfWaitingForTheLoad` (a fixture whose design-time build stalls 90 s), `ServedAsync_WhileThePreloadIsRunning_AnswersTheFileScanWithoutWaitingForTheLoad`, `Preload_WhenTheLoadedSurfaceDiffersFromTheScan_AnnouncesTheToolListMoved`, `Preload_WhenTheLoadedSurfaceMatchesTheScan_AnnouncesNothing`, `Scan_OverEachFixture_AgreesWithTheAnswerTheLoadedIndexGives`, `Scan_OfADirectoryThatDoesNotExist_AdvertisesEveryFamilyRatherThanClaimingNone` and `Scan_SkipsMarkupInsideExcludedDirectoriesAndSessionState`.
@@ -6897,7 +6899,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.71.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.71.1...HEAD
+[0.71.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.71.1
 [0.71.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.71.0
 [0.70.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.70.0
 [0.69.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.69.1
