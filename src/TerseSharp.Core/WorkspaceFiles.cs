@@ -1,3 +1,5 @@
+using System.IO.Enumeration;
+
 namespace TerseSharp.Core;
 
 public static class WorkspaceFiles
@@ -74,8 +76,16 @@ public static class WorkspaceFiles
         !IsExcludedDirectory(Path.GetFileName(directory)) && !IsSessionDirectory(directory) && !IsLink(directory);
 
     private static bool IsSessionDirectory(string directory) =>
-        Path.GetFileName(Path.GetDirectoryName(directory.AsSpan())).Equals(ClaudeDirectory, StringComparison.OrdinalIgnoreCase)
-        && !Matches(Path.GetFileName(directory.AsSpan()), AuthoredUnderClaude);
+        IsSessionDirectory(Path.GetDirectoryName(directory.AsSpan()), Path.GetFileName(directory.AsSpan()));
+
+    private static bool IsSessionDirectory(ReadOnlySpan<char> parent, ReadOnlySpan<char> name) =>
+        Path.GetFileName(parent).Equals(ClaudeDirectory, StringComparison.OrdinalIgnoreCase)
+        && !Matches(name, AuthoredUnderClaude);
+
+    public static bool Traversable(ref FileSystemEntry entry) =>
+        (entry.Attributes & FileAttributes.ReparsePoint) == 0
+        && !Matches(entry.FileName, ExcludedDirectories)
+        && !IsSessionDirectory(entry.Directory, entry.FileName);
 
     private static bool IsLink(string directory)
     {
@@ -109,8 +119,8 @@ public static class WorkspaceFiles
         }
     }
 
-    public static bool HoldsSessionState(string directory) =>
-        Path.GetFileName(directory.AsSpan()).Equals(ClaudeDirectory, StringComparison.OrdinalIgnoreCase);
+    public static bool HoldsSessionState(ReadOnlySpan<char> directory) =>
+        Path.GetFileName(directory).Equals(ClaudeDirectory, StringComparison.OrdinalIgnoreCase);
 
     private static readonly string[] GitInternals = [".git"];
 

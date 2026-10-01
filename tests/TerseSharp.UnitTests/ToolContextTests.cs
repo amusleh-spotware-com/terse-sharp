@@ -93,6 +93,60 @@ public sealed class ToolContextTests
     }
 
     [Fact]
+    public async Task ServedAsync_WhileThePreloadIsRunning_AnswersTheFileScanWithoutWaitingForTheLoad()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false, new ToolSurface(null, MarkupDerived: true));
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var scanned = new WorkspaceMarkup(Xaml: true, Razor: false, Resx: false);
+
+        context.Preload(preload.Task, Task.FromResult(scanned), TestContext.Current.CancellationToken);
+
+        var served = context.ServedAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(served.IsCompleted, "tools/list waited for the workspace load instead of answering from the scan");
+        Assert.Equal(scanned, await served);
+
+        preload.SetResult();
+    }
+
+    [Fact]
+    public async Task Preload_WhenTheLoadedSurfaceDiffersFromTheScan_AnnouncesTheToolListMoved()
+    {
+        var announced = await AnnouncedAfterPreloadAsync(scanned: default);
+
+        Assert.Equal(1, announced);
+    }
+
+    [Fact]
+    public async Task Preload_WhenTheLoadedSurfaceMatchesTheScan_AnnouncesNothing()
+    {
+        var announced = await AnnouncedAfterPreloadAsync(scanned: WorkspaceMarkup.Every);
+
+        Assert.Equal(0, announced);
+    }
+
+    private static async Task<int> AnnouncedAfterPreloadAsync(WorkspaceMarkup scanned)
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false, new ToolSurface(null, MarkupDerived: true));
+        var announced = 0;
+
+        context.ToolsChanged = _ =>
+        {
+            announced++;
+
+            return Task.CompletedTask;
+        };
+
+        context.Preload(Task.CompletedTask, Task.FromResult(scanned), TestContext.Current.CancellationToken);
+
+        await context.Announcement;
+
+        return announced;
+    }
+
+    [Fact]
     public async Task WithWorkspaceAsync_WhenTheSyncThrows_StillReleasesTheLease()
     {
         using var files = TemporarySolution.Create();

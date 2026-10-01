@@ -8,6 +8,8 @@ public readonly record struct ToolLatency(int Calls, double ResolveMs, double Sy
 
 public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolSurface surface = default) : IDisposable
 {
+    private Task<WorkspaceMarkup> scanned = Task.FromResult(WorkspaceMarkup.Every);
+
     private Task ready = Task.CompletedTask;
 
     public WorkspaceRegistry Registry { get; } = registry;
@@ -20,16 +22,28 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
     public string? PreloadFailure { get; private set; }
 
+    internal Task Announcement { get; private set; } = Task.CompletedTask;
+
     public void BeginPreload(string target, CancellationToken cancellationToken)
     {
-        Preload(Task.Run(() => Registry.LoadAsync(target, cancellationToken), cancellationToken));
+        var root = Path.GetDirectoryName(Path.GetFullPath(target)) ?? target;
+        var scan = Surface.MarkupDerived
+            ? Task.Run(() => WorkspaceMarkup.Scan(root), CancellationToken.None)
+            : Task.FromResult(WorkspaceMarkup.Every);
 
-        _ = AnnouncedAsync(WorkspaceMarkup.Every, cancellationToken);
+        Preload(Task.Run(() => Registry.LoadAsync(target, cancellationToken), cancellationToken), scan, cancellationToken);
     }
 
     public Task ReadyAsync() => ready;
 
     internal void Preload(Task load) => ready = ObserveAsync(load);
+
+    internal void Preload(Task load, Task<WorkspaceMarkup> scan, CancellationToken cancellationToken)
+    {
+        scanned = scan;
+        Preload(load);
+        Announcement = AnnouncedAsync(scan, cancellationToken);
+    }
 
     public async Task<string> WithSymbolAsync(
         string? workspace,
@@ -389,20 +403,18 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         await notify(cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<WorkspaceMarkup> ServedAsync(CancellationToken cancellationToken)
-    {
-        await ready.WaitAsync(cancellationToken).ConfigureAwait(false);
+    public async Task<WorkspaceMarkup> ServedAsync(CancellationToken cancellationToken) =>
+        ready.IsCompleted
+            ? await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false)
+            : await scanned.WaitAsync(cancellationToken).ConfigureAwait(false);
 
-        return await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task AnnouncedAsync(WorkspaceMarkup before, CancellationToken cancellationToken)
+    private async Task AnnouncedAsync(Task<WorkspaceMarkup> advertised, CancellationToken cancellationToken)
     {
         await ReadyAsync().ConfigureAwait(false);
 
         try
         {
-            await AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
+            await AnnounceAsync(await advertised.ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

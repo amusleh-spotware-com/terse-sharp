@@ -266,7 +266,9 @@ rather than estimated. The surface shrinks three ways, all optional.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
   **55 tools, ≤25,700 tokens**. Load one that does and they come back, announced with
-  `notifications/tools/list_changed`.
+  `notifications/tools/list_changed`. The narrowing never delays the connection: while the solution is
+  still loading, `tools/list` answers from a file scan of its directory — 0.6 s instead of 43.6 s on a
+  132-project solution.
 - **Per project, and per directory.** The same `.terse.json` — every one from your home directory
   (`$TERSE_HOME`, else the user profile) down through the repository root to the server's directory, the
   nearer file winning per setting and the walk never climbing above the repository root — disables whole groups (`analysis` `build` `edit` `file` `git`

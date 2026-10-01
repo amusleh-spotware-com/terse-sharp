@@ -23,8 +23,10 @@ public sealed class ResxIndex
 
     public static ResxIndex Of(string root, ParsedDocumentCache documents) => new(root, documents);
 
-    public static bool IsResource(string path) =>
-        Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    public static bool IsResource(string path) => IsResource(path.AsSpan());
+
+    public static bool IsResource(ReadOnlySpan<char> path) =>
+        WorkspaceFiles.Matches(Path.GetExtension(path), Extensions);
 
     public ResxFamily? FamilyOf(string fullPath) => Families.FirstOrDefault(family => family
         .Files

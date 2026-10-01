@@ -47,6 +47,32 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ToolsList_WhileTheWorkspaceIsStillLoading_AnswersFromAFileScanInsteadOfWaitingForTheLoad()
+    {
+        var stalled = await TerseServerProcess.StartAsync(
+            Root,
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", Path.Combine(Root, "SelectionSolution.slnx")],
+            new Dictionary<string, string> { ["TERSE_TOOLS"] = string.Empty, ["TERSE_STALL_LOAD"] = "true" },
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            using var budget = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+
+            budget.CancelAfter(TimeSpan.FromSeconds(45));
+
+            var advertised = (await stalled.Client.ListToolsAsync(cancellationToken: budget.Token)).Select(tool => tool.Name).ToArray();
+
+            Assert.Contains("get_file_outline", advertised);
+            Assert.DoesNotContain(advertised, name => Prefixes.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal)));
+        }
+        finally
+        {
+            await stalled.KillAsync();
+        }
+    }
+
+    [Fact]
     public async Task AToolTheWorkspaceCannotServe_StillAnswersWhenCalledByName()
     {
         var text = await server.CallAsync("xaml_validate", [], TestContext.Current.CancellationToken);

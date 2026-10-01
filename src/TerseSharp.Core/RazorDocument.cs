@@ -81,8 +81,10 @@ public sealed class RazorDocument
 
     public bool WellFormed => Issues.Count is 0;
 
-    public static bool IsRazor(string path) =>
-        Extensions.Contains(System.IO.Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    public static bool IsRazor(string path) => IsRazor(path.AsSpan());
+
+    public static bool IsRazor(ReadOnlySpan<char> path) =>
+        WorkspaceFiles.Matches(System.IO.Path.GetExtension(path), Extensions);
 
     [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous Razor index leaf; the enclosing document cache is a synchronous enumerator, so the async ripple cannot terminate here. Removing it means an async index, not a local change.")]
     public static Result<RazorDocument> Load(string fullPath)

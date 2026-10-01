@@ -30,8 +30,10 @@ public sealed record XamlDocument(string Path, XDocument Document, string Dialec
 
     private static readonly string[] Extensions = [".xaml", ".axaml", ".paml"];
 
-    public static bool IsXaml(string path) =>
-        Extensions.Contains(System.IO.Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    public static bool IsXaml(string path) => IsXaml(path.AsSpan());
+
+    public static bool IsXaml(ReadOnlySpan<char> path) =>
+        WorkspaceFiles.Matches(System.IO.Path.GetExtension(path), Extensions);
 
     [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Synchronous XAML index leaf, called from the parsed-document cache every xaml_* tool shares; converting it means an async index, not a local change.")]
     public static Result<XamlDocument> Load(string fullPath)

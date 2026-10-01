@@ -69,6 +69,15 @@ internal sealed class TerseServerProcess
         Terminate(process);
     }
 
+    public async ValueTask KillAsync()
+    {
+        KillTree(process);
+
+        await client.DisposeAsync();
+
+        process.Dispose();
+    }
+
     private static void Terminate(Process process)
     {
         CloseInput(process);
