@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.72.0] - 2026-10-01
+
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
 > `run_tests DETACHED` and `run_tests RUNNING` end `next: run_tests status="<id>" waitSeconds=3600 before
 > ending the turn - no notification arrives when a detached run finishes; ...` instead of a poll hint.
@@ -19,7 +21,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ### Changed
 
-- **`run_tests DETACHED` and `RUNNING` say that nothing notifies a detached run, and name the waiting call.** Both used to end with a poll hint - `RUNNING` with `the run finishes without being polled`, which read as a promise that the verdict would arrive by itself. They now end `next: run_tests status="<id>" waitSeconds=3600 before ending the turn - no notification arrives when a detached run finishes; that call answers the moment the verdict lands, and a client that backgrounds a long call notifies you when it returns; pass a shorter waitSeconds if your client times out long calls`. The `run_tests` description says nothing notifies a detached run, and README, NUGET_README and SKILL.md steer a client that backgrounds long calls itself to a plain `run_tests`, which that client does notify on, keeping `detach=true` for clients that do not. The `run_tests` schema stays under its 1 024-token cap (1 015) by tightening two sentences and two `Default false.` tails. Pinned by `StartAndRunning_SayNoNotificationArrives_AndNameTheWaitingCall`.
+- **`run_tests DETACHED` and `RUNNING` say that nothing notifies a detached run, and name the waiting call.** Both used to end with a poll hint - `RUNNING` with `the run finishes without being polled`, which read as a promise that the verdict would arrive by itself. They now end `next: run_tests status="<id>" waitSeconds=3600 before ending the turn - no notification arrives when a detached run finishes; that call answers the moment the verdict lands, and a client that backgrounds a long call notifies you when it returns; pass a shorter waitSeconds if your client times out long calls`. The `run_tests` description says nothing notifies a detached run, and README, NUGET_README and SKILL.md steer a client that backgrounds long calls itself to a plain `run_tests`, which that client does notify on, keeping `detach=true` for clients that do not. The `run_tests` schema stays under its 1 024-token cap (1 008) by tightening its wording - the UNCHANGED sentence, the `test`/`filter` parameter boilerplate and two `Default false.` tails; no fact was dropped. Pinned by `StartAndRunning_SayNoNotificationArrives_AndNameTheWaitingCall`.
 
 ## [0.71.1] - 2026-10-01
 
@@ -6912,7 +6914,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.71.1...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.72.0...HEAD
+[0.72.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.72.0
 [0.71.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.71.1
 [0.71.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.71.0
 [0.70.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.70.0
