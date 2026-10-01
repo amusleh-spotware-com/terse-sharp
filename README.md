@@ -131,7 +131,7 @@ that merely shortens a response, and both beat a faster server.
 | grep the test tree and guess what to run | `find_usages impact=true tests=true` — ready-made `run_tests test=` arguments |
 | one search per glob | `search_text paths=["src/**/*.cs", "**/*.md"]` — globs OR-ed into one file set, one answer |
 | `dotnet test` per project, serially | `run_tests projects=[…]` — concurrent, one process per core |
-| a `run_tests` past the client's foreground limit, polled with `TaskOutput` | `run_tests detach=true` answers an id at once, `run_tests status="<id>"` the verdict |
+| a `run_tests` past the client's foreground limit, polled with `TaskOutput` | a plain `run_tests` where the client moves long calls to the background and notifies (Claude Code); elsewhere `run_tests detach=true` answers an id at once and `run_tests status="<id>" waitSeconds=3600` waits for the verdict - nothing notifies a detached run |
 
 **And the waiting itself is shorter.** A bare `run_tests` over a solution builds **once**, then runs each
 test assembly directly where its runner allows — no MSBuild evaluation and no VSTest host per project —

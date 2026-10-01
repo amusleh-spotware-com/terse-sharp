@@ -8,6 +8,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+> **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> `run_tests DETACHED` and `run_tests RUNNING` end `next: run_tests status="<id>" waitSeconds=3600 before
+> ending the turn - no notification arrives when a detached run finishes; ...` instead of a poll hint.
+> New parameter: `run_tests waitSeconds`.
+
+### Added
+
+- **`run_tests status="<id>" waitSeconds=<n>` waits for a detached run's verdict** - up to `n` seconds (0-3600; `0`, the default, still answers at once), returning the moment the verdict lands, and `RUNNING` when the wait runs out or the call is cancelled, neither of which stops the run. Nothing notifies a client when a detached run finishes, so a `status=` poll was the only way to learn the verdict - and a field session ended its turn twice "waiting for its notification" of a detached run, sitting idle 21 minutes and then 2.5 hours until the user prompted it. A waiting `status=` call is one the client itself can move to the background and notify on, as Claude Code does past 120 s. `waitSeconds=` without `status=` is refused naming `status=` rather than silently ignored. Pinned by `RunTests_DetachedThenStatusWithWaitSeconds_AnswersTheVerdictInOneCall_AndTheDetachedAnswerSaysNothingNotifies`, `RunTests_WaitSecondsWithoutStatus_IsRefusedNamingStatusInsteadOfStartingARun`, `Status_WithAWait_AnswersTheVerdictTheMomentTheRunFinishes`, `Status_WhenTheWaitRunsOutFirst_AnswersRunning_AndTheRunStillLands` and `Status_WhenTheWaitingCallIsCancelled_AnswersRunningWithoutStoppingTheRun`.
+
+### Changed
+
+- **`run_tests DETACHED` and `RUNNING` say that nothing notifies a detached run, and name the waiting call.** Both used to end with a poll hint - `RUNNING` with `the run finishes without being polled`, which read as a promise that the verdict would arrive by itself. They now end `next: run_tests status="<id>" waitSeconds=3600 before ending the turn - no notification arrives when a detached run finishes; that call answers the moment the verdict lands, and a client that backgrounds a long call notifies you when it returns; pass a shorter waitSeconds if your client times out long calls`. The `run_tests` description says nothing notifies a detached run, and README, NUGET_README and SKILL.md steer a client that backgrounds long calls itself to a plain `run_tests`, which that client does notify on, keeping `detach=true` for clients that do not. The `run_tests` schema stays under its 1 024-token cap (1 015) by tightening two sentences and two `Default false.` tails. Pinned by `StartAndRunning_SayNoNotificationArrives_AndNameTheWaitingCall`.
+
 ## [0.71.1] - 2026-10-01
 
 ### Changed

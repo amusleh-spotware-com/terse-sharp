@@ -147,7 +147,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` |
 | **Build and test** | `Bash: dotnet test` / `vstest` | `run_tests` |
 | **Build and test** | one `run_tests` call per test project | `run_tests(projects: [...])` — concurrent, per-project timeout |
-| **Build and test** | a run past the client's foreground limit, then a poll | `run_tests(detach: true)`, then `run_tests(status: "<id>")` |
+| **Build and test** | a run past the client's foreground limit | `run_tests` where the client backgrounds long calls; else `run_tests(detach: true)`, then `run_tests(status: "<id>", waitSeconds: 3600)` - nothing notifies it |
 | **Build and test** | bounding parallelism **inside** one test assembly | `run_tests(runSettings: ["xUnit.MaxParallelThreads=1"])` |
 | **Build and test** | re-running what broke - a failure stays remembered until a run passes it | `rerun_failed` |
 | **Build and test** | re-verifying SOME of what broke | `rerun_failed(tests: [...], exclude: [...])` |
@@ -498,8 +498,7 @@ names the byte-equivalent CI pair. Every file `whitespace` is a green CI leg; an
 formatter, each named file tagged `style`, `analyzers` or `style+analyzers`.
 
 **`find_usages` and `resx_usages` report one record per SOURCE POSITION.** A multi-targeted project
-gives Roslyn one symbol per target framework, each finding the same call site, so one usage used to
-print two to eight times. They deduplicate by position now, so the count IS the blast radius.
+gives Roslyn one symbol per target framework, each finding the same call site. Deduplicated by position, the count IS the blast radius.
 
 **Refusals the tool descriptions do not spell out:** `cellChars=` without `columns=`; `bytes=` and
 `stamp=` answer `UNRESOLVED` under `ref=`; `edit_text` refuses `toPath=` naming the same file twice

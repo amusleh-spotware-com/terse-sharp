@@ -98,7 +98,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a call that already answered GREEN with nothing written since is not re-run: it answers run_tests UNCHANGED naming the previous verdict and its age, and force=true re-runs it anyway. A stopped run names the test still running. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: one merged verdict, a per-project timeout, built once then run with --no-build. tests=[...] runs several tests, classes or namespaces in ONE call. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. detach=true runs in the background and answers an id; status=<id> reads it.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a GREEN call with nothing written since answers run_tests UNCHANGED instead of running; force=true runs it. A stopped run names the test still running. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY - built once, one merged verdict, a per-project timeout. tests=[...] runs several tests, classes or namespaces in ONE call. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. detach=true answers an id at once; NOTHING notifies when it finishes - status=<id> waitSeconds=N waits for the verdict.")]
     public Task<string> RunTests(
         [Description("Optional test to run: a fully-qualified test name, or a class or namespace prefix. Cannot be combined with filter.")] string? test = null,
         [Description("Optional VSTest filter expression. Cannot be combined with test. Microsoft.Testing.Platform takes FullyQualifiedName only; anything else is refused naming test=.")] string? filter = null,
@@ -113,17 +113,19 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Run existing binaries; skip the build, including a batch's per-project build.")] bool noBuild = false,
         [Description("List passing tests too.")] bool includePassed = false,
         [Description("List the N slowest tests.")] int slowest = 0,
-        [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run. Default false.")] bool verbose = false,
+        [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600). With projects= or a solution it is the budget for EACH project and its build; above 30s also a per-test ceiling 15s below it.")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter. A blank entry is refused by index; not with filter.")] string?[]? tests = null,
-        [Description("Run even when this exact call already answered green and nothing has been written since. Default false.")] bool force = false,
+        [Description("Run even when this exact call already answered green and nothing has been written since.")] bool force = false,
         [Description("Run in the background and answer an id at once; it still holds the solution.")] bool detach = false,
         [Description("Id detach=true answered: RUNNING with its age, or the verdict.")] string? status = null,
+        [Description("With status=: wait up to N seconds, max 3600, for the verdict; 0 answers at once.")] int waitSeconds = 0,
         CancellationToken cancellationToken = default)
     {
         return status is { Length: > 0 }
-            ? detached.StatusAsync(status)
+            ? detached.StatusAsync(status, Waited(waitSeconds), cancellationToken)
+            : waitSeconds != 0 ? Task.FromResult(StatuslessWait())
             : detach ? Task.FromResult(detached.Start(Run)) : Run(cancellationToken);
 
         Task<string> Run(CancellationToken token) => Replayable(
@@ -437,6 +439,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     }
 
     private static TimeSpan Seconds(int timeoutSeconds) => TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, DotnetRunner.MaxTimeoutSeconds));
+
+    private static TimeSpan Waited(int waitSeconds) => TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 0, DotnetRunner.MaxTimeoutSeconds));
+
+    private static string StatuslessWait() => Errors.Invalid(
+        "waitSeconds= waits on a detached run, and no status= was passed",
+        "pass status=\"<id>\" beside it, or drop waitSeconds= - a run that is not detached already waits for its verdict").Render();
 
     private static Task<string> Contained(WorkspaceTarget workspace, string? project, Func<string?, Task<string>> action)
     {

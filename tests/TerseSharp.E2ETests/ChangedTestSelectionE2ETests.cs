@@ -409,6 +409,26 @@ public sealed class ChangedTestSelectionE2ETests
     }
 
     [Fact]
+    public async Task RunTests_DetachedThenStatusWithWaitSeconds_AnswersTheVerdictInOneCall_AndTheDetachedAnswerSaysNothingNotifies()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var started = await CallAsync(server, "run_tests", new() { ["projects"] = new[] { "Selection.Core.Tests" }, ["detach"] = true });
+            var verdict = await CallAsync(server, "run_tests", new() { ["status"] = Id(started), ["waitSeconds"] = 600 });
+
+            Assert.Contains("no notification arrives", started, StringComparison.Ordinal);
+            Assert.Contains("waitSeconds=", started, StringComparison.Ordinal);
+            Assert.StartsWith("run_tests PASSED", verdict, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task RunTests_StatusOfAnUnknownId_IsRefusedWithARemedy()
     {
         var server = await StartAsync();
@@ -419,6 +439,25 @@ public sealed class ChangedTestSelectionE2ETests
 
             Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
             Assert.Contains("'t999'", text, StringComparison.Ordinal);
+            Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RunTests_WaitSecondsWithoutStatus_IsRefusedNamingStatusInsteadOfStartingARun()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var text = await CallAsync(server, "run_tests", new() { ["projects"] = new[] { "Selection.Core.Tests" }, ["waitSeconds"] = 5 });
+
+            Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+            Assert.Contains("no status= was passed", text, StringComparison.Ordinal);
             Assert.Contains("remedy:", text, StringComparison.Ordinal);
         }
         finally

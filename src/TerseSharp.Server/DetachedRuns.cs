@@ -20,13 +20,18 @@ public sealed class DetachedRuns : IDisposable, IAsyncDisposable
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"run_tests DETACHED id={id}\nnext: run_tests status=\"{id}\" answers RUNNING until the verdict is ready, then the verdict itself");
+            $"run_tests DETACHED id={id}\n{Unnotified(id)}");
     }
 
-    public async Task<string> StatusAsync(string id) =>
-        !runs.TryGetValue(id, out var run) ? Unknown(id)
-        : run.Task.IsCompleted ? await run.Task.ConfigureAwait(false)
-        : Running(id, run.Started);
+    public async Task<string> StatusAsync(string id, TimeSpan wait, CancellationToken cancellationToken)
+    {
+        if (!runs.TryGetValue(id, out var run))
+            return Unknown(id);
+
+        await SettledAsync(run.Task, wait, cancellationToken).ConfigureAwait(false);
+
+        return run.Task.IsCompleted ? await run.Task.ConfigureAwait(false) : Running(id, run.Started);
+    }
 
     public void Dispose()
     {
@@ -42,7 +47,22 @@ public sealed class DetachedRuns : IDisposable, IAsyncDisposable
 
     private static string Running(string id, long started) => string.Create(
         CultureInfo.InvariantCulture,
-        $"run_tests RUNNING id={id} {Stopwatch.GetElapsedTime(started).TotalSeconds:F0}s\nnext: run_tests status=\"{id}\" again later - the run finishes without being polled");
+        $"run_tests RUNNING id={id} {Stopwatch.GetElapsedTime(started).TotalSeconds:F0}s\n{Unnotified(id)}");
+
+    private static string Unnotified(string id) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"next: run_tests status=\"{id}\" waitSeconds={DotnetRunner.MaxTimeoutSeconds} before ending the turn - no notification arrives when a detached run finishes; that call answers the moment the verdict lands, and a client that backgrounds a long call notifies you when it returns; pass a shorter waitSeconds if your client times out long calls");
+
+    private static async Task SettledAsync(Task run, TimeSpan wait, CancellationToken cancellationToken)
+    {
+        if (run.IsCompleted || wait <= TimeSpan.Zero)
+            return;
+
+        using var expiry = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        await Task.WhenAny(run, Task.Delay(wait, expiry.Token)).ConfigureAwait(false);
+        await expiry.CancelAsync().ConfigureAwait(false);
+    }
 
     private static string Unknown(string id) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"no detached run has id '{id}' in this server - ids live only as long as the process that answered them"),
