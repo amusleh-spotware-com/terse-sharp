@@ -48,10 +48,15 @@ public static class ToolExamples
 
             foreach (var tool in listed.Tools)
             {
-                if (Advertised.Contains(tool.Name) && tool.Description is { Length: > 0 } text && !text.Contains("  example: ", StringComparison.Ordinal))
-                    tool.Description = text + "  example: " + Worked[tool.Name];
+                if (Advertised.Contains(tool.Name) && tool.Description is { Length: > 0 } text && !text.Contains(Separator, StringComparison.Ordinal))
+                    tool.Description = text + Separator + Worked[tool.Name];
             }
 
             return listed;
         };
+
+    public const string Separator = "  example: ";
+
+    public static int DecorationLength(string name) =>
+        Advertised.Contains(name) ? Separator.Length + Worked[name].Length : 0;
 }

@@ -8,6 +8,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`workspace_status tools=true` estimates the working tree's own tool schemas (I694).** In a
+  workspace that declares `[McpServerTool]` methods it adds `source=<n> tools declared in the working
+  tree, schema estimated HEURISTIC: <c> differ from the running server, <o> over the 1024-token cap`,
+  then one `  <tool> <installed|new> -> <estimated> [OVER]` line per tool whose source name,
+  `[Description]` or parameter descriptions differ from the running server, or whose estimate passes
+  the cap. The estimate is the running server's measured schema frame plus the source's own text, read
+  with Roslyn from constant attribute arguments, so a description edit is priced before any build; a
+  tool the server does not yet advertise is priced on a fixed per-parameter frame and printed `new`. A
+  workspace that declares no tool prints nothing new. The cap now lives in `TerseSharp.Core`
+  (`ToolSchemaEstimate.TokenCap`) and the schema census reads it. Covered by
+  `DeclaredAsync_CountsTheNameAndEveryConstantDescription_AndSkipsTheCancellationToken`,
+  `Render_ForANewToolWithAHugeDescription_FlagsItOverTheCap`,
+  `Render_ForAToolWhoseDescriptionGrew_PricesItOnTheInstalledFrameAndFlagsTheCap`,
+  `Render_ForAnUnchangedToolUnderTheCap_ListsNothing`,
+  `Render_CountsTheWorkedExampleTheServerAppends_TowardTheCap`,
+  `EstimatedAsync_ForSourceThatMatchesTheInstalledSchema_ReportsNoDifference_AndAnEditAsOne` and
+  `WorkspaceStatus_WithTools_InAWorkspaceThatDeclaresNoTool_EstimatesNothingFromSource`.
+
 ### Changed
 
 - **Three runtime failures stop answering `ERROR InvalidArgument` (I696).** Each told the agent its

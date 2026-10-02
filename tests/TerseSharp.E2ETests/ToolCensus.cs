@@ -343,7 +343,7 @@ internal static class ToolCensus
         || line.Contains("calls in a row", StringComparison.Ordinal)
         || line.StartsWith("NOTE re-ran: stamp moved ", StringComparison.Ordinal);
 
-    public const int SchemaTokenCap = 1024;
+    public const int SchemaTokenCap = TerseSharp.Core.ToolSchemaEstimate.TokenCap;
     public const int MaxSchemaOverrides = 0;
 
     public static readonly ToolBudget[] SchemaOverrides = [];

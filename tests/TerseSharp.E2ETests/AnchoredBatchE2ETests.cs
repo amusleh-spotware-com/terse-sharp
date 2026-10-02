@@ -113,6 +113,15 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task WorkspaceStatus_WithTools_InAWorkspaceThatDeclaresNoTool_EstimatesNothingFromSource()
+    {
+        var text = await server.CallAsync("workspace_status", new() { ["tools"] = true });
+
+        Assert.Contains("perTool=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("tools declared in the working tree", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReplaceSymbol_AddToNamingATypeNoTargetLivesIn_LandsTheInterfaceMemberBesideItsImplementationsAsOneEdit()
     {
         var alone = await server.CallAsync("add_member", new()

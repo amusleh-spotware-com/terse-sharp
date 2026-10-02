@@ -44,12 +44,13 @@ public static class AdvertisedCost
             var schema = tool.InputSchema.GetRawText();
             var described = Described(tool.InputSchema);
             var whole = tool.Name.Length + (tool.Description?.Length ?? 0) + schema.Length;
+            var named = Named(tool.InputSchema);
 
             names += tool.Name.Length;
             descriptions += tool.Description?.Length ?? 0;
             parameters += described;
             frame += schema.Length - described;
-            costs.Add(new ToolCost(tool.Name, described, whole));
+            costs.Add(new ToolCost(tool.Name, described, whole, tool.Name.Length + Undecorated(tool.Description) + named, schema.Length - named));
         }
 
         var every = Ordered(costs);
@@ -112,7 +113,7 @@ public static class AdvertisedCost
 
     private const int MaxCostliest = 10;
 
-    public readonly record struct ToolCost(string Name, int Parameters, int Total = 0);
+    public readonly record struct ToolCost(string Name, int Parameters, int Total = 0, int Basis = 0, int Frame = 0);
 
     private static List<ToolCost> Costliest(List<ToolCost> costs)
     {
@@ -156,5 +157,43 @@ public static class AdvertisedCost
             builder.Append(CultureInfo.InvariantCulture, $"\n  {cost.Name} {Tokens(cost.Total)}");
 
         return builder.ToString();
+    }
+
+    private static int Named(JsonElement schema)
+    {
+        if (schema.ValueKind is not JsonValueKind.Object || !schema.TryGetProperty("properties", out var properties) || properties.ValueKind is not JsonValueKind.Object)
+            return 0;
+
+        var total = 0;
+
+        foreach (var property in properties.EnumerateObject())
+            total += property.Name.Length + (property.Value.ValueKind is JsonValueKind.Object && property.Value.TryGetProperty("description", out var text) && text.ValueKind is JsonValueKind.String ? text.GetString()!.Length : 0);
+
+        return total;
+    }
+
+    private static int Undecorated(string? description) => description switch
+    {
+        null => 0,
+        _ when description.AsSpan().IndexOf(ToolExamples.Separator, StringComparison.Ordinal) is var at and >= 0 => at,
+        _ => description.Length,
+    };
+
+    public static async Task<string?> EstimatedAsync(Microsoft.CodeAnalysis.Solution solution, CancellationToken cancellationToken)
+    {
+        var declared = await ToolSchemaSource.DeclaredAsync(solution, cancellationToken).ConfigureAwait(false);
+
+        return declared.Count is 0 ? null : ToolSchemaEstimate.Render(declared, Installed(), ToolExamples.DecorationLength);
+    }
+
+    private static Dictionary<string, InstalledSchema> Installed()
+    {
+        var every = Volatile.Read(ref unnarrowed)?.Every ?? [];
+        var installed = new Dictionary<string, InstalledSchema>(every.Count, StringComparer.Ordinal);
+
+        foreach (var cost in every)
+            installed[cost.Name] = new InstalledSchema(cost.Basis, cost.Frame);
+
+        return installed;
     }
 }
