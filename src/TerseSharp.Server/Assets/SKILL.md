@@ -109,7 +109,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit text** | an anchor that deliberately repeats — a table of near-identical rows | `edit_text(path, oldText: "\| row \|", occurrence: 3)` |
 | **Edit text** | N sequential calls to replace the SAME anchor N times — three identical `[Description]` strings in one file | `edit_text(path, oldText, newText, replaceAll: true)` — one pass, applied by descending offset |
 | **Edit text** | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` |
-| **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` already handles it — dedented payloads still match |
+| **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` handles it — dedented or blank-stripped anchors match |
 | **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` |
 | **Edit text** | re-sending a whole file after a `CS0246` rollback | `write_text(retryWith: "r3", usings: ["System.Collections.Immutable"], force: true)` — the content is held |
 | **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` — compile-gated when a project compiles it; replacing an unrelated file needs `overwrite: true` |
@@ -199,12 +199,8 @@ forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it 
 
 **And issue independent calls in ONE message.** Several `tool_use` blocks in one message run
 concurrently; one call per message pays a **6 136 ms (p50)** model gap before its tool even starts.
-Measured over a fortnight and 647 transcripts, grouping `tool_use` blocks by the API `message.id`
-that carried them: **1.165 calls per assistant message, and only 14.3% of messages carry two or
-more**. Measured A/B on the same eight
-files: eight `get_file_outline` calls one-per-message cost **151.4 s wall**, of which **148.5 s was
-model gap**; the identical work as one `paths=[...]` call cost **10.2 s** - **14.8x faster**, and
-**98% of the saving was gap, not tool time**. Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
+Measured: eight `get_file_outline` calls one-per-message cost **151.4 s**, one `paths=[...]` call
+**10.2 s** - 98% of the gap was model round trips, not tool time. Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
 `find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
 message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
@@ -236,11 +232,11 @@ check, so never shell out for them - and **`cleanup verify=true fix=ci` is both 
 
 **A bare `sleep` is denied too, `Start-Sleep` included, and nothing replaces it** - background work re-invokes you, so **end the turn**. The one allowed shape is the pause inside a loop that detects the process dying: `while :; do kill -0 "$PID" || break; sleep 1; done`.
 
-**POLLING BY TOOL is the same breach**: `TaskOutput`/`TaskList` for a result the harness delivers itself cost **14.08 h/week**; check after a notification, never wait on one.
+**POLLING BY TOOL is the same breach**: `TaskOutput`/`TaskList` for a result the harness delivers itself is waste; check after a notification, never wait on one.
 
 **One replaced command no longer kills a batch.** The guard strips those commands, rewrites the
 rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
-rewrites only sound shapes: uniform `&&`/`;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with the pipeline it follows - stripped with a replaced one, run with a kept one; a heredoc (`<<`), a target-less redirect and `>&-` still fence. `||`, a background `&`, a subshell, a substitution, a comment, a backslash escape, a mixed `;`/`&&` run or a shell keyword is **denied
+rewrites only sound shapes: uniform `&&`/`;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with its pipeline; `$NAME`, `${NAME}` and a quoted, terminated heredoc not fed to a shell are opaque words; other heredocs, a target-less redirect and `>&-` fence. `||`, a background `&`, a subshell, a substitution, a comment, a backslash escape, a mixed `;`/`&&` run or a shell keyword is **denied
 whole** — `NO part of the command ran`, and `Call this instead:` names each denied segment's tool call
 **and** every segment nothing replaces — chained with `&&` when re-issuing them together is sound,
 listed one by one when it is not, because printing a segment executes nothing. A whole-command
@@ -259,13 +255,13 @@ raising a number you chose; the steer returns as soon as you drop the argument.
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. A diff of a path
 that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, and so does a diff flag no tool serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`). Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
-directory the command actually addresses (`-C` target, then a directory operand, then the working
+directory the command actually addresses (`-C` target, then a directory operand, then a literal earlier `cd`, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
 `git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`, and a `git tag` **listing** —
 bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. A tag listing of
 **origin** — `git ls-remote --tags` — is `history tags=true remote=true`, which merges both lists and
 tags every row `local=yes|no remote=yes|no`; `--heads`, another remote and a bare `git ls-remote` are left alone. Still on the shell: `git blame`
-— measured at **one** call in 683 sessions — anything that mutates the index or history (`git add`,
+- anything that mutates the index or history (`git add`,
 `git commit`, `git push`, and every `git tag` that creates, annotates or deletes one), and a
 **scripted extraction** such as
 `$(git log -1 --format=%H)`, because `--format=`, `--pretty=`, `-s` and `--name-only` ask for a shape
@@ -318,12 +314,12 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 `surface=<n> tools <t> tokens`.
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold`, and the first semantic call that realizes them appends
-`compilations=realized in Nms (once per load, not per call)` — a one-off, measured at about 7 s on a
-300-document solution, not the per-call cost of the tool that happened to pay it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation.
+`compilations=realized in Nms (once per load, not per call)` — a one-off, not the per-call cost of the tool that paid it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation.
 **Compilations are given back once the server has served no call for 15 minutes** (`--idle-minutes`,
 `TERSE_IDLE_MINUTES`, `0` to disable; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
-what it needs for a second or two. On a **multi-targeted** solution pass
+what it needs, then warms the rest in the background. Right after connecting, `workspace_status` may
+answer `LOADING <solution> elapsed=Ns`: the text, file and git tools already answer then. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
 be invisible to `find_usages` with every gate green; whatever was chosen is printed as
 `targetFramework=`.
@@ -343,9 +339,10 @@ rebuilding an analyzer whose behaviour you need to see.
 `load_workspace`'s last line reports freshness —
 `watch=active gen=c12/p1/x3/r0/rz2/f4 pending=0 lastSyncMs=8 gaps=0`: the
 watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor / Files), how many paths are
-waiting to be examined, and how many watcher events were lost. The line after it reports the workspace index —
-`index=xaml(hit=12 miss=1 files=9) resx(hit=4 miss=1 families=2) code(hit=0 miss=0 calls=-) razor(hit=3 miss=1 files=10)
-paths(hit=7 miss=1 files=31324) documents=9/128 parses=9`.
+waiting to be examined, and how many watcher events were lost. The line after it reports the workspace index's hit and miss counts.
+A standing offer - `containers=true names …`, `condensed=true …`, `N members - narrow with contains=`,
+a complete listing's ` - narrow with …` - prints on a tool's first answer only; `truncated` steers print
+every time, and `TERSE_OFFERS=always` keeps every offer.
 
 **`find_files`, `search_text` and `search_regex` answer from that `paths` index, not from a fresh
 walk.** The tree is enumerated once and re-enumerated only when the watcher sees a file appear,
@@ -364,7 +361,7 @@ or `load_workspace reload=true`. `verbose=true` prints the clean verdict too - `
 
 **A `WARNING guard=absent` or `skill=absent` line on `workspace_status` or `load_workspace` is for the
 user.** Without the `PreToolUse` guard nothing stops an agent answering with `Read`, `Grep`, `cat` or
-`dotnet build` - measured at 884 such `Bash` calls in one week. Tell the user to run
+`dotnet build`. Tell the user to run
 `terse install --guard`; do not run it yourself, because it writes their settings file.
 
 **`failures=` counts projects that did NOT load; `warnings=` counts everything else** — NuGet
@@ -406,15 +403,14 @@ nothing for a project it did not recompile, so a second `build` on an unchanged 
 `warnings=0` however many the first found; ask `analyze` for the solution-wide truth.
 
 `run_tests`, `rerun_failed` and `list_tests` report a build that failed under them the same way:
-`no test results were produced` followed by the **errors**, not by raw MSBuild output. Those three
+`no test results were produced` followed by the **errors** (any `: error <ID>:`), not raw MSBuild output; a run where only some projects built leads with `FAILED <project> did not build`. Those three
 have no "list the warnings when there is no error" fallback — a failure carrying only warnings
 answers with the bounded `FAILED with no error-severity diagnostic; last output lines:` tail, which
 is where a crashed test host says why. It is appended whenever no **error** was found, in either
 mode, so `verbose=true` is always a superset: it adds the warnings, never replacing the reason.
 
 **The verification ladder — climb it, never start at the top.** `run_tests` is **37% of all tool wall
-time**, and **6.1% of its identical repeats were provably redundant - nothing was written between
-them** (`build`: 10.0%). Per
+time**. Per
 edit, climb only as high as the edit reaches:
 
 | Rung | Call | Measured mean | When |
@@ -435,8 +431,7 @@ take it; the whole-solution sweep you just started is the composite's one call.
 **Analyse — the detail:** It runs `analyze` at `info`,
 `format`, `cleanup fix=all` and `analyze` again, in the order this project mandates, over the files
 changed since the workspace loaded, and answers **one verdict line**. That is the whole end-of-task
-sweep in one call instead of four, and it is the first thing to reach for — a measured week of this
-server's own sessions made 356 `analyze` calls and **zero** `gate` calls. Reach for the individual
+sweep in one call instead of four, and it is the first thing to reach for. Reach for the individual
 tools only when you need one of them on its own, or when `gate` reports `FAILED` and you are
 fixing what it named.
 
@@ -519,8 +514,7 @@ so two new interdependent `.cs` files land in either order.
 `get_symbol_source` and `get_type_outline` answer `1/2 symbols` when one id did not resolve - a
 partial batch, not a truncation - and the `NOT_RESOLVED` line names which one.
 
-**A question with a defensible default is answered by taking the default, not by asking.** Stopping
-the loop to ask cost **12.91 h over 90 calls** in one fortnight. Take the default and record it as an
+**A question with a defensible default is answered by taking the default, not by asking.** Take the default and record it as an
 ASSUMPTION.
 
 **A missing path is answered, not just refused.** `get_file_outline` and `read_text` on a path named
@@ -532,7 +526,7 @@ on a `.cs` file nobody has written yet names `write_text path=… force=true` �
 them** — `WARNING attributes dropped: McpServerTool, Description`. The edit still applies, because
 dropping an attribute is sometimes the intent, but an un-advertised tool is exactly what a clean
 build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, or use
-`replace_symbol_body`. On a TYPE, a bodiless header of the same kind re-heads it and keeps its members; a replace that loses members warns naming them, rollback included.
+`replace_symbol_body`. On a TYPE, a bodiless header of the same kind re-heads it and keeps its members (a primary constructor `Type.#ctor` is refused - re-head the type); a replace that loses members warns naming them, rollback included.
 
 **`add_member` formats only what it inserted** - no collateral hunks, and an anchored insert leaves the
 close brace alone.
@@ -696,7 +690,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
 1. **Address a symbol by the name a response printed.** An outline prints `OrderService.Submit`, and
    adds the parameter list (`Reconcile(Order, decimal)`) only where the type overloads that name;
    every tool taking a `symbolId` accepts that, the full documentation id
-   (`M:Trading.OrderService.Submit(Trading.Order)`), a bare `Submit`, or any qualifier in between.
+   (`M:Trading.OrderService.Submit(Trading.Order)`; one typed with `(string)` resolves by name and says `resolved from name:`), a bare `Submit`, or any qualifier in between.
    A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
    guess**. Constructors, operators, indexers, generics and explicit interface implementations keep
    their documentation id in outlines, because a name cannot address them. `Type.#ctor` and `Type..ctor` address constructors; a primary one answers its type header. Every one of those tools
@@ -1179,7 +1173,7 @@ naming `MSB3026`. Run the probe from a copy outside the solution. Its stderr end
 
 ## When a tool refuses
 
-Errors are `ERROR <Code>` plus a `remedy:` line. `SymbolNotFound` suggests the nearest names;
+Errors are `ERROR <Code>` plus a `remedy:` line. `Timeout`, `FileLocked` and `RunNotFound` are runtime conditions - narrow with `path=`/`baseRef=`, retry later, or start the run again; never rewrite the arguments. `SymbolNotFound` suggests the nearest names;
 `AmbiguousSymbol` lists the candidates and says how many of the total it shows; `SaturatedName` means
 too many symbols carry that name **exactly** - a unique exact match resolves however many fuzzy
 candidates share its letters, and an already-dotted name is told to pass `symbolId="T:<fqn>"`. It is
