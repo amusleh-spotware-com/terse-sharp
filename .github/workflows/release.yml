@@ -78,11 +78,14 @@ jobs:
           user: AlgoDeveloper
 
       - name: Publish to NuGet
-        run: >
-          dotnet nuget push "artifacts/nupkg/*.nupkg"
-          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
-          --source https://api.nuget.org/v3/index.json
-          --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          for rid in win-x64 win-arm64 linux-x64 linux-arm64 osx-x64 osx-arm64 any; do
+            dotnet nuget push artifacts/nupkg/TerseSharp.$rid.*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          done
+          dotnet nuget push artifacts/nupkg/TerseSharp.[0-9]*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Create or update the GitHub release
         uses: softprops/action-gh-release@v2

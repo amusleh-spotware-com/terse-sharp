@@ -1133,8 +1133,22 @@ public sealed class DotnetRunnerTests
     public void BuildFailure_NamesTheProjectFromTheErrorLineOnEveryHost(string line, string project) =>
         Assert.StartsWith("FAILED " + project + " did not build", DotnetRunner.BuildFailure([line]), StringComparison.Ordinal);
 
-
     [Fact]
     public void BuildFailure_ForAnErrorNamingNoProject_DoesNotInventOne() =>
         Assert.StartsWith("FAILED the build reported 1 error(s)", DotnetRunner.BuildFailure(["MSBUILD : error MSB1009: Project file does not exist."]), StringComparison.Ordinal);
+
+    [Fact]
+    public void RenderTest_ForAFailedTestWhoseMessageQuotesACompilerError_DoesNotClaimTheBuildFailed()
+    {
+        const string Output = "Build succeeded.\nTest run for C:\\x\\Foo.Tests.dll (.NETCoreApp,Version=v10.0)\n  Failed Foo.Tests.Checks.Answer [3 ms]\n  Error Message:\n   x.cs(1,1): error CS0103: y [p.csproj]\n";
+
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(1, Output, 5000),
+            ScopedReport([new("Foo.Tests", 1, 1, 0, 2, 40)]),
+            Searching(1),
+            "C:/repo");
+
+        Assert.DoesNotContain("did not build", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("the build reported", text, StringComparison.Ordinal);
+    }
 }

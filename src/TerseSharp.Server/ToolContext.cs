@@ -477,7 +477,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             : answer;
     }
 
-    private sealed record PreloadTarget(string Solution, string Root, long Started);
+    private sealed record PreloadTarget(string Solution, string Root);
 
     private PreloadTarget? preloading;
 
@@ -492,28 +492,20 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         var full = Path.GetFullPath(target);
 
         return File.Exists(full) && Path.GetDirectoryName(full) is { } root
-            ? new PreloadTarget(full, root, Stopwatch.GetTimestamp())
+            ? new PreloadTarget(full, root)
             : null;
     }
 
     private PreloadTarget? Unloaded() =>
         preloading is { } pending && Registry.All().Count is 0 ? pending : null;
 
-
     public string? LoadingRoot(string? workspace) =>
         !ready.IsCompleted && Unloaded() is { } pending && Names(workspace, pending) ? pending.Root : null;
-
 
     private static bool Names(string? workspace, PreloadTarget pending) =>
         string.IsNullOrWhiteSpace(workspace)
         || Path.GetFileNameWithoutExtension(pending.Solution.AsSpan()).Equals(workspace, StringComparison.OrdinalIgnoreCase)
         || Path.GetFileName(pending.Root.AsSpan()).Equals(workspace, StringComparison.OrdinalIgnoreCase);
-
-
-    public string Loading() => preloading is { } pending
-        ? string.Create(CultureInfo.InvariantCulture, $"LOADING {Path.GetFileName(pending.Solution)} elapsed={(long)Stopwatch.GetElapsedTime(pending.Started).TotalSeconds}s - text, file and git tools answer now; the rest wait for the load")
-        : string.Empty;
-
 
     public Task<string> WithRootAsync(string? workspace, Func<string, Task<string>> early, Func<Task<string>> otherwise) =>
         LoadingRoot(workspace) is { } root ? ToolBoundary.RunAsync(() => early(root)) : otherwise();

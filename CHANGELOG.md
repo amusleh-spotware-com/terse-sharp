@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.73.0] - 2026-10-02
+
+> **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> Three runtime failures answer `ERROR Timeout`, `ERROR FileLocked` and `ERROR RunNotFound` instead of
+> `ERROR InvalidArgument`; a `run_tests` whose build failed for some projects leads with `FAILED <project>
+> did not build`; a guard denial of a non-.NET path says `judged inside the .NET tree`; a documentation
+> id resolved through the name path ends `resolved from name: <id>`; `edit_text` applies a unique
+> indentation-and-blank-line-insensitive match with a `NOTE`; an edit of the shipped `SKILL.md` ends its
+> `changedLines=` line with the token budget; and three standing offers print once per tool per server
+> process (`TERSE_OFFERS=always` restores them). The NuGet release now ships ReadyToRun RID-specific
+> tool packages behind a pointer package.
+
 ### Added
 
 - **`workspace_status tools=true` estimates the working tree's own tool schemas (I694).** In a
@@ -64,7 +76,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `TerseRidPackages=true`, so `dotnet build`, the E2E binary at
   `src/TerseSharp.Server/bin/<Configuration>/net10.0/terse.dll` and a from-source `dotnet pack` are
   unchanged; CI and Release pack with it, fail unless all eight packages exist and the linux-x64 one
-  is precompiled, and install the packed tool to prove the linux-x64 package resolves. Pinned by
+  is precompiled, and install the packed tool to prove the linux-x64 package resolves. Release pushes
+  the seven RID packages first and the pointer package last, so the pointer never names a package
+  NuGet has not received. Pinned by
   `TheRidSwitch_ShipsReadyToRunPackagesForEveryReleasedRidAndAFrameworkDependentFallback`,
   `TheRidPackages_RunThroughTheDotnetHost_SoTheWindowsShimStaysAnExecutable`,
   `ThePlainBuild_DeclaresNoRidProperty_SoTheE2EBinaryStaysAtBinConfigurationNet10` and
@@ -92,7 +106,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   line now counts as an error whatever its id prefix - in `build`, `run_tests`, `rerun_failed` and
   `list_tests` - and a run that has results but whose build reported errors leads with `FAILED
   <project> did not build (N error(s)), so its tests did not run; the counts below cover only the
-  projects that built`, followed by the errors. Response-format change on that failure path only.
+  projects that built`, followed by the errors - only unindented build-error lines count, so a failed
+  test whose message quotes a compiler error does not claim the build failed
+  (`RenderTest_ForAFailedTestWhoseMessageQuotesACompilerError_DoesNotClaimTheBuildFailed`).
+  Response-format change on that failure path only.
   Pinned by `Diagnostics_ForAnAnalyzerIdThatStartsLowerCase_ClassifiesItBySeverity`,
   `RenderNoResults_ForAnAnalyzerErrorWithALowerCaseId_ListsItInsteadOfClaimingNoErrorDiagnostic`,
   `RenderTest_ForASolutionRunWhereOneProjectFailedToBuild_LeadsWithFailedNamingIt`,
@@ -196,7 +213,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   unreplaced `git add`/`fetch`/`worktree`/`commit`. `$NAME`, `${NAME}` and a heredoc whose delimiter is
   quoted and whose terminator line is present are now opaque when splitting, so the batch is rewritten
   instead; an unquoted or shell-fed heredoc, one whose body holds a covered command or whose next line
-  opens with an operator, `$(…)`, `${X:-…}`, `$1` and every backslash still deny the whole command, and
+  opens with an operator, one whose opener line carries `;`, `&` or `|` after the delimiter, one
+  whose terminator line ends in `\r`, the dynamic `$_`, `$LINENO`, `$PIPESTATUS`, `$BASH_COMMAND`,
+  `$BASH_LINENO`, `$SECONDS` and `$RANDOM`, `$(…)`, `${X:-…}`, `$1` and every backslash still deny the
+  whole command, and
   a batch whose assigned variable feeds a stripped part is denied whole rather than rewritten. Covered
   by `Guard_ForABatchCarryingAPlainVariableOrAQuotedHeredoc_RewritesIt` and seven new rows of
   `Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole`.
@@ -258,17 +278,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `find_files` (single glob, not `tracked=`), `search_text`, `search_regex`, `changed_files`, `history`
   and `diff_text` answer from the preload solution's directory, byte-identical to the answer after the
   load, instead of waiting up to ~45 s on a large solution - when no workspace is loaded yet and
-  `workspace=` is empty or names that solution or its directory. `workspace_status` answers one new
-  line in that window: `LOADING <solution> elapsed=Ns - text, file and git tools answer now; the rest
-  wait for the load`, and `guard=` is answered at once too. Semantic tools still wait. Covered by
+  `workspace=` is empty or names that solution or its directory. `workspace_status guard=` is
+  answered at once too; `workspace_status` itself and the semantic tools still wait for the load,
+  because a first status call is how an agent - and 14 E2E tests - wait for one. Covered by
   `RootOnlyTools_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould`,
-  `WorkspaceStatus_WhileThePreloadIsRunning_AnswersLoadingWithTheSolutionAndElapsedSeconds` and
+  `WorkspaceStatus_WhileThePreloadIsRunning_JudgesAGuardAtOnceAndWaitsForTheStatus` and
   `WithRootAsync_WhenAnotherWorkspaceIsNamedOrThePreloadFinished_TakesTheLoadedPath`.
 - **A standing offer prints once per tool per server process, not on every call (I700).** A 1-week
   scan counted the `containers=true names …` line on 296 `search_text`/`search_regex` answers (23
   tokens each; the next search used `containers=` after 63 of 280), `read_text`'s `condensed=true …`
   marker on 220 (22 tokens), and complete-listing ` - narrow with …` offers on ~540 more answers that
-  were acted on in under 10 % of cases. Each offer - those two lines, `get_file_outline`'s `N members -
+  were acted on in under 10 % of cases. Each offer - the containers line, `get_file_outline`'s `N members -
   narrow with contains=` and the ` - narrow with …` tail of a complete listing of 25+ records - is now
   printed on a tool's first answer that carries it and omitted afterwards; the memo is a typed offer
   entry in `ResponseBuilder`, so no record or payload text is ever matched or edited. Every real
@@ -7189,7 +7209,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.72.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.73.0...HEAD
+[0.73.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.73.0
 [0.72.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.72.0
 [0.71.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.71.1
 [0.71.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.71.0

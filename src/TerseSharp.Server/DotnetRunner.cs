@@ -491,7 +491,7 @@ public static partial class DotnetRunner
         if (run.ExitCode is 0)
             return;
 
-        var errors = Diagnostics(run.Output).Errors;
+        var errors = Array.FindAll(Diagnostics(run.Output).Errors, line => Unindented(run.Output, line));
 
         if (errors.Length is 0)
             return;
@@ -1301,6 +1301,9 @@ public static partial class DotnetRunner
     }
 
     internal const int MaxTimeoutSeconds = 3600;
+
+    private static bool Unindented(string output, string line) =>
+        output.StartsWith(line, StringComparison.Ordinal) || output.Contains(string.Concat("\n", line), StringComparison.Ordinal);
 }
 
 internal sealed record ProcessRun(

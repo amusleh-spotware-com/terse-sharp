@@ -127,8 +127,8 @@ CancellationToken cancellationToken = default) =>
             [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
             [Description("Price every advertised tool's whole schema - name, description and parameters - one line per tool in tokens, descending, plus a working-tree estimate for tools whose source differs or passes the cap. Default false.")] bool tools = false,
             [Description("A shell command to judge against the PreToolUse guard, e.g. \"grep -rn TODO src\". Answers ALLOWED or DENIED with the reason and the call that replaces it, and NOTHING is executed - which is the only way to triage a destructive command. Answered alone, in the workspace's own directory.")] string? guard = null,
-            CancellationToken cancellationToken = default) => context.LoadingRoot(workspace) is { } loading
-    ? Task.FromResult(guard is { Length: > 0 } judged ? GuardAnswer(judged, loading) : context.Loading())
+            CancellationToken cancellationToken = default) => guard is { Length: > 0 } judged && context.LoadingRoot(workspace) is { } loading
+    ? Task.FromResult(GuardAnswer(judged, loading))
     : context.WithWorkspaceAsync(
         workspace,
         null,

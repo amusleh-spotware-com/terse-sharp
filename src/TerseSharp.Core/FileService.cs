@@ -305,7 +305,7 @@ public static class FileService
         response.Summary(selection.CoveredLines, ReachableLines(selection), "lines");
 
         if (selection.NextLine is 0 && selection.Lines.Count < selection.CoveredLines)
-            response.Offer("condensed", CondensedMarker);
+            response.Note(CondensedMarker);
 
         if (!request.Verbose && IsOutside(path))
             response.Note(OutsideMarker);
@@ -1681,8 +1681,8 @@ public static class FileService
 
     private static string Realigned(int columns, bool loose, bool shifted) => (loose, shifted) switch
     {
-        (true, true) => string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched ignoring indentation and blank lines - the only such match - and newText was re-indented by {columns} column(s) to the matched block; blank lines inside the match were replaced too"),
-        (true, false) => "NOTE oldText matched ignoring indentation and blank lines - the only such match; blank lines inside the match were replaced too",
+        (true, true) => string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched ignoring indentation and blank lines, and newText was re-indented by {columns} column(s) to the matched block; blank lines inside the match were replaced too"),
+        (true, false) => "NOTE oldText matched ignoring indentation and blank lines; blank lines inside the match were replaced too",
         _ => string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched after re-indenting by {columns} column(s) - it was pasted from a dedented payload such as get_symbol_source, and newText was re-indented to match the file"),
     };
 

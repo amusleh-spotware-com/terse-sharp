@@ -1221,6 +1221,12 @@ public sealed class ToolGuardTests
     [InlineData("git log --oneline -3 && npm test ${X:-$(date)}")]
     [InlineData("git log --oneline -3 && echo $1 && npm test")]
     [InlineData("git log --oneline -3 && npm test $'a;b'")]
+    [InlineData("git commit -q -F - <<'EOF' && git log --oneline -3\nsubject\nEOF")]
+    [InlineData("python3 - <<'EOF'; git status\nprint(1)\nEOF")]
+    [InlineData("tee notes.md <<'EOF' | git log --oneline -3\nbody\nEOF")]
+    [InlineData("git commit -q -F - <<'EOF'\r\nsubject\r\nEOF\r\ngit log --oneline -3")]
+    [InlineData("cat src/Foo.cs; cp $_ /tmp/x")]
+    [InlineData("git log --oneline -3\necho $LINENO")]
     public void Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);

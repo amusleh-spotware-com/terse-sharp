@@ -2041,7 +2041,7 @@ public static class ToolGuard
     private static readonly SearchValues<char> Unfollowable = SearchValues.Create("|(){}`<\\");
     private static readonly SearchValues<char> QuotedUnliteral = SearchValues.Create("$`\\\"");
     private static readonly SearchValues<char> BareUnliteral = SearchValues.Create("$`\\\"'*?[ \t{}");
-    private static readonly SearchValues<char> Unsealable = SearchValues.Create("<'\"\\");
+    private static readonly SearchValues<char> Unsealable = SearchValues.Create("<'\"\\;&|");
     private static readonly string[] ShellHosts = ["bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd", "source", "eval"];
 
     private static List<Judgement> Judging(List<Pipeline> written, string command, string? cwd)
@@ -2204,7 +2204,7 @@ public static class ToolGuard
         var text = masked.AsSpan(index);
         var (name, width) = Reference(text);
 
-        if (width is 0 || !IsName(text[name]))
+        if (width is 0 || !IsName(text[name]) || Dynamic(text[name]))
             return 1;
 
         text[..width].Fill('x');
@@ -2273,7 +2273,7 @@ public static class ToolGuard
         for (var start = lined + 1; start <= command.Length; start = NextLine(command, start))
         {
             var stop = command.IndexOf('\n', start) is var end and >= 0 ? end : command.Length;
-            var line = command.AsSpan(start, stop - start).TrimEnd('\r');
+            var line = command.AsSpan(start, stop - start);
 
             if ((dashed ? line.TrimStart('\t') : line).SequenceEqual(delimiter))
                 return stop;
@@ -2345,6 +2345,9 @@ public static class ToolGuard
     private static string InTree(string target) => string.Create(
         CultureInfo.InvariantCulture,
         $"TerseSharp guard: Bash on '{Trim(target)}' names a path judged inside the .NET tree, which the terse-sharp MCP serves - {BashRouting(target)}. Read the tool's remedy: line rather than falling back to a built-in.");
+
+    private static bool Dynamic(ReadOnlySpan<char> name) =>
+            name is "_" or "LINENO" or "PIPESTATUS" or "BASH_COMMAND" or "BASH_LINENO" or "SECONDS" or "RANDOM";
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

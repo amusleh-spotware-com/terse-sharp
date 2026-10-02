@@ -318,8 +318,8 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 **Compilations are given back once the server has served no call for 15 minutes** (`--idle-minutes`,
 `TERSE_IDLE_MINUTES`, `0` to disable; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
-what it needs, then warms the rest in the background. Right after connecting, `workspace_status` may
-answer `LOADING <solution> elapsed=Ns`: the text, file and git tools already answer then. On a **multi-targeted** solution pass
+what it needs, then warms the rest in the background. While the startup load runs, the
+text, file and git tools already answer. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
 be invisible to `find_usages` with every gate green; whatever was chosen is printed as
 `targetFramework=`.
@@ -340,7 +340,7 @@ rebuilding an analyzer whose behaviour you need to see.
 `watch=active gen=c12/p1/x3/r0/rz2/f4 pending=0 lastSyncMs=8 gaps=0`: the
 watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor / Files), how many paths are
 waiting to be examined, and how many watcher events were lost. The line after it reports the workspace index's hit and miss counts.
-A standing offer - `containers=true names …`, `condensed=true …`, `N members - narrow with contains=`,
+A standing offer - `containers=true names …`, `N members - narrow with contains=`,
 a complete listing's ` - narrow with …` - prints on a tool's first answer only; `truncated` steers print
 every time, and `TERSE_OFFERS=always` keeps every offer.
 

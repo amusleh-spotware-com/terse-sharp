@@ -273,16 +273,13 @@ public static class Errors
     public static TerseError Timeout(string message, string remedy) =>
         new(TerseErrorCode.Timeout, message, remedy);
 
-
     public static TerseError RunNotFound(string id) => new(
         TerseErrorCode.RunNotFound,
         string.Create(CultureInfo.InvariantCulture, $"no detached run has id '{id}' in this server - ids live only as long as the process that answered them, so one a restarted server never issued cannot be found"),
         "start the run again - run_tests with the same arguments, or detach=true for a fresh id; no status= value can recover a run this process did not start");
 
-
     public static bool IsSharingViolation(IOException exception) =>
         exception.HResult is SharingViolationResult or LockViolationResult;
-
 
     public static TerseError Locked(IOException exception) => new(
         TerseErrorCode.FileLocked,

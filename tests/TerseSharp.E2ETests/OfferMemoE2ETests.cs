@@ -15,7 +15,7 @@ public sealed class OfferMemoE2ETests
         try
         {
             await SearchTextOffersContainersOnceAndSteersEveryTruncationAsync(server);
-            await ReadTextSaysCondensedOnceAsync(server);
+            await ReadTextSaysCondensedOnEveryCondensedRangeAsync(server);
             await GetFileOutlineSteersWideOutlineOnceAsync(server);
             await FindFilesAdvertisesNarrowingOnceAsync(server);
         }
@@ -42,14 +42,14 @@ public sealed class OfferMemoE2ETests
         Assert.Contains(" - narrow with glob=", again.Split('\n')[0], StringComparison.Ordinal);
     }
 
-    private static async Task ReadTextSaysCondensedOnceAsync(TerseServerProcess server)
+    private static async Task ReadTextSaysCondensedOnEveryCondensedRangeAsync(TerseServerProcess server)
     {
         var first = await CallAsync(server, "read_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["lines"] = "1-17" });
         var second = await CallAsync(server, "read_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["lines"] = "1-16" });
 
         Assert.Equal("condensed=true - blank lines dropped, a number shown only after a gap; verbose=true numbers every line", first.Split('\n')[1]);
         Assert.True(second.Split('\n').Length < 17, second);
-        Assert.DoesNotContain("condensed=true", second, StringComparison.Ordinal);
+        Assert.Contains("condensed=true", second, StringComparison.Ordinal);
     }
 
     private static async Task GetFileOutlineSteersWideOutlineOnceAsync(TerseServerProcess server)

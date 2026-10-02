@@ -111,7 +111,6 @@ public sealed class SymbolReferenceTests
     public void AsName_ForAMappableDocumentationId_KeepsTheQualifierAndTheParameterList(string id, string expected) =>
             Assert.Equal(expected, SymbolReference.AsName(id));
 
-
     [Theory]
     [InlineData("N:A.B")]
     [InlineData("M:A.B.F``1(``0)")]

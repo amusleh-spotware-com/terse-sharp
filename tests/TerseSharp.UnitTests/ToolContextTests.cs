@@ -351,7 +351,7 @@ public sealed class ToolContextTests
     }
 
     [Fact]
-    public async Task WorkspaceStatus_WhileThePreloadIsRunning_AnswersLoadingWithTheSolutionAndElapsedSeconds()
+    public async Task WorkspaceStatus_WhileThePreloadIsRunning_JudgesAGuardAtOnceAndWaitsForTheStatus()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         using var registry = new WorkspaceRegistry();
@@ -361,11 +361,16 @@ public sealed class ToolContextTests
 
         context.Preload(preload.Task, Fixtures.SolutionPath);
 
-        var answer = await status.WorkspaceStatus(cancellationToken: cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        var judged = await status.WorkspaceStatus(guard: "grep -rn TODO src", cancellationToken: cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+        var waiting = status.WorkspaceStatus(cancellationToken: cancellationToken);
+        var pending = !waiting.IsCompleted;
 
+        await registry.LoadAsync(Fixtures.SolutionPath, cancellationToken);
         preload.SetResult();
-        Assert.StartsWith("LOADING " + Path.GetFileName(Fixtures.SolutionPath) + " elapsed=", answer, StringComparison.Ordinal);
-        Assert.Matches(@" elapsed=\d+s - ", answer);
+
+        Assert.StartsWith("guard ", judged, StringComparison.Ordinal);
+        Assert.True(pending);
+        Assert.Contains("FixtureSolution", await waiting, StringComparison.Ordinal);
     }
 
     [Fact]
