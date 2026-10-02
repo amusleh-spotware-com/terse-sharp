@@ -1506,6 +1506,21 @@ Gate 9's three counters convert in this order, because that is their cost order:
    by stating it once in the system prompt. So a row here whose only mechanism is "add a line to
    `CLAUDE.md`" is weak; a row that puts the reminder **at the moment of the call** — a `PostToolUse`
    or `PostToolBatch` hook, a `remedy:` line, a deny message from `ToolGuard` — is the strong form.
+   **The `PostToolBatch` nudge is a controlled experiment, not a fixture (I697).** `terse guard
+   --post-batch` holds out the half of eligible batches (one call, a read-only terse tool) whose
+   `tool_use` id hashes odd: `held = hashlib.sha256(tool_use_id.encode('utf-8')).digest()[0] & 1 == 1`
+   gets no `additionalContext`, even is nudged. Pinned vectors: `test` -> held, `abc` -> nudged -
+   check them before trusting the split. Each eligible batch is appended to
+   `~/.terse/batch-nudge.log` (or `$TERSE_HOME/.terse/`) as `<utc> <tool_use_id> nudged|held`
+   (`-` when the payload carried no id). Join the log to the transcripts by `tool_use.id`, take the
+   NEXT assistant message after each logged call, and print
+   `nudge arm: nudged a/n = x%  held b/m = y%  gap = x-y points`. Count only ids present in the log -
+   the log is what proves the hold-out build answered. If the log is absent, or every line is `-`, say
+   the experiment did not run and compute no gap. **Drop rule:** with at least 300 next-messages per
+   arm, a gap under 3 points is a row to delete the `PostToolBatch` hook (`BatchNudge`,
+   `ClientRegistrar.BatchEntry`) and its ~58 tokens per firing; a gap of 3 points or more is logged as
+   the measured lift and keeps the nudge, and the hold-out is turned off only after a second week
+   repeats the lift.
 3. **redundant share** — identical arguments, one session. Lever `(d)`: the server can *prove* the
    answer did not change (no write in between) and say so instead of recomputing.
 

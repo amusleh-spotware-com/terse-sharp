@@ -263,7 +263,7 @@ working directory is not a reason to refuse a file your solution does not contai
 covered command in it**: when a compound command mixes commands the server answers with commands it does
 not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at all, so
 the rest runs under your normal permission rules - unless all that would remain is `echo`/`printf`
-framing, which is denied whole rather than run without what it labels. The same install adds a `PostToolBatch` hook: after a response that carried a single read-only terse-sharp call, it places one line after the results asking the next response to send every independent call at once.
+framing, which is denied whole rather than run without what it labels. The same install adds a `PostToolBatch` hook: after a response that carried a single read-only terse-sharp call, it places one line after the results asking the next response to send every independent call at once - for half of those responses, chosen by a hash of the call id, so the next measurement can tell whether the line helps; each decision is logged to `~/.terse/batch-nudge.log`.
 
 <details>
 <summary>Exactly what the guard denies, what it allows, and how to log or remove it</summary>

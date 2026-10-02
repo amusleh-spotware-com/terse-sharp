@@ -24,22 +24,32 @@ public static class BatchNudge
 
     internal static IReadOnlyCollection<string> Reads => ReadTools;
 
-    public static async Task<int> RunAsync(TextReader input, TextWriter output, CancellationToken cancellationToken)
+    public static Task<int> RunAsync(TextReader input, TextWriter output, CancellationToken cancellationToken) =>
+        RunAsync(input, output, ClientRegistrar.Home(), cancellationToken);
+
+    internal static async Task<int> RunAsync(TextReader input, TextWriter output, string home, CancellationToken cancellationToken)
     {
         var payload = await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
 
-        if (Decide(payload) is { } context)
+        if (Classify(payload) is not { } verdict)
+            return 0;
+
+        await NudgeHoldOut.RecordAsync(home, verdict, cancellationToken).ConfigureAwait(false);
+
+        if (Decide(verdict) is { } context)
             await output.WriteLineAsync(context).ConfigureAwait(false);
 
         return 0;
     }
 
-    internal static string? Decide(string payload)
+    internal static string? Decide(BatchVerdict? verdict) => verdict is { Arm: NudgeArm.Nudged } ? Rendered() : null;
+
+    internal static BatchVerdict? Classify(string payload)
     {
         try
         {
-            return JsonNode.Parse(payload) is JsonObject root && Single(root) is { } name && IsTerseRead(name)
-                ? Rendered()
+            return JsonNode.Parse(payload) is JsonObject root && Eligible(root) is { } call
+                ? NudgeHoldOut.Assign(Identified(call))
                 : null;
         }
         catch (JsonException)
@@ -48,16 +58,22 @@ public static class BatchNudge
         }
     }
 
-    private static string? Single(JsonObject root)
+    private static JsonObject? Eligible(JsonObject root) =>
+        Single(root) is { } call && Named(call) is { } name && IsTerseRead(name) ? call : null;
+
+    private static JsonObject? Single(JsonObject root)
     {
         foreach (var key in BatchKeys)
         {
             if (root[key] is JsonArray calls)
-                return calls.Count is 1 && calls[0] is JsonObject call ? Named(call) : null;
+                return calls.Count is 1 ? calls[0] as JsonObject : null;
         }
 
         return null;
     }
+
+    private static string? Identified(JsonObject call) =>
+        (call["tool_use_id"] ?? call["id"]) is JsonValue value && value.TryGetValue(out string? id) ? id : null;
 
     private static string? Named(JsonObject call) =>
         (call["tool_name"] ?? call["name"]) is JsonValue value && value.TryGetValue(out string? name) ? name : null;

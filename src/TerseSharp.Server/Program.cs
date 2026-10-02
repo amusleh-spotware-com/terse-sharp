@@ -17,7 +17,7 @@ var idleMinutesOption = new Option<int?>("--idle-minutes") { Description = "Drop
 var toolsOption = new Option<string?>("--tools") { Description = TerseSharp.Server.ToolProfile.ToolsOptionDescription };
 
 var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption, maxWorkspacesOption, idleMinutesOption, toolsOption };
-var postBatchOption = new Option<bool>("--post-batch") { Description = "Read a Claude Code PostToolBatch payload instead, and nudge the next response to batch its independent calls when the batch was one read-only terse call." };
+var postBatchOption = new Option<bool>("--post-batch") { Description = "Read a Claude Code PostToolBatch payload instead, and nudge the next response to batch its independent calls when the batch was one read-only terse call - except the half held out by a hash of its tool_use id, which is only logged to ~/.terse/batch-nudge.log." };
 
 var guard = new Command("guard", "Hook entry point: reads a Claude Code PreToolUse payload on stdin and denies built-in tools on C#/.NET source.") { postBatchOption };
 var install = new Command("install", "Register TerseSharp with your MCP clients.") { clientOption, workspaceOption, skillOption, guardOption };

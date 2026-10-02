@@ -207,6 +207,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `dryRun` diff and an `edits=` batch's summary. Response-format change on that one path only. Covered by
   `EditText_OnTheShippedSkillPath_EndsItsSuccessLineWithTheBudget` and
   `Trailer_OnTheShippedSkillOnly_RendersTheBudgetOnTheSameLine`.
+- **The `PostToolBatch` nudge is now a controlled experiment (I697).** `terse guard --post-batch` holds
+  out the half of eligible batches (one call, a read-only terse tool) whose `tool_use` id hashes odd -
+  the first byte of its UTF-8 SHA-256 - and injects nothing for them; the other half is nudged exactly
+  as before. Every eligible batch is appended to `~/.terse/batch-nudge.log` (`TERSE_HOME` honoured) as
+  `<utc> <tool_use_id> nudged|held`, `-` when the payload carried no usable id, so the next session
+  scan compares nudged and un-nudged next messages directly. A log that cannot be written is skipped;
+  the hook still answers and exits 0. The hook command is unchanged, so no reinstall is needed. Covered
+  by `IsHeldOut_IsTheParityOfTheFirstSha256ByteTheScanRecomputes`,
+  `IsHeldOut_SplitsToolUseIdsIntoTwoHalves`, `Classify_ForAHeldOutToolUseId_DecidesHeldAndInjectsNothing`,
+  `Classify_ForABatchWithNoUsableToolUseId_NudgesAndRecordsItUnidentified`,
+  `RunAsync_ForAnEligibleBatch_LogsItsArmAndNudgesOnlyTheNudgedHalf` and
+  `RunAsync_WhenTheLogCannotBeWritten_StillNudgesAndExitsZero`.
 
 ## [0.72.0] - 2026-10-01
 
