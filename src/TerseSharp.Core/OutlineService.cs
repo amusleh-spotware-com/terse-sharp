@@ -113,7 +113,7 @@ public static class OutlineService
         }
 
         if (omitted is 0 && format.Contains is not { Length: > 0 } && members >= WideOutline)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"{members} members - narrow with contains="));
+            response.Offer("contains", string.Create(CultureInfo.InvariantCulture, $"{members} members - narrow with contains="));
         else if (omitted is 0 && format.Batchable && ArgumentLine.Ids(references) is { } batch)
             response.Note(batch);
 

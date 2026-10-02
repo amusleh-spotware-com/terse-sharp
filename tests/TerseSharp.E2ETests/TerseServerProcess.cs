@@ -106,6 +106,7 @@ internal sealed class TerseServerProcess
 
         start.Environment["TERSE_UPDATE"] = "0";
         start.Environment["TERSE_HOME"] = IsolatedHome;
+        start.Environment["TERSE_OFFERS"] = "always";
 
         foreach (var (name, value) in environment)
             start.Environment[name] = value;

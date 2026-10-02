@@ -60,7 +60,12 @@ public sealed class ResponseBuilder(string tool, string argument)
         var text = new StringBuilder(512);
 
         foreach (var entry in entries)
+        {
+            if (entry.Offer is { } offer && !OfferMemo.First(tool, offer))
+                continue;
+
             text.Append(Rendered(entry, verbatim: false)).Append('\n');
+        }
 
         return text.ToString().TrimEnd('\n');
     }
@@ -76,7 +81,7 @@ public sealed class ResponseBuilder(string tool, string argument)
 
     private string Brief(Counted count) => count.Total > count.Shown
         ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit} truncated - {count.Total - count.Shown} NOT shown{Steer(count)}")
-        : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit}{Advertised(count)}");
+        : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit}{Offered(count)}");
 
     private string Advertised(Counted count) =>
         count.Shown >= SteerThreshold ? Steer(count) : string.Empty;
@@ -95,7 +100,7 @@ public sealed class ResponseBuilder(string tool, string argument)
 
     private readonly record struct Counted(int Shown, int Total, string Unit, string? NarrowWith);
 
-    private readonly record struct Entry(EntryKind Kind, string Text, Counted Count);
+    private readonly record struct Entry(EntryKind Kind, string Text, Counted Count, string? Offer = null);
 
     private bool chosen;
 
@@ -147,4 +152,14 @@ public sealed class ResponseBuilder(string tool, string argument)
     private static string Restored(Counted count) => count.Total > count.Shown
         ? string.Create(CultureInfo.InvariantCulture, $"{count.Shown}/{count.Total} {count.Unit} (resolved={count.Shown}, total={count.Total})\n")
         : string.Create(CultureInfo.InvariantCulture, $"{count.Shown} {count.Unit} (truncated=false, total={count.Total})\n");
+
+    public ResponseBuilder Offer(string offer, string note)
+    {
+        entries.Add(new Entry(EntryKind.Note, note, default, offer));
+
+        return this;
+    }
+
+    private string Offered(Counted count) =>
+        Advertised(count) is { Length: > 0 } steer && OfferMemo.First(tool, "listing") ? steer : string.Empty;
 }

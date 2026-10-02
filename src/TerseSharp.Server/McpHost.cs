@@ -17,6 +17,8 @@ public static class McpHost
             string? tools,
             CancellationToken cancellationToken)
     {
+        OfferMemo.Remember(OfferMode.Once(Environment.GetEnvironmentVariable(OfferMode.Variable)));
+
         var builder = Host.CreateApplicationBuilder();
         var overrides = await ToolSettings.LoadAsync(Directory.GetCurrentDirectory(), cancellationToken).ConfigureAwait(false);
         var surface = ToolProfile.Resolve(tools) with { Overrides = overrides };

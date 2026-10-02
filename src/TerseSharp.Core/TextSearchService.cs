@@ -316,7 +316,7 @@ public static class TextSearchService
             response.Note(batch);
 
         if (Containable(request, records.Count))
-            response.Note("containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes");
+            response.Offer("containers", "containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes");
 
         return response.ToString();
     }

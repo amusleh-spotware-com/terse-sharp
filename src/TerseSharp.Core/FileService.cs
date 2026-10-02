@@ -305,7 +305,7 @@ public static class FileService
         response.Summary(selection.CoveredLines, ReachableLines(selection), "lines");
 
         if (selection.NextLine is 0 && selection.Lines.Count < selection.CoveredLines)
-            response.Note(CondensedMarker);
+            response.Offer("condensed", CondensedMarker);
 
         if (!request.Verbose && IsOutside(path))
             response.Note(OutsideMarker);
