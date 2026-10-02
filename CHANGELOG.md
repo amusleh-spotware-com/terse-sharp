@@ -23,6 +23,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Boundary_AnyOtherIOException_KeepsTodaysArgumentAnswer`, `Timeout_RendersItsOwnCode_NotInvalidArgument`,
   `RunNotFound_NamesTheIdAndTellsTheAgentToRunAgain` and `RunTests_StatusOfAnUnknownId_IsRefusedWithARemedy`.
 
+### Fixed
+
+- **`run_tests` no longer answers `0 failures  build=ok errors=0` when a project of the run failed to
+  build on an analyzer error (I668).** The build-output parser accepted only upper-case diagnostic
+  ids, so `error xUnit1051:` was dropped: a solution run with `tests=` reported the projects that built
+  as `0 failures  build=ok errors=0 warnings=0 … exitCode=1`, and a single-project run printed `FAILED
+  with no error-severity diagnostic` directly above the `error xUnit1051:` lines. Any `: error <ID>:`
+  line now counts as an error whatever its id prefix - in `build`, `run_tests`, `rerun_failed` and
+  `list_tests` - and a run that has results but whose build reported errors leads with `FAILED
+  <project> did not build (N error(s)), so its tests did not run; the counts below cover only the
+  projects that built`, followed by the errors. Response-format change on that failure path only.
+  Pinned by `Diagnostics_ForAnAnalyzerIdThatStartsLowerCase_ClassifiesItBySeverity`,
+  `RenderNoResults_ForAnAnalyzerErrorWithALowerCaseId_ListsItInsteadOfClaimingNoErrorDiagnostic`,
+  `RenderTest_ForASolutionRunWhereOneProjectFailedToBuild_LeadsWithFailedNamingIt`,
+  `BuildFailure_NamesTheProjectFromTheErrorLineOnEveryHost` and
+  `BuildFailure_ForAnErrorNamingNoProject_DoesNotInventOne`.
+
 ## [0.72.0] - 2026-10-01
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**

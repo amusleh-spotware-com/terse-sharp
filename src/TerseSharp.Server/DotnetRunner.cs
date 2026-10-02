@@ -221,6 +221,7 @@ public static partial class DotnetRunner
         var shown = Math.Min(report.Failures.Length, MaxFailures);
         var response = new ResponseBuilder("run_tests", request.Target).Verbose(request.Verbose);
 
+        AppendBuildFailure(response, run, root);
         response.Summary(shown, report.Failures.Length, "failures");
         response.Note(Counters(report, run, request.Target));
 
@@ -386,7 +387,7 @@ public static partial class DotnetRunner
             IReadOnlyList<KeyValuePair<string, string>>? environment = null) =>
             ChildProcess.RunAsync("dotnet", arguments, workingDirectory, timeout, cancellationToken, environment);
 
-    [GeneratedRegex(@"^.*?: (error|warning) [A-Z]+\d+:.*$", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^.*?: (error|warning) [A-Za-z]+\d+:.*$", RegexOptions.Multiline)]
     private static partial Regex DiagnosticLine();
 
     [GeneratedRegex(@"MSB3021|MSB3027|being used by another process", RegexOptions.IgnoreCase)]
@@ -444,6 +445,61 @@ public static partial class DotnetRunner
         var warning = line.IndexOf(": warning ", StringComparison.Ordinal);
 
         return error >= 0 && (warning < 0 || error < warning);
+    }
+
+    internal static string BuildFailure(string[] errors)
+    {
+        var projects = FailedProjects(errors);
+
+        return projects.Length is 0
+            ? string.Create(CultureInfo.InvariantCulture, $"FAILED the build reported {errors.Length} error(s), so at least one project did not run; the counts below cover only what did")
+            : string.Create(CultureInfo.InvariantCulture, $"FAILED {string.Join(", ", projects)} did not build ({errors.Length} error(s)), so its tests did not run; the counts below cover only the projects that built");
+    }
+
+    private static string[] FailedProjects(string[] errors)
+    {
+        var projects = new List<string>(errors.Length);
+
+        foreach (var error in errors)
+        {
+            if (ProjectOf(error) is { Length: > 0 } project && !projects.Contains(project, StringComparer.Ordinal))
+                projects.Add(project);
+        }
+
+        return [.. projects];
+    }
+
+    private static string ProjectOf(ReadOnlySpan<char> line)
+    {
+        var trimmed = line.TrimEnd();
+        var open = trimmed.LastIndexOf('[');
+
+        if (open < 0 || !trimmed.EndsWith(']'))
+            return string.Empty;
+
+        var path = trimmed[(open + 1)..^1];
+        var frameworks = path.IndexOf("::", StringComparison.Ordinal);
+        var project = frameworks < 0 ? path : path[..frameworks];
+        var name = project[(project.LastIndexOfAny('/', '\\') + 1)..];
+        var dot = name.LastIndexOf('.');
+
+        return dot > 0 && name[dot..].EndsWith("proj", StringComparison.OrdinalIgnoreCase) ? new string(name[..dot]) : string.Empty;
+    }
+
+    private static void AppendBuildFailure(ResponseBuilder response, ProcessRun run, string root)
+    {
+        if (run.ExitCode is 0)
+            return;
+
+        var errors = Diagnostics(run.Output).Errors;
+
+        if (errors.Length is 0)
+            return;
+
+        response.Note(BuildFailure(errors));
+
+        foreach (var line in errors)
+            response.Line(Relative(line, root));
     }
 
     private static string[] Shown(BuildDiagnostics diagnostics, bool verbose) =>

@@ -1091,4 +1091,50 @@ public sealed class DotnetRunnerTests
         Assert.Contains("the build had finished but the test host printed no start line before the deadline", batched, StringComparison.Ordinal);
         Assert.DoesNotContain("BUILDING", skipped + batched, StringComparison.Ordinal);
     }
+
+    private const string XunitAnalyzerError = @"C:\x\Foo.cs(12,5): error xUnit1051: Calls to methods which accept CancellationToken should use TestContext.Current.CancellationToken [C:\x\Foo.csproj]";
+
+    [Fact]
+    public void Diagnostics_ForAnAnalyzerIdThatStartsLowerCase_ClassifiesItBySeverity()
+    {
+        const string Warning = "src/A.cs(3,5): warning xUnit1031: do not block [A.csproj]";
+
+        var diagnostics = DotnetRunner.Diagnostics(XunitAnalyzerError + "\n" + Warning + "\n");
+
+        Assert.Equal([XunitAnalyzerError], diagnostics.Errors);
+        Assert.Equal([Warning], diagnostics.Warnings);
+    }
+
+    [Fact]
+    public void RenderNoResults_ForAnAnalyzerErrorWithALowerCaseId_ListsItInsteadOfClaimingNoErrorDiagnostic()
+    {
+        var text = DotnetRunner.RenderNoResults("Foo.csproj", new ProcessRun(1, XunitAnalyzerError + "\nBuild FAILED.\n", 4000), verbose: false);
+
+        Assert.Contains("error xUnit1051:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("no error-severity diagnostic", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForASolutionRunWhereOneProjectFailedToBuild_LeadsWithFailedNamingIt()
+    {
+        var text = DotnetRunner.RenderTest(
+            new ProcessRun(1, XunitAnalyzerError + "\n", 5000),
+            ScopedReport([new("Core.Tests", 2, 0, 0, 2, 40)]),
+            Searching(2),
+            "C:/repo");
+
+        Assert.StartsWith("FAILED Foo did not build (1 error(s))", text, StringComparison.Ordinal);
+        Assert.Contains("error xUnit1051:", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(@"C:\x\Foo.cs(1,1): error xUnit1051: m [C:\x\Foo.csproj]", "Foo")]
+    [InlineData("/src/B.cs(1,1): error CS0029: m [/src/Bar.Tests.csproj::TargetFramework=net10.0]", "Bar.Tests")]
+    public void BuildFailure_NamesTheProjectFromTheErrorLineOnEveryHost(string line, string project) =>
+        Assert.StartsWith("FAILED " + project + " did not build", DotnetRunner.BuildFailure([line]), StringComparison.Ordinal);
+
+
+    [Fact]
+    public void BuildFailure_ForAnErrorNamingNoProject_DoesNotInventOne() =>
+        Assert.StartsWith("FAILED the build reported 1 error(s)", DotnetRunner.BuildFailure(["MSBUILD : error MSB1009: Project file does not exist."]), StringComparison.Ordinal);
 }
