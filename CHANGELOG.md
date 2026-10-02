@@ -22,6 +22,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   by `Boundary_ASharingViolation_AnswersFileLockedRatherThanAnArgumentError`,
   `Boundary_AnyOtherIOException_KeepsTodaysArgumentAnswer`, `Timeout_RendersItsOwnCode_NotInvalidArgument`,
   `RunNotFound_NamesTheIdAndTellsTheAgentToRunAgain` and `RunTests_StatusOfAnUnknownId_IsRefusedWithARemedy`.
+- **`.terse.json` policy no longer sizes a test class by its test count (I684).** `TERSE102`
+  (`typeMethods`) counts only the methods of a type that carry no `[Fact]`/`[Theory]`/`[Test]`/
+  `[TestMethod]`/`[TestCase]`-style attribute, and `TERSE101` (`methodStatements`) skips those test
+  methods, whose statements are their arrange/act/assert. A test class's helpers still count, and
+  cognitive complexity, nesting depth and every other rule still judge test methods - the same
+  detection I654 uses for the `testMethod` naming pattern. On this repo the 3 `TERSE102` and 4
+  `TERSE101` records over `ToolCensusE2ETests.cs`, `PolicyServiceTests.cs` and
+  `WorkspaceRegistryTests.cs` drop to 0. Pinned by
+  `Inspect_ForATestClassOverTheMethodLimit_CountsOnlyItsNonTestMethods` and
+  `Inspect_ForATestMethodOverTheStatementLimit_IsNotAStatementViolation`.
 
 ### Fixed
 
@@ -39,6 +49,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `RenderTest_ForASolutionRunWhereOneProjectFailedToBuild_LeadsWithFailedNamingIt`,
   `BuildFailure_NamesTheProjectFromTheErrorLineOnEveryHost` and
   `BuildFailure_ForAnErrorNamingNoProject_DoesNotInventOne`.
+- **A `workspace=` hint that names one worktree exactly no longer answers `AmbiguousWorkspace` when two
+  worktrees of one solution are loaded (I682).** Within any one match tier (solution file name, file
+  stem, root name, path substring) a workspace whose worktree name equals the hint now ranks first; a
+  weaker tier never outranks a stronger one, and a tie no worktree name breaks is still refused, never
+  guessed. `workspace=TerseSharp` with `TerseSharp.slnx (TerseSharp)` and `TerseSharp.slnx (oldhead)`
+  loaded now resolves to the first. Pinned by
+  `Tier_WhenTwoWorktreesShareTheSolutionNameAndTheHintNamesOneWorktree_RanksThatWorktreeFirst`,
+  `Tier_WhenTwoWorktreesShareTheSolutionNameAndTheHintNamesNeither_KeepsThemTied` and
+  `Tier_ForAHintThatIsOneSolutionsStemAndAnotherWorktreesName_StillRanksTheSolutionStemFirst`.
 
 ## [0.72.0] - 2026-10-01
 

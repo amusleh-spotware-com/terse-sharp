@@ -233,25 +233,26 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
             ? Ok(loaded[0], semantic)
             : Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(loaded)));
 
-    private static int Tier(LoadedWorkspace workspace, string hint)
+    private static int Tier(LoadedWorkspace workspace, string hint) =>
+        Tier(workspace.SolutionPath, workspace.Root, workspace.Git.WorktreeName, hint);
+
+    internal static int Tier(string solutionPath, string root, string worktreeName, string hint)
     {
-        if (Path.IsPathRooted(hint) && PathBoundary.SameFile(workspace.SolutionPath, Path.GetFullPath(hint)))
-            return 0;
+        var tier = Matched(solutionPath, root, worktreeName, hint);
 
-        if (Same(Path.GetFileName(workspace.SolutionPath), hint))
-            return 1;
-
-        if (Same(Path.GetFileNameWithoutExtension(workspace.SolutionPath), hint))
-            return 2;
-
-        if (Same(workspace.Git.WorktreeName, hint))
-            return 3;
-
-        if (Same(Path.GetFileName(workspace.Root), hint))
-            return 4;
-
-        return workspace.SolutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase) ? 5 : int.MaxValue;
+        return tier is int.MaxValue ? tier : (2 * tier) + (Same(worktreeName, hint) ? 0 : 1);
     }
+
+    private static int Matched(string solutionPath, string root, string worktreeName, string hint) => hint switch
+    {
+        _ when Path.IsPathRooted(hint) && PathBoundary.SameFile(solutionPath, Path.GetFullPath(hint)) => 0,
+        _ when Same(Path.GetFileName(solutionPath), hint) => 1,
+        _ when Same(Path.GetFileNameWithoutExtension(solutionPath), hint) => 2,
+        _ when Same(worktreeName, hint) => 3,
+        _ when Same(Path.GetFileName(root), hint) => 4,
+        _ when solutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase) => 5,
+        _ => int.MaxValue,
+    };
 
     private static Result<WorkspaceLease> Ok(LoadedWorkspace workspace, bool semantic)
     {

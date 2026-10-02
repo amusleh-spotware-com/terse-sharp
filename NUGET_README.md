@@ -176,7 +176,7 @@ TERSE100  src/Trading/OrderService.cs:41  OrderService.Reconcile  cognitive comp
 remedy: fix the code above, or pass allowPolicy=true to apply it anyway; the response then names every rule it bypassed
 ```
 
-Fourteen rules, `TERSE100`–`TERSE113`: cognitive complexity, method statements, methods per type,
+Fourteen rules, `TERSE100`–`TERSE113`: cognitive complexity, method statements and methods per type (both skip `[Fact]`-style test methods),
 constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
 declaration kind (a `[Fact]`/`[Theory]`/`[Test]`/`[TestMethod]`/`[TestCase]` method is judged by its own `testMethod` pattern, which accepts `Method_Scenario_Outcome`), `async void`, condition operands, chained references, nesting depth, and **comments
 (`TERSE112`) plus XML doc comments (`TERSE113`) — the two rules enforced at `warn` with no

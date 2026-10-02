@@ -539,4 +539,39 @@ public sealed class WorkspaceRegistryTests
         Assert.StartsWith("ERROR AmbiguousWorkspace", bound.Error!.Render(), StringComparison.Ordinal);
         Assert.Contains(unbound.Workspace, registry.All());
     }
+
+    [Fact]
+    public void Tier_WhenTwoWorktreesShareTheSolutionNameAndTheHintNamesOneWorktree_RanksThatWorktreeFirst()
+    {
+        var main = Path.Combine(Path.GetTempPath(), "TerseSharp");
+        var other = Path.Combine(main, ".claude", "worktrees", "oldhead");
+
+        var named = WorkspaceRegistry.Tier(Path.Combine(main, "TerseSharp.slnx"), main, "TerseSharp", "TerseSharp");
+        var unnamed = WorkspaceRegistry.Tier(Path.Combine(other, "TerseSharp.slnx"), other, "oldhead", "TerseSharp");
+
+        Assert.InRange(named, 0, unnamed - 1);
+    }
+
+    [Fact]
+    public void Tier_WhenTwoWorktreesShareTheSolutionNameAndTheHintNamesNeither_KeepsThemTied()
+    {
+        var first = Path.Combine(Path.GetTempPath(), "alpha");
+        var second = Path.Combine(Path.GetTempPath(), "beta");
+
+        Assert.Equal(
+            WorkspaceRegistry.Tier(Path.Combine(first, "App.slnx"), first, "alpha", "App"),
+            WorkspaceRegistry.Tier(Path.Combine(second, "App.slnx"), second, "beta", "App"));
+    }
+
+    [Fact]
+    public void Tier_ForAHintThatIsOneSolutionsStemAndAnotherWorktreesName_StillRanksTheSolutionStemFirst()
+    {
+        var first = Path.Combine(Path.GetTempPath(), "x");
+        var second = Path.Combine(Path.GetTempPath(), "y");
+
+        var stem = WorkspaceRegistry.Tier(Path.Combine(first, "App.slnx"), first, "x", "App");
+        var worktree = WorkspaceRegistry.Tier(Path.Combine(second, "Other.slnx"), second, "App", "App");
+
+        Assert.InRange(stem, 0, worktree - 1);
+    }
 }

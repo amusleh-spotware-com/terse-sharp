@@ -79,7 +79,7 @@ public static class PolicyService
 
     private static Measure? Statements(MemberDeclarationSyntax member, Scope scope)
     {
-        if (Body(member) is not { } body)
+        if ((member is MethodDeclarationSyntax method && IsTest(method)) || Body(member) is not { } body)
             return null;
 
         var count = body.DescendantNodes(node => node is not AnonymousFunctionExpressionSyntax)
@@ -163,8 +163,21 @@ public static class PolicyService
 
     private static Measure? Methods(BaseTypeDeclarationSyntax type, Scope scope) =>
         type is TypeDeclarationSyntax declaration
-            ? Over(declaration.Members.OfType<MethodDeclarationSyntax>().Count(), scope.Limit(PolicyRule.TypeMethods), "methods")
+            ? Over(NonTestMethods(declaration), scope.Limit(PolicyRule.TypeMethods), "methods")
             : null;
+
+    private static int NonTestMethods(TypeDeclarationSyntax declaration)
+    {
+        var count = 0;
+
+        foreach (var member in declaration.Members)
+        {
+            if (member is MethodDeclarationSyntax method && !IsTest(method))
+                count++;
+        }
+
+        return count;
+    }
 
     private static Measure? Condition(BinaryExpressionSyntax condition, Scope scope)
     {

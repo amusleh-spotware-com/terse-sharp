@@ -505,4 +505,34 @@ public sealed class PolicyServiceTests
     [Fact]
     public void Inspect_ForAPascalCaseMutableLocal_IsStillANamingViolation() =>
         Assert.Contains("local name 'Limit'", Assert.Single(Findings(PolicyRule.Naming, "class Sample { public int Run() { var Limit = 3; return Limit; } }")).Measured, StringComparison.Ordinal);
+
+    [Fact]
+    public void Inspect_ForATestClassOverTheMethodLimit_CountsOnlyItsNonTestMethods()
+    {
+        var tests = Declared("[Fact] ", 11, 0);
+
+        Assert.Empty(Findings(PolicyRule.TypeMethods, "class SampleTests { " + tests + Declared("", 10, 100) + "}"));
+
+        var finding = Assert.Single(Findings(PolicyRule.TypeMethods, "class SampleTests { " + tests + Declared("", 11, 100) + "}"));
+
+        Assert.Equal("SampleTests", finding.Declaration);
+        Assert.Equal("11 methods", finding.Measured);
+        Assert.Equal("10", finding.Allowed);
+    }
+
+    [Fact]
+    public void Inspect_ForATestMethodOverTheStatementLimit_IsNotAStatementViolation()
+    {
+        var statements = string.Concat(Enumerable.Repeat("Run(); ", 11));
+
+        Assert.Empty(Findings(PolicyRule.MethodStatements, "class SampleTests { [Theory] void Case() { " + statements + "} void Run() { } }"));
+
+        var finding = Assert.Single(Findings(PolicyRule.MethodStatements, "class Sample { void Case() { " + statements + "} void Run() { } }"));
+
+        Assert.Equal("Sample.Case", finding.Declaration);
+        Assert.Equal("11 statements", finding.Measured);
+    }
+
+    private static string Declared(string attribute, int count, int start) =>
+        string.Concat(Enumerable.Range(start, count).Select(index => string.Create(CultureInfo.InvariantCulture, $"{attribute}void M{index}() {{ }} ")));
 }
