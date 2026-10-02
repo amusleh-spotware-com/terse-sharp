@@ -39,9 +39,10 @@ public sealed class DetachedRunsTests
         await using var runs = new DetachedRuns();
         var text = await runs.StatusAsync("t42", TimeSpan.Zero, TestContext.Current.CancellationToken);
 
-        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.StartsWith("ERROR RunNotFound", text, StringComparison.Ordinal);
         Assert.Contains("'t42'", text, StringComparison.Ordinal);
-        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.Contains("remedy: start the run again", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -263,6 +263,28 @@ public static class Errors
             TerseErrorCode.FileLocked,
             string.Create(CultureInfo.InvariantCulture, $"'{path}' is held open by another process that shares no read access, so no read can open it"),
             "retry once that process closes it - no read_text argument helps, tail= included, because every read opens the file the same way; find_files stamps=true still answers its size and last-write time");
+
+    private const int SharingViolationResult = unchecked((int)0x80070020);
+    private const int LockViolationResult = unchecked((int)0x80070021);
+
+    public static TerseError Timeout(string message, string remedy) =>
+        new(TerseErrorCode.Timeout, message, remedy);
+
+
+    public static TerseError RunNotFound(string id) => new(
+        TerseErrorCode.RunNotFound,
+        string.Create(CultureInfo.InvariantCulture, $"no detached run has id '{id}' in this server - ids live only as long as the process that answered them, so one a restarted server never issued cannot be found"),
+        "start the run again - run_tests with the same arguments, or detach=true for a fresh id; no status= value can recover a run this process did not start");
+
+
+    public static bool IsSharingViolation(IOException exception) =>
+        exception.HResult is SharingViolationResult or LockViolationResult;
+
+
+    public static TerseError Locked(IOException exception) => new(
+        TerseErrorCode.FileLocked,
+        exception.Message,
+        "retry once the other process closes the file - no argument of this call helps, because every attempt opens it the same way; find_files stamps=true still answers its size and last-write time");
 }
 
 public readonly record struct RollbackHints(

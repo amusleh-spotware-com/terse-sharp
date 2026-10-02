@@ -64,9 +64,7 @@ public sealed class DetachedRuns : IDisposable, IAsyncDisposable
         await expiry.CancelAsync().ConfigureAwait(false);
     }
 
-    private static string Unknown(string id) => Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"no detached run has id '{id}' in this server - ids live only as long as the process that answered them"),
-        "pass the id a run_tests detach=true call answered, or start the run again with detach=true").Render();
+    private static string Unknown(string id) => Errors.RunNotFound(id).Render();
 
     private void Prune()
     {

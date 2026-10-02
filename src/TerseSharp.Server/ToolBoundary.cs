@@ -56,11 +56,13 @@ public static class ToolBoundary
             ? inner
             : exception;
 
-    private static string Describe(Exception exception) =>
-        Errors.Invalid(
+    private static string Describe(Exception exception) => exception switch
+    {
+        IOException locked when Errors.IsSharingViolation(locked) => Errors.Locked(locked).Render(),
+        _ => Errors.Invalid(
             string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),
-            "check the arguments; use search_symbols or find_files to get a valid id or path")
-            .Render();
+            "check the arguments; use search_symbols or find_files to get a valid id or path").Render(),
+    };
 
     private static string Announced(string response) =>
         UpdateBanner.Take() is { } notice ? response + "\n" + notice : response;

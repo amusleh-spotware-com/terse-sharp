@@ -437,9 +437,10 @@ public sealed class ChangedTestSelectionE2ETests
         {
             var text = await CallAsync(server, "run_tests", new() { ["status"] = "t999" });
 
-            Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+            Assert.StartsWith("ERROR RunNotFound", text, StringComparison.Ordinal);
             Assert.Contains("'t999'", text, StringComparison.Ordinal);
             Assert.Contains("remedy:", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
         }
         finally
         {

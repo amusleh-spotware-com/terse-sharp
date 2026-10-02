@@ -22,7 +22,9 @@ public enum TerseErrorCode
     UnsupportedRunner,
     NameTaken,
     RunInFlight,
-    FileLocked
+    FileLocked,
+    Timeout,
+    RunNotFound
 }
 
 public sealed record TerseError(TerseErrorCode Code, string Message, string Remedy)

@@ -8,6 +8,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **Three runtime failures stop answering `ERROR InvalidArgument` (I696).** Each told the agent its
+  arguments were wrong when they were not, so the retry it made with altered arguments could not
+  succeed. Response-format change, by path: a git child killed at the 60 s deadline (`history
+  contains=` pickaxe, `changed_files`, `diff_symbols`, `diff_text`) now answers `ERROR Timeout`, with
+  a remedy naming `path=` and `baseRef=`; `run_tests status=` naming an id this process never issued
+  now answers `ERROR RunNotFound`, with a remedy to start the run again; and an `IOException` carrying
+  a Windows sharing or lock violation (HRESULT `0x80070020`/`0x80070021`) that reaches the tool
+  boundary from any tool now answers `ERROR FileLocked`, not only `read_text`'s own read path. Every
+  other `IOException`, and a Unix lock (raw errno HResult), still answers `InvalidArgument`. Covered
+  by `Boundary_ASharingViolation_AnswersFileLockedRatherThanAnArgumentError`,
+  `Boundary_AnyOtherIOException_KeepsTodaysArgumentAnswer`, `Timeout_RendersItsOwnCode_NotInvalidArgument`,
+  `RunNotFound_NamesTheIdAndTellsTheAgentToRunAgain` and `RunTests_StatusOfAnUnknownId_IsRefusedWithARemedy`.
+
 ## [0.72.0] - 2026-10-01
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
