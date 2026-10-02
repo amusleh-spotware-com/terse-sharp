@@ -66,9 +66,8 @@ public static class RepeatSteer
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static bool Unbatchable(CallToolRequestParams parameters, string tool) =>
-        PerEntryOnly.TryGetValue(tool, out var names)
-        && parameters.Arguments is { } arguments
-        && Carries(arguments, names);
+        parameters.Arguments is { } arguments
+        && (Carries(arguments, PerEntryOnly.GetValueOrDefault(tool, [])) || MovesWhole(arguments, tool));
 
     private static bool Carries(IDictionary<string, JsonElement> arguments, string[] names)
     {
@@ -100,13 +99,16 @@ public static class RepeatSteer
 
         var (count, seen, captured) = Counted(tool, value, mode);
 
-        return Repeated(tool, count, seen, captured);
+        return Repeated(tool, count, seen, captured, mode);
     }
 
-    private static string? Repeated(string tool, int count, string[] seen, int captured)
+    private static string? Repeated(string tool, int count, string[] seen, int captured, string mode)
     {
         if (count != Threshold || !Plural.TryGetValue(tool, out var plural))
             return null;
+
+        if (RowMove(tool, mode))
+            return string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - pass rows=[...] with the next {Math.Min(count, MaxBatch)}+ in ONE call: {RowShape}");
 
         if (Shape.TryGetValue(tool, out var shape))
             return string.Create(CultureInfo.InvariantCulture, $"{count} {tool} calls in a row - pass {plural}=[...] with the next {Math.Min(count, MaxBatch)}+ in ONE call: {shape}");
@@ -277,7 +279,7 @@ public static class RepeatSteer
 
         StringBuilder? mode = null;
 
-        foreach (var name in CallWide)
+        foreach (var name in Carries(arguments, ToPath) ? MoveWide : CallWide)
         {
             if (arguments.TryGetValue(name, out var value) && value.ValueKind is not (JsonValueKind.False or JsonValueKind.Null))
                 (mode ??= new StringBuilder()).Append(name).Append('=').Append(value.GetRawText()).Append(';');
@@ -285,4 +287,18 @@ public static class RepeatSteer
 
         return mode?.ToString() ?? string.Empty;
     }
+
+    private static bool MovesWhole(IDictionary<string, JsonElement> arguments, string tool) =>
+        MovedWhole.TryGetValue(tool, out var moved) && Carries(arguments, ToPath) && Carries(arguments, moved);
+
+    private static readonly FrozenDictionary<string, string[]> MovedWhole = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["edit_text"] = ["section", "rows"],
+    }.ToFrozenDictionary(StringComparer.Ordinal);
+    private static readonly string[] ToPath = ["toPath"];
+    private static readonly string[] MoveWide = ["toPath", "path", "dryRun", "workspace", "allowErrors", "verbose"];
+    private const string RowShape = "each entry is {row, newText} with newText optional, every row moving from the ONE path= into the ONE toPath=, at most 25 per call";
+
+    private static bool RowMove(string tool, string mode) =>
+        tool is "edit_text" && mode.StartsWith("toPath=", StringComparison.Ordinal);
 }

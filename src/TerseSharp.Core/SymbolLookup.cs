@@ -19,19 +19,8 @@ public static class SymbolLookup
         string? path,
         CancellationToken cancellationToken,
         bool typesOnly = false,
-        bool referenced = false)
-    {
-        var requested = SymbolReference.Unescaped(symbolId);
-
-        if (SymbolReference.IsDocumentationId(requested))
-            return await ByIdAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
-
-        if (path is not { Length: > 0 } scope)
-            return await ByNameAsync(workspace, requested, typesOnly, referenced, cancellationToken).ConfigureAwait(false);
-
-        return Typed(await InFileAsync(workspace, requested, scope, cancellationToken).ConfigureAwait(false), typesOnly)
-            ?? await ByNameAsync(workspace, requested, typesOnly, referenced, cancellationToken).ConfigureAwait(false);
-    }
+        bool referenced = false) =>
+        (await ResolveNotedAsync(workspace, symbolId, path, cancellationToken, typesOnly, referenced).ConfigureAwait(false)).Symbol;
 
     private static Result<ISymbol>? Typed(Result<ISymbol>? found, bool typesOnly) =>
         typesOnly && found is { IsOk: true, Value: not INamedTypeSymbol } ? null : found;
@@ -154,7 +143,7 @@ public static class SymbolLookup
     internal static string Addressable(ISymbol symbol) =>
             SymbolReference.RoundTrips(symbol) ? SymbolReference.Brief(symbol) : SymbolId.From(symbol).Value;
 
-    private static async Task<Result<ISymbol>> ByIdAsync(
+    private static async Task<SymbolResolution> ByIdAsync(
         LoadedWorkspace workspace,
         string requested,
         CancellationToken cancellationToken)
@@ -163,14 +152,17 @@ public static class SymbolLookup
         var distinct = matches.DistinctBy(Describe, StringComparer.Ordinal).ToArray();
 
         if (distinct.Length is 1)
-            return Result.Ok(distinct[0]);
+            return new(Result.Ok(distinct[0]), false);
 
         if (distinct.Length > 1)
-            return Result.Fail<ISymbol>(Errors.AmbiguousSymbol(requested, [.. distinct.Select(Describe)]));
+            return new(Result.Fail<ISymbol>(Errors.AmbiguousSymbol(requested, [.. distinct.Select(Describe)])), false);
+
+        if (await FromNameAsync(workspace, requested, cancellationToken).ConfigureAwait(false) is { } named)
+            return new(Result.Ok(named), true);
 
         var nearest = await NearestAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
 
-        return Result.Fail<ISymbol>(Errors.SymbolNotFound(requested, nearest));
+        return new(Result.Fail<ISymbol>(Errors.SymbolNotFound(requested, nearest)), false);
     }
 
     private static async Task<Result<ISymbol>?> InFileAsync(
@@ -317,4 +309,41 @@ public static class SymbolLookup
 
         return OnlyTypes(text, types, matches.Length - types.Length) ?? Chosen(text, types, found);
     }
+
+    public static async Task<SymbolResolution> ResolveNotedAsync(
+        LoadedWorkspace workspace,
+        string symbolId,
+        string? path,
+        CancellationToken cancellationToken,
+        bool typesOnly = false,
+        bool referenced = false)
+    {
+        var requested = SymbolReference.Unescaped(symbolId);
+
+        if (SymbolReference.IsDocumentationId(requested))
+            return await ByIdAsync(workspace, requested, cancellationToken).ConfigureAwait(false);
+
+        if (path is not { Length: > 0 } scope)
+            return new(await ByNameAsync(workspace, requested, typesOnly, referenced, cancellationToken).ConfigureAwait(false), false);
+
+        return new(
+            Typed(await InFileAsync(workspace, requested, scope, cancellationToken).ConfigureAwait(false), typesOnly)
+                ?? await ByNameAsync(workspace, requested, typesOnly, referenced, cancellationToken).ConfigureAwait(false),
+            false);
+    }
+
+    private static async Task<ISymbol?> FromNameAsync(LoadedWorkspace workspace, string requested, CancellationToken cancellationToken)
+    {
+        if (SymbolReference.AsName(requested) is not { } name)
+            return null;
+
+        var found = await ByNameAsync(workspace, name, typesOnly: false, referenced: false, cancellationToken).ConfigureAwait(false);
+
+        return found is { IsOk: true, Value: { } symbol } && SameKind(requested[0], symbol) ? symbol : null;
+    }
+
+    private static bool SameKind(char kind, ISymbol symbol) =>
+        (kind, symbol) is ('M', IMethodSymbol) or ('T', INamedTypeSymbol) or ('P', IPropertySymbol) or ('F', IFieldSymbol) or ('E', IEventSymbol);
+
+    public readonly record struct SymbolResolution(Result<ISymbol> Symbol, bool FromName);
 }

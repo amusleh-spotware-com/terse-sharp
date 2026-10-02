@@ -98,4 +98,30 @@ public sealed class SymbolReferenceTests
         Assert.Equal(container, query.ContainingType);
         Assert.Equal(member, query.Member);
     }
+
+    [Theory]
+    [InlineData("M:TerseSharp.Core.Errors.FileLocked(string)", "TerseSharp.Core.Errors.FileLocked(string)")]
+    [InlineData("M:A.B.F(string)~System.Int32", "A.B.F(string)")]
+    [InlineData("M:A.B.Healthy", "A.B.Healthy()")]
+    [InlineData("M:A.B.#ctor(int)", "A.B.#ctor(int)")]
+    [InlineData("T:A.B", "A.B")]
+    [InlineData("P:A.B.Name", "A.B.Name")]
+    [InlineData("F:A.B.count", "A.B.count")]
+    [InlineData("E:A.B.Changed", "A.B.Changed")]
+    public void AsName_ForAMappableDocumentationId_KeepsTheQualifierAndTheParameterList(string id, string expected) =>
+            Assert.Equal(expected, SymbolReference.AsName(id));
+
+
+    [Theory]
+    [InlineData("N:A.B")]
+    [InlineData("M:A.B.F``1(``0)")]
+    [InlineData("T:A.List`1")]
+    [InlineData("M:A.B.F(System.Collections.Generic.List{System.String})")]
+    [InlineData("M:A.B.F(System.Int32@)")]
+    [InlineData("M:A.B.F(System.Int32*)")]
+    [InlineData("M:A.B.A#IHandler#Handle(int)")]
+    [InlineData("M:A.B.op_Implicit(A.B)~System.Int32")]
+    [InlineData("A.B.F(string)")]
+    public void AsName_ForAnIdTheNamePathCannotProve_ReturnsNull(string id) =>
+        Assert.Null(SymbolReference.AsName(id));
 }

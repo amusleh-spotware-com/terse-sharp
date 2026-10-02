@@ -75,12 +75,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
             return await AttributedAsync(lease.Workspace, async () =>
             {
-                var symbol = await SymbolLookup.ResolveAsync(lease.Workspace, requested, path, cancellationToken, typesOnly, referenced).ConfigureAwait(false);
+                var resolution = await SymbolLookup.ResolveNotedAsync(lease.Workspace, requested, path, cancellationToken, typesOnly, referenced).ConfigureAwait(false);
 
-                if (symbol.IsOk)
-                    return await action(lease.Workspace, symbol.Value!).ConfigureAwait(false);
+                if (resolution.Symbol is { IsOk: true, Value: { } symbol })
+                    return NotedFromName(await action(lease.Workspace, symbol).ConfigureAwait(false), resolution.FromName, symbol);
 
-                return unresolved is null ? symbol.Error!.Render() : unresolved(lease.Workspace, symbol.Error!);
+                return unresolved is null ? resolution.Symbol.Error!.Render() : unresolved(lease.Workspace, resolution.Symbol.Error!);
             }).ConfigureAwait(false);
         }).ConfigureAwait(false);
     }
@@ -458,6 +458,11 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         before is 0 && compiled == total && loaded.TakeRealizedNotice()
             ? Realized(milliseconds, loaded.Drops, loaded.DroppedAfter)
             : Grew(milliseconds, compiled - before, compiled, total, loaded.Drops);
+
+    private static string NotedFromName(string answer, bool fromName, ISymbol symbol) =>
+        fromName && !answer.StartsWith("ERROR", StringComparison.Ordinal)
+            ? string.Concat(answer, "\nresolved from name: ", SymbolId.From(symbol).Value)
+            : answer;
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

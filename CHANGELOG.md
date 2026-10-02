@@ -116,6 +116,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `DeleteAndReplace_OnAPrimaryConstructor_AreRefusedNamingTheTypeInsteadOfEditingTheWholeType`,
   `DeleteSymbol_OnACompilerSynthesizedRecordMember_IsRefusedInsteadOfDeletingTheRecord` and
   `ReplaceSymbol_OnATypeWithAPrimaryConstructor_StillReHeadsItFromItsHeaderAlone`.
+- **A hand-typed documentation id spelled with C# keywords resolves instead of answering
+  `SymbolNotFound` (I695).** `M:TerseSharp.Core.Errors.FileLocked(string)` was refused, and its own
+  `nearest:` line offered `…FileLocked(System.String)`, while `Errors.FileLocked(string)` resolved. When
+  a `T:`/`M:`/`P:`/`F:`/`E:` id fails exact resolution it is now re-resolved through the name path: the
+  prefix and any `~Return` suffix are dropped, the parameter list is kept, and an `M:` with no list means
+  zero parameters. It answers only when that yields exactly one symbol of the same kind; generic arity
+  or arguments, `ref`/`out`/pointer markers, explicit interface implementations and conversion operators
+  keep today's refusal. Response-format change: a symbol resolved this way ends `resolved from name:
+  <documentation id>` on `get_symbol`, `get_symbol_source`, `find_usages`, `find_implementations` and the
+  symbol-addressed edit and refactor tools. Covered by
+  `AsName_ForAMappableDocumentationId_KeepsTheQualifierAndTheParameterList`,
+  `AsName_ForAnIdTheNamePathCannotProve_ReturnsNull`,
+  `FindUsages_ForADocumentationIdSpelledWithAKeywordParameter_ResolvesThroughTheNamePathAndSaysSo`,
+  `GetSymbolSource_ForADocumentationIdSpelledWithAKeywordParameter_PicksThatOverloadOnly` and
+  `FindUsages_ForADocumentationIdTheNamePathCannotProve_KeepsRefusing`.
+- **The run-batching steer no longer tells a markdown move to use `edits=[...]` (I670).** After two
+  `edit_text` calls it answered `pass edits=[...] with the next 2+ in ONE call` even when the second was a
+  `rows=[…] toPath=` row move, which `edits=` entries cannot carry. An `edit_text` carrying `toPath=` with
+  `section=` or `rows=` now breaks the run and gets no steer; a run of single `row=` moves sharing one
+  `path=` and one `toPath=` is steered to `rows=[...]`; an in-place edit and a move, or moves from
+  different source files, are no longer counted as one run; `section=` without `toPath=` stays batchable
+  into `edits=`. Locked by `Unbatchable_ForAnEditTextMoveTheEditsEntriesCannotCarry_SuppressesTheRunSteer`,
+  `Steer_ForARowsMoveAfterAnEdit_NeverOffersTheEditsBatchThatCannotCarryIt`,
+  `Steer_ForARunOfSingleRowMoves_NamesRowsRatherThanEdits`,
+  `Steer_ForARowMoveAfterAnInPlaceEdit_SaysNothingBecauseOneCallCannotCarryBoth` and
+  `Steer_ForRowMovesFromDifferentSourceFiles_SaysNothingBecauseRowsTakesOnePath`.
 
 ## [0.72.0] - 2026-10-01
 

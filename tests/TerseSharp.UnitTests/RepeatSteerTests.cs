@@ -313,6 +313,76 @@ public sealed class RepeatSteerTests
 
         Assert.Equal(expected, RepeatSteer.Unbatchable(parameters, "write_text"));
     }
+
+    [Theory]
+    [InlineData("rows", "[{\"row\":\"I670\"}]", true, true)]
+    [InlineData("section", "\"## Open\"", true, true)]
+    [InlineData("row", "\"I670\"", true, false)]
+    [InlineData("section", "\"## Open\"", false, false)]
+    public void Unbatchable_ForAnEditTextMoveTheEditsEntriesCannotCarry_SuppressesTheRunSteer(string argument, string json, bool moved, bool expected) =>
+            Assert.Equal(expected, RepeatSteer.Unbatchable(EditTextCall(argument, json, moved), "edit_text"));
+
+    [Fact]
+    public void Steer_ForARowsMoveAfterAnEdit_NeverOffersTheEditsBatchThatCannotCarryIt()
+    {
+        RepeatSteer.Forget();
+
+        var move = EditTextCall("rows", "[{\"row\":\"I670\"}]", moved: true);
+
+        Assert.Null(RepeatSteer.Steer("edit_text"));
+        Assert.Null(SteerFor(move));
+        Assert.Null(SteerFor(move));
+    }
+
+    [Fact]
+    public void Steer_ForARunOfSingleRowMoves_NamesRowsRatherThanEdits()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(SteerFor(EditTextCall("row", "\"I669\"", moved: true)));
+
+        var steer = SteerFor(EditTextCall("row", "\"I670\"", moved: true));
+
+        Assert.NotNull(steer);
+        Assert.Contains("pass rows=[...]", steer, StringComparison.Ordinal);
+        Assert.Contains("ONE toPath=", steer, StringComparison.Ordinal);
+        Assert.DoesNotContain("edits=", steer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Steer_ForARowMoveAfterAnInPlaceEdit_SaysNothingBecauseOneCallCannotCarryBoth()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(SteerFor(EditTextCall("oldText", "\"a\"", moved: false)));
+        Assert.Null(SteerFor(EditTextCall("row", "\"I670\"", moved: true)));
+    }
+
+    [Fact]
+    public void Steer_ForRowMovesFromDifferentSourceFiles_SaysNothingBecauseRowsTakesOnePath()
+    {
+        RepeatSteer.Forget();
+
+        Assert.Null(SteerFor(EditTextCall("row", "\"I669\"", moved: true)));
+        Assert.Null(SteerFor(EditTextCall("row", "\"I670\"", moved: true, path: "OTHER.md")));
+    }
+
+    private static string? SteerFor(ModelContextProtocol.Protocol.CallToolRequestParams call) =>
+        RepeatSteer.Steer(call.Name, unbatchable: RepeatSteer.Unbatchable(call, call.Name), value: RepeatSteer.Argument(call, call.Name), mode: RepeatSteer.Mode(call));
+
+    private static ModelContextProtocol.Protocol.CallToolRequestParams EditTextCall(string argument, string json, bool moved, string path = "IMPROVEMENTS.md")
+    {
+        var arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
+        {
+            ["path"] = System.Text.Json.JsonSerializer.SerializeToElement(path),
+            [argument] = System.Text.Json.JsonDocument.Parse(json).RootElement,
+        };
+
+        if (moved)
+            arguments["toPath"] = System.Text.Json.JsonSerializer.SerializeToElement("IMPROVEMENTS-ARCHIVE.md");
+
+        return new ModelContextProtocol.Protocol.CallToolRequestParams { Name = "edit_text", Arguments = arguments };
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

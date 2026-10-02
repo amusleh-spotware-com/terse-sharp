@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
@@ -283,4 +284,38 @@ public static class SymbolReference
         "#cctor" => WellKnownMemberNames.StaticConstructorName,
         _ => name,
     };
+
+    private static readonly SearchValues<char> Unmappable = SearchValues.Create("`{}@*^");
+
+    public static string? AsName(string documentationId)
+    {
+        if (!IsDocumentationId(documentationId) || documentationId[0] is not ('M' or 'T' or 'P' or 'F' or 'E'))
+            return null;
+
+        var body = documentationId.AsSpan(2);
+        var signature = body.IndexOf('~') is var returns and >= 0 ? body[..returns] : body;
+        var open = signature.IndexOf('(');
+        var name = open < 0 ? signature : signature[..open];
+
+        if (!Mappable(signature, name))
+            return null;
+
+        return documentationId[0] is 'M' && open < 0 ? string.Concat(signature, "()".AsSpan()) : signature.ToString();
+    }
+
+    private static bool Mappable(ReadOnlySpan<char> signature, ReadOnlySpan<char> name) =>
+        !signature.ContainsAny(Unmappable) && ConstructorHashOnly(name) && !IsConversion(name);
+
+    private static bool IsConversion(ReadOnlySpan<char> name) =>
+        name.EndsWith("op_Implicit", StringComparison.Ordinal) || name.EndsWith("op_Explicit", StringComparison.Ordinal);
+
+    private static bool ConstructorHashOnly(ReadOnlySpan<char> name)
+    {
+        var hash = name.IndexOf('#');
+
+        return hash < 0 || IsConstructorSegment(name, hash);
+    }
+
+    private static bool IsConstructorSegment(ReadOnlySpan<char> name, int hash) =>
+        hash > 0 && name[hash - 1] is '.' && name[(hash + 1)..] is "ctor" or "cctor";
 }

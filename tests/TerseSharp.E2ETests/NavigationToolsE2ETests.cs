@@ -1026,4 +1026,39 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("  OrderService.Submit  ", text, StringComparison.Ordinal);
         Assert.DoesNotContain("OrderService.repository", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindUsages_ForADocumentationIdSpelledWithAKeywordParameter_ResolvesThroughTheNamePathAndSaysSo()
+    {
+        var keyword = await server.CallAsync("find_usages", new() { ["symbolId"] = "M:Fixture.Trading.SplitHandler.Route(string)" });
+        var exact = await server.CallAsync("find_usages", new() { ["symbolId"] = "M:Fixture.Trading.SplitHandler.Route(System.String)" });
+
+        Assert.DoesNotContain("ERROR", keyword, StringComparison.Ordinal);
+        Assert.Contains("1 usages in 1 files", keyword, StringComparison.Ordinal);
+        Assert.Contains("SplitHandler.cs", keyword, StringComparison.Ordinal);
+        Assert.Contains("resolved from name: M:Fixture.Trading.SplitHandler.Route(System.String)~System.Int32", keyword, StringComparison.Ordinal);
+        Assert.DoesNotContain("resolved from name", exact, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForADocumentationIdSpelledWithAKeywordParameter_PicksThatOverloadOnly()
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "M:Fixture.Trading.SplitHandler.Route(int)" });
+
+        Assert.Contains("value + 1", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("value.Length", source, StringComparison.Ordinal);
+        Assert.Contains("resolved from name: M:Fixture.Trading.SplitHandler.Route(System.Int32)~System.Int32", source, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("M:Fixture.Trading.SplitHandler.Route(long)")]
+    [InlineData("P:Fixture.Trading.SplitHandler.Dispatch")]
+    [InlineData("F:Fixture.Trading.SplitHandler.Route(string)")]
+    public async Task FindUsages_ForADocumentationIdTheNamePathCannotProve_KeepsRefusing(string id)
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolId"] = id });
+
+        Assert.StartsWith("ERROR SymbolNotFound", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("resolved from name", text, StringComparison.Ordinal);
+    }
 }
