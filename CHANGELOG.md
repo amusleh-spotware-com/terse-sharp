@@ -288,7 +288,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   scan counted the `containers=true names …` line on 296 `search_text`/`search_regex` answers (23
   tokens each; the next search used `containers=` after 63 of 280), `read_text`'s `condensed=true …`
   marker on 220 (22 tokens), and complete-listing ` - narrow with …` offers on ~540 more answers that
-  were acted on in under 10 % of cases. Each offer - the containers line, `get_file_outline`'s `N members -
+  were acted on in under 10 % of cases. The `condensed=true` marker stays on every condensed read - it
+  is a caveat about altered payload, not an offer. Each offer - the containers line, `get_file_outline`'s `N members -
   narrow with contains=` and the ` - narrow with …` tail of a complete listing of 25+ records - is now
   printed on a tool's first answer that carries it and omitted afterwards; the memo is a typed offer
   entry in `ResponseBuilder`, so no record or payload text is ever matched or edited. Every real
