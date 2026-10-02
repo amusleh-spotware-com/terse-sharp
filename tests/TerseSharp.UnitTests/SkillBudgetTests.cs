@@ -37,4 +37,13 @@ public sealed class SkillBudgetTests
             string.Create(CultureInfo.InvariantCulture, $"\nbudget={SkillBudget.Tokens} used={SkillBudget.Tokens + 1} over=1"),
             SkillBudget.Stamp("/r/src/TerseSharp.Server/Assets/SKILL.md", requested: true, text));
     }
+
+    [Fact]
+    public void Trailer_OnTheShippedSkillOnly_RendersTheBudgetOnTheSameLine()
+    {
+        Assert.Equal(
+            string.Create(CultureInfo.InvariantCulture, $"  budget={SkillBudget.Tokens} used=2 left={SkillBudget.Tokens - 2}"),
+            SkillBudget.Trailer("src/TerseSharp.Server/Assets/SKILL.md", "ab\r\ncd\r\n"));
+        Assert.Equal(string.Empty, SkillBudget.Trailer("/repo/README.md", "ab\ncd\n"));
+    }
 }

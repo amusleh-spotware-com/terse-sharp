@@ -330,28 +330,26 @@ public sealed class FileServiceTests
         content is [0xEF, 0xBB, 0xBF, ..];
 
     [Fact]
-    public async Task EditText_WithAnOldTextThatOnlyMatchesDedented_SaysSoAndSteersToTheSymbolTools()
+    public async Task EditText_WithAnOldTextThatOnlyMatchesDedented_AppliesTheOnlyLooseMatchAndAShallowerFileStillRefuses()
     {
         using var registry = new WorkspaceRegistry();
         await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
         using var lease = registry.Resolve(null, null).Value!;
         var name = "terse-dedent-" + Guid.NewGuid().ToString("N") + ".txt";
         var path = Path.Combine(lease.Workspace.Root, name);
-        await File.WriteAllTextAsync(
-            path,
-            "class Order\n{\n    public int Total()\n    {\n\n        return 1;\n    }\n}\n",
-            TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(path, "class Order\n{\n    public int Total()\n    {\n\n        return 1;\n    }\n}\n", TestContext.Current.CancellationToken);
         try
         {
-            var result = await FileService.EditTextAsync(
-                lease.Workspace,
-                name,
-                new FileService.EditRequest("public int Total()\n{\nreturn 1;\n}", "x", null, false, false, false),
-                TestContext.Current.CancellationToken);
+            var applied = await FileService.EditTextAsync(lease.Workspace, name, new FileService.EditRequest("public int Total()\n{\nreturn 1;\n}", "x", null, false, false, false), TestContext.Current.CancellationToken);
+            var landed = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
 
-            Assert.False(result.IsOk);
-            Assert.Contains("indentation and blank lines", result.Error!.Remedy, StringComparison.Ordinal);
-            Assert.Contains("replace_symbol_body", result.Error!.Remedy, StringComparison.Ordinal);
+            await File.WriteAllTextAsync(path, "a();\n\nb();\n", TestContext.Current.CancellationToken);
+            var refused = await FileService.EditTextAsync(lease.Workspace, name, new FileService.EditRequest("    a();\n    b();", "x", null, false, false, false), TestContext.Current.CancellationToken);
+
+            Assert.True(applied.IsOk, applied.Error?.Message);
+            Assert.Equal("class Order\n{\n    x\n}\n", landed);
+            Assert.False(refused.IsOk);
+            Assert.Contains("indentation and blank lines", refused.Error!.Remedy, StringComparison.Ordinal);
         }
         finally
         {

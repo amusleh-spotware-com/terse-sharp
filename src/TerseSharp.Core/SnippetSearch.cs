@@ -5,6 +5,8 @@ public readonly record struct SnippetMatch(int Start, int Length, int Occurrence
     public bool IsUnique => Occurrences is 1;
 
     public string? Indent { get; init; }
+
+    public bool Loose { get; init; }
 }
 
 public static class SnippetSearch
@@ -30,7 +32,9 @@ public static class SnippetSearch
 
         var reindented = Reindented(haystack, needle, occurrence);
 
-        return reindented.Occurrences > 0 ? reindented : relaxed;
+        return reindented.Occurrences > 0 ? reindented
+            : Loose(haystack, needle, occurrence) is { Occurrences: > 0 } loose ? loose
+            : relaxed;
     }
 
     public static int Count(ReadOnlySpan<char> text, ReadOnlySpan<char> value) => Locate(text, value, 1).Occurrences;
@@ -339,5 +343,94 @@ public static class SnippetSearch
                 CultureInfo.InvariantCulture,
                 $"the file's closest region is lines {best.Start + 1}-{best.Start + wanted.Count}, where {best.Matched} of the anchor's {wanted.Count} lines match - re-read exactly that with read_text startLine={best.Start + 1} endLine={best.Start + wanted.Count} verbose=true and copy the anchor from it")
             : string.Empty;
+    }
+
+    internal static ReadOnlySpan<char> Lead(ReadOnlySpan<char> text)
+    {
+        var line = text[Filled(text, 0)..];
+
+        return line[..(line.Length - line.TrimStart().Length)];
+    }
+
+    private static SnippetMatch Loose(string haystack, string needle, int occurrence)
+    {
+        var text = LineEndings.Normalize(haystack);
+        var found = LocateLoose(text, LineEndings.Normalize(needle), occurrence);
+
+        return found.Start < 0 || ReferenceEquals(text, haystack)
+            ? found
+            : Mapped(haystack, found) with { Indent = found.Indent, Loose = true };
+    }
+
+    private static SnippetMatch LocateLoose(ReadOnlySpan<char> text, ReadOnlySpan<char> value, int occurrence)
+    {
+        var lead = Lead(value);
+        var (chosen, stop, occurrences, start) = (-1, -1, 0, 0);
+
+        while (start < text.Length)
+        {
+            if (LooseEnd(text, start, value) is var end and >= 0 && Lead(text[start..]).EndsWith(lead, StringComparison.Ordinal) && ++occurrences == occurrence)
+                (chosen, stop) = (start, end);
+
+            if (text[start..].IndexOf('\n') is var offset and >= 0)
+                start += offset + 1;
+            else
+                break;
+        }
+
+        return chosen < 0
+            ? new SnippetMatch(-1, value.Length, occurrences, false) { Loose = true }
+            : Loosened(text, chosen, stop, value, lead.Length) with { Occurrences = occurrences };
+    }
+
+    private static SnippetMatch Loosened(ReadOnlySpan<char> text, int chosen, int stop, ReadOnlySpan<char> value, int lead)
+    {
+        var depth = Lead(text[chosen..]);
+        var end = Closed(text, stop, value.EndsWith("\n", StringComparison.Ordinal));
+
+        return new SnippetMatch(chosen, end - chosen, 0, false) { Indent = depth[..(depth.Length - lead)].ToString(), Loose = true };
+    }
+
+    private static int LooseEnd(ReadOnlySpan<char> text, int start, ReadOnlySpan<char> value)
+    {
+        var end = -1;
+
+        foreach (var needle in value.EnumerateLines())
+        {
+            if (needle.IsWhiteSpace())
+                continue;
+
+            end = LooseLine(text, end < 0 ? start : Filled(text, end + 1), needle.Trim());
+
+            if (end < 0)
+                return -1;
+        }
+
+        return end;
+    }
+
+    private static int LooseLine(ReadOnlySpan<char> text, int at, ReadOnlySpan<char> wanted)
+    {
+        if (at >= text.Length)
+            return -1;
+
+        var end = LineEnd(text, at);
+
+        return text[at..end].Trim().Equals(wanted, StringComparison.Ordinal) ? end : -1;
+    }
+
+    private static int Filled(ReadOnlySpan<char> text, int at)
+    {
+        while (at < text.Length)
+        {
+            var end = LineEnd(text, at);
+
+            if (!text[at..end].IsWhiteSpace())
+                return at;
+
+            at = end + 1;
+        }
+
+        return text.Length;
     }
 }

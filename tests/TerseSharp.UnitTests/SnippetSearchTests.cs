@@ -128,4 +128,25 @@ public sealed class SnippetSearchTests
 
     [Fact]
     public void Find_WhenTheFileLineIsShorterThanTheAnchorLine_StaysUnmatched() => Assert.Equal(0, SnippetSearch.Find("class A\n{\n  int V()\n  {\n  }\n}\n", "int V()\n{\n    return 1;\n}", 1).Occurrences);
+
+    [Fact]
+    public void Find_ForAnAnchorWithoutTheBlankLinesItSpans_MatchesLooselyWithTheBlocksIndent()
+    {
+        var match = SnippetSearch.Find("    a();\n\n    b();\n", "a();\nb();", 1);
+
+        Assert.True(match.Loose);
+        Assert.Equal(1, match.Occurrences);
+        Assert.Equal(0, match.Start);
+        Assert.Equal("    a();\n\n    b();".Length, match.Length);
+        Assert.Equal("    ", match.Indent);
+    }
+
+    [Fact]
+    public void Find_ForAnAnchorDeeperThanTheFile_DoesNotMatchLoosely()
+    {
+        var match = SnippetSearch.Find("a();\n\nb();\n", "    a();\n    b();", 1);
+
+        Assert.Equal(0, match.Occurrences);
+        Assert.Equal(-1, match.Start);
+    }
 }

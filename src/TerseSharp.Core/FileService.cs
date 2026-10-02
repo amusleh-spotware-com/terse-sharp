@@ -65,7 +65,7 @@ public static class FileService
         EditRequest request,
         CancellationToken cancellationToken)
     {
-        var resolved = PathGuard.Resolve(workspace, path);
+        var resolved = Writable(workspace, path, request.Force);
 
         if (!resolved.IsOk)
             return Result.Fail<string>(resolved.Error!);
@@ -116,7 +116,7 @@ public static class FileService
 
         return Result.Ok(string.Concat(
             before.AsSpan(0, start),
-            LineEndings.Adopt(Reindented(newText, match.Indent, notes), ending),
+            LineEndings.Adopt(Reindented(newText, match, oldText, notes), ending),
             before.AsSpan(match.Start + match.Length)));
     }
 
@@ -146,11 +146,16 @@ public static class FileService
         IReadOnlyList<string> notes,
         CancellationToken cancellationToken)
     {
-        if (!request.DryRun)
-            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
+        var inside = workspace.Contains(full);
 
-        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, notes: notes, context: request.Context));
+        if (!request.DryRun)
+            await StoredAsync(workspace, full, after, inside, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, inside ? null : full, notes, request.Context));
     }
+
+    private static Task StoredAsync(LoadedWorkspace workspace, string full, string content, bool inside, CancellationToken cancellationToken) =>
+        inside ? WriteAsync(workspace, full, content, cancellationToken) : AtomicWrite.TextAsync(full, content, cancellationToken);
 
     private static TerseError NoMatch(string before, string oldText, SnippetMatch match, int occurrence)
     {
@@ -165,14 +170,14 @@ public static class FileService
 
         return match.Occurrences > 1
             ? Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"oldText matched {match.Occurrences} times, expected exactly 1"),
+                string.Create(CultureInfo.InvariantCulture, $"oldText matched {match.Occurrences} times{(match.Loose ? " ignoring indentation and blank lines" : string.Empty)}, expected exactly 1"),
                 string.Create(
                     CultureInfo.InvariantCulture,
                     $"pass occurrence=1..{match.Occurrences} to pick one, include more surrounding text so the match is unique, or pass section= for a markdown heading{Candidates(before, oldText, match)}"))
             : Errors.Invalid(
                 "oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)",
                 MatchesDedented(before, oldText)
-                    ? "it matches once indentation and blank lines are ignored, so it was pasted from a dedented, blank-stripped payload such as get_symbol_source - address a .cs member with replace_symbol_body or replace_symbol, and re-read anything else with read_text verbose=true"
+                    ? "it matches only once indentation and blank lines are ignored, and that match starts mid-line or sits shallower than the anchor, so no re-indentation can be proven - re-read the lines with read_text verbose=true and copy the anchor from there"
                     : Nearest(before, oldText));
     }
 
@@ -684,7 +689,7 @@ public static class FileService
         bool force,
         CancellationToken cancellationToken)
     {
-        var resolved = PathGuard.Resolve(workspace, path);
+        var resolved = Writable(workspace, path, force);
 
         if (!resolved.IsOk)
             return Result.Fail<(string, string)>(resolved.Error!);
@@ -730,7 +735,7 @@ public static class FileService
         var report = full ? UnifiedDiff.Report(path, before, after) : new DiffReport(string.Empty, UnifiedDiff.ChangedLines(before, after));
         var summary = string.Create(
             CultureInfo.InvariantCulture,
-            $"{Path.GetFileName(path.AsSpan())}  changedLines={report.ChangedLines}  edits={applied}/{total}");
+            $"{Path.GetFileName(path.AsSpan())}  changedLines={report.ChangedLines}  edits={applied}/{total}{SkillBudget.Trailer(path, after)}");
 
         if (!request.DryRun && !request.Verbose && failures.Count is 0 && notes.Count is 0)
             return Windowed(response.Line(summary), before, after, request.Context);
@@ -765,8 +770,9 @@ public static class FileService
             return Result.Fail<string>(opened.Error!);
 
         var (full, before) = opened.Value;
+        var inside = workspace.Contains(full);
         var failed = new string?[edits.Count];
-        var notes = new List<string>();
+        List<string> notes = inside ? [] : ["outside-workspace  " + full];
         var after = before;
         var applied = 0;
 
@@ -788,7 +794,7 @@ public static class FileService
         }
 
         if (applied > 0 && !request.DryRun)
-            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
+            await StoredAsync(workspace, full, after, inside, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(BatchResponse(path, before, after, [.. failed.OfType<string>()], notes, applied, edits.Count, request));
     }
@@ -1649,16 +1655,8 @@ public static class FileService
         }
     }
 
-    private static bool Carries(string text, string indent)
-    {
-        foreach (var line in text.AsSpan().EnumerateLines())
-        {
-            if (!line.IsWhiteSpace() && !line.StartsWith(indent, StringComparison.Ordinal))
-                return false;
-        }
-
-        return true;
-    }
+    private static bool AtDepth(string newText, int depth) =>
+        newText.AsSpan().IsWhiteSpace() || SnippetSearch.Lead(newText).Length >= depth;
 
     private static string Indented(string text, string indent)
     {
@@ -1681,16 +1679,22 @@ public static class FileService
         return builder.ToString();
     }
 
-    private static string Reindented(string newText, string? indent, List<string> notes)
+    private static string Realigned(int columns, bool loose, bool shifted) => (loose, shifted) switch
     {
-        if (indent is not { Length: > 0 } || Carries(newText, indent))
-            return newText;
+        (true, true) => string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched ignoring indentation and blank lines - the only such match - and newText was re-indented by {columns} column(s) to the matched block; blank lines inside the match were replaced too"),
+        (true, false) => "NOTE oldText matched ignoring indentation and blank lines - the only such match; blank lines inside the match were replaced too",
+        _ => string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched after re-indenting by {columns} column(s) - it was pasted from a dedented payload such as get_symbol_source, and newText was re-indented to match the file"),
+    };
 
-        notes.Add(string.Create(
-            CultureInfo.InvariantCulture,
-            $"NOTE oldText matched after re-indenting by {indent.Length} column(s) - it was pasted from a dedented payload such as get_symbol_source, and newText was re-indented to match the file"));
+    private static string Reindented(string newText, SnippetMatch match, string oldText, List<string> notes)
+    {
+        var indent = match.Indent ?? string.Empty;
+        var shifted = indent.Length > 0 && !AtDepth(newText, indent.Length + SnippetSearch.Lead(oldText).Length);
 
-        return Indented(newText, indent);
+        if (match.Loose || shifted)
+            notes.Add(Realigned(indent.Length, match.Loose, shifted));
+
+        return shifted ? Indented(newText, indent) : newText;
     }
 
     private const int MaxDirectoryEntries = 4;
@@ -1830,7 +1834,7 @@ public static class FileService
 
     private static string Condensed(ResponseBuilder response, string path, int changed, string before, string after, int context)
     {
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={changed}"));
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  changedLines={changed}{SkillBudget.Trailer(path, after)}"));
 
         return Windowed(response, before, after, context);
     }
@@ -1849,7 +1853,7 @@ public static class FileService
 
         response.Line(report.Text);
 
-        return response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}")).ToString();
+        return response.Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={report.ChangedLines}{SkillBudget.Trailer(path, after)}")).ToString();
     }
 
     private static string Windowed(ResponseBuilder response, string before, string after, int context)
@@ -2204,7 +2208,7 @@ public static class FileService
             var match = SnippetSearch.Find(before, oldText, index);
             var head = Math.Max(at, SplitCarriageReturn(before, match.Start) ? match.Start - 1 : match.Start);
 
-            built.Append(before, at, head - at).Append(LineEndings.Adopt(Reindented(newText, match.Indent, seen), ending));
+            built.Append(before, at, head - at).Append(LineEndings.Adopt(Reindented(newText, match, oldText, seen), ending));
             at = match.Start + match.Length;
         }
 

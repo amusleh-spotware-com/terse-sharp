@@ -1577,4 +1577,109 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_ForAnAnchorWithoutTheFilesBlankLines_AppliesTheOnlyLooseMatchAndReindents()
+    {
+        const string Probe = "terse-loose-probe.md";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\n    void A()\n    {\n        var x = 1;\n\n        return;\n    }\n" });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "var x = 1;\nreturn;", ["newText"] = "var x = 2;\nreturn;" });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("matched ignoring indentation and blank lines", applied, StringComparison.Ordinal);
+            Assert.Contains("re-indented by 8 column(s)", applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("        var x = 2;", read, StringComparison.Ordinal);
+            Assert.Contains("        return;", read, StringComparison.Ordinal);
+            Assert.DoesNotContain("var x = 1;", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_ForAnAnchorMatchingTwiceIgnoringIndentation_IsRefusedNamingTheCount()
+    {
+        const string Probe = "terse-loose-twice-probe.md";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\n    a();\n\n    b();\n    c();\n\n    a();\n\n    b();\n" });
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "a();\nb();", ["newText"] = "z();" });
+
+            Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+            Assert.Contains("oldText matched 2 times ignoring indentation and blank lines", refused, StringComparison.Ordinal);
+
+            var picked = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "a();\nb();", ["newText"] = "z();", ["occurrence"] = 2 });
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.DoesNotContain("ERROR", picked, StringComparison.Ordinal);
+            Assert.Contains("    z();", read, StringComparison.Ordinal);
+            Assert.Contains("    a();", read, StringComparison.Ordinal);
+            Assert.Contains("    c();", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_ForANewTextAtTheDedentedAnchorsOwnDepth_ReindentsItToTheFile()
+    {
+        const string Probe = "terse-reindent-depth-probe.md";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\n    class A\n    {\n        int V() => 1;\n        int W() => 1;\n    }\n" });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "    int V() => 1;\n    int W() => 1;", ["newText"] = "    int V() => 2;\n    int W() => 2;" });
+
+            Assert.Contains("re-indenting by 4 column(s)", applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("        int V() => 2;", read, StringComparison.Ordinal);
+            Assert.Contains("        int W() => 2;", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_OnTheShippedSkillPath_EndsItsSuccessLineWithTheBudget()
+    {
+        const string Probe = "TerseSharp.Server/Assets/SKILL.md";
+        const string Other = "terse-budget-probe.md";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Skill\n\nalpha\n" });
+        await server.CallAsync("write_text", new() { ["path"] = Other, ["content"] = "# Skill\n\nalpha\n" });
+        try
+        {
+            var used = TerseSharp.Core.SkillBudget.Used("# Skill\n\nbeta\n");
+            var budget = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"  budget={TerseSharp.Core.SkillBudget.Tokens} used={used} left={TerseSharp.Core.SkillBudget.Tokens - used}");
+
+            var previewed = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "alpha", ["newText"] = "beta", ["dryRun"] = true });
+            var applied = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "alpha", ["newText"] = "beta" });
+            var elsewhere = await server.CallAsync("edit_text", new() { ["path"] = Other, ["oldText"] = "alpha", ["newText"] = "beta" });
+
+            var line = applied.Split('\n').Single(l => l.Contains("budget=", StringComparison.Ordinal)).TrimEnd('\r');
+
+            Assert.StartsWith("SKILL.md  changedLines=", line, StringComparison.Ordinal);
+            Assert.EndsWith(budget, line, StringComparison.Ordinal);
+            Assert.Contains(budget, previewed, StringComparison.Ordinal);
+            Assert.DoesNotContain("budget=", elsewhere, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = "TerseSharp.Server/Assets", ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = "TerseSharp.Server", ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Other, ["delete"] = true });
+        }
+    }
 }

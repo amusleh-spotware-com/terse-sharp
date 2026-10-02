@@ -2387,4 +2387,33 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("calls in a row", second, StringComparison.Ordinal);
         Assert.DoesNotContain("OrderSide.cs", second, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task EditText_WithForceAndAnAbsolutePathOutsideEveryRoot_EditsItAndSaysSo()
+    {
+        var probe = Path.Combine(Path.GetTempPath(), "terse-outside-probe-i688.cs");
+        await File.WriteAllTextAsync(probe, "public static class OutsideProbe\n{\n    public static int Answer() => 1;\n}\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var refused = await server.CallAsync("edit_text", new() { ["path"] = probe, ["oldText"] = "=> 1;", ["newText"] = "=> 2;" });
+
+            Assert.Contains("ERROR OutOfWorkspace", refused, StringComparison.Ordinal);
+            Assert.Contains("force=true", refused, StringComparison.Ordinal);
+
+            var edited = await server.CallAsync("edit_text", new() { ["path"] = probe, ["oldText"] = "=> 1;", ["newText"] = "=> 2;", ["force"] = true });
+
+            Assert.DoesNotContain("ERROR", edited, StringComparison.Ordinal);
+            Assert.Contains("outside-workspace", edited, StringComparison.Ordinal);
+            Assert.Contains("=> 2;", await File.ReadAllTextAsync(probe, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+
+            var climbed = await server.CallAsync("edit_text", new() { ["path"] = "../terse-outside-relative-i688.md", ["oldText"] = "a", ["newText"] = "b", ["force"] = true });
+
+            Assert.Contains("ERROR OutOfWorkspace", climbed, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(probe);
+        }
+    }
 }

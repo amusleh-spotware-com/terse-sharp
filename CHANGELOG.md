@@ -180,6 +180,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   a batch whose assigned variable feeds a stripped part is denied whole rather than rewritten. Covered
   by `Guard_ForABatchCarryingAPlainVariableOrAQuotedHeredoc_RewritesIt` and seven new rows of
   `Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole`.
+- **`edit_text` applies an anchor that matches only once indentation and blank lines are ignored
+  (I679).** It used to refuse with `it matches once indentation and blank lines are ignored`, costing a
+  `read_text verbose=true` and a retry per anchor pasted from a dedented payload. When exactly one such
+  match exists and the file's block is at least as deep as the anchor, it lands: `newText` is
+  re-indented by the difference and the answer says `NOTE oldText matched ignoring indentation and blank
+  lines`, because blank lines inside the matched block are replaced along with it. Several such
+  matches answer `oldText matched N times ignoring indentation and blank lines` and take
+  `occurrence=`. A re-indented match no longer lands `newText` at the anchor's own shallower depth when
+  every line of it shared the anchor's leading whitespace. Response-format change: the new NOTE, the
+  count suffix, and a reworded remedy for a match that starts mid-line or sits shallower than the
+  anchor. Covered by `EditText_ForAnAnchorWithoutTheFilesBlankLines_AppliesTheOnlyLooseMatchAndReindents`,
+  `EditText_ForAnAnchorMatchingTwiceIgnoringIndentation_IsRefusedNamingTheCount`,
+  `EditText_ForANewTextAtTheDedentedAnchorsOwnDepth_ReindentsItToTheFile`,
+  `EditText_WithAnOldTextThatOnlyMatchesDedented_AppliesTheOnlyLooseMatchAndAShallowerFileStillRefuses`,
+  `Find_ForAnAnchorWithoutTheBlankLinesItSpans_MatchesLooselyWithTheBlocksIndent` and
+  `Find_ForAnAnchorDeeperThanTheFile_DoesNotMatchLoosely`.
+- **`edit_text force=true` edits an absolute path outside every workspace root (I688)**, as `write_text
+  force=true` already writes one. It is tagged `outside-workspace  <path>`, not compile-gated, and
+  covers `edits=` entries too; without `force=true` the refusal names `force=true`. A relative path that
+  climbs out of the root is still refused `OutOfWorkspace`. Measured: 14 such refusals in one week.
+  Covered by `EditText_WithForceAndAnAbsolutePathOutsideEveryRoot_EditsItAndSaysSo`.
+- **An `edit_text` or `write_text` on the shipped `SKILL.md` ends its `changedLines=` line with
+  `budget=27200 used=N left=M` (I693)**, or `over=N` past the budget - the estimator `read_text
+  tokens=true` and `TheShippedSkill_StaysWithinItsTokenBudget` use - on the condensed success line, the
+  `dryRun` diff and an `edits=` batch's summary. Response-format change on that one path only. Covered by
+  `EditText_OnTheShippedSkillPath_EndsItsSuccessLineWithTheBudget` and
+  `Trailer_OnTheShippedSkillOnly_RendersTheBudgetOnTheSameLine`.
 
 ## [0.72.0] - 2026-10-01
 
