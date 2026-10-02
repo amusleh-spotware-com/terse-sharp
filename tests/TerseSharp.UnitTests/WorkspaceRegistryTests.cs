@@ -574,4 +574,115 @@ public sealed class WorkspaceRegistryTests
 
         Assert.InRange(stem, 0, worktree - 1);
     }
+
+    [Fact]
+    public async Task Warm_OnTheFirstSemanticCallAfterADrop_RealizesEveryProjectInTheBackgroundOnce()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
+
+        var workspace = registry.All()[0];
+        Assert.Equal(0, LoadedWorkspace.RealizedProjects(workspace.Solution));
+
+        using (registry.Resolve(null, null, semantic: true).Value!)
+            workspace.Warm(static () => false);
+
+        var warming = workspace.Warming;
+        await warming;
+        workspace.Warm(static () => false);
+
+        Assert.Equal(workspace.Solution.ProjectIds.Count, LoadedWorkspace.RealizedProjects(workspace.Solution));
+        Assert.Same(warming, workspace.Warming);
+    }
+
+    [Fact]
+    public async Task Warm_WithNoDropSinceTheLastSemanticCall_StartsNothing()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null, semantic: true).Value!;
+        lease.Workspace.Warm(static () => false);
+
+        Assert.Same(Task.CompletedTask, lease.Workspace.Warming);
+    }
+
+    [Fact]
+    public async Task Warm_AfterAResolveThatCannotReRealizeCompilations_StartsNothing()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured);
+
+        using var reader = registry.Resolve(null, null, semantic: false).Value!;
+        reader.Workspace.Warm(static () => false);
+
+        Assert.Same(Task.CompletedTask, reader.Workspace.Warming);
+    }
+
+    [Fact]
+    public async Task Warm_UnderMemoryPressure_StartsNothingUntilACallFindsThePressureGone()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured);
+
+        using var lease = registry.Resolve(null, null, semantic: true).Value!;
+        var workspace = lease.Workspace;
+
+        workspace.Warm(static () => true);
+        Assert.Same(Task.CompletedTask, workspace.Warming);
+        Assert.Equal(0, LoadedWorkspace.RealizedProjects(workspace.Solution));
+
+        workspace.Warm(static () => false);
+        await workspace.Warming;
+
+        Assert.Equal(workspace.Solution.ProjectIds.Count, LoadedWorkspace.RealizedProjects(workspace.Solution));
+    }
+
+    [Fact]
+    public async Task DropCompilations_WhileWarming_LeavesTheNewSolutionUncompiled()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured);
+
+        var workspace = registry.All()[0];
+
+        using (registry.Resolve(null, null, semantic: true).Value!)
+            workspace.Warm(static () => false);
+
+        Assert.True(workspace.DropCompilations());
+        await workspace.Warming;
+
+        Assert.Equal(0, LoadedWorkspace.RealizedProjects(workspace.Solution));
+    }
+
+    [Fact]
+    public async Task Unload_WhileWarming_EndsTheWarmingWithoutThrowingAndRefusesANewOne()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured);
+
+        var workspace = registry.All()[0];
+
+        using (registry.Resolve(null, null, semantic: true).Value!)
+            workspace.Warm(static () => false);
+
+        var warming = workspace.Warming;
+        Assert.True(registry.Unload(Fixtures.SolutionPath, reclaim: false));
+        await warming;
+        workspace.Warm(static () => false);
+
+        Assert.True(warming.IsCompletedSuccessfully);
+        Assert.Same(warming, workspace.Warming);
+    }
 }

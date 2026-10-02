@@ -314,22 +314,16 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         return [.. paths.Order(StringComparer.Ordinal)];
     }
 
-    private static async Task<string> AttributedAsync(LoadedWorkspace loaded, Func<Task<string>> action)
+    private async Task<string> AttributedAsync(LoadedWorkspace loaded, Func<Task<string>> action)
     {
-        var snapshot = loaded.Solution;
-        var total = snapshot.ProjectIds.Count;
-        var before = LoadedWorkspace.RealizedProjects(snapshot);
-
-        if (before >= total)
-            return await action().ConfigureAwait(false);
-
-        var stopwatch = Stopwatch.StartNew();
-        var answer = await action().ConfigureAwait(false);
-        var compiled = Math.Min(total, Math.Max(LoadedWorkspace.RealizedProjects(snapshot), LoadedWorkspace.RealizedProjects(loaded.Solution)));
-
-        return compiled > before && !answer.StartsWith("ERROR", StringComparison.Ordinal)
-            ? answer + "\n" + Realization(loaded, before, compiled, total, stopwatch.ElapsedMilliseconds)
-            : answer;
+        try
+        {
+            return await NotedAsync(loaded, action).ConfigureAwait(false);
+        }
+        finally
+        {
+            loaded.Warm(Registry.Pressured);
+        }
     }
 
     public async Task<ToolLatency> MeasureAsync(int calls, CancellationToken cancellationToken)
@@ -463,6 +457,24 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         fromName && !answer.StartsWith("ERROR", StringComparison.Ordinal)
             ? string.Concat(answer, "\nresolved from name: ", SymbolId.From(symbol).Value)
             : answer;
+
+    private static async Task<string> NotedAsync(LoadedWorkspace loaded, Func<Task<string>> action)
+    {
+        var snapshot = loaded.Solution;
+        var total = snapshot.ProjectIds.Count;
+        var before = LoadedWorkspace.RealizedProjects(snapshot);
+
+        if (before >= total)
+            return await action().ConfigureAwait(false);
+
+        var stopwatch = Stopwatch.StartNew();
+        var answer = await action().ConfigureAwait(false);
+        var compiled = Math.Min(total, Math.Max(LoadedWorkspace.RealizedProjects(snapshot), LoadedWorkspace.RealizedProjects(loaded.Solution)));
+
+        return compiled > before && !answer.StartsWith("ERROR", StringComparison.Ordinal)
+            ? answer + "\n" + Realization(loaded, before, compiled, total, stopwatch.ElapsedMilliseconds)
+            : answer;
+    }
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

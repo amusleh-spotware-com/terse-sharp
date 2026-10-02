@@ -239,6 +239,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Classify_ForABatchWithNoUsableToolUseId_NudgesAndRecordsItUnidentified`,
   `RunAsync_ForAnEligibleBatch_LogsItsArmAndNudgesOnlyTheNudgedHalf` and
   `RunAsync_WhenTheLogCannotBeWritten_StillNudgesAndExitsZero`.
+- **After an idle drop, the first semantic call warms the rest of the solution in the background once
+  it has answered (I667).** Before, every later call paid for the projects it happened to reach, and 84
+  of 112 slow `search_symbols` calls in a week carried `(K more of T projects, C compiled now; after
+  drop #D)`. Warming realizes one project at a time in dependency order, never starts on the idle sweep
+  or while memory is past the 60 % threshold (the next semantic call retries), and is cancelled by the
+  next drop and by unload. The triggering call's own `compilations=` note is unchanged: it is counted
+  before the warm-up starts. No response format changes. Covered by
+  `Warm_OnTheFirstSemanticCallAfterADrop_RealizesEveryProjectInTheBackgroundOnce`,
+  `Warm_WithNoDropSinceTheLastSemanticCall_StartsNothing`,
+  `Warm_AfterAResolveThatCannotReRealizeCompilations_StartsNothing`,
+  `Warm_UnderMemoryPressure_StartsNothingUntilACallFindsThePressureGone`,
+  `DropCompilations_WhileWarming_LeavesTheNewSolutionUncompiled`,
+  `Unload_WhileWarming_EndsTheWarmingWithoutThrowingAndRefusesANewOne`,
+  `WithWorkspaceAsync_OnTheFirstSemanticCallAfterADrop_WarmsEveryProjectOnceItHasAnswered` and
+  `WithWorkspaceAsync_AfterADropUnderMemoryPressure_AnswersWithoutWarming`.
 
 ## [0.72.0] - 2026-10-01
 

@@ -283,4 +283,38 @@ public sealed class ToolContextTests
 
         Assert.Equal(0, announced);
     }
+
+    [Fact]
+    public async Task WithWorkspaceAsync_OnTheFirstSemanticCallAfterADrop_WarmsEveryProjectOnceItHasAnswered()
+    {
+        using var registry = new WorkspaceRegistry { Pressured = static () => false };
+        using var context = new ToolContext(registry, readOnly: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1), 0));
+
+        var workspace = registry.All()[0];
+        var answer = await context.WithWorkspaceAsync(null, null, static _ => Task.FromResult("answered"), cancellationToken: TestContext.Current.CancellationToken);
+        await workspace.Warming;
+
+        Assert.Equal("answered", answer);
+        Assert.Equal(workspace.Solution.ProjectIds.Count, LoadedWorkspace.RealizedProjects(workspace.Solution));
+    }
+
+    [Fact]
+    public async Task WithWorkspaceAsync_AfterADropUnderMemoryPressure_AnswersWithoutWarming()
+    {
+        using var registry = new WorkspaceRegistry { Pressured = static () => true };
+        using var context = new ToolContext(registry, readOnly: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        registry.DropIdleCompilations(TimeSpan.FromTicks(1), 0);
+
+        var workspace = registry.All()[0];
+        var answer = await context.WithWorkspaceAsync(null, null, static _ => Task.FromResult("answered"), cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("answered", answer);
+        Assert.Same(Task.CompletedTask, workspace.Warming);
+        Assert.Equal(0, LoadedWorkspace.RealizedProjects(workspace.Solution));
+    }
 }

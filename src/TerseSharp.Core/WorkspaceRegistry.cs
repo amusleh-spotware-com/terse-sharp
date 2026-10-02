@@ -438,4 +438,6 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
         return dropped;
     }
+
+    public Func<bool> Pressured { get; init; } = static () => GC.GetTotalMemory(forceFullCollection: false) >= PressureBytes;
 }

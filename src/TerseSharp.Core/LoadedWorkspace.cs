@@ -68,6 +68,7 @@ public sealed class LoadedWorkspace : IDisposable
             if (!semantic)
                 return;
 
+            warmPending |= CompilationsDropped;
             noticeForThisCall = droppedNotice;
             droppedNotice = false;
             CompilationsDropped = false;
@@ -512,6 +513,8 @@ public sealed class LoadedWorkspace : IDisposable
                 return false;
 
             retired = true;
+            warmingCancellation.Cancel();
+            warmingCancellation.Dispose();
 
             return leases is 0;
         }
@@ -583,6 +586,9 @@ public sealed class LoadedWorkspace : IDisposable
             if (leases is not 0 || retired)
                 return false;
 
+            StopWarming();
+            warmPending = false;
+
             lock (historyGate)
             {
                 Solution = Forked();
@@ -618,6 +624,47 @@ public sealed class LoadedWorkspace : IDisposable
 
     public bool TakeRealizedNotice() =>
         Interlocked.CompareExchange(ref realizedNoticeTaken, 1, 0) is 0;
+
+    private CancellationTokenSource warmingCancellation = new();
+    private bool warmPending;
+
+    internal Task Warming { get; private set; } = Task.CompletedTask;
+
+    public void Warm(Func<bool> pressured)
+    {
+        lock (leaseGate)
+        {
+            if (!warmPending || retired || pressured())
+                return;
+
+            warmPending = false;
+            var cancellationToken = warmingCancellation.Token;
+            Warming = QuietlyAsync(Task.Run(() => RealizeAsync(pressured, cancellationToken), CancellationToken.None));
+        }
+    }
+
+    private async Task RealizeAsync(Func<bool> pressured, CancellationToken cancellationToken)
+    {
+        foreach (var id in Solution.GetProjectDependencyGraph().GetTopologicallySortedProjects(cancellationToken))
+        {
+            if (cancellationToken.IsCancellationRequested || pressured())
+                return;
+
+            if (Solution.GetProject(id) is { SupportsCompilation: true } project)
+                await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task QuietlyAsync(Task warming) =>
+        await warming.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+    private void StopWarming()
+    {
+        var stopped = warmingCancellation;
+        warmingCancellation = new CancellationTokenSource();
+        stopped.Cancel();
+        stopped.Dispose();
+    }
 
     public IReadOnlyList<string> EditedPaths
     {
