@@ -278,6 +278,7 @@ CONFIGURED = re.compile(r'ConfigureAwait\(')
 RULE = re.compile(r'\b((?:CA|IDE|CS|SYSLIB|RS)\d{4})\b')
 NOOP = re.compile(r'\b0 files changed\b|changedLines=0')
 CHANGED = re.compile(r'changedLines=(\d+)')
+GATE_RED = re.compile(r'FAILED|ERROR |\berrors=[1-9]')
 INSERTS = {'add_member', 'xaml_add_element', 'razor_add_element'}
 REPLACERS = {'replace_symbol', 'replace_symbol_body', 'edit_text', 'xaml_set_property',
              'resx_set', 'razor_set_attribute', 'project_set_property'}
@@ -772,6 +773,12 @@ for path, project, spilled in walk():
                         chunks = []
                         harvest(arguments, chunks)
                         asked = sum(chunk.count('\n') + 1 for chunk in chunks)
+                        asked_helpers = arguments.get('add') or []
+                        asked_usings = arguments.get('usings') or []
+                        asked_helpers = [asked_helpers] if isinstance(asked_helpers, str) else asked_helpers
+                        asked_usings = [asked_usings] if isinstance(asked_usings, str) else asked_usings
+                        asked += sum(str(helper).count('\n') + 2 for helper in asked_helpers)
+                        asked += len(asked_usings) + 1 if asked_usings else 0
                         if asked:
                             reported = int(CHANGED.search(text).group(1))
                             allowed = asked + 1 if tool in INSERTS else asked * 2 + 2
@@ -783,7 +790,7 @@ for path, project, spilled in walk():
                 if tool in VERIFY:
                     for rule in RULE.findall(text):
                         rules[rule] += 1
-                    if 'FAILED' in text or 'error' in text[:400].lower():
+                    if GATE_RED.search(text):
                         gate_red[tool] += 1
                         if session_edits:
                             after_edit[tool] += 1
@@ -1287,7 +1294,10 @@ and the next run must be comparable.
      diff counts the removed lines too. Whole-file (`write_text`) and deliberately cross-file
      (`rename_symbol`, `change_signature`, `move_type_to_*`) tools are **excluded**, since their
      change is not bounded by their payload. `asked` comes from the same `harvest()` the emitted-code
-     regexes already use, so this costs one comparison. The histogram is printed beside the counts
+     regexes already use, plus every `add=` helper (its lines and one separator) and every
+     `usings=` line (one each, plus one separator), because the call asked for those too - so this
+     costs one comparison. A verify gate counts red on `FAILED`, `ERROR ` or `errors=[1-9]`, never
+     on the substring `error`, which `errors=0` satisfies. The histogram is printed beside the counts
      because **the mode is `+1`** — the benign separator line — and a reader who does not see that
      will read the whole class as collateral.
    - **refusal and recovery** — the trap scan now runs for **every** tool, not only edit tools, the

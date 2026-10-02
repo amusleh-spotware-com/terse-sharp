@@ -123,11 +123,19 @@ Every spawn prompt carries, in this order:
 4. This contract:
 
 ```
-You are a PLANNER. Read-only plus dryRun. You may call: workspace_status, get_file_outline,
-get_symbol_source, get_symbol, get_type_outline, search_symbols, find_usages, find_implementations,
-find_files, search_text, search_regex, read_text, list_projects, and any edit tool ONLY with
-dryRun=true. You may NOT write, build, run tests, format, cleanup or gate.
+You are a PLANNER. Read-only plus dryRun. You may call: workspace_status (guard= included),
+load_workspace (a fixture only), get_file_outline, get_symbol_source, get_symbol, get_type_outline,
+search_symbols, find_usages, find_implementations, find_files, search_text, search_regex, read_text,
+history, list_projects, and any edit tool ONLY with dryRun=true. You may NOT write, build, run
+tests, format, cleanup or gate.
 Call ceiling: 25. If you exceed it, return the best plan you have and say so.
+
+OBSERVE-RED is RUN, never predicted. Observe the pre-fix state yourself with read-only means -
+workspace_status guard=, an edit tool with dryRun=true, a read call against the installed server,
+load_workspace of a fixture - and return the call with its answer. Every fixture fact the plan
+relies on (a project count, a file's content, a symbol's existence) cites the call that established
+it. "Predicted from source" is allowed only when no read-only call can observe the state, and the
+plan must say so and why.
 
 Return EXACTLY this, and nothing else:
 
@@ -143,7 +151,8 @@ Return EXACTLY this, and nothing else:
    Callees BEFORE callers. Every declaration complete, attributes included.
   DRYRUN: the verdict of the dryRun you ran on the riskiest edit, or why none was possible
   TESTS: the test file, the test name, and the complete test body, per requirement
-  OBSERVE-RED: the exact call that proves the behaviour is wrong BEFORE the fix
+  OBSERVE-RED: the exact call you RAN that proves the state BEFORE the fix, and its answer -
+     or PREDICTED: <why no read-only call can observe it>
   DOCS: the exact CHANGELOG / SKILL.md / README / NUGET_README lines to add or change
   ARCHIVE: the finished 4-cell archive row - Finding | Tool | Change | Outcome
   If VERDICT is CLOSE: the evidence that refutes the row, and the condition to reopen it.
