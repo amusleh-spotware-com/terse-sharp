@@ -55,4 +55,21 @@ public sealed class BatchNudgeTests
 
         Assert.Equal(string.Empty, output.ToString());
     }
+
+    [Fact]
+    public void EveryNudgedTool_IsDeclaredReadOnly()
+    {
+        var readOnly = typeof(ToolGuard).Assembly.GetTypes()
+            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance))
+            .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
+            .OfType<McpServerToolAttribute>()
+            .Where(attribute => attribute.ReadOnly)
+            .Select(attribute => attribute.Name)
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("analyze", readOnly);
+        Assert.NotEmpty(BatchNudge.Reads);
+        Assert.All(BatchNudge.Reads, tool => Assert.Contains(tool, readOnly));
+    }
 }

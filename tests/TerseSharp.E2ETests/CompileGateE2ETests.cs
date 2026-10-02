@@ -1099,4 +1099,19 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
             await CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Fact]
+    public async Task Analyze_WithIdsThatFilterAwayAnError_SaysHowManyErrorsItHid()
+    {
+        var filtered = await CallAsync("analyze", new() { ["path"] = "src/Fixture.Broken/Calculator.cs", ["ids"] = "CA1822", ["includeDeadCode"] = false });
+        var named = await CallAsync("analyze", new() { ["path"] = "src/Fixture.Broken/Calculator.cs", ["ids"] = "CA1822,CS0029", ["includeDeadCode"] = false });
+        var unfiltered = await CallAsync("analyze", new() { ["path"] = "src/Fixture.Broken/Calculator.cs", ["includeDeadCode"] = false });
+
+        Assert.Contains("CA1822", filtered, StringComparison.Ordinal);
+        Assert.DoesNotContain("CS0029", filtered, StringComparison.Ordinal);
+        Assert.Contains("1 error(s) outside ids= not shown - drop ids= to see them", filtered, StringComparison.Ordinal);
+        Assert.Contains("CS0029", named, StringComparison.Ordinal);
+        Assert.DoesNotContain("outside ids=", named, StringComparison.Ordinal);
+        Assert.DoesNotContain("outside ids=", unfiltered, StringComparison.Ordinal);
+    }
 }

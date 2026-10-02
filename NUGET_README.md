@@ -98,7 +98,7 @@ since is not re-run at all: it answers `UNCHANGED` with the previous verdict and
 consecutive call of the same tool, the response adds one 14-token line naming the plural you should have
 passed.
 
-Every read tool declares the MCP `readOnlyHint` annotation and every deleting tool declares
+Every read tool — `analyze` included — declares the MCP `readOnlyHint` annotation and every deleting tool declares
 `destructiveHint`, so a client that gates parallel dispatch on those hints — Claude Code does — fans the
 reads out instead of running them one at a time. The build and test tools are deliberately off that list:
 a build dispatched beside an edit is a race, not a saving.

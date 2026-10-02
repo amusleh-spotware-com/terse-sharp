@@ -254,4 +254,26 @@ public sealed class PolicyE2ETests : IAsyncLifetime
             await RestoreAsync(before);
         }
     }
+
+    [Fact]
+    public async Task Analyze_WithAWarningFloor_DropsTheInfoPolicyAndDeadCodeRecordsItListsAtInfo()
+    {
+        var before = await OriginalAsync();
+
+        try
+        {
+            await AddAsync(Long(), allowPolicy: false);
+
+            var info = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Policy/Ledger.cs", ["minSeverity"] = "info" }, TestContext.Current.CancellationToken);
+            var warning = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Policy/Ledger.cs", ["minSeverity"] = "warning" }, TestContext.Current.CancellationToken);
+
+            Assert.Contains("TERSE101 info Policy", info, StringComparison.Ordinal);
+            Assert.DoesNotContain("TERSE101", warning, StringComparison.Ordinal);
+            Assert.DoesNotContain(" info ", warning, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await RestoreAsync(before);
+        }
+    }
 }

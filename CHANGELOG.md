@@ -49,6 +49,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `TheRidPackages_RunThroughTheDotnetHost_SoTheWindowsShimStaysAnExecutable`,
   `ThePlainBuild_DeclaresNoRidProperty_SoTheE2EBinaryStaysAtBinConfigurationNet10` and
   `EveryWorkflowThatPacks_PassesTheRidSwitchWithoutNoBuildAndVerifiesEveryReleasedRid`.
+- **`analyze ids=` says how many errors it filtered away (I673).** A sweep narrowed with `ids=` used to
+  answer `0 diagnostics` while error-severity diagnostics in the same files sat outside the list, and
+  the next build failed. When `ids=` hides N error-severity diagnostics in scope (only those on changed
+  lines under `baseRef=`), the answer now carries `N error(s) outside ids= not shown - drop ids= to see
+  them`. Pinned by `Analyze_WithIdsThatFilterAwayAnError_SaysHowManyErrorsItHid`.
+- **`analyze` advertises `readOnlyHint` (I699).** It writes nothing to the tree (its only state is this
+  server's in-memory diagnostic history), so a client that gates parallel dispatch on the hint, as
+  Claude Code does, now runs it beside the reads in the same message instead of after them. `ToolCensus`
+  moves it from `MutatingTools` to `ReadOnlyTools` and drops its read-only exclusion (ratchet 7 -> 6),
+  and `EveryNudgedTool_IsDeclaredReadOnly` census-gates every tool on the batch-nudge allow-list as
+  `ReadOnly`. Pinned by `EveryAdvertisedTool_IsClassifiedAndCarriesTheAnnotationItsClassDeclares` and
+  `EveryNudgedTool_IsDeclaredReadOnly`.
 
 ### Fixed
 
@@ -88,6 +100,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   sits on the `<path>  changedLines=N` line, after the warnings. Pinned by
   `Marked_PrefixesTheFileLineAfterAnyPolicyWarningNotTheFirstLine` and
   `WriteText_OverwritingAFileWithAWarnedEdit_MarksTheFileLineNotTheWarning`.
+- **`analyze minSeverity=` floors the policy and dead-code records too (I675).** `TERSE1xx` policy
+  records and `TERSE001` dead-code records skipped the severity filter, so `minSeverity=warning` over
+  `AnalysisTools.cs` answered 8 records, all `info`. They are now filtered by the severity they print,
+  and a record whose severity cannot be read is kept, not dropped. Pinned by
+  `Analyze_WithAWarningFloor_DropsTheInfoPolicyAndDeadCodeRecordsItListsAtInfo`.
 
 ## [0.72.0] - 2026-10-01
 

@@ -170,7 +170,7 @@ internal static class ToolCensus
     [
         "changed_files", "diff_symbols", "diff_text", "history",
     "find_files", "find_implementations", "find_registrations", "find_usages",
-    "get_diagnostics", "get_file_outline", "get_symbol", "get_symbol_source", "get_type_outline",
+    "analyze", "get_diagnostics", "get_file_outline", "get_symbol", "get_symbol_source", "get_type_outline",
     "list_endpoints", "list_projects", "list_workspaces",
     "package_list", "project_properties", "solution_projects",
     "razor_bindings", "razor_codebehind", "razor_component", "razor_find", "razor_outline", "razor_validate",
@@ -186,7 +186,7 @@ internal static class ToolCensus
 ];
     public static readonly string[] MutatingTools =
     [
-        "add_member", "analyze", "build", "change_signature", "cleanup", "edit_text", "extract_interface",
+        "add_member", "build", "change_signature", "cleanup", "edit_text", "extract_interface",
     "format", "gate", "list_tests", "load_workspace", "move_type_to_file", "move_type_to_namespace",
     "package_add", "project_add_reference", "project_create", "project_set_property",
     "razor_add_element", "razor_set_attribute", "razor_set_directive", "rename_symbol",
@@ -326,10 +326,9 @@ internal static class ToolCensus
         new("solution_remove_project", "edits the .slnx solution file, which the policy does not evaluate"),
     ];
 
-    public const int MaxReadOnlyExclusions = 7;
+    public const int MaxReadOnlyExclusions = 6;
     public static readonly ToolExemption[] RunsUnderReadOnly =
     [
-        new("analyze", "reads diagnostics; the only state it mutates is this server's own diagnostic history, never the tree"),
     new("build", "shells out to dotnet build, which writes to obj/ and bin/ and never to source"),
     new("list_tests", "builds to discover test names and writes no source"),
     new("load_workspace", "mutates only this server's in-memory workspace registry"),

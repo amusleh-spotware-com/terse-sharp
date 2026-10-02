@@ -122,10 +122,8 @@ public static class AnalysisService
         return engines;
     }
 
-    private static string[] Keep(IReadOnlyList<string> findings, IReadOnlyList<string> ids) =>
-        ids.Count is 0
-            ? [.. findings]
-            : [.. findings.Where(finding => ids.Any(id => finding.StartsWith(id, StringComparison.OrdinalIgnoreCase)))];
+    private static string[] Keep(IReadOnlyList<string> findings, IReadOnlyList<string> ids, DiagnosticSeverity minimum) =>
+        [.. findings.Where(finding => Meets(finding, minimum) && (ids.Count is 0 || ids.Any(id => finding.StartsWith(id, StringComparison.OrdinalIgnoreCase))))];
 
     private static IEnumerable<Project> Targets(LoadedWorkspace workspace, DocumentId[] documents, bool unscoped) =>
         unscoped
@@ -197,7 +195,7 @@ public static class AnalysisService
         bool changed,
         Narrowed narrowed)
     {
-        var kept = Keep(collected.Extra, ids);
+        var kept = Keep(collected.Extra, ids, minimum);
         var extra = Introduced(kept, narrowed.Touched);
         var findings = DiagnosticFold.Findings(root, found, DiagnosticFormat.Head, declaration);
         var occurrences = Occurrences(findings, extra);
@@ -226,6 +224,9 @@ public static class AnalysisService
 
         if (collected.Unsupported.Count > 0)
             response.Note("NOT_ENABLED " + string.Join(", ", collected.Unsupported) + " - no analyzer these projects reference declares it, so this pass could not have found it");
+
+        if (OutsideIds(collected, ids, narrowed.Touched) is > 0 and var outside)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{outside} error(s) outside ids= not shown - drop ids= to see them"));
 
         if (changed)
             response.Note("gate runs this, format and cleanup fix=all as one call");
@@ -297,6 +298,31 @@ public static class AnalysisService
 
     private static string[] Introduced(string[] extra, TouchedLines? touched) =>
         touched is null ? extra : [.. extra.Where(touched.CoversRecord)];
+
+    private static bool Meets(string finding, DiagnosticSeverity minimum)
+    {
+        var rest = finding.AsSpan(finding.IndexOf(' ', StringComparison.Ordinal) + 1);
+        var end = rest.IndexOf(' ');
+
+        return RecordSeverity(end < 0 ? rest : rest[..end]) >= minimum;
+    }
+
+    private static DiagnosticSeverity RecordSeverity(ReadOnlySpan<char> token) => token switch
+    {
+        "hidden" => DiagnosticSeverity.Hidden,
+        "info" => DiagnosticSeverity.Info,
+        "warning" => DiagnosticSeverity.Warning,
+        _ => DiagnosticSeverity.Error,
+    };
+
+    private static int OutsideIds(Collected collected, IReadOnlyList<string> ids, TouchedLines? touched) =>
+        ids.Count is 0
+            ? 0
+            : Introduced(
+                [.. collected.Found
+                    .Where(diagnostic => Keep(diagnostic, collected.Scope, DiagnosticSeverity.Error, []) && !ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
+                    .Distinct()],
+                touched).Length;
 }
 
 public static class DiagnosticFormat
