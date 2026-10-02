@@ -1,5 +1,6 @@
 using TerseSharp.Core;
 using TerseSharp.Server;
+using TerseSharp.Server.Tools;
 
 namespace TerseSharp.UnitTests;
 
@@ -316,5 +317,72 @@ public sealed class ToolContextTests
         Assert.Equal("answered", answer);
         Assert.Same(Task.CompletedTask, workspace.Warming);
         Assert.Equal(0, LoadedWorkspace.RealizedProjects(workspace.Solution));
+    }
+
+    [Fact]
+    public async Task RootOnlyTools_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        context.Preload(preload.Task, Fixtures.SolutionPath);
+
+        var early = await RootOnlyAnswersAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, cancellationToken);
+        preload.SetResult();
+
+        Assert.Equal(await RootOnlyAnswersAsync(context, cancellationToken), early);
+    }
+
+    private static Task<string[]> RootOnlyAnswersAsync(ToolContext context, CancellationToken cancellationToken)
+    {
+        var files = new FileTools(context);
+        var git = new GitTools(context, new ListingMemo());
+
+        return Task.WhenAll(
+            files.FindFiles("**/*.cs", cancellationToken: cancellationToken),
+            files.SearchText("OrderService", "**/*.cs", workspace: "FixtureSolution", containers: true, cancellationToken: cancellationToken),
+            git.History(maxResults: 5, cancellationToken: cancellationToken),
+            git.ChangedFiles(cancellationToken: cancellationToken),
+            git.DiffText(maxLines: 50, cancellationToken: cancellationToken));
+    }
+
+    [Fact]
+    public async Task WorkspaceStatus_WhileThePreloadIsRunning_AnswersLoadingWithTheSolutionAndElapsedSeconds()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+        var status = new WorkspaceTools(context, new ReplayGate(context, new UnchangedRun()));
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        context.Preload(preload.Task, Fixtures.SolutionPath);
+
+        var answer = await status.WorkspaceStatus(cancellationToken: cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        preload.SetResult();
+        Assert.StartsWith("LOADING " + Path.GetFileName(Fixtures.SolutionPath) + " elapsed=", answer, StringComparison.Ordinal);
+        Assert.Matches(@" elapsed=\d+s - ", answer);
+    }
+
+    [Fact]
+    public async Task WithRootAsync_WhenAnotherWorkspaceIsNamedOrThePreloadFinished_TakesTheLoadedPath()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        context.Preload(preload.Task, Fixtures.SolutionPath);
+
+        var named = await context.WithRootAsync("SomeOtherSolution", root => Task.FromResult(root), () => Task.FromResult("loaded"));
+
+        preload.SetResult();
+        await context.ReadyAsync();
+
+        Assert.Equal("loaded", named);
+        Assert.Equal("loaded", await context.WithRootAsync(null, root => Task.FromResult(root), () => Task.FromResult("loaded")));
     }
 }

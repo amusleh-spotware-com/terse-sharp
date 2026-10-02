@@ -24,15 +24,17 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         [Description("List what is STAGED - the index against HEAD, or against baseRef. Untracked files are never listed. Default false.")] bool staged = false,
         [Description("Include files git does not track. Default true; false answers tracked changes only, which is what git status --untracked-files=no asks.")] bool untracked = true,
         [Description("Ignore whitespace, git diff -w: a file whose only change is whitespace or line endings is not listed. Default false.")] bool ignoreWhitespace = false,
-        CancellationToken cancellationToken = default) =>
-        root is { Length: > 0 }
-            ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken))
-            : context.WithWorkingWorkspaceAsync(
-                workspace,
-                path,
-                loaded => baseRef is { Length: > 0 }
+        CancellationToken cancellationToken = default) => root is { Length: > 0 }
+    ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken))
+    : context.WithRootAsync(
+        workspace,
+        early => ListAsync(early, baseRef is { Length: > 0 } ? baseRef : null, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken),
+        () => context.WithWorkingWorkspaceAsync(
+            workspace,
+            path,
+            loaded => baseRef is { Length: > 0 }
                 ? ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken)
-            : ListMemoizedAsync(loaded, path, exclude, NavigationTools.Cap(maxResults, 200), new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken));
+                : ListMemoizedAsync(loaded, path, exclude, NavigationTools.Cap(maxResults, 200), new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken)));
 
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
     [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
@@ -87,10 +89,13 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         return root is { Length: > 0 }
             ? OutsideAsync(root, full => TextAsync(full, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), full, shape, skipLines, cancellationToken))
-            : context.WithWorkingWorkspaceAsync(
+            : context.WithRootAsync(
                 workspace,
-                hint,
-                loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, shape, skipLines, cancellationToken));
+                early => TextAsync(early, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, shape, skipLines, cancellationToken),
+                () => context.WithWorkingWorkspaceAsync(
+                    workspace,
+                    hint,
+                    loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, shape, skipLines, cancellationToken)));
     }
 
     private static async Task<string> ListAsync(
@@ -385,10 +390,13 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         return root is { Length: > 0 }
             ? OutsideAsync(root, full => HistoryAsync(full, baseRef, path, contains, message, commit, tags, describe, remote, NavigationTools.Cap(maxResults, 50), full, maxResults > 0, cancellationToken))
-            : context.WithWorkingWorkspaceAsync(
+            : context.WithRootAsync(
                 workspace,
-                path,
-                loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, tags, describe, remote, NavigationTools.Cap(maxResults, 50), null, maxResults > 0, cancellationToken));
+                early => HistoryAsync(early, baseRef, path, contains, message, commit, tags, describe, remote, NavigationTools.Cap(maxResults, 50), null, maxResults > 0, cancellationToken),
+                () => context.WithWorkingWorkspaceAsync(
+                    workspace,
+                    path,
+                    loaded => HistoryAsync(loaded.Root, baseRef, path, contains, message, commit, tags, describe, remote, NavigationTools.Cap(maxResults, 50), null, maxResults > 0, cancellationToken)));
     }
 
     private static async Task<string> HistoryAsync(

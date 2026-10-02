@@ -254,6 +254,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Unload_WhileWarming_EndsTheWarmingWithoutThrowingAndRefusesANewOne`,
   `WithWorkspaceAsync_OnTheFirstSemanticCallAfterADrop_WarmsEveryProjectOnceItHasAnswered` and
   `WithWorkspaceAsync_AfterADropUnderMemoryPressure_AnswersWithoutWarming`.
+- **While the startup preload is still loading, the text, file and git tools answer at once (I689).**
+  `find_files` (single glob, not `tracked=`), `search_text`, `search_regex`, `changed_files`, `history`
+  and `diff_text` answer from the preload solution's directory, byte-identical to the answer after the
+  load, instead of waiting up to ~45 s on a large solution - when no workspace is loaded yet and
+  `workspace=` is empty or names that solution or its directory. `workspace_status` answers one new
+  line in that window: `LOADING <solution> elapsed=Ns - text, file and git tools answer now; the rest
+  wait for the load`, and `guard=` is answered at once too. Semantic tools still wait. Covered by
+  `RootOnlyTools_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould`,
+  `WorkspaceStatus_WhileThePreloadIsRunning_AnswersLoadingWithTheSolutionAndElapsedSeconds` and
+  `WithRootAsync_WhenAnotherWorkspaceIsNamedOrThePreloadFinished_TakesTheLoadedPath`.
 
 ## [0.72.0] - 2026-10-01
 

@@ -474,10 +474,12 @@ public static class TextSearchService
             (uint)at < (uint)text.Length && (char.IsLetterOrDigit(text[at]) || text[at] is '_');
     }
 
-    private static List<WorkspacePath> Matched(LoadedWorkspace workspace, string glob)
+    private static List<WorkspacePath> Matched(LoadedWorkspace workspace, string glob) =>
+        Matched(workspace.Indexes.Paths(), workspace.Root, glob);
+
+    private static List<WorkspacePath> Matched(PathIndex index, string root, string glob)
     {
-        var matcher = FileGlob.Compile(DirectoryGlob(workspace.Root, glob));
-        var index = workspace.Indexes.Paths();
+        var matcher = FileGlob.Compile(DirectoryGlob(root, glob));
         var matched = new List<WorkspacePath>(Math.Min(index.Count, 1024));
 
         foreach (var path in index.Paths)
@@ -1187,5 +1189,18 @@ public static class TextSearchService
         }
 
         return Result.Ok(response.ToString());
+    }
+
+    public static string FindFilesUnder(string root, string glob, int maxResults, bool stamps, string? name = null, int depth = 0, bool chosen = false) =>
+        Rendered(Matched(PathIndex.Build(root), root, glob), glob, maxResults, stamps, name, depth, null, chosen, root);
+
+    public static async Task<string> SearchUnderAsync(string root, TextSearchRequest request, CancellationToken cancellationToken)
+    {
+        var index = PathIndex.Build(root);
+        var selected = request.Globs.IsDefaultOrEmpty
+            ? Matched(index, root, request.Glob)
+            : Selected(Matched(index, root, "**"), root, request.Globs.AsSpan());
+
+        return await ScannedAsync(Kept([.. selected.Where(IsSearchableFile)], request.Exclude), request, cancellationToken).ConfigureAwait(false);
     }
 }

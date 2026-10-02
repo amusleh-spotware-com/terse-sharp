@@ -318,14 +318,7 @@ bool verbose) =>
         }
 
         if (globs is not { Length: > 0 })
-        {
-            return context.WithWorkspaceAsync(
-                workspace,
-                null,
-                loaded => ListedAsync(loaded, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
-                semantic: false,
-                cancellationToken);
-        }
+            return One(matcher ?? string.Empty);
 
         var combined = PluralPaths.Combine(matcher, globs, "globs");
 
@@ -333,13 +326,22 @@ bool verbose) =>
             return Task.FromResult(combined.Error!.Render());
 
         return combined.Value is [var single]
-            ? context.WithWorkspaceAsync(
-                workspace,
-                null,
-                loaded => ListedAsync(loaded, single, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
-                semantic: false,
-                cancellationToken)
+            ? One(single)
             : ManyAsync(combined.Value, workspace, maxResults, stamps, tracked, name, depth, cancellationToken);
+
+        Task<string> One(string chosenGlob) => tracked
+            ? Waited(chosenGlob)
+            : context.WithRootAsync(
+                workspace,
+                early => Task.FromResult(TextSearchService.FindFilesUnder(early, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0)),
+                () => Waited(chosenGlob));
+
+        Task<string> Waited(string chosenGlob) => context.WithWorkspaceAsync(
+            workspace,
+            null,
+            loaded => ListedAsync(loaded, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+            semantic: false,
+            cancellationToken);
     }
 
     [McpServerTool(Name = "search_text", ReadOnly = true)]
@@ -445,15 +447,17 @@ bool verbose) =>
         request.MaxResults is > 0 and <= NavigationTools.MaxCap,
         globs);
 
-    private Task<string> Scanned(TextQuery request, TextSearchRequest search, CancellationToken cancellationToken) =>
-        request.Root is { Length: > 0 }
-            ? TextSearchService.SearchOutsideAsync(search, cancellationToken)
-            : context.WithWorkspaceAsync(
-                request.Workspace,
-                null,
-                loaded => TextSearchService.SearchAsync(loaded, search, cancellationToken),
-                semantic: false,
-                cancellationToken);
+    private Task<string> Scanned(TextQuery request, TextSearchRequest search, CancellationToken cancellationToken) => request.Root is { Length: > 0 }
+    ? TextSearchService.SearchOutsideAsync(search, cancellationToken)
+    : context.WithRootAsync(
+        request.Workspace,
+        root => TextSearchService.SearchUnderAsync(root, search, cancellationToken),
+        () => context.WithWorkspaceAsync(
+            request.Workspace,
+            null,
+            loaded => TextSearchService.SearchAsync(loaded, search, cancellationToken),
+            semantic: false,
+            cancellationToken));
 
     private readonly record struct TextQuery(
         string? Text,

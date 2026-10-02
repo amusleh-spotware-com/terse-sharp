@@ -127,14 +127,15 @@ CancellationToken cancellationToken = default) =>
             [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
             [Description("Price every advertised tool's whole schema - name, description and parameters - one line per tool in tokens, descending, plus a working-tree estimate for tools whose source differs or passes the cap. Default false.")] bool tools = false,
             [Description("A shell command to judge against the PreToolUse guard, e.g. \"grep -rn TODO src\". Answers ALLOWED or DENIED with the reason and the call that replaces it, and NOTHING is executed - which is the only way to triage a destructive command. Answered alone, in the workspace's own directory.")] string? guard = null,
-            CancellationToken cancellationToken = default) =>
-            context.WithWorkspaceAsync(
-                workspace,
-                null,
-                async loaded => guard is { Length: > 0 } command
-                    ? GuardAnswer(command, loaded.Root)
-                    : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
-                cancellationToken: cancellationToken);
+            CancellationToken cancellationToken = default) => context.LoadingRoot(workspace) is { } loading
+    ? Task.FromResult(guard is { Length: > 0 } judged ? GuardAnswer(judged, loading) : context.Loading())
+    : context.WithWorkspaceAsync(
+        workspace,
+        null,
+        async loaded => guard is { Length: > 0 } command
+            ? GuardAnswer(command, loaded.Root)
+            : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
+        cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]
     [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. properties=\"IsTestProject,TargetFramework\" adds each project's EVALUATED value to its line, so 'which projects set X' is ONE call, a Directory.Build.props value is answered rather than missed, and an undefined one reads (unset). path=<file> answers the opposite question - which project compiles that file, and whether an edit to it would be compile-gated; the two are refused together. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]

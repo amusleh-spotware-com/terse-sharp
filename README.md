@@ -326,7 +326,7 @@ An MCP server's fixed cost is its tool list, attached to every request — and p
 measurably costs tool-selection accuracy. `workspace_status` prints `advertised=<n> tools <t> tokens` —
 asserted on every push against the list the server really sent, under a **30,900-token ceiling** — and
 lists the whole surface beside it under `verbose=true`, so what a narrowing saves is read off the
-running server rather than estimated. `tools=true` prices each tool, and in a repo that declares `[McpServerTool]` methods it also estimates the working tree's edited schemas against the 1,024-token per-tool cap before any build. The surface shrinks three ways, all optional; the default
+running server rather than estimated. While a large solution is still loading, the text, file and git tools answer at once and `workspace_status` reports `LOADING <solution> elapsed=Ns`. `tools=true` prices each tool, and in a repo that declares `[McpServerTool]` methods it also estimates the working tree's edited schemas against the 1,024-token per-tool cap before any build. The surface shrinks three ways, all optional; the default
 advertises everything.
 
 - **Automatically.** A solution holding no `.xaml`, `.razor` or `.resx` never sees those 31 tools —
