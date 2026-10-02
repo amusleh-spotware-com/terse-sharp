@@ -23,6 +23,9 @@ public static class SymbolEditService
         if (target is null)
             return Result.Fail<string>(Errors.SymbolNotFound(SymbolId.From(symbol).Value, []));
 
+        if (TypeHeld(target) is { } held)
+            return Result.Fail<string>(held);
+
         var replacement = ParseBody(target.Node, body);
 
         return replacement is null
@@ -317,7 +320,7 @@ public static class SymbolEditService
         var node = await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
         var document = workspace.Solution.GetDocument(node.SyntaxTree);
 
-        return document is null ? null : new EditTarget(document, node);
+        return document is null ? null : new EditTarget(document, node, symbol);
     }
 
     private static async Task<Result<string>> SwapAsync(
@@ -439,13 +442,30 @@ public static class SymbolEditService
     };
 
     private static TerseError? Shared(EditTarget target) =>
-        target.Node is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: > 1 } declaration }
+        TypeHeld(target) ?? (target.Node is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: > 1 } declaration }
             ? Errors.Invalid(
                 string.Create(
                     CultureInfo.InvariantCulture,
                     $"this field shares one declaration with {declaration.Variables.Count - 1} other variable(s), so it cannot be replaced or deleted as a whole member"),
                 "split the declaration into one field per line first, or edit it with edit_text force=true")
+            : null);
+
+    private static TerseError? TypeHeld(EditTarget target) =>
+        target is { Symbol: not INamedTypeSymbol, Node: BaseTypeDeclarationSyntax or DelegateDeclarationSyntax }
+            ? Errors.Invalid(
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{SymbolId.From(target.Symbol).Value}' has no declaration of its own - {HeldBy(target.Symbol)} the header of {target.Symbol.ContainingType.Name}, so editing it here would replace or delete the whole type"),
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"edit the type instead: replace_symbol symbolId={SymbolId.From(target.Symbol.ContainingType).Value} with its header alone and no body re-heads it and keeps every member"))
             : null;
+
+    private static string HeldBy(ISymbol symbol) => symbol switch
+    {
+        IMethodSymbol { MethodKind: MethodKind.Constructor } => "it is the primary constructor declared by",
+        _ => "the compiler synthesizes it from",
+    };
 
     private static SyntaxNode? WithExpression(SyntaxNode node, string body)
     {
@@ -1705,4 +1725,4 @@ public static class SymbolEditService
         planned.Select(edit => DroppedDeclarations.Replaced(edit.Target.Node, edit.Nodes) is { } warning ? "\n" + warning : string.Empty));
 }
 
-internal sealed record EditTarget(Document Document, SyntaxNode Node);
+internal sealed record EditTarget(Document Document, SyntaxNode Node, ISymbol Symbol);

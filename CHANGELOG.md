@@ -105,6 +105,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `AnalysisTools.cs` answered 8 records, all `info`. They are now filtered by the severity they print,
   and a record whose severity cannot be read is kept, not dropped. Pinned by
   `Analyze_WithAWarningFloor_DropsTheInfoPolicyAndDeadCodeRecordsItListsAtInfo`.
+- **`delete_symbol`, `replace_symbol` and `replace_symbol_body` refuse a member whose only declaration
+  is its type's header (I672)** - a primary constructor (`Scattered.#ctor`) or a record member the
+  compiler generates (`Order.Deconstruct`). Roslyn reports the whole type declaration as that member's
+  syntax, so `delete_symbol Scattered.#ctor` deleted the entire class with `errors=0 (+0)`,
+  `replace_symbol` replaced the class with the constructor, and `delete_symbol Order.Deconstruct`
+  deleted the record. All three now answer `ERROR InvalidArgument` naming the type and the safe call -
+  `replace_symbol` on the type with its header alone and no body re-heads it and keeps every member -
+  in single and `symbolIds=` batches alike. Pinned by
+  `DeleteAndReplace_OnAPrimaryConstructor_AreRefusedNamingTheTypeInsteadOfEditingTheWholeType`,
+  `DeleteSymbol_OnACompilerSynthesizedRecordMember_IsRefusedInsteadOfDeletingTheRecord` and
+  `ReplaceSymbol_OnATypeWithAPrimaryConstructor_StillReHeadsItFromItsHeaderAlone`.
 
 ## [0.72.0] - 2026-10-01
 

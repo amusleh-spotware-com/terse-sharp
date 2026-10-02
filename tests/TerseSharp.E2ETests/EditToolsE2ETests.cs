@@ -1363,4 +1363,47 @@ public sealed class RegionTail
         Assert.Contains("WARNING this replace drops 6 member(s) the type declared: OrderService.repository, OrderService.#ctor(IOrderRepository), OrderService.PendingCount, OrderService.Submit(Order), OrderService.Unused(), OrderService.NeverCalled()", rejected, StringComparison.Ordinal);
         Assert.Equal(before, await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public async Task DeleteAndReplace_OnAPrimaryConstructor_AreRefusedNamingTheTypeInsteadOfEditingTheWholeType()
+    {
+        var deleted = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "Scattered.#ctor", ["force"] = true, ["dryRun"] = true });
+        var batched = await server.CallAsync("delete_symbol", new() { ["symbolIds"] = new[] { "Scattered.#ctor" }, ["force"] = true, ["dryRun"] = true });
+        var replaced = await server.CallAsync("replace_symbol", new() { ["symbolId"] = "Scattered.#ctor", ["declaration"] = "public Scattered(int x) { }", ["dryRun"] = true });
+        var batchReplaced = await server.CallAsync("replace_symbol", new() { ["symbolIds"] = new[] { "Scattered.#ctor" }, ["declarations"] = new[] { "public Scattered(int x) { }" }, ["dryRun"] = true });
+        var body = await server.CallAsync("replace_symbol_body", new() { ["symbolId"] = "Scattered.#ctor", ["body"] = "{ }", ["dryRun"] = true });
+
+        foreach (var text in (string[])[deleted, batched, replaced, batchReplaced, body])
+        {
+            Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+            Assert.Contains("primary constructor declared by the header of Scattered", text, StringComparison.Ordinal);
+            Assert.Contains("replace_symbol symbolId=T:Fixture.Trading.Scattered", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("-public sealed class Scattered", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_OnACompilerSynthesizedRecordMember_IsRefusedInsteadOfDeletingTheRecord()
+    {
+        var text = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "Order.Deconstruct", ["force"] = true, ["dryRun"] = true });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("the compiler synthesizes it from the header of Order", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("-public sealed record Order", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_OnATypeWithAPrimaryConstructor_StillReHeadsItFromItsHeaderAlone()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "T:Fixture.Trading.Scattered",
+            ["declaration"] = "public sealed class Scattered(int offset, int scale)",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("+public sealed class Scattered(int offset, int scale)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("-    public int Between() => offset;", text, StringComparison.Ordinal);
+    }
 }
