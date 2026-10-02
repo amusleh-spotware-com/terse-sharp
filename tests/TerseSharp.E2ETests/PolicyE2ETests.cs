@@ -232,4 +232,26 @@ public sealed class PolicyE2ETests : IAsyncLifetime
         Assert.DoesNotContain("NOT_ENABLED TERSE107", text, StringComparison.Ordinal);
         Assert.Contains("NOT_ENABLED CA9999", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task WriteText_OverwritingAFileWithAWarnedEdit_MarksTheFileLineNotTheWarning()
+    {
+        var before = await OriginalAsync();
+
+        try
+        {
+            var content = before[..before.LastIndexOf('}')] + "    " + Long() + "\n}\n";
+            var response = await server.CallAsync("write_text", new() { ["path"] = LedgerPath, ["content"] = content, ["force"] = true }, TestContext.Current.CancellationToken);
+            var lines = response.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            Assert.DoesNotContain("ERROR", response, StringComparison.Ordinal);
+            Assert.Contains(lines, line => line.StartsWith("WARNING policy  TERSE101", StringComparison.Ordinal));
+            Assert.Contains(lines, line => line.StartsWith("overwrote existing  ", StringComparison.Ordinal) && line.Contains("Ledger.cs  changedLines=", StringComparison.Ordinal));
+            Assert.DoesNotContain("overwrote existing  WARNING", response, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await RestoreAsync(before);
+        }
+    }
 }

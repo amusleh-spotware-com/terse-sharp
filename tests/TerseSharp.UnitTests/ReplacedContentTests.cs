@@ -27,4 +27,11 @@ public sealed class ReplacedContentTests
     [InlineData("x\n", "y\n", false, "a.md  changedLines=1")]
     public void Marked_PrefixesOnlyAQuietWriteThatChangedAFileWithContent(string before, string after, bool quiet, string expected) =>
         Assert.Equal(expected, ReplacedContent.Marked("a.md  changedLines=1", before, after, quiet));
+
+    [Theory]
+    [InlineData("WARNING policy  TERSE112 src/A.cs:3 comment\nsrc/A.cs  changedLines=1", "WARNING policy  TERSE112 src/A.cs:3 comment\noverwrote existing  src/A.cs  changedLines=1")]
+    [InlineData("WARNING policy  TERSE101 changedLines= in a message\ngate=semantic - note\nsrc/A.cs  changedLines=2", "WARNING policy  TERSE101 changedLines= in a message\ngate=semantic - note\noverwrote existing  src/A.cs  changedLines=2")]
+    [InlineData("no file line here", "overwrote existing  no file line here")]
+    public void Marked_PrefixesTheFileLineAfterAnyPolicyWarningNotTheFirstLine(string text, string expected) =>
+            Assert.Equal(expected, ReplacedContent.Marked(text, "x\n", "y\n", quiet: true));
 }

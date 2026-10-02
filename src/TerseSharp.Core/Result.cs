@@ -228,9 +228,12 @@ public static class Errors
     internal static bool HoldsUsings(string? tool) =>
         tool is null or "replace_symbol" or "replace_symbol_body" or "add_member";
 
-    internal static string Missing(IReadOnlyList<string> imports, string? tool) => HoldsUsings(tool)
-        ? "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway"
-        : tool + " declares no usings= and no retryWith=, so put " + QuotedList(imports) + " in the file's own using directives in the content you send, or pass allowErrors=true to apply it anyway";
+    internal static string Missing(IReadOnlyList<string> imports, string? tool) => tool switch
+    {
+        _ when HoldsUsings(tool) => "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway",
+        "write_text" => "retry with usings=[" + QuotedList(imports) + "], force=true and the retryWith token below, which adds the import to the content the token holds and lands it in the same compile-gated edit - a files= batch holds no token, so there put " + QuotedList(imports) + " in that file's own using directives - or pass allowErrors=true to apply it anyway",
+        _ => tool + " declares no usings= and no retryWith=, so put " + QuotedList(imports) + " in the file's own using directives in the content you send, or pass allowErrors=true to apply it anyway",
+    };
 
     internal static string Ambiguity(IReadOnlyList<string> collisions, string? tool) => HoldsUsings(tool)
         ? "the ambiguity was introduced by usings=[" + QuotedList(collisions) + "] which this edit added - retry with usings=[] and the retryWith token below to drop it, fully qualify the name, or pass allowErrors=true to apply it anyway"

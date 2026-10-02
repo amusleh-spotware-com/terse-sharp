@@ -44,16 +44,30 @@ jobs:
         run: dotnet test TerseSharp.slnx --no-build -c Release
 
       - name: Pack
-        run: dotnet pack src/TerseSharp.Server/TerseSharp.Server.csproj --no-build -c Release -o artifacts/nupkg
+        run: dotnet pack src/TerseSharp.Server/TerseSharp.Server.csproj -c Release -o artifacts/nupkg -p:TerseRidPackages=true
 
       - name: Show resolved version
         run: ls -1 artifacts/nupkg
+
+      - name: Verify the RID package set
+        run: |
+          set -euo pipefail
+          cd artifacts/nupkg
+          ls TerseSharp.[0-9]*.nupkg
+          for rid in win-x64 win-arm64 linux-x64 linux-arm64 osx-x64 osx-arm64 any; do
+            ls TerseSharp.$rid.*.nupkg
+          done
+          test "$(ls -1 *.nupkg | wc -l)" -eq 8
+          precompiled=$(unzip -l TerseSharp.linux-x64.*.nupkg | awk '$NF ~ /\/Microsoft\.CodeAnalysis\.dll$/ {print $1}')
+          portable=$(unzip -l TerseSharp.any.*.nupkg | awk '$NF ~ /\/Microsoft\.CodeAnalysis\.dll$/ {print $1}')
+          test "$precompiled" -gt "$portable"
 
       - name: Smoke test the packaged tool
         run: |
           dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
           export PATH="$PATH:$HOME/.dotnet/tools"
           terse --version
+          find "$HOME/.dotnet/tools/.store" -ipath '*linux-x64*' -name terse.dll | grep -q .
           cd fixtures/FixtureSolution
           terse doctor
 

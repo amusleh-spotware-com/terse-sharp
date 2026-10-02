@@ -44,11 +44,16 @@ The `Release` workflow then, on the tag:
 
 1. checks out with full history so MinVer sees the tag,
 2. builds and runs **all** tests,
-3. packs `TerseSharp.<version>.nupkg`,
-4. **smoke-tests the real artifact** — installs the packed tool globally and runs `terse doctor`
-   against the fixture solution, so a broken package cannot be published,
+3. packs with `-p:TerseRidPackages=true`: the pointer package `TerseSharp.<version>.nupkg`, one
+   ReadyToRun `TerseSharp.<rid>.<version>.nupkg` for each of `win-x64`, `win-arm64`, `linux-x64`,
+   `linux-arm64`, `osx-x64` and `osx-arm64`, and the framework-dependent fallback
+   `TerseSharp.any.<version>.nupkg`, then fails unless all eight exist and the linux-x64 one is
+   precompiled,
+4. **smoke-tests the real artifact** — installs the packed tool globally, checks the linux-x64
+   package is the one that resolved, and runs `terse doctor` against the fixture solution, so a
+   broken package cannot be published,
 5. exchanges the GitHub OIDC token for a short-lived NuGet key and pushes to NuGet.org,
-6. creates or updates the GitHub Release with auto-generated notes and the `.nupkg` attached.
+6. creates or updates the GitHub Release with auto-generated notes and every `.nupkg` attached.
 
 A tag containing `-` (e.g. `v0.3.0-rc.1`) is marked as a GitHub prerelease automatically.
 

@@ -32,6 +32,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `WorkspaceRegistryTests.cs` drop to 0. Pinned by
   `Inspect_ForATestClassOverTheMethodLimit_CountsOnlyItsNonTestMethods` and
   `Inspect_ForATestMethodOverTheStatementLimit_IsNotAStatementViolation`.
+- **The NuGet release ships ReadyToRun, RID-specific tool packages (I686).** `TerseSharp.<v>.nupkg`
+  is now the pointer package: `dotnet tool install -g TerseSharp` resolves `TerseSharp.<rid>.<v>.nupkg`
+  for `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64` and `osx-arm64`, each
+  framework-dependent and precompiled with `PublishReadyToRun`, so connecting no longer JITs Roslyn:
+  measured on Windows over 5 runs each, `initialize` 0.568 s -> 0.377 s and `tools/list` 0.612 s ->
+  0.406 s. Any other platform installs `TerseSharp.any.<v>.nupkg`, the framework-dependent build the
+  package used to be. The RID packages run through the `dotnet` host (`UseAppHost=false`), so the
+  Windows shim stays `terse.exe` - an apphost entry point would have installed a `terse.cmd` shim that
+  an MCP client spawning the bare `terse` command cannot start. The switch is the pack property
+  `TerseRidPackages=true`, so `dotnet build`, the E2E binary at
+  `src/TerseSharp.Server/bin/<Configuration>/net10.0/terse.dll` and a from-source `dotnet pack` are
+  unchanged; CI and Release pack with it, fail unless all eight packages exist and the linux-x64 one
+  is precompiled, and install the packed tool to prove the linux-x64 package resolves. Pinned by
+  `TheRidSwitch_ShipsReadyToRunPackagesForEveryReleasedRidAndAFrameworkDependentFallback`,
+  `TheRidPackages_RunThroughTheDotnetHost_SoTheWindowsShimStaysAnExecutable`,
+  `ThePlainBuild_DeclaresNoRidProperty_SoTheE2EBinaryStaysAtBinConfigurationNet10` and
+  `EveryWorkflowThatPacks_PassesTheRidSwitchWithoutNoBuildAndVerifiesEveryReleasedRid`.
 
 ### Fixed
 
@@ -58,6 +75,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Tier_WhenTwoWorktreesShareTheSolutionNameAndTheHintNamesOneWorktree_RanksThatWorktreeFirst`,
   `Tier_WhenTwoWorktreesShareTheSolutionNameAndTheHintNamesNeither_KeepsThemTied` and
   `Tier_ForAHintThatIsOneSolutionsStemAndAnotherWorktreesName_StillRanksTheSolutionStemFirst`.
+- **A `write_text` rolled back on a missing import names the retry it actually offers (I669).** The
+  `CompileRegression` remedy said `write_text declares no usings= and no retryWith=`, while the same
+  rejection ended with a `retryWith=` token that `write_text retryWith=<token> usings=[…] force=true`
+  lands. It now reads `retry with usings=["<ns>"], force=true and the retryWith token below …`, and
+  says that a `files=` batch holds no token, so there the directive goes in the file's own usings.
+  Pinned by `WriteText_RolledBack_OffersNoParameterItDoesNotDeclare` and
+  `WriteTextBatch_RolledBackOnAMissingImport_MintsNoTokenAndSaysWhereTheDirectiveGoes`.
+- **An overwriting `write_text` marks its file line, not the first policy warning (I671).** The
+  `overwrote existing  ` prefix was put on the first line of the response, so an overwrite whose edit
+  raised a warn-level policy finding answered `overwrote existing  WARNING policy  TERSE1xx …`. It now
+  sits on the `<path>  changedLines=N` line, after the warnings. Pinned by
+  `Marked_PrefixesTheFileLineAfterAnyPolicyWarningNotTheFirstLine` and
+  `WriteText_OverwritingAFileWithAWarnedEdit_MarksTheFileLineNotTheWarning`.
 
 ## [0.72.0] - 2026-10-01
 

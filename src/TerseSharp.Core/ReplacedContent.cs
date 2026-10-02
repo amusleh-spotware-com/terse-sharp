@@ -17,7 +17,27 @@ public static class ReplacedContent
         "check what the path holds with get_file_outline or read_text and write the new file to another path; to replace it deliberately pass overwrite=true - dryRun=true overwrite=true previews the diff, and write_text ref=HEAD restores a tracked file");
 
     public static string Marked(string text, string before, string after, bool quiet) =>
-        quiet && Replaced(before, after) ? Marker + text : text;
+        quiet && Replaced(before, after) ? text.Insert(FileLine(text), Marker) : text;
+
+    private const string WarningPrefix = "WARNING ";
+    private const string ChangedLines = "  changedLines=";
+
+    private static int FileLine(ReadOnlySpan<char> text)
+    {
+        for (var start = 0; start < text.Length;)
+        {
+            var rest = text[start..];
+            var end = rest.IndexOf('\n');
+            var line = end < 0 ? rest : rest[..end];
+
+            if (!line.StartsWith(WarningPrefix, StringComparison.Ordinal) && line.Contains(ChangedLines, StringComparison.Ordinal))
+                return start;
+
+            start = end < 0 ? text.Length : start + end + 1;
+        }
+
+        return 0;
+    }
 
     private static bool Replaced(string before, string after) =>
         before.Length > 0 && !string.Equals(before, after, StringComparison.Ordinal);
