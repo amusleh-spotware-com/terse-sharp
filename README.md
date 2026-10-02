@@ -292,7 +292,7 @@ The compound-command rewrite is only attempted where it is provably sound: every
 `&&`, `;` or a newline, and a pipeline containing a covered stage is dropped whole, its redirects with
 it — a plain `>`, `>>`, `2>` or `<` binds to the command it follows and no longer forces a refusal. A
 command carrying `||`, a background `&`, a subshell, a heredoc, a substitution, a comment, any backslash
-escape, a mixed `;`/`&&` run or a shell keyword falls back to denying the command as before.
+escape, a mixed `;`/`&&` run or a shell keyword falls back to denying the command as before. A covered read behind a background `&` or inside a `for` loop (its variable expanded to the loop's list) is caught and denies the whole command. A plain `$NAME` or `${NAME}` and a heredoc whose delimiter is quoted (`<<'EOF'`) and whose terminator line is present are opaque words, not fences, unless a shell reads the heredoc, the next line opens with an operator, or a covered command sits in its body; an unquoted heredoc, `$(…)`, `${X:-…}` and `$1` still fence. A `NAME=value` assigned earlier also expands into a heredoc's opener line. A literal `cd`/`pushd` to an existing directory earlier in a `;`/`&&` chain moves the directory later commands are judged in - never across a pipe, subshell, heredoc, backslash or background `&`. A shell text read of a path that is not .NET source is denied as "judged inside the .NET tree", never called C#/.NET source.
 
 Git rows fire only when the directory the command actually addresses sits under a
 `.sln`/`.slnx`/`.slnf`/`.csproj` — the `-C` target or a directory operand before the working directory —

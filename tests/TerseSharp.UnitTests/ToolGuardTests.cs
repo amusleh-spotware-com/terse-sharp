@@ -1214,6 +1214,13 @@ public sealed class ToolGuardTests
     [InlineData("echo a\\;git log --oneline -3 && echo hi")]
     [InlineData("test -f foo ; dotnet build && rm -rf artifacts")]
     [InlineData("git log --oneline -3\nnpm test &&\nnpm publish")]
+    [InlineData("git commit -q -F - <<EOF\nsubject\nEOF\ngit log --oneline -3")]
+    [InlineData("git commit -q -F - <<'EOF'\nsubject\ngit log --oneline -3")]
+    [InlineData("bash <<'EOF'\necho hi\nEOF\ngit log --oneline -3")]
+    [InlineData("git commit -q -F - <<'EOF'\ngit log --oneline -3\nEOF\nnpm test")]
+    [InlineData("git log --oneline -3 && npm test ${X:-$(date)}")]
+    [InlineData("git log --oneline -3 && echo $1 && npm test")]
+    [InlineData("git log --oneline -3 && npm test $'a;b'")]
     public void Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
@@ -1552,14 +1559,15 @@ public sealed class ToolGuardTests
     }
 
     [Fact]
-    public void Inspect_ForATextReadOfAPathInsideTheTree_StillNamesItAsDotNetSource()
+    public void Inspect_ForATextReadOfAPathInsideTheTree_SaysItWasJudgedInsideTheTree()
     {
         var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
         var inside = Path.Combine(root, "notes.txt");
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat " + inside }, root);
 
         Assert.True(verdict.Denied);
-        Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("judged inside the .NET tree", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
         Assert.DoesNotContain("OUTSIDE that tree", verdict.Reason, StringComparison.Ordinal);
     }
 
@@ -1626,7 +1634,7 @@ public sealed class ToolGuardTests
 
         Assert.True(verdict.Denied);
         Assert.DoesNotContain("OUTSIDE that tree", verdict.Reason, StringComparison.Ordinal);
-        Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("judged inside the .NET tree", verdict.Reason, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1904,7 +1912,7 @@ public sealed class ToolGuardTests
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
 
         Assert.True(verdict.Denied, command);
-        Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("judged inside the .NET tree", verdict.Reason, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -2104,5 +2112,128 @@ public sealed class ToolGuardTests
 
         Assert.True(verdict.Denied);
         Assert.Equal("diff_text unified=0", verdict.Routing);
+    }
+
+    [Theory]
+    [InlineData("true & cat \"src/TerseSharp.Core/Result.cs\"")]
+    [InlineData("npm start & git status")]
+    [InlineData("for f in src/TerseSharp.Core/*.cs; do cat \"$f\"; done")]
+    [InlineData("for f in src/TerseSharp.Core/*.cs; do head -5 ${f}; done")]
+    [InlineData("if true; then cat src/TerseSharp.Core/Result.cs; fi")]
+    public void Guard_ForACoveredReadBehindABackgroundAmpersandOrInALoop_DeniesItWhole(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied, command);
+        Assert.Null(verdict.Rewrite);
+        Assert.Contains("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("npm start & npm test")]
+    [InlineData("for f in src/TerseSharp.Core/*.cs; do echo \"$f\"; done")]
+    [InlineData("for f in a b; do echo $f; done")]
+    public void Guard_ForABackgroundOrLoopThatReadsNoDotNetSource_StillAllowsIt(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+
+    [Theory]
+    [InlineData("cd 'PLAIN' && git init -q && git diff -w --numstat")]
+    [InlineData("cd 'PLAIN'; git status --porcelain")]
+    [InlineData("cd 'PLAIN'; python s.py > dump.txt; wc -l dump.txt")]
+    [InlineData("pushd 'PLAIN' && wc -l dump.txt")]
+    public void Guard_ForACommandAfterALiteralCdOutOfTheTree_JudgesItInThatDirectory(string template)
+    {
+        var plain = Directory.CreateTempSubdirectory("terse-guard-cd");
+
+        try
+        {
+            var command = template.Replace("PLAIN", plain.FullName, StringComparison.Ordinal);
+            var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+            Assert.False(verdict.Denied, NotHermetic(plain.FullName, verdict.Reason));
+        }
+        finally
+        {
+            plain.Delete(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("cd \"$(mktemp -d)\" && git diff -w --numstat")]
+    [InlineData("true && cd 'PLAIN'; wc -l dump.txt")]
+    [InlineData("cd 'PLAIN-missing'; wc -l dump.txt")]
+    [InlineData("(cd 'PLAIN' && true); git status")]
+    [InlineData("cd 'PLAIN' | true; wc -l dump.txt")]
+    [InlineData("cd 'PLAIN' & git status")]
+    [InlineData("cd 'PLAIN'; cat Foo.cs")]
+    public void Guard_ForACdTheGuardCannotFollow_KeepsJudgingTheWorkingDirectory(string template)
+    {
+        var plain = Directory.CreateTempSubdirectory("terse-guard-cd");
+
+        try
+        {
+            var command = template.Replace("PLAIN", plain.FullName, StringComparison.Ordinal);
+
+            Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+        }
+        finally
+        {
+            plain.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void Inspect_ForAHeredocWriteToAVariableAssignedOutsideTheTree_AllowsIt()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch");
+        var command = "S=" + scratch + "; cat > \"$S/ws.sh\" <<'EOF'\necho hi\nEOF";
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("S=SCRATCH; cat > \"$S/Foo.cs\" <<'EOF'\nclass A {}\nEOF")]
+    [InlineData("S=src; cat > \"$S/ws.sh\" <<'EOF'\necho hi\nEOF")]
+    [InlineData("cat > \"$S/ws.sh\" <<'EOF'\necho hi\nEOF\nS=SCRATCH")]
+    public void Inspect_ForAHeredocWriteThatStillLandsInsideTheTreeOrNamesSource_StillDeniesIt(string template)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch");
+        var command = template.Replace("SCRATCH", scratch, StringComparison.Ordinal);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root).Denied, command);
+    }
+
+    [Fact]
+    public void Reason_ForATextReadOfANonDotNetPathInsideTheTree_SaysJudgedInsideTheTreeNotCSharpSource()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "wc -l dump.txt" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("judged inside the .NET tree", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Reason_ForATextReadNamingDotNetSource_StillCallsItCSharpSource()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "wc -l src/TerseSharp.Core/Result.cs" }, Fixtures.RepositoryRoot);
+
+        Assert.Contains("is C#/.NET source", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git status && npm test ${FLAGS}", "npm test ${FLAGS}")]
+    [InlineData("git status && cp $SRC $DST", "cp $SRC $DST")]
+    [InlineData("git commit -q -F - <<'EOF'\nsubject; body && more\nEOF\ngit status", "git commit -q -F - <<'EOF'\nsubject; body && more\nEOF")]
+    [InlineData("npm pack <<-'END'\n\tdata\n\tEND\ngit status", "npm pack <<-'END'\n\tdata\n\tEND")]
+    public void Guard_ForABatchCarryingAPlainVariableOrAQuotedHeredoc_RewritesIt(string command, string rewrite)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(rewrite, verdict.Rewrite);
     }
 }

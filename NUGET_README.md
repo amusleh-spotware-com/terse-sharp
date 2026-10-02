@@ -211,7 +211,7 @@ arguments filled in from the command it just denied** — which Claude Code plac
 `Call this instead: get_file_outline path="src/App/OrderService.cs"`. The call it names follows the
 **direction** as well as the file kind, so a shell redirect that creates a file answers
 `write_text path="..." force=true`, never an outline; and the shell-text rows are scoped to the tree, so
-a text command naming no .NET source whose every path operand lands outside it - `~/`, `$HOME` and a `$VAR` assigned earlier in the same command included - is allowed. And **a batch is not denied whole
+a text command naming no .NET source whose every path operand lands outside it - `~/`, `$HOME` and a `$VAR` assigned earlier in the same command - a heredoc's opener line too - included - is allowed. And **a batch is not denied whole
 for one covered command in it**: when a compound command mixes commands the server answers with commands
 it does not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at
 all, so the rest runs under your normal permission rules. The rewrite is only attempted where it is
@@ -219,7 +219,7 @@ provably sound: every top-level separator is `&&`, `;` or a newline, and a pipel
 is dropped whole, its redirects with it — a plain `>`, `>>`, `2>` or `<` binds to the command it
 follows and no longer forces a refusal. A command carrying `||`, a background `&`, a subshell, a heredoc, a substitution, a
 comment, any backslash escape, a mixed `;`/`&&` run or a shell keyword is denied whole, as before - and
-so is a batch whose only surviving parts would be `echo`/`printf` framing. The same install adds a `PostToolBatch` hook: after a response that carried a single read-only terse-sharp call, it places one line after the results asking the next response to send every independent call at once. `terse uninstall` removes both hooks along with the server entry.
+so is a batch whose only surviving parts would be `echo`/`printf` framing. A covered read behind a background `&` or inside a `for` loop (its variable expanded to the loop's list) is caught and denies the whole command. A plain `$NAME` or `${NAME}` and a heredoc whose delimiter is quoted (`<<'EOF'`) and whose terminator line is present are opaque words, not fences, unless a shell reads the heredoc, the next line opens with an operator, or a covered command sits in its body; an unquoted heredoc, `$(…)`, `${X:-…}` and `$1` still fence. A literal `cd`/`pushd` to an existing directory earlier in a `;`/`&&` chain moves the directory later commands are judged in - never across a pipe, subshell, heredoc, backslash or background `&`. A shell text read of a path that is not .NET source is denied as "judged inside the .NET tree", never called C#/.NET source. The same install adds a `PostToolBatch` hook: after a response that carried a single read-only terse-sharp call, it places one line after the results asking the next response to send every independent call at once. `terse uninstall` removes both hooks along with the server entry.
 
 It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and friends; the shell text tools
 (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that names a

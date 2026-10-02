@@ -142,6 +142,44 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Steer_ForARunOfSingleRowMoves_NamesRowsRatherThanEdits`,
   `Steer_ForARowMoveAfterAnInPlaceEdit_SaysNothingBecauseOneCallCannotCarryBoth` and
   `Steer_ForRowMovesFromDifferentSourceFiles_SaysNothingBecauseRowsTakesOnePath`.
+- **A covered read behind a background `&` or inside a loop is denied (I677).** `true & cat
+  "src/TerseSharp.Core/Result.cs"` and `for f in src/TerseSharp.Core/*.cs; do cat "$f"; done` were
+  allowed: a lone `&` was not a stage boundary, and a stage opening with `do`/`then`/`if`/`while` was
+  judged by its keyword. Each `&`-separated command is now judged, a leading shell keyword is skipped,
+  and a `for` body is judged with its variable expanded to the loop's list; one that names .NET source
+  denies the whole command. Covered by `Guard_ForACoveredReadBehindABackgroundAmpersandOrInALoop_DeniesItWhole`
+  and `Guard_ForABackgroundOrLoopThatReadsNoDotNetSource_StillAllowsIt`.
+- **The guard follows a literal `cd` earlier in the command (I680, I692).** `cd <temp> && git init &&
+  git diff -w` had its `git diff` stripped, and `cd <scratch>; python s.py > dump.txt; wc -l dump.txt`
+  its `wc`, because every part was judged against the hook's working directory. A literal `cd`/`pushd`
+  to an existing directory now moves the directory later commands in a `;`/`&&` chain are judged in; a
+  `cd` to a substitution or variable, `cd -`, `popd`, a `cd` reached through `&&` once its list ends,
+  and any command carrying a pipe, subshell, heredoc, backslash or background `&` keep today's answer.
+  Covered by `Guard_ForACommandAfterALiteralCdOutOfTheTree_JudgesItInThatDirectory` and
+  `Guard_ForACdTheGuardCannotFollow_KeepsJudgingTheWorkingDirectory`.
+- **Response-format change: a shell read of a non-.NET path inside the tree is no longer called C#/.NET
+  source (I692).** The reason now reads `TerseSharp guard: Bash on '<command>' names a path judged
+  inside the .NET tree, which the terse-sharp MCP serves - <call>.`; a command whose operand names .NET
+  source keeps `is C#/.NET source`. Covered by
+  `Reason_ForATextReadOfANonDotNetPathInsideTheTree_SaysJudgedInsideTheTreeNotCSharpSource`,
+  `Reason_ForATextReadNamingDotNetSource_StillCallsItCSharpSource` and
+  `Inspect_ForATextReadOfAPathInsideTheTree_SaysItWasJudgedInsideTheTree`.
+- **A heredoc no longer disables the earlier-assignment expansion (I681).** `S=<scratch>; cat >
+  "$S/ws.sh" <<'EOF'` was denied as a write inside the tree because any `<<` skipped the I665
+  expansion. The expansion now fills the command up to the end of the heredoc's opener line and leaves
+  the body unparsed, so a redirect target outside the tree is allowed; a target that resolves inside
+  the tree or names .NET source is still denied. Covered by
+  `Inspect_ForAHeredocWriteToAVariableAssignedOutsideTheTree_AllowsIt` and
+  `Inspect_ForAHeredocWriteThatStillLandsInsideTheTreeOrNamesSource_StillDeniesIt`.
+- **A plain `$NAME` and a quoted heredoc no longer force a whole-command denial (I698).** 131 of 207
+  whole denials in a measured week were compounds fenced for `$`, `<<`, `\`, `{` or a keyword, carrying
+  unreplaced `git add`/`fetch`/`worktree`/`commit`. `$NAME`, `${NAME}` and a heredoc whose delimiter is
+  quoted and whose terminator line is present are now opaque when splitting, so the batch is rewritten
+  instead; an unquoted or shell-fed heredoc, one whose body holds a covered command or whose next line
+  opens with an operator, `$(…)`, `${X:-…}`, `$1` and every backslash still deny the whole command, and
+  a batch whose assigned variable feeds a stripped part is denied whole rather than rewritten. Covered
+  by `Guard_ForABatchCarryingAPlainVariableOrAQuotedHeredoc_RewritesIt` and seven new rows of
+  `Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole`.
 
 ## [0.72.0] - 2026-10-01
 

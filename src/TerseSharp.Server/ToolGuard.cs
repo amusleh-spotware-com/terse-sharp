@@ -147,7 +147,7 @@ public static class ToolGuard
         if (command is null)
             return Allowed;
 
-        var replaced = Assigned(command, cwd);
+        var replaced = Unrolling(command, cwd);
 
         return replaced.Denied || !Sleeping(command) ? replaced : Napping();
     }
@@ -918,7 +918,7 @@ public static class ToolGuard
 
     private static List<Pipeline> Pipelines(string command)
     {
-        var masked = Masked(command).AsSpan();
+        var masked = Sealed(command).AsSpan();
         var pipelines = new List<Pipeline>();
         var lead = string.Empty;
         var start = 0;
@@ -979,13 +979,11 @@ public static class ToolGuard
         if (!Uniform(pipelines))
             return null;
 
-        var judged = pipelines
-            .FindAll(pipeline => pipeline.Text.Trim().Length > 0)
-            .ConvertAll(pipeline => new Judgement(pipeline, Judged(pipeline.Text, cwd)));
+        var judged = Judging(pipelines.FindAll(pipeline => pipeline.Text.Trim().Length > 0), command, cwd);
         var kept = judged.FindAll(entry => !entry.Verdict.Denied);
         var dropped = judged.FindAll(entry => entry.Verdict.Denied);
 
-        if (dropped.Count is 0 || kept.TrueForAll(entry => Framing(entry.Pipeline.Text)))
+        if (Unsplittable(kept, dropped))
             return null;
 
         return dropped[0].Verdict with
@@ -998,16 +996,19 @@ public static class ToolGuard
 
     private static GuardVerdict Blocking(Stage[] stages, string command, string? cwd)
     {
-        var compound = stages.Length > 1;
+        var judged = Detached(stages);
+        var compound = judged.Length > 1;
         var unfenceable = compound ? Unfenceable(command) : string.Empty;
-        var allowed = new List<string>(stages.Length);
+        var directories = Directories(command, cwd, judged.Length);
+        var allowed = new List<string>(judged.Length);
         var calls = new List<string>();
         GuardVerdict? refused = null;
         string? allowance = null;
 
-        foreach (var stage in stages)
+        for (var index = 0; index < judged.Length; index++)
         {
-            var verdict = Denial(stage.Text, cwd, compound, unfenceable, stage.Fed);
+            var stage = judged[index];
+            var verdict = Denial(Unkeyworded(stage.Text), directories is null ? cwd : directories[index], compound, unfenceable, stage.Fed);
 
             if (!verdict.Denied)
             {
@@ -1091,7 +1092,7 @@ public static class ToolGuard
 
     private static string Unfenceable(string command)
     {
-        var masked = Masked(command);
+        var masked = Sealed(command);
 
         if (masked.AsSpan().IndexOfAny(Hazards) is var hazard and >= 0)
             return Around(command, hazard, "'" + masked[hazard] + "'");
@@ -1099,7 +1100,7 @@ public static class ToolGuard
         if (masked.IndexOf("||", StringComparison.Ordinal) is var either and >= 0)
             return Around(command, either, "'||'");
 
-        if (Escaping(command.AsSpan()))
+        if (Escaping(Bodiless(command).AsSpan()))
             return "a backslash escape";
 
         if (Backgrounded(masked.AsSpan()))
@@ -1368,7 +1369,9 @@ public static class ToolGuard
         if (WriteTarget(segment) is { Length: > 0 } target)
             return new GuardVerdict(true, ShellWriteReason(trimmed, target) + Priced + Nothing(compound, unfenceable), ShellWriteRouting(target), ShellWriter(target));
 
-        return new GuardVerdict(true, Reason("Bash", trimmed) + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
+        var reason = Covered(trimmed) ? Reason("Bash", trimmed) : InTree(trimmed);
+
+        return new GuardVerdict(true, reason + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
     }
 
     private static readonly string[] PatternCommands = ["grep", "rg", "egrep", "fgrep", "findstr", "select-string", "sls", "awk", "sed"];
@@ -1876,13 +1879,14 @@ public static class ToolGuard
 
     private static string? Resolved(string command)
     {
-        if (!command.Contains('$') || !command.Contains('=') || command.Contains("<<", StringComparison.Ordinal))
+        if (!command.Contains('$') || !command.Contains('='))
             return null;
 
+        var opened = Opened(command);
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var builder = new StringBuilder(command.Length);
 
-        foreach (var pipeline in Pipelines(command))
+        foreach (var pipeline in Pipelines(command[..opened]))
         {
             var text = Filled(pipeline.Text, values);
 
@@ -1892,7 +1896,7 @@ public static class ToolGuard
                 Recorded(text, values);
         }
 
-        var resolved = builder.ToString();
+        var resolved = builder.Append(command.AsSpan(opened)).ToString();
 
         return resolved.Equals(command, StringComparison.Ordinal) ? null : resolved;
     }
@@ -1909,6 +1913,7 @@ public static class ToolGuard
         return (verdict.Denied, expanded.Denied) switch
         {
             (true, false) => expanded,
+            (true, true) when verdict.Rewrite is not null => Blocking(Stages(resolved), resolved, cwd),
             (false, true) when IntroducesSource(command, resolved) => Blocking(Stages(resolved), resolved, cwd),
             _ => verdict,
         };
@@ -2030,6 +2035,316 @@ public static class ToolGuard
     };
 
     private static readonly char[] PathSeparators = ['/', '\\'];
+
+    private readonly record struct Heredoc(int Delimited, int Lined, int Closed);
+
+    private static readonly SearchValues<char> Unfollowable = SearchValues.Create("|(){}`<\\");
+    private static readonly SearchValues<char> QuotedUnliteral = SearchValues.Create("$`\\\"");
+    private static readonly SearchValues<char> BareUnliteral = SearchValues.Create("$`\\\"'*?[ \t{}");
+    private static readonly SearchValues<char> Unsealable = SearchValues.Create("<'\"\\");
+    private static readonly string[] ShellHosts = ["bash", "sh", "zsh", "dash", "ksh", "pwsh", "powershell", "cmd", "source", "eval"];
+
+    private static List<Judgement> Judging(List<Pipeline> written, string command, string? cwd)
+    {
+        var directories = Directories(command, cwd, written.Count);
+        var judged = new List<Judgement>(written.Count);
+
+        for (var index = 0; index < written.Count; index++)
+            judged.Add(new Judgement(written[index], Judged(written[index].Text, directories is null ? cwd : directories[index])));
+
+        return judged;
+    }
+
+    private static bool Unsplittable(List<Judgement> kept, List<Judgement> dropped) =>
+        dropped.Count is 0
+        || kept.TrueForAll(entry => Framing(entry.Pipeline.Text))
+        || dropped.Exists(entry => entry.Pipeline.Text.Contains("<<", StringComparison.Ordinal));
+
+    private static bool Leads(ReadOnlySpan<char> word) => word is "do" or "then" or "else" or "elif" or "if" or "while" or "until" or "!";
+
+    private static string Unkeyworded(string segment)
+    {
+        var rest = segment.AsSpan().TrimStart();
+        var stripped = false;
+
+        while (rest.IndexOfAny(' ', '\t') is var gap and > 0 && Leads(rest[..gap]))
+        {
+            rest = rest[gap..].TrimStart();
+            stripped = true;
+        }
+
+        return stripped ? rest.ToString() : segment;
+    }
+
+    private static Stage[] Detached(Stage[] stages)
+    {
+        var detached = new List<Stage>(stages.Length);
+
+        foreach (var stage in stages)
+            Backgrounds(stage, detached);
+
+        detached.RemoveAll(stage => stage.Text.AsSpan().Trim().IsEmpty);
+
+        return [.. detached];
+    }
+
+    private static void Backgrounds(Stage stage, List<Stage> detached)
+    {
+        var masked = stage.Text.Contains('&') ? Masked(stage.Text) : string.Empty;
+        var start = 0;
+        var fed = stage.Fed;
+
+        for (var index = masked.IndexOf('&'); index >= 0; index = masked.IndexOf('&', index + 1))
+        {
+            detached.Add(new Stage(stage.Text[start..index], fed));
+            start = index + 1;
+            fed = false;
+        }
+
+        detached.Add(new Stage(stage.Text[start..], fed));
+    }
+
+    private static bool Followable(string command)
+    {
+        var masked = Masked(command).AsSpan();
+
+        return masked.IndexOfAny(Unfollowable) < 0 && !Backgrounded(masked);
+    }
+
+    private static string?[]? Directories(string command, string? cwd, int count)
+    {
+        if (!Followable(command))
+            return null;
+
+        var directories = Walked(command, cwd);
+
+        return directories.Count == count ? [.. directories] : null;
+    }
+
+    private static List<string?> Walked(string command, string? cwd)
+    {
+        var directories = new List<string?>();
+        var (here, conditional) = (cwd, false);
+
+        foreach (var pipeline in Pipelines(command).FindAll(pipeline => pipeline.Text.Trim().Length > 0))
+        {
+            var anded = pipeline.Lead.AsSpan().Trim() is "&&";
+            var current = !anded && conditional ? cwd : here;
+
+            directories.Add(current);
+            (here, conditional) = Stepped(Entered(pipeline.Text, current, cwd), current, conditional && anded, anded);
+        }
+
+        return directories;
+    }
+
+    private static (string? Here, bool Conditional) Stepped(string? entered, string? current, bool carried, bool anded) =>
+        string.Equals(entered, current, StringComparison.Ordinal) ? (current, carried) : (entered, carried || anded);
+
+    private static string? Entered(string statement, string? here, string? origin)
+    {
+        var trimmed = statement.AsSpan().Trim();
+        var gap = trimmed.IndexOfAny(' ', '\t');
+        var verb = gap < 0 ? trimmed : trimmed[..gap];
+        var operand = gap < 0 ? "~" : trimmed[gap..].Trim();
+
+        return verb switch
+        {
+            "popd" => origin,
+            "pushd" when gap < 0 => origin,
+            "cd" or "pushd" when Literal(operand) is { } target => Located(here, target) ?? here,
+            "cd" or "pushd" => origin,
+            _ => here,
+        };
+    }
+
+    private static string? Literal(ReadOnlySpan<char> operand) => operand switch
+    {
+        ['\'', .. var inner, '\''] when !inner.Contains('\'') => inner.ToString(),
+        ['"', .. var inner, '"'] when !inner.ContainsAny(QuotedUnliteral) => inner.ToString(),
+        [] or ['-', ..] => null,
+        _ when !operand.ContainsAny(BareUnliteral) => operand.ToString(),
+        _ => null,
+    };
+
+    private static string? Located(string? here, string target)
+    {
+        var expanded = Expanded(target);
+        var native = OperatingSystem.IsWindows() && expanded.StartsWith('/') && !expanded.StartsWith("//", StringComparison.Ordinal)
+            ? PosixOnWindows(expanded)
+            : expanded;
+
+        if (native is null)
+            return null;
+
+        var located = Under(here is { Length: > 0 } ? here : Environment.CurrentDirectory, native);
+
+        return Directory.Exists(located) ? located : null;
+    }
+
+    private static string Sealed(string command)
+    {
+        if (!command.Contains('$') && !command.Contains("<<", StringComparison.Ordinal))
+            return Masked(command);
+
+        var masked = Masked(Bodiless(command)).ToCharArray();
+        var index = 0;
+
+        while (index < masked.Length)
+            index += Opaque(masked, index);
+
+        return new string(masked);
+    }
+
+    private static int Opaque(char[] masked, int index)
+    {
+        if (masked[index] is not '$')
+            return 1;
+
+        var text = masked.AsSpan(index);
+        var (name, width) = Reference(text);
+
+        if (width is 0 || !IsName(text[name]))
+            return 1;
+
+        text[..width].Fill('x');
+
+        return width;
+    }
+
+    private static string Bodiless(string command)
+    {
+        if (!command.Contains("<<", StringComparison.Ordinal))
+            return command;
+
+        var text = command.ToCharArray();
+        var quote = '\0';
+
+        for (var index = 0; index < text.Length; index++)
+        {
+            quote = Quote(quote, command[index]);
+
+            if (quote is '\0' && Opening(command, index) is { } heredoc)
+                index = Unbodied(text, index, heredoc);
+        }
+
+        return new string(text);
+    }
+
+    private static int Unbodied(char[] text, int index, Heredoc heredoc)
+    {
+        text.AsSpan(index, heredoc.Delimited - index).Fill('x');
+        text.AsSpan(heredoc.Lined, heredoc.Closed - heredoc.Lined).Fill('x');
+
+        return heredoc.Closed - 1;
+    }
+
+    private static Heredoc? Opening(string command, int index) =>
+        command.AsSpan(index) is ['<', '<', not '<', ..] && (index is 0 || command[index - 1] is not '<')
+            ? Sealable(command, index)
+            : null;
+
+    private static ReadOnlySpan<char> Delimiter(ReadOnlySpan<char> opener) =>
+        opener is [var quote and ('\'' or '"'), .. var tail] && tail.IndexOf(quote) is var close and > 0 && IsName(tail[..close])
+            ? tail[..close]
+            : [];
+
+    private static Heredoc? Sealable(string command, int index)
+    {
+        var rest = command.AsSpan(index + 2);
+        var dashed = rest is ['-', ..];
+        var delimiter = Delimiter(rest[(dashed ? 1 : 0)..].TrimStart(' '));
+        var delimited = command.AsSpan().Overlaps(delimiter, out var offset) ? offset + delimiter.Length + 1 : -1;
+        var lined = delimited < 0 ? -1 : command.IndexOf('\n', delimited);
+
+        if (lined < 0 || Unsealed(command, index, delimited, lined))
+            return null;
+
+        var closed = Terminated(command, lined, delimiter, dashed);
+
+        return closed > 0 && !Continued(command.AsSpan(closed)) ? new Heredoc(delimited, lined, closed) : null;
+    }
+
+    private static bool Unsealed(string command, int index, int delimited, int lined) =>
+        command.AsSpan(delimited, lined - delimited).ContainsAny(Unsealable) || Hosted(command, index, lined);
+
+    private static int Terminated(string command, int lined, ReadOnlySpan<char> delimiter, bool dashed)
+    {
+        for (var start = lined + 1; start <= command.Length; start = NextLine(command, start))
+        {
+            var stop = command.IndexOf('\n', start) is var end and >= 0 ? end : command.Length;
+            var line = command.AsSpan(start, stop - start).TrimEnd('\r');
+
+            if ((dashed ? line.TrimStart('\t') : line).SequenceEqual(delimiter))
+                return stop;
+        }
+
+        return -1;
+    }
+
+    private static int NextLine(string command, int start) =>
+        command.IndexOf('\n', start) is var end and >= 0 ? end + 1 : command.Length + 1;
+
+    private static bool Continued(ReadOnlySpan<char> rest) => rest.TrimStart(" \t\r\n") is ['&' or '|' or ';', ..];
+
+    private static bool Hosted(string command, int index, int lined)
+    {
+        var opened = command.LastIndexOf('\n', index) + 1;
+
+        return Array.Exists(Tokens(command[opened..lined]), token => Bare(token) is var bare && (bare is "." || ShellHosts.Contains(Path.GetFileNameWithoutExtension(bare), StringComparer.OrdinalIgnoreCase)));
+    }
+
+    private static int Opened(string command)
+    {
+        var masked = Masked(command);
+        var heredoc = masked.IndexOf("<<", StringComparison.Ordinal);
+        var lined = heredoc < 0 ? -1 : masked.IndexOf('\n', heredoc);
+
+        return lined < 0 ? command.Length : lined;
+    }
+
+    private static GuardVerdict Unrolling(string command, string? cwd)
+    {
+        var verdict = Assigned(command, cwd);
+
+        if (verdict.Denied || Unrolled(command) is not { } unrolled)
+            return verdict;
+
+        var looped = Blocking(Stages(unrolled), unrolled, cwd);
+
+        return looped.Denied ? looped : verdict;
+    }
+
+    private static string? Unrolled(string command)
+    {
+        if (!command.Contains('$'))
+            return null;
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var builder = new StringBuilder(command.Length);
+
+        foreach (var pipeline in Pipelines(command))
+        {
+            var text = Filled(pipeline.Text, values);
+
+            builder.Append(pipeline.Lead).Append(text);
+            Iterated(text, values);
+        }
+
+        var unrolled = builder.ToString();
+
+        return values.Count is 0 || unrolled.Equals(command, StringComparison.Ordinal) ? null : unrolled;
+    }
+
+    private static void Iterated(string statement, Dictionary<string, string> values)
+    {
+        if (Tokenized(Unkeyworded(statement)) is ["for", var name, "in", .. var words] && words.Length > 0 && IsName(name))
+            values[name] = string.Join(' ', words);
+    }
+
+    private static string InTree(string target) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"TerseSharp guard: Bash on '{Trim(target)}' names a path judged inside the .NET tree, which the terse-sharp MCP serves - {BashRouting(target)}. Read the tool's remedy: line rather than falling back to a built-in.");
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);
