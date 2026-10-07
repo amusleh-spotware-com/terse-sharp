@@ -80,7 +80,7 @@ public static class ArchiveService
         for (var index = 0; index < shown; index++)
             response.Line(Row(kept[index], stamps));
 
-        response.Note("outside-workspace  " + full);
+        response.Note("archive  " + full);
 
         return response.ToString();
     }

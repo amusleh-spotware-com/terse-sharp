@@ -2452,7 +2452,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             Assert.Matches(@"terse\.nuspec  \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ  33", text);
             Assert.Contains("tools/net10.0/any/DotnetToolSettings.xml", text, StringComparison.Ordinal);
             Assert.Matches(@"tools/net10\.0/any/terse\.dll  \S+  10", text);
-            Assert.Contains("outside-workspace", text, StringComparison.Ordinal);
+            Assert.Contains("archive  " + Path.GetFullPath(archive), text, StringComparison.Ordinal);
         }
         finally
         {

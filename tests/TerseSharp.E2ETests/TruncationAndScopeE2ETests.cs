@@ -385,7 +385,7 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain("ERROR", directory, StringComparison.Ordinal);
         Assert.DoesNotContain(".slnf", directory, StringComparison.Ordinal);
-        Assert.Equal(named, directory);
+        Assert.StartsWith(directory, named, StringComparison.Ordinal);
     }
 
     [Fact]

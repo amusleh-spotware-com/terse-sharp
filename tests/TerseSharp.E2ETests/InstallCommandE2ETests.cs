@@ -454,7 +454,7 @@ public sealed class InstallCommandE2ETests : IDisposable
         var called = await RunAsync("call", "workspace_status", "--workspace", solution, "--json", "{\"tools\": true}");
         var server = await TerseServerProcess.StartAsync(
             TerseServerFixture.FixtureRoot,
-            [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", solution],
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--tools", "all", "--workspace", solution],
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["TERSE_HOME"] = home,
