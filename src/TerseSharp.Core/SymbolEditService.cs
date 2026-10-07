@@ -96,11 +96,11 @@ public static class SymbolEditService
         EditOptions options,
         CancellationToken cancellationToken)
     {
-        var parsed = MemberDeclaration.ParseEnumMembers(declaration);
+        var planned = EnumInsertion(target, enumeration, declaration);
 
-        return parsed.IsOk
-            ? await SwapAsync(workspace, target, [enumeration.AddMembers([.. parsed.Value!.Select(OnANewLine)])], options, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(parsed.Error!);
+        return planned.IsOk
+            ? await SwapAsync(workspace, target, planned.Value.Nodes, options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(planned.Error!);
     }
 
     private static EnumMemberDeclarationSyntax OnANewLine(EnumMemberDeclarationSyntax member) =>
@@ -1684,11 +1684,14 @@ public static class SymbolEditService
 
         var target = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
 
-        return target?.Node is TypeDeclarationSyntax type
-            ? Insertion(target, type, declaration, options)
-            : Result.Fail<PlannedEdit>(Errors.Invalid(
+        return target?.Node switch
+        {
+            TypeDeclarationSyntax type => Insertion(target, type, declaration, options),
+            EnumDeclarationSyntax enumeration => EnumInsertion(target, enumeration, declaration),
+            _ => Result.Fail<PlannedEdit>(Errors.Invalid(
                 "the target is not a type declaration",
-                "pass a type symbol id - an enum container and a path= file take one add_member call each"));
+                "pass a type or enum symbol id - a path= file takes one add_member call")),
+        };
     }
 
     private static Result<PlannedEdit> Insertion(EditTarget target, TypeDeclarationSyntax type, string declaration, EditOptions options)
@@ -1706,6 +1709,15 @@ public static class SymbolEditService
         return at.IsOk
             ? Result.Ok(new PlannedEdit(target, [Appended(type, Formattable(members.Value!), at.Value)], false))
             : Result.Fail<PlannedEdit>(at.Error!);
+    }
+
+    private static Result<PlannedEdit> EnumInsertion(EditTarget target, EnumDeclarationSyntax enumeration, string declaration)
+    {
+        var parsed = MemberDeclaration.ParseEnumMembers(declaration);
+
+        return parsed.IsOk
+            ? Result.Ok(new PlannedEdit(target, [enumeration.AddMembers([.. parsed.Value!.Select(OnANewLine)])]))
+            : Result.Fail<PlannedEdit>(parsed.Error!);
     }
 
     private static TerseError PlacementLost(AppendedMembers appended) => Errors.Invalid(

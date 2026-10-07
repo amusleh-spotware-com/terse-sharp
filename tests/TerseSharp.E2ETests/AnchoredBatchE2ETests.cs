@@ -67,6 +67,41 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task AddMember_WithTypeSymbolIdsPairingAnEnumWithAClass_LandsTheEnumValueAndItsFirstUseAsOneEdit()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.OrderSide", "T:Fixture.Trading.TwinAlpha" },
+            ["declarations"] = new[] { "Hold", "public OrderSide Held() => OrderSide.Hold;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("rolled back", text, StringComparison.Ordinal);
+        Assert.Contains("2 files changed", text, StringComparison.Ordinal);
+        Assert.Contains("OrderSide.cs", text, StringComparison.Ordinal);
+        Assert.Contains("TwinAlpha.cs", text, StringComparison.Ordinal);
+        Assert.Matches(@"(?m)^\+\s+Hold,?\r?$", text);
+        Assert.Contains("OrderSide.Hold", text, StringComparison.Ordinal);
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsSendingAMethodToAnEnum_IsRefusedAsNotEnumMembersAtItsIndex()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.TwinAlpha", "T:Fixture.Trading.OrderSide" },
+            ["declarations"] = new[] { "public int Twice() => Count() * 2;", "public int Twice() => 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("declarations[1]:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("not a type declaration", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AddMember_WithUnpairedTypeSymbolIdsAndDeclarations_IsRefusedNamingBothCounts()
     {
         var text = await server.CallAsync("add_member", new()

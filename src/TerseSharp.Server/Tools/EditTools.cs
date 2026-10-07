@@ -146,7 +146,7 @@ public sealed class EditTools(ToolContext context)
                 [Description(UsingsHelp)] string[]? usings = null,
                 [Description(RetryHelp)] string? retryWith = null,
                 [Description("Alias for declaration; entries join into the one edit - or, beside typeSymbolIds, one per id in order.")] string[]? declarations = null,
-                [Description("Type ids to add to together, paired positionally with declarations and applied as ONE compile-gated edit across their files. Not with declaration= or path=.")] string[]? typeSymbolIds = null,
+                [Description("Type or enum ids to add to together, paired positionally with declarations and applied as ONE compile-gated edit across their files. Not with declaration= or path=.")] string[]? typeSymbolIds = null,
                 [Description("Member of this type to land the new members ABOVE, by short name or documentation id. Not with after= or position=, and not held by a retryWith token.")] string? before = null,
                 [Description("Member of this type to land the new members BELOW, addressed as before= is. Not with before= or position=.")] string? after = null,
                 [Description("Coarse slot instead of an anchor: first, afterFields (after the last field) or last. Default last. Not with before= or after=.")] string? position = null,

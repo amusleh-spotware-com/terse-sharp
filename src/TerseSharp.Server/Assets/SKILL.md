@@ -121,7 +121,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` |
 | **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"`; the anchor takes any spelling of the parameter list |
 | **Edit code** | removing several members | `delete_symbol(symbolIds: [...])` — one gated edit |
-| **Edit code** | an interface member and every implementation | `add_member(typeSymbolIds: [...], declarations: [...])` — ONE compile-gated edit |
+| **Edit code** | an interface member and every implementation, or an enum value and its use | `add_member(typeSymbolIds: [...], declarations: [...])` — ONE gated edit |
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
 | **Refactor** | hand-writing an interface from a class | `extract_interface(symbolId)` |

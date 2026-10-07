@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **`add_member typeSymbolIds=` accepts an enum beside a class (I706).** A batch naming an enum answered
+  `declarations[0]: the target is not a type declaration`, so a new enum value and its first use - a new
+  error code and the `Errors` factory that returns it - always cost two calls. An enum entry now takes enum
+  member names, exactly as a single `typeSymbolId=` enum does, and the whole batch lands as ONE
+  compile-gated edit; a declaration that is not an enum value is refused at its own index. Covered by
+  `AddMember_WithTypeSymbolIdsPairingAnEnumWithAClass_LandsTheEnumValueAndItsFirstUseAsOneEdit` and
+  `AddMember_WithTypeSymbolIdsSendingAMethodToAnEnum_IsRefusedAsNotEnumMembersAtItsIndex`.
+
 ## [0.74.0] - 2026-10-07
 
 > **Behaviour and response-format change (MAJOR under this project's rules; on 0.x the MINOR segment
