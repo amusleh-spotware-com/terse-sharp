@@ -38,6 +38,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   rows, which stay newest first. Covered by
   `MergedTags_ForSeveralTagsOnlyTheRemoteHas_ListsThemNewestVersionFirstAndJoinsPeeledLines` and
   `History_WithTagsAndRemoteUnderACap_JoinsEveryLocalTagAndListsNewestFirst`.
+- **`search_symbols kind=type` matches every named type, `kind=record` matches records, and an unknown kind
+  is refused (I728).** `kind=type` answered `0 symbols` and blamed the referenced-assembly fallback for a source
+  `readonly record struct`, because no symbol's kind ever read `type`; `kind=record` matched no source
+  declaration because a record's type kind is `class` or `struct`; `kind=bogus` answered a silent `0`.
+  `kind=type` now matches every class, struct, record, interface, enum and delegate and still reaches the
+  fallback; `kind=record` matches record classes and record structs; `kind=class` and `kind=struct` are
+  unchanged. Response-format change: an unknown kind answers `ERROR InvalidArgument` naming the 14 accepted
+  kinds, and the `kind` parameter lists them. Covered by
+  `SearchSymbols_WithKindTypeOrRecord_MatchesRecordStructsAndRecordClasses`,
+  `SearchSymbols_WithAnUnknownKind_IsRefusedNamingTheAcceptedKinds`,
+  `IsKnown_AcceptsEveryAdvertisedKindAndNoKind`, `IsKnown_RefusesAKindNoSymbolCanCarry` and
+  `Refusal_NamesTheKindAndEveryAcceptedKind`.
 
 ## [0.74.0] - 2026-10-07
 

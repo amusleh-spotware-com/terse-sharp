@@ -33,7 +33,7 @@ public static class SymbolSearch
                 var test = TestScope.Of(projects[index]) is "test";
 
                 perProject[index] = [.. matches
-                        .Where(candidate => KindMatches(candidate, kind))
+                        .Where(candidate => SymbolKindFilter.Matches(candidate, kind))
                         .Select(candidate => new Identified(candidate, SymbolId.From(candidate).Value, test))];
             }).ConfigureAwait(false);
 
@@ -79,10 +79,6 @@ public static class SymbolSearch
     .ThenBy(entry => entry.Id, StringComparer.Ordinal)
     .Take(ResultCap.Shown(distinct.Length, maxResults))
     .Select(entry => entry.Symbol)];
-    private static bool KindMatches(ISymbol symbol, string? kind) =>
-        string.IsNullOrWhiteSpace(kind)
-        || SymbolFormat.Kind(symbol).Equals(kind, StringComparison.OrdinalIgnoreCase)
-        || symbol.Kind.ToString().Equals(kind, StringComparison.OrdinalIgnoreCase);
 
     private readonly record struct Identified(ISymbol Symbol, string Id, bool IsTest);
 

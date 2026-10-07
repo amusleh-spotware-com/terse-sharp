@@ -11,7 +11,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none. Use instead of Grep for anything that is a type or member.")]
     public Task<string> SearchSymbols(
             [Description("Name or CamelHump pattern.")] string query,
-            [Description("Optional kind filter: class, interface, method, property, field, enum.")] string? kind = null,
+            [Description("Optional kind filter: type (any class, struct, record, interface, enum or delegate), class, record, struct, interface, enum, delegate, method, ctor, property, field, event, namespace. Any other kind is refused.")] string? kind = null,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Max results (50).")] int maxResults = 0,
             [Description("Keep only one half of the solution: src for the production projects, test for the ones that reference a test framework. Empty searches both.")] string? scope = null,
@@ -20,15 +20,18 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     {
         var half = scope?.ToLowerInvariant();
 
-        return half is null or "" or "src" or "test"
-            ? context.WithWorkspaceAsync(
+        return (half, SymbolKindFilter.Refusal(kind)) switch
+        {
+            (not (null or "" or "src" or "test"), _) => Task.FromResult(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"scope='{scope}' is not a known half of the solution"),
+                "pass scope=src, scope=test, or leave it empty to search both").Render()),
+            (_, { } refusal) => Task.FromResult(refusal.Render()),
+            _ => context.WithWorkspaceAsync(
                 workspace,
                 path,
                 loaded => SearchAsync(loaded, query, kind, half, Cap(maxResults, 50), path, cancellationToken),
-                cancellationToken: cancellationToken)
-            : Task.FromResult(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"scope='{scope}' is not a known half of the solution"),
-                "pass scope=src, scope=test, or leave it empty to search both").Render());
+                cancellationToken: cancellationToken),
+        };
     }
 
     [McpServerTool(Name = "get_file_outline", ReadOnly = true)]
@@ -410,7 +413,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
     private static bool NamesAType(string? kind) => kind switch
     {
-        null or "" or "class" or "interface" or "enum" or "struct" or "record" or "delegate" => true,
+        null or "" or "type" or "namedtype" or "class" or "interface" or "enum" or "struct" or "record" or "delegate" => true,
         _ => false,
     };
 

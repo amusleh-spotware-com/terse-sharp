@@ -688,6 +688,33 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task SearchSymbols_WithKindTypeOrRecord_MatchesRecordStructsAndRecordClasses()
+    {
+        var asType = await server.CallAsync("search_symbols", new() { ["query"] = "Money", ["kind"] = "type" });
+        var asRecord = await server.CallAsync("search_symbols", new() { ["query"] = "Money", ["kind"] = "record" });
+        var recordClass = await server.CallAsync("search_symbols", new() { ["query"] = "Order", ["kind"] = "record" });
+        var asClass = await server.CallAsync("search_symbols", new() { ["query"] = "Order", ["kind"] = "class" });
+
+        Assert.Contains("T:Fixture.Trading.Money  struct", asType, StringComparison.Ordinal);
+        Assert.DoesNotContain("holds types only", asType, StringComparison.Ordinal);
+        Assert.Contains("T:Fixture.Trading.Money  struct", asRecord, StringComparison.Ordinal);
+        Assert.Contains("T:Fixture.Trading.Order  class", recordClass, StringComparison.Ordinal);
+        Assert.DoesNotContain("T:Fixture.Trading.OrderService", recordClass, StringComparison.Ordinal);
+        Assert.Contains("T:Fixture.Trading.Order  class", asClass, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithAnUnknownKind_IsRefusedNamingTheAcceptedKinds()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["query"] = "Money", ["kind"] = "bogus" });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("kind='bogus'", text, StringComparison.Ordinal);
+        Assert.Contains("remedy: pass one of type, class, record, struct", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("holds types only", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetFileOutline_OnAWideType_AnswersItsMemberCountInsteadOfItsMembers()
     {
         var capped = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/WideSurface.cs" });
