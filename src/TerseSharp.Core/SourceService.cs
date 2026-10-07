@@ -116,29 +116,42 @@ public static class SourceService
         string? path,
         CancellationToken cancellationToken)
     {
-        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
+        var noted = await SymbolLookup.ResolveNotedAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
 
-        if (!resolved.IsOk)
+        if (noted.Symbol is not { IsOk: true, Value: { } symbol })
         {
-            response.Note("NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, resolved.Error!));
+            response.Note("NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, noted.Symbol.Error!));
             return false;
         }
 
-        if (await OutlinedAsync(workspace, resolved.Value!, format, cancellationToken).ConfigureAwait(false) is { } outlined)
-        {
-            response.Note(outlined);
-            return true;
-        }
+        await AppendSymbolAsync(workspace, response, symbol, format, cancellationToken).ConfigureAwait(false);
 
-        if (resolved.Value!.DeclaringSyntaxReferences.Length is 0)
-        {
-            response.Note(Metadata(resolved.Value!, format));
-            return true;
-        }
-
-        await AppendAsync(workspace.Root, response, resolved.Value!, format, cancellationToken).ConfigureAwait(false);
+        if (noted.Note is { } note)
+            response.Note(note);
 
         return true;
+    }
+
+    private static async Task AppendSymbolAsync(
+        LoadedWorkspace workspace,
+        ResponseBuilder response,
+        ISymbol symbol,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        if (await OutlinedAsync(workspace, symbol, format, cancellationToken).ConfigureAwait(false) is { } outlined)
+        {
+            response.Note(outlined);
+            return;
+        }
+
+        if (symbol.DeclaringSyntaxReferences.Length is 0)
+        {
+            response.Note(Metadata(symbol, format));
+            return;
+        }
+
+        await AppendAsync(workspace.Root, response, symbol, format, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<string?> OutlinedAsync(
@@ -274,14 +287,17 @@ public static class SourceService
 
         foreach (var symbolId in symbolIds)
         {
-            var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
+            var noted = await SymbolLookup.ResolveNotedAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
 
-            if (resolved.IsOk)
+            if (noted.Symbol.IsOk)
                 answered++;
 
-            response.Note(resolved.IsOk
-                ? Described(workspace.Root, resolved.Value!, verbose)
-                : "NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, resolved.Error!));
+            response.Note(noted.Symbol.IsOk
+                ? Described(workspace.Root, noted.Symbol.Value!, verbose)
+                : "NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, noted.Symbol.Error!));
+
+            if (noted.Note is { } note)
+                response.Note(note);
         }
 
         return response.Answered(answered, symbolIds.Count, "symbols").ToString();

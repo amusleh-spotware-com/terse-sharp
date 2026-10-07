@@ -467,14 +467,14 @@ public static class OutlineService
         string? path,
         CancellationToken cancellationToken)
     {
-        var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
+        var noted = await SymbolLookup.ResolveNotedAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
 
-        if (!resolved.IsOk)
-            return "NOT_RESOLVED " + symbolId + "  " + resolved.Error!.Message;
+        if (noted.Symbol is not { IsOk: true, Value: { } symbol })
+            return "NOT_RESOLVED " + symbolId + "  " + noted.Symbol.Error!.Message;
 
         var outline = await TypeAsync(
             workspace,
-            resolved.Value!,
+            symbol,
             format.Signatures,
             format.Ids,
             cancellationToken,
@@ -482,7 +482,12 @@ public static class OutlineService
             format.Contains,
             format.All).ConfigureAwait(false);
 
-        return outline.IsOk ? outline.Value!.TrimEnd('\n') : outline.Error!.Render();
+        return (outline.IsOk, noted.Note) switch
+        {
+            (false, _) => outline.Error!.Render(),
+            (true, null) => outline.Value!.TrimEnd('\n'),
+            (true, { } note) => string.Concat(outline.Value!.AsSpan().TrimEnd('\n'), "\n", note),
+        };
     }
 
     private static bool Resolved(string outline) =>

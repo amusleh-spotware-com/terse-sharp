@@ -117,6 +117,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `AddMember_AnchoredOnTheQualifiedSpellingAnOutlinePrints_PicksThatOverloadAmongScatteredOnes`,
   `AddMember_AnchoredOnANamespaceQualifiedParameterList_LandsBesideThatOverloadNotTheFirst` and
   `SameStructure_ComparesTheMemberAndEachParameterBySuffix`.
+- **A batched documentation id resolved through the name path now says so (I710).** `get_symbol_source`,
+  `get_symbol` and `get_type_outline` with `symbolIds=` resolved a keyword-spelled or parameter-less id by
+  name silently, while the same id passed as `symbolId=` ended `resolved from name: <id>`. Each such entry
+  now carries that line after its own block; an id that resolved exactly carries none. The edit batches
+  (`replace_symbol`/`delete_symbol symbolIds=`, `add_member typeSymbolIds=`) are unchanged: their success
+  answer is one line per file. Covered by
+  `GetSymbolSource_WithSymbolIdsHoldingAKeywordSpelledId_TagsOnlyThatEntryResolvedFromName`,
+  `GetSymbol_WithSymbolIdsHoldingAMethodIdWithoutItsParameterList_SaysWhichIdItTook` and
+  `GetTypeOutline_WithSymbolIdsHoldingAShortNamespaceTypeId_TagsThatEntryResolvedFromName`.
 
 ## [0.74.0] - 2026-10-07
 

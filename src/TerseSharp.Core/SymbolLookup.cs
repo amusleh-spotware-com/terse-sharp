@@ -340,7 +340,12 @@ public static class SymbolLookup
     private static bool SameKind(char kind, ISymbol symbol) =>
         (kind, symbol) is ('M', IMethodSymbol) or ('T', INamedTypeSymbol) or ('P', IPropertySymbol) or ('F', IFieldSymbol) or ('E', IEventSymbol);
 
-    public readonly record struct SymbolResolution(Result<ISymbol> Symbol, bool FromName);
+    public readonly record struct SymbolResolution(Result<ISymbol> Symbol, bool FromName)
+    {
+        public string? Note => FromName && Symbol is { IsOk: true, Value: { } symbol }
+            ? "resolved from name: " + SymbolId.From(symbol).Value
+            : null;
+    }
 
     private static async Task<ISymbol?> NamedAsync(LoadedWorkspace workspace, string requested, string? name, CancellationToken cancellationToken)
     {

@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -1110,5 +1111,44 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.StartsWith("ERROR SymbolNotFound", text, StringComparison.Ordinal);
         Assert.DoesNotContain("resolved from name", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithSymbolIdsHoldingAKeywordSpelledId_TagsOnlyThatEntryResolvedFromName()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Trading.SplitHandler.Route(int)", "M:Fixture.Trading.SplitHandler.Route(System.String)" },
+        });
+        var note = text.IndexOf("resolved from name: M:Fixture.Trading.SplitHandler.Route(System.Int32)~System.Int32", StringComparison.Ordinal);
+
+        Assert.InRange(note, text.IndexOf("value + 1", StringComparison.Ordinal), text.IndexOf("value.Length", StringComparison.Ordinal));
+        Assert.Equal(-1, text.IndexOf("resolved from name", note + 1, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetSymbol_WithSymbolIdsHoldingAMethodIdWithoutItsParameterList_SaysWhichIdItTook()
+    {
+        var text = await server.CallAsync("get_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Trading.OrderBook.Remove", "T:Fixture.Trading.OrderBook" },
+        });
+
+        Assert.Contains("2 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("resolved from name: M:Fixture.Trading.OrderBook.Remove(Fixture.Trading.Order)~System.Boolean", text, StringComparison.Ordinal);
+        Assert.Equal(text.IndexOf("resolved from name", StringComparison.Ordinal), text.LastIndexOf("resolved from name", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithSymbolIdsHoldingAShortNamespaceTypeId_TagsThatEntryResolvedFromName()
+    {
+        var text = await server.CallAsync("get_type_outline", new()
+        {
+            ["symbolIds"] = new[] { "T:Trading.OrderBook", "T:Fixture.Trading.OrderService" },
+        });
+        var note = text.IndexOf("resolved from name: T:Fixture.Trading.OrderBook", StringComparison.Ordinal);
+
+        Assert.InRange(note, 0, text.IndexOf("\nOrderService  ", StringComparison.Ordinal));
+        Assert.Equal(-1, text.IndexOf("resolved from name", note + 1, StringComparison.Ordinal));
     }
 }
