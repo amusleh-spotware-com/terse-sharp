@@ -137,6 +137,12 @@ relies on (a project count, a file's content, a symbol's existence) cites the ca
 it. "Predicted from source" is allowed only when no read-only call can observe the state, and the
 plan must say so and why.
 
+Hand over every edit as a complete declaration (attributes included) or an exact, unique edit_text
+anchor copied from a read - never "verbatim from HEAD except X", which costs the main thread a re-read
+and a surgical patch. A premise about a build artifact or packaging (a RuntimeIdentifiers entry, an
+apphost, a pack layout) is RUN, not assumed: say exactly which command the main thread must run to
+prove it before the edit lands.
+
 Return EXACTLY this, and nothing else:
 
   ROW: <id>
