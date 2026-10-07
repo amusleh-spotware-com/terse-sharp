@@ -602,7 +602,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         "for-each-ref",
         "--sort=-v:refname",
         "--count=" + (maxResults + 1).ToString(CultureInfo.InvariantCulture),
-        "--format=%(refname:short) %(if)%(*objectname)%(then)%(*objectname:short)%(else)%(objectname:short)%(end) %(if)%(*committerdate)%(then)%(*committerdate:short)%(else)%(creatordate:short)%(end)",
+        TagFormat,
         "refs/tags",
     ];
 
@@ -924,19 +924,15 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     internal static string MergedTags(string local, string remote)
     {
         var published = RemoteTags(remote);
-        var lines = new List<string>(published.Count + 8);
-        var listed = new HashSet<string>(StringComparer.Ordinal);
+        var locals = Trimmed(local);
+        var listed = new HashSet<string>(locals.Count, StringComparer.Ordinal);
 
-        foreach (var line in Trimmed(local))
+        foreach (var line in locals)
             listed.Add(TagName(line));
 
-        foreach (var pair in published)
-        {
-            if (!listed.Contains(pair.Key))
-                lines.Add(pair.Key + " " + pair.Value + "  local=no remote=yes");
-        }
+        var lines = RemoteOnly(published, listed);
 
-        foreach (var line in Trimmed(local))
+        foreach (var line in locals)
             lines.Add(line + (published.ContainsKey(TagName(line)) ? "  local=yes remote=yes" : "  local=yes remote=no"));
 
         return string.Join("\n", lines);
@@ -944,7 +940,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
     private static async Task<string> RemoteTagsAsync(string root, int maxResults, string? outside, bool chosen, CancellationToken cancellationToken)
     {
-        var local = await GitRunner.ReadAsync(root, TagArguments(maxResults), cancellationToken).ConfigureAwait(false);
+        var local = await GitRunner.ReadAsync(root, EveryTagArguments, cancellationToken).ConfigureAwait(false);
 
         if (!local.IsOk)
             return local.Error!.Render();
@@ -1097,5 +1093,43 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
                 return [.. command];
             }
         }
+    }
+
+    private const string TagFormat = "--format=%(refname:short) %(if)%(*objectname)%(then)%(*objectname:short)%(else)%(objectname:short)%(end) %(if)%(*committerdate)%(then)%(*committerdate:short)%(else)%(creatordate:short)%(end)";
+    private static readonly string[] EveryTagArguments = ["for-each-ref", "--sort=-v:refname", TagFormat, "refs/tags"];
+
+    private static List<string> RemoteOnly(Dictionary<string, string> published, HashSet<string> listed)
+    {
+        var names = new List<string>(published.Count);
+
+        foreach (var name in published.Keys)
+        {
+            if (!listed.Contains(name))
+                names.Add(name);
+        }
+
+        names.Sort(Newest);
+
+        var lines = new List<string>(names.Count + listed.Count);
+
+        foreach (var name in names)
+            lines.Add(name + " " + published[name] + "  local=no remote=yes");
+
+        return lines;
+    }
+
+    private static int Newest(string left, string right)
+    {
+        var leftParsed = ReleaseVersion.TryParse(left, out var leftVersion);
+        var rightParsed = ReleaseVersion.TryParse(right, out var rightVersion);
+
+        return (leftParsed, rightParsed) switch
+        {
+            (true, true) when leftVersion.IsNewerThan(rightVersion) => -1,
+            (true, true) when rightVersion.IsNewerThan(leftVersion) => 1,
+            (true, false) => -1,
+            (false, true) => 1,
+            _ => string.CompareOrdinal(right, left),
+        };
     }
 }

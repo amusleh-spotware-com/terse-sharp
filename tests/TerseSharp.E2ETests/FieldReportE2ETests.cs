@@ -554,4 +554,31 @@ public sealed class FieldReportE2ETests(TerseServerFixture server)
         Assert.Contains("nothing to undo - 2 snapshot(s) were dropped after move_type_to_file moved src", undone, StringComparison.Ordinal);
         Assert.Contains("Unused() => 9;", await File.ReadAllTextAsync(solution.OrderServicePath, Token), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task History_WithTagsAndRemoteUnderACap_JoinsEveryLocalTagAndListsNewestFirst()
+    {
+        using var origin = await ScratchRepository.CreateAsync();
+        using var clone = await ScratchRepository.CreateAsync();
+
+        await clone.WriteAsync("a.md", "a\n");
+        await clone.CommitAllAsync("base");
+
+        foreach (var tag in (string[])["v0.0.1", "v0.1.0", "v0.2.0", "v0.3.0", "v0.10.0", "v0.11.0", "v0.20.0"])
+            await clone.GitAsync("tag", "-a", tag, "-m", tag);
+
+        await clone.GitAsync("remote", "add", "origin", origin.Root);
+        await clone.GitAsync("push", "--quiet", "origin", "--tags");
+        await clone.GitAsync("tag", "-d", "v0.3.0");
+        await clone.GitAsync("tag", "-d", "v0.20.0");
+        await clone.GitAsync("tag", "-a", "v0.12.0", "-m", "v0.12.0");
+
+        var text = await server.CallAsync("history", new() { ["root"] = clone.Root, ["tags"] = true, ["remote"] = true, ["maxResults"] = 4 });
+        var rows = text.Split('\n').Where(line => line.StartsWith('v')).ToArray();
+
+        Assert.Equal(["v0.20.0", "v0.3.0", "v0.12.0", "v0.11.0"], rows.Select(row => row.Split(' ')[0]));
+        Assert.EndsWith("local=no remote=yes", rows[0].TrimEnd('\r'), StringComparison.Ordinal);
+        Assert.EndsWith("local=yes remote=no", rows[2].TrimEnd('\r'), StringComparison.Ordinal);
+        Assert.EndsWith("local=yes remote=yes", rows[3].TrimEnd('\r'), StringComparison.Ordinal);
+    }
 }

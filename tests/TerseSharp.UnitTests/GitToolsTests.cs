@@ -71,4 +71,27 @@ public sealed class GitToolsTests
     [InlineData("main..", new[] { "main" })]
     public void RangeEnds_SplitsARevisionRangeIntoTheRefsGitMustResolve(string reference, string[] expected) =>
             Assert.Equal(expected, GitTools.RangeEnds(reference));
+
+    [Fact]
+    public void MergedTags_ForSeveralTagsOnlyTheRemoteHas_ListsThemNewestVersionFirstAndJoinsPeeledLines()
+    {
+        var remote = "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/v0.1.0\n"
+            + "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/tags/v0.1.0^{}\n"
+            + "3333333ccccccccccccccccccccccccccccccccc\trefs/tags/v0.10.0\n"
+            + "4444444ddddddddddddddddddddddddddddddddd\trefs/tags/v0.2.0\n"
+            + "5555555eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\trefs/tags/v0.58.0\n"
+            + "bfd4768111111111111111111111111111111111\trefs/tags/v0.58.0^{}";
+
+        var rows = GitTools.MergedTags(Local, remote).Split('\n');
+
+        Assert.Equal(
+            [
+                "v0.10.0 3333333  local=no remote=yes",
+                "v0.2.0 4444444  local=no remote=yes",
+                "v0.1.0 2222222  local=no remote=yes",
+                "v0.59.0 06ed47e 2026-09-14  local=yes remote=no",
+                "v0.58.0 bfd4768 2026-09-12  local=yes remote=yes",
+            ],
+            rows);
+    }
 }

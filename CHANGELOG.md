@@ -30,6 +30,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `GitRunner_AnUndrainedStream_AnswersIncompleteRatherThanAnArgumentError`,
   `GitRunner_ARunKilledAtTheDeadline_AnswersTimeoutBeforeCancelled` and
   `GitRunner_ANonZeroExit_KeepsTodaysArgumentAnswer`.
+- **`history tags=true remote=true` joined origin's tags against a capped local list (I729).** The local half
+  was read with the same `--count=maxResults+1` as a plain listing, so every pushed tag older than the cap was
+  reported `local=no remote=yes`, and those rows, listed first in ls-remote's byte order, filled the cap with
+  `v0.1.0`, `v0.1.1`, `v0.10.0`... while the tags a release check asks about were cut. Every local tag is now
+  read before the join, and the rows only origin has are sorted newest version first, ahead of the local
+  rows, which stay newest first. Covered by
+  `MergedTags_ForSeveralTagsOnlyTheRemoteHas_ListsThemNewestVersionFirstAndJoinsPeeledLines` and
+  `History_WithTagsAndRemoteUnderACap_JoinsEveryLocalTagAndListsNewestFirst`.
 
 ## [0.74.0] - 2026-10-07
 
