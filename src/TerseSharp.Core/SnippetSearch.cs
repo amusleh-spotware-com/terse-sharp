@@ -275,10 +275,8 @@ public static class SnippetSearch
     private static bool SameIndent(ReadOnlySpan<char> text, ReadOnlySpan<char> lead, AnchorRegion region) =>
         region.IndentStart >= 0 ? lead.SequenceEqual(text.Slice(region.IndentStart, region.IndentLength)) : lead.IsWhiteSpace();
 
-
     private static bool Reaches(ReadOnlySpan<char> line, ReadOnlySpan<char> wanted, int pad) =>
         pad >= 0 && line.Length >= pad + wanted.Length;
-
 
     private static bool Fits(ReadOnlySpan<char> text, ReadOnlySpan<char> line, ReadOnlySpan<char> wanted, int pad, AnchorRegion region) =>
         Reaches(line, wanted, pad) && SameIndent(text, line[..pad], region) && line[pad..].StartsWith(wanted, StringComparison.Ordinal);
