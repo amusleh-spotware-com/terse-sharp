@@ -123,7 +123,7 @@ public static class AnalysisService
     }
 
     private static string[] Keep(IReadOnlyList<string> findings, IReadOnlyList<string> ids, DiagnosticSeverity minimum) =>
-        [.. findings.Where(finding => Meets(finding, minimum) && (ids.Count is 0 || ids.Any(id => finding.StartsWith(id, StringComparison.OrdinalIgnoreCase))))];
+        [.. findings.Where(finding => Meets(finding, minimum) && (ids.Count is 0 || ids.Any(id => finding.AsSpan().StartsWith(DiagnosticIds.Stem(id), StringComparison.OrdinalIgnoreCase))))];
 
     private static IEnumerable<Project> Targets(LoadedWorkspace workspace, DocumentId[] documents, bool unscoped) =>
         unscoped
@@ -168,7 +168,7 @@ public static class AnalysisService
     private static bool Keep(Diagnostic diagnostic, DiagnosticScope scope, DiagnosticSeverity minimum, IReadOnlyList<string> ids) =>
         diagnostic.Severity >= minimum
         && !diagnostic.IsSuppressed
-        && (ids.Count is 0 || ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
+        && (ids.Count is 0 || DiagnosticIds.MatchesAny(diagnostic.Id, ids))
         && scope.Includes(diagnostic);
 
     private static string[] Grouped(DiagnosticFold.Finding[] findings, IReadOnlyList<string> extra) =>
@@ -320,7 +320,7 @@ public static class AnalysisService
             ? 0
             : Introduced(
                 [.. collected.Found
-                    .Where(diagnostic => Keep(diagnostic, collected.Scope, DiagnosticSeverity.Error, []) && !ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
+                    .Where(diagnostic => Keep(diagnostic, collected.Scope, DiagnosticSeverity.Error, []) && !DiagnosticIds.MatchesAny(diagnostic.Id, ids))
                     .Distinct()],
                 touched).Length;
 }

@@ -27,7 +27,7 @@ public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, Diagnos
     public bool Wants(Diagnostic diagnostic) =>
         diagnostic.Severity >= Severity
         && !diagnostic.IsSuppressed
-        && (Ids.Count is 0 || Ids.Contains(diagnostic.Id, StringComparer.OrdinalIgnoreCase))
+        && (Ids.Count is 0 || DiagnosticIds.MatchesAny(diagnostic.Id, Ids))
         && InMode(diagnostic.Id);
 
     private bool InMode(string id) => Mode switch

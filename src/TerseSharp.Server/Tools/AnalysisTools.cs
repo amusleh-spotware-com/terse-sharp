@@ -14,7 +14,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
             [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
             [Description("Alias for minSeverity.")] string? severity = null,
-            [Description("Optional comma-separated diagnostic ids to keep, e.g. CA1822,TERSE001; a JSON-array spelling such as [\"CA1822\"] reads the same. An id no referenced analyzer declares and no enforced .terse.json policy rule emits is reported NOT_ENABLED.")] string? ids = null,
+            [Description("Optional comma-separated diagnostic ids to keep, e.g. CA1822,TERSE001, or CA* for every id with that prefix; a JSON-array spelling such as [\"CA1822\"] reads the same. An id no referenced analyzer declares and no enforced .terse.json policy rule emits is reported NOT_ENABLED, and so is a prefix no declared id starts with.")] string? ids = null,
             [Description("Include unreferenced members and unreachable code. Default true; set false on a huge solution to skip the reference scan.")] bool includeDeadCode = true,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Max results (200).")] int maxResults = 0,
@@ -94,7 +94,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
     public Task<string> Cleanup(
         [Description("File, directory or glob such as src/**/*.cs; empty cleans every document.")] string? path = null,
         [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, ci for both CI rule sets in one pass, or all.")] string? fix = null,
-        [Description("Optional comma-separated diagnostic ids to fix, e.g. IDE0005,CA1822.")] string? ids = null,
+        [Description("Optional comma-separated diagnostic ids to fix, e.g. IDE0005,CA1822, or CA* for every id with that prefix.")] string? ids = null,
         [Description("Minimum severity to fix: error, warning, info, hidden. Default info.")] string? severity = null,
         [Description("Only files modified since the workspace loaded and, on a git tree, reformatting only the lines they changed against HEAD. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,

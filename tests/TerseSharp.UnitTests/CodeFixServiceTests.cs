@@ -174,4 +174,19 @@ public sealed class CodeFixServiceTests
     [InlineData(FixMode.Analyzers, false)]
     [InlineData(FixMode.None, false)]
     public void StyleUnavailable_WhenTheFixersAreThereOrTheModeDoesNotUseThem_SaysNothing(FixMode mode, bool hasStyleFixers) => Assert.Null(CodeFixService.StyleUnavailable(mode, hasStyleFixers, "Fixture.Trading"));
+
+    [Fact]
+    public async Task Producing_WithAPrefixId_SelectsTheAnalyzersOfThatFamily()
+    {
+        using var registry = new WorkspaceRegistry();
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+        var project = lease.Workspace.Solution.Projects.First(candidate => ProjectDiagnostics.Analyzers(candidate).Length > 0);
+
+        Assert.False(ProjectDiagnostics.Producing(project, ["ca*"]).IsEmpty);
+        Assert.True(ProjectDiagnostics.Producing(project, ["ca*"]).Length >= ProjectDiagnostics.Producing(project, ["CA1822"]).Length);
+        Assert.True(ProjectDiagnostics.Producing(project, ["ZZ9*"]).IsEmpty);
+    }
 }

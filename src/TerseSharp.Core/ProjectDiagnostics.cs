@@ -37,22 +37,15 @@ internal static class ProjectDiagnostics
             : await RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
     }
 
-    private static bool Produces(DiagnosticAnalyzer analyzer, HashSet<string> ids) =>
-        Supported(analyzer).Any(descriptor => ids.Contains(descriptor.Id));
+    private static bool Produces(DiagnosticAnalyzer analyzer, IReadOnlyList<string> ids) =>
+        Supported(analyzer).Any(descriptor => DiagnosticIds.MatchesAny(descriptor.Id, ids));
 
-    public static ImmutableArray<DiagnosticAnalyzer> Producing(Project project, IReadOnlyCollection<string> ids)
-    {
-        if (ids.Count is 0)
-            return Analyzers(project);
-
-        var wanted = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
-
-        return [.. Analyzers(project).Where(analyzer => Produces(analyzer, wanted))];
-    }
+    public static ImmutableArray<DiagnosticAnalyzer> Producing(Project project, IReadOnlyList<string> ids) =>
+        ids.Count is 0 ? Analyzers(project) : [.. Analyzers(project).Where(analyzer => Produces(analyzer, ids))];
 
     public static async Task<ImmutableArray<Diagnostic>> OfProjectAsync(
         Project project,
-        IReadOnlyCollection<string> ids,
+        IReadOnlyList<string> ids,
         CancellationToken cancellationToken)
     {
         var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
@@ -94,14 +87,6 @@ internal static class ProjectDiagnostics
         foreach (var diagnostic in found)
             declared.Add(diagnostic.Id);
 
-        return [.. ids.Where(id => !declared.Contains(id) && !IsCompilerId(id) && !IsDeadCodeId(id))];
+        return [.. ids.Where(id => !DiagnosticIds.IsDeclared(id, declared) && !DiagnosticIds.IsCompilerId(id) && !DiagnosticIds.IsDeadCodeId(id))];
     }
-
-    private static bool IsCompilerId(string id) =>
-        id.Length > 2
-        && id.StartsWith("CS", StringComparison.OrdinalIgnoreCase)
-        && !id.AsSpan(2).ContainsAnyExceptInRange('0', '9');
-
-    private static bool IsDeadCodeId(string id) =>
-        string.Equals(id, DeadCodeService.RuleId, StringComparison.OrdinalIgnoreCase);
 }

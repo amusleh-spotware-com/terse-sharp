@@ -8,6 +8,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`analyze ids=` and `cleanup ids=` accept a trailing-wildcard prefix (I726).** `ids=CS*,CA*,IDE*,xUnit*`
+  answered `NOT_ENABLED` for every entry, because each was compared as a whole id, so a family filter cost
+  one re-run per family. An entry ending in `*` now keeps every diagnostic whose id starts with the rest,
+  case-insensitively, and is `NOT_ENABLED` only when no declared, emitted, compiler or dead-code id can
+  start with it; an id without `*` matches exactly as before, and the JSON-array spelling reads the same.
+  Covered by `Matches_TreatsATrailingStarAsAPrefixAndEverythingElseAsAnExactId`,
+  `Unsupported_WithAPrefixNoDeclaredIdStartsWith_NamesOnlyThatPrefix`,
+  `Wants_WithAPrefixId_KeepsEveryDiagnosticOfThatFamilyAndNoOther`,
+  `Producing_WithAPrefixId_SelectsTheAnalyzersOfThatFamily`,
+  `Analyze_WithATrailingWildcardId_FiltersByPrefixInsteadOfDeclaringItNotEnabled` and
+  `Analyze_WithAWildcardNoDeclaredIdStartsWith_SaysNotEnabled`.
+
 ### Changed
 
 - **`add_member typeSymbolIds=` accepts an enum beside a class (I706).** A batch naming an enum answered

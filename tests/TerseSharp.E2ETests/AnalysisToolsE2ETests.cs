@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -643,5 +644,33 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("get_type_outline", new() { ["symbol"] = "OrderService", ["typeName"] = "Order" });
 
         Assert.Contains("unrecognized typeName", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithATrailingWildcardId_FiltersByPrefixInsteadOfDeclaringItNotEnabled()
+    {
+        const string Target = "src/Fixture.Trading/OrderService.cs";
+
+        var exact = await server.CallAsync("analyze", new() { ["path"] = Target, ["ids"] = "CS0219,TERSE001", ["minSeverity"] = "info" });
+        var prefixed = await server.CallAsync("analyze", new() { ["path"] = Target, ["ids"] = "CS*,TERSE*,CA*", ["minSeverity"] = "info" });
+        var bracketed = await server.CallAsync("analyze", new() { ["path"] = Target, ["ids"] = "[\"CS*\", \"TERSE*\", \"CA*\"]", ["minSeverity"] = "info" });
+
+        Assert.True(Records(exact) > 0, exact);
+        Assert.DoesNotContain("NOT_ENABLED", prefixed, StringComparison.Ordinal);
+        Assert.True(Records(prefixed) >= Records(exact), prefixed);
+        Assert.Equal(Records(prefixed), Records(bracketed));
+    }
+
+    [Fact]
+    public async Task Analyze_WithAWildcardNoDeclaredIdStartsWith_SaysNotEnabled()
+    {
+        var text = await server.CallAsync("analyze", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ids"] = "ZZ9*",
+        });
+
+        Assert.Contains("NOT_ENABLED ZZ9*", text, StringComparison.Ordinal);
+        Assert.Contains("could not have found it", text, StringComparison.Ordinal);
     }
 }
