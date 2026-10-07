@@ -1302,6 +1302,46 @@ public sealed class RegionTail
         }
     }
 
+    [Fact]
+    public async Task DeleteSymbol_WithSymbolIdsPairingAFieldWithTheOnlyPropertyThatReadsIt_DeletesBothAsOneEdit()
+    {
+        const string Probe = "src/Fixture.Trading/BatchFieldProbe.cs";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "BatchFieldProbe.cs");
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class BatchFieldProbe\n{\n    private static int observedCount;\n\n    public static int ObservedCount => observedCount;\n\n    public static int Kept() => 2;\n}\n",
+            ["force"] = true,
+        });
+
+        try
+        {
+            var alone = await server.CallAsync("delete_symbol", new()
+            {
+                ["symbolIds"] = new[] { "BatchFieldProbe.observedCount" },
+                ["dryRun"] = true,
+            });
+
+            var batched = await server.CallAsync("delete_symbol", new()
+            {
+                ["symbolIds"] = new[] { "BatchFieldProbe.observedCount", "BatchFieldProbe.ObservedCount" },
+            });
+
+            var remaining = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.Contains("'observedCount' still has 1 usages", alone, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", batched, StringComparison.Ordinal);
+            Assert.DoesNotContain("observedCount", remaining, StringComparison.Ordinal);
+            Assert.DoesNotContain("ObservedCount", remaining, StringComparison.Ordinal);
+            Assert.Contains("public static int Kept() => 2;", remaining, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
     private const string NestedInitializer = "public static object Probed()\n{\n    var map = new System.Collections.Generic.Dictionary<string, string[]>\n    {\n        [\"ids\"] = new[]\n        {\n            \"a\",\n            \"b\",\n        },\n        [\"flag\"] = new[] { \"c\" },\n    };\n\n    return map;\n}";
 
     [Fact]
