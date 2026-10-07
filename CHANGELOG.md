@@ -108,6 +108,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `ScopeRemedy_WithADirectoryAndAPattern_NamesTheGlobThatSearchesThePatternInsideIt`,
   `ScopeRemedy_WithARootAnchoredPattern_OffersNoComposedGlobBecauseItsMeaningWouldChange` and
   `Chosen_WithOneValueOrTheSameValueTwice_AnswersThatValue`.
+- **`add_member before=`/`after=` resolve a qualified or namespace-qualified anchor to its overload (I708).**
+  The spelling an outline prints, `AnalysisService.Keep(Diagnostic, ...)`, carried its type qualifier into
+  every signature tier, so only the name tier matched: overloads that do not sit together were refused as
+  ambiguous, and adjacent ones placed the member beside the first overload instead of the one named. The
+  structural tier now drops the qualifier and compares each parameter by namespace suffix, the way symbol ids
+  already resolve. Covered by
+  `AddMember_AnchoredOnTheQualifiedSpellingAnOutlinePrints_PicksThatOverloadAmongScatteredOnes`,
+  `AddMember_AnchoredOnANamespaceQualifiedParameterList_LandsBesideThatOverloadNotTheFirst` and
+  `SameStructure_ComparesTheMemberAndEachParameterBySuffix`.
 
 ## [0.74.0] - 2026-10-07
 

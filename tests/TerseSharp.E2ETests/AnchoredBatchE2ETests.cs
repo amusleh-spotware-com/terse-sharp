@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -242,5 +243,45 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
         });
 
         Assert.Equal(2, text.Split("+using System.Text;").Length - 1);
+    }
+
+    private static int InsertedAt(string diff)
+    {
+        var hunk = diff.AsSpan(diff.IndexOf("@@ -", StringComparison.Ordinal));
+        var start = hunk[(hunk.IndexOf(" +", StringComparison.Ordinal) + 2)..];
+
+        return int.Parse(start[..start.IndexOfAny(',', ' ')], CultureInfo.InvariantCulture);
+    }
+
+    [Fact]
+    public async Task AddMember_AnchoredOnTheQualifiedSpellingAnOutlinePrints_PicksThatOverloadAmongScatteredOnes()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.Scattered",
+            ["declaration"] = "public int Qualified() => 1;",
+            ["after"] = "Scattered.Pick(int)",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("Qualified", text, StringComparison.Ordinal);
+        Assert.InRange(InsertedAt(text), 43, 45);
+    }
+
+    [Fact]
+    public async Task AddMember_AnchoredOnANamespaceQualifiedParameterList_LandsBesideThatOverloadNotTheFirst()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.Awkward",
+            ["declaration"] = "public int Suffixed() => 1;",
+            ["before"] = "Weigh(Fixture.Trading.Boxed<Fixture.Trading.IHandler>)",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("Suffixed", text, StringComparison.Ordinal);
+        Assert.InRange(InsertedAt(text), 21, 22);
     }
 }

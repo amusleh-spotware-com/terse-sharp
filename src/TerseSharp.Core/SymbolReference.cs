@@ -328,4 +328,7 @@ public static class SymbolReference
 
     private static bool IsConstructorSegment(ReadOnlySpan<char> name, int hash) =>
         hash > 0 && name[hash - 1] is '.' && name[(hash + 1)..] is "ctor" or "cctor";
+
+    internal static bool SameSpelling(ReadOnlySpan<char> left, ReadOnlySpan<char> right) =>
+            SameType(left, right) || SameType(right, left);
 }

@@ -129,4 +129,35 @@ public static class AnchorSignature
 
         return new string(kept[..length]);
     }
+
+    public static bool SameStructure(string signature, string reference)
+    {
+        var actual = signature.AsSpan();
+        var requested = reference.AsSpan();
+        var actualOpen = actual.IndexOf('(');
+        var requestedOpen = requested.IndexOf('(');
+        var actualClose = actual.LastIndexOf(')');
+        var requestedClose = requested.LastIndexOf(')');
+
+        return actualOpen >= 0 && actualClose > actualOpen && requestedOpen >= 0 && requestedClose > requestedOpen
+            && SameMember(actual[..actualOpen], requested[..requestedOpen])
+            && SameParameters(actual[(actualOpen + 1)..actualClose], requested[(requestedOpen + 1)..requestedClose]);
+    }
+
+    private static bool SameMember(ReadOnlySpan<char> actual, ReadOnlySpan<char> requested) =>
+        actual.Equals(requested[(requested.LastIndexOf('.') + 1)..].Trim(), StringComparison.Ordinal);
+
+    private static bool SameParameters(ReadOnlySpan<char> actual, ReadOnlySpan<char> requested)
+    {
+        while (!actual.IsEmpty && !requested.IsEmpty)
+        {
+            var left = Normalized(Next(ref actual), AnchorTier.Structural);
+            var right = Normalized(Next(ref requested), AnchorTier.Structural);
+
+            if (!SymbolReference.SameSpelling(left, right))
+                return false;
+        }
+
+        return actual.IsEmpty && requested.IsEmpty;
+    }
 }

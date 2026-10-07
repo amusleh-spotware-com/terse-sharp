@@ -43,4 +43,13 @@ public sealed class AnchorSignatureTests
     [Fact]
     public void Canonical_ForAnEmptyParameterList_StaysEmpty() =>
         Assert.Equal("Submit()", AnchorSignature.Canonical("Submit()", AnchorTier.Structural));
+
+    [Theory]
+    [InlineData("Keep(Diagnostic,DiagnosticScope,DiagnosticSeverity,IReadOnlyList<string>)", "AnalysisService.Keep(Diagnostic, DiagnosticScope, DiagnosticSeverity, IReadOnlyList<string>)", true)]
+    [InlineData("Keep(Diagnostic,DiagnosticScope,DiagnosticSeverity,IReadOnlyList<string>)", "Keep(Microsoft.CodeAnalysis.Diagnostic d, DiagnosticScope s, DiagnosticSeverity m, System.Collections.Generic.IReadOnlyList<string>? ids)", true)]
+    [InlineData("Keep(IReadOnlyList<string>,IReadOnlyList<string>,DiagnosticSeverity)", "AnalysisService.Keep(Diagnostic, DiagnosticScope, DiagnosticSeverity, IReadOnlyList<string>)", false)]
+    [InlineData("Weigh(int)", "Weigh(Fixture.Trading.Boxed<Fixture.Trading.IHandler>)", false)]
+    [InlineData("Pick(int)", "Pick(int, int)", false)]
+    public void SameStructure_ComparesTheMemberAndEachParameterBySuffix(string signature, string reference, bool expected) =>
+            Assert.Equal(expected, AnchorSignature.SameStructure(signature, reference));
 }

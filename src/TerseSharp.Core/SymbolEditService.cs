@@ -1473,12 +1473,13 @@ public static class SymbolEditService
     }
 
     private static bool Names(MemberDeclarationSyntax member, string reference, AnchorTier tier) =>
-            Signature(member) is { } signature && tier switch
-            {
-                AnchorTier.Exact => signature.AsSpan().Equals(reference, StringComparison.Ordinal),
-                AnchorTier.Name => Plain(signature).Equals(Plain(reference), StringComparison.Ordinal),
-                _ => string.Equals(AnchorSignature.Canonical(signature, tier), AnchorSignature.Canonical(reference, tier), StringComparison.Ordinal),
-            };
+        Signature(member) is { } signature && tier switch
+        {
+            AnchorTier.Exact => signature.AsSpan().Equals(reference, StringComparison.Ordinal),
+            AnchorTier.Name => Plain(signature).Equals(Plain(reference), StringComparison.Ordinal),
+            AnchorTier.Structural when AnchorSignature.SameStructure(signature, reference) => true,
+            _ => string.Equals(AnchorSignature.Canonical(signature, tier), AnchorSignature.Canonical(reference, tier), StringComparison.Ordinal),
+        };
 
     private static string PlacementCandidates(TypeDeclarationSyntax type)
     {
