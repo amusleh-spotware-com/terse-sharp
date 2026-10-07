@@ -112,16 +112,33 @@ bool verbose) =>
         FileService.ReadRequest request,
         string? workspace,
         CancellationToken cancellationToken) =>
-        context.OutsideEveryWorkspace(path)
-            ? ToolBoundary.RunAsync(async () => NavigationTools.Unwrap(
-                await FileService.ReadOutsideAsync(path, request, cancellationToken).ConfigureAwait(false)))
-            : context.WithWorkspaceAsync(
+        Unhoused(path)
+            ? ToolBoundary.RunAsync(() => UnwrappedAsync(FileService.ReadOutsideAsync(path, request, cancellationToken)))
+            : context.WithRootAsync(
                 workspace,
-                path,
-                async loaded => NavigationTools.Unwrap(
-                    await FileService.ReadTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false)),
-                semantic: false,
-                cancellationToken);
+                root => FileService.ReadUnderAsync(root, path, request, cancellationToken) is { } early
+                    ? UnwrappedAsync(early)
+                    : Housed(path, request, workspace, cancellationToken),
+                () => Housed(path, request, workspace, cancellationToken));
+
+    private Task<string> Housed(
+        string path,
+        FileService.ReadRequest request,
+        string? workspace,
+        CancellationToken cancellationToken) =>
+        context.WithWorkspaceAsync(
+            workspace,
+            path,
+            loaded => UnwrappedAsync(FileService.ReadTextAsync(loaded, path, request, cancellationToken)),
+            semantic: false,
+            cancellationToken);
+
+    private bool Unhoused(string path) =>
+        context.OutsideEveryWorkspace(path)
+        && !(context.LoadingRoot(null) is { } root && PathBoundary.Contains(root, Path.GetFullPath(path)));
+
+    private static async Task<string> UnwrappedAsync(Task<Result<string>> read) =>
+        NavigationTools.Unwrap(await read.ConfigureAwait(false));
 
     [McpServerTool(Name = "write_text")]
     [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 10 files under ONE compile gate. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token holding the content; one no project globs stays ungated. force=true also lets a SINGLE write land outside every workspace root. delete=true removes a file or an EMPTY directory; recursive=true removes the tree - a shell rm -r - refused over a file this workspace compiles unless force=true. Replacing a file answers overwrote existing  <name>, and a write keeping under a quarter of its content lines is refused unless overwrite=true. Missing directories are created and line endings kept.")]
@@ -329,12 +346,10 @@ bool verbose) =>
             ? One(single)
             : ManyAsync(combined.Value, workspace, maxResults, stamps, tracked, name, depth, cancellationToken);
 
-        Task<string> One(string chosenGlob) => tracked
-            ? Waited(chosenGlob)
-            : context.WithRootAsync(
-                workspace,
-                early => Task.FromResult(TextSearchService.FindFilesUnder(early, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0)),
-                () => Waited(chosenGlob));
+        Task<string> One(string chosenGlob) => context.WithRootAsync(
+            workspace,
+            early => ListedUnderAsync(early, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+            () => Waited(chosenGlob));
 
         Task<string> Waited(string chosenGlob) => context.WithWorkspaceAsync(
             workspace,
@@ -491,11 +506,11 @@ context.RejectWrite() is { } rejection
     private static int Lines(int requested) => requested <= 0 ? 2000 : Math.Min(requested, 20000);
 
     private static async Task<Result<HashSet<string>>> TrackedAsync(
-    LoadedWorkspace loaded,
-    CancellationToken cancellationToken)
+        string root,
+        CancellationToken cancellationToken)
     {
         var listed = await GitRunner.ReadAsync(
-            loaded.Root,
+            root,
             ["--no-optional-locks", "-c", "core.quotePath=false", "ls-files", "--cached"],
             cancellationToken).ConfigureAwait(false);
 
@@ -545,10 +560,31 @@ context.RejectWrite() is { } rejection
         if (!tracked)
             return TextSearchService.FindFiles(loaded, glob, maxResults, stamps, null, name, depth, chosen);
 
-        var known = await TrackedAsync(loaded, cancellationToken).ConfigureAwait(false);
+        var known = await TrackedAsync(loaded.Root, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
             ? TextSearchService.FindFiles(loaded, glob, maxResults, stamps, known.Value!, name, depth, chosen)
+            : known.Error!.Render();
+    }
+
+    private static async Task<string> ListedUnderAsync(
+        string root,
+        string glob,
+        int maxResults,
+        bool stamps,
+        bool tracked,
+        string? name,
+        int depth,
+        bool chosen,
+        CancellationToken cancellationToken)
+    {
+        if (!tracked)
+            return TextSearchService.FindFilesUnder(root, glob, maxResults, stamps, name, depth, chosen);
+
+        var known = await TrackedAsync(root, cancellationToken).ConfigureAwait(false);
+
+        return known.IsOk
+            ? TextSearchService.FindFilesUnder(root, glob, maxResults, stamps, name, depth, chosen, known.Value!)
             : known.Error!.Render();
     }
 
@@ -645,7 +681,7 @@ context.RejectWrite() is { } rejection
         bool whole,
         string? workspace,
         CancellationToken cancellationToken) =>
-        whole && path.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !context.OutsideEveryWorkspace(path)
+        whole && path.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !Unhoused(path)
             ? context.WithWorkspaceAsync(
                 workspace,
                 path,
@@ -1022,12 +1058,15 @@ context.RejectWrite() is { } rejection
         string? name,
         int depth,
         CancellationToken cancellationToken) =>
-        context.WithWorkspaceAsync(
+        context.WithRootAsync(
             workspace,
-            null,
-            loaded => ListedManyAsync(loaded, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
-            semantic: false,
-            cancellationToken);
+            early => ListedManyUnderAsync(early, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+            () => context.WithWorkspaceAsync(
+                workspace,
+                null,
+                loaded => ListedManyAsync(loaded, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+                semantic: false,
+                cancellationToken));
 
     private static async Task<string> ListedManyAsync(
         LoadedWorkspace loaded,
@@ -1043,10 +1082,31 @@ context.RejectWrite() is { } rejection
         if (!tracked)
             return TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, null, name, depth, chosen);
 
-        var known = await TrackedAsync(loaded, cancellationToken).ConfigureAwait(false);
+        var known = await TrackedAsync(loaded.Root, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
             ? TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, known.Value!, name, depth, chosen)
+            : known.Error!.Render();
+    }
+
+    private static async Task<string> ListedManyUnderAsync(
+        string root,
+        IReadOnlyList<string> globs,
+        int maxResults,
+        bool stamps,
+        bool tracked,
+        string? name,
+        int depth,
+        bool chosen,
+        CancellationToken cancellationToken)
+    {
+        if (!tracked)
+            return TextSearchService.FindFilesManyUnder(root, globs, maxResults, stamps, null, name, depth, chosen);
+
+        var known = await TrackedAsync(root, cancellationToken).ConfigureAwait(false);
+
+        return known.IsOk
+            ? TextSearchService.FindFilesManyUnder(root, globs, maxResults, stamps, known.Value!, name, depth, chosen)
             : known.Error!.Render();
     }
 

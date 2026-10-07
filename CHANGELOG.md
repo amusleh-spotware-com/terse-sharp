@@ -57,6 +57,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   Both paths now decorate through one `ToolExamples.Decorate`. Covered by
   `Call_WorkspaceStatusWithTools_PricesEveryPromotedExampleToolExactlyAsTheStdioSessionDoes` and
   `Decorate_AppendsTheExampleToAPromotedToolOnceAndLeavesEveryOtherToolAlone`.
+- **During the startup preload, `read_text` and the rest of `find_files` answer at once too (I702).** I689
+  left `read_text` of a workspace-relative path (and its `paths=` batch), `find_files tracked=true` and
+  `find_files globs=` with several globs waiting for the whole load. They now answer from the preload
+  solution's directory - the tracked set from `git ls-files` at that root - byte-identical to the answer after
+  the load. A path the preload root cannot answer still waits: a missing file (its "declared in" hint needs
+  Roslyn), a path that resolves outside the root, a whole `.cs` read (it answers the outline) and `ref=`. An
+  absolute path inside the preload root is no longer treated as outside the workspace during the preload, so a
+  whole read of an absolute `.cs` path there answers the outline instead of raw text tagged
+  `outside-workspace`. Covered by
+  `ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould` and
+  `ReadText_OfAnAbsoluteCsPathWhileThePreloadIsRunning_AnswersTheOutlineTheLoadedWorkspaceWould`.
 
 ## [0.74.0] - 2026-10-07
 

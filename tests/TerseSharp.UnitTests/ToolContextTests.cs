@@ -433,4 +433,59 @@ public sealed class ToolContextTests
     [InlineData("3 diagnostics\nNOTE queued 4200ms before this call ran, while build was in flight on this solution for 9s\nnext: gate", "3 diagnostics\nnext: gate")]
     [InlineData("3 diagnostics\nnext: gate", "3 diagnostics\nnext: gate")]
     public void Unqueued_DropsOnlyTheQueuedLine_SoAReplayNeverRepeatsAWaitThatIsOver(string answer, string remembered) => Assert.Equal(remembered, ToolContext.Unqueued(answer));
+
+    [Fact]
+    public async Task ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        context.Preload(preload.Task, Fixtures.SolutionPath);
+
+        var early = await ReadAndListAnswersAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, cancellationToken);
+        preload.SetResult();
+
+        Assert.Equal(await ReadAndListAnswersAsync(context, cancellationToken), early);
+        Assert.All(early, answer => Assert.False(answer.StartsWith("ERROR", StringComparison.Ordinal), answer));
+        Assert.Contains("OrderService.cs", early[3], StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", early[5], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_OfAnAbsoluteCsPathWhileThePreloadIsRunning_AnswersTheOutlineTheLoadedWorkspaceWould()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false);
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        context.Preload(preload.Task, Fixtures.SolutionPath);
+
+        var pending = new FileTools(context).ReadText(Fixtures.OrderServicePath, cancellationToken: cancellationToken);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, cancellationToken);
+        preload.SetResult();
+
+        var answer = await pending.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
+
+        Assert.Contains("OrderService.Submit", answer, StringComparison.Ordinal);
+        Assert.DoesNotContain("outside-workspace", answer, StringComparison.Ordinal);
+    }
+
+    private static Task<string[]> ReadAndListAnswersAsync(ToolContext context, CancellationToken cancellationToken)
+    {
+        var files = new FileTools(context);
+
+        return Task.WhenAll(
+            files.ReadText("notes.md", cancellationToken: cancellationToken),
+            files.ReadText(paths: ["appsettings.json", "global.json"], cancellationToken: cancellationToken),
+            files.ReadText("src/Fixture.Trading/OrderService.cs", lines: "1-5", cancellationToken: cancellationToken),
+            files.FindFiles("**/*.cs", tracked: true, cancellationToken: cancellationToken),
+            files.FindFiles(globs: ["*.json", "**/*.csproj"], cancellationToken: cancellationToken),
+            files.FindFiles(globs: ["*.md", "**/OrderService.cs"], tracked: true, cancellationToken: cancellationToken));
+    }
 }

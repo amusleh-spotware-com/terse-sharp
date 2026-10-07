@@ -522,6 +522,11 @@ public static class FileService
         return PresentFileAsync(full, Outside(full), request, cancellationToken);
     }
 
+    public static Task<Result<string>>? ReadUnderAsync(string root, string path, ReadRequest request, CancellationToken cancellationToken) =>
+        PathGuard.Resolve(root, path) is { IsOk: true, Value: { } full } && File.Exists(full)
+            ? PresentFileAsync(full, path, request, cancellationToken)
+            : null;
+
     private static string Outside(string full) => full + OutsideSuffix;
 
     private static async Task<Result<string>> PresentFileAsync(

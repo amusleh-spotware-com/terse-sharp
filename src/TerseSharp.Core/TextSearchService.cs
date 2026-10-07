@@ -1002,7 +1002,10 @@ public static class TextSearchService
         IReadOnlySet<string>? tracked = null,
         string? name = null,
         int depth = 0,
-        bool chosen = false)
+        bool chosen = false) =>
+        Many(globs, glob => FindFiles(workspace, glob, maxResults, stamps, tracked, name, depth, chosen));
+
+    private static string Many(IReadOnlyList<string> globs, Func<string, string> listed)
     {
         var response = new ResponseBuilder("find_files", string.Join(", ", globs));
 
@@ -1011,7 +1014,7 @@ public static class TextSearchService
         foreach (var glob in globs)
         {
             response.Note(glob);
-            response.Line(FindFiles(workspace, glob, maxResults, stamps, tracked, name, depth, chosen).TrimEnd('\n'));
+            response.Line(listed(glob).TrimEnd('\n'));
         }
 
         return response.ToString();
@@ -1191,8 +1194,26 @@ public static class TextSearchService
         return Result.Ok(response.ToString());
     }
 
-    public static string FindFilesUnder(string root, string glob, int maxResults, bool stamps, string? name = null, int depth = 0, bool chosen = false) =>
-        Rendered(Matched(PathIndex.Build(root), root, glob), glob, maxResults, stamps, name, depth, null, chosen, root);
+    public static string FindFilesUnder(string root, string glob, int maxResults, bool stamps, string? name = null, int depth = 0, bool chosen = false, IReadOnlySet<string>? tracked = null) =>
+        ListedUnder(PathIndex.Build(root), root, glob, maxResults, stamps, name, depth, chosen, tracked);
+
+    public static string FindFilesManyUnder(
+        string root,
+        IReadOnlyList<string> globs,
+        int maxResults,
+        bool stamps,
+        IReadOnlySet<string>? tracked = null,
+        string? name = null,
+        int depth = 0,
+        bool chosen = false)
+    {
+        var index = PathIndex.Build(root);
+
+        return Many(globs, glob => ListedUnder(index, root, glob, maxResults, stamps, name, depth, chosen, tracked));
+    }
+
+    private static string ListedUnder(PathIndex index, string root, string glob, int maxResults, bool stamps, string? name, int depth, bool chosen, IReadOnlySet<string>? tracked) =>
+        Rendered(Tracked(Matched(index, root, glob), tracked), glob, maxResults, stamps, name, depth, null, chosen, root, tracked is not null);
 
     public static async Task<string> SearchUnderAsync(string root, TextSearchRequest request, CancellationToken cancellationToken)
     {
