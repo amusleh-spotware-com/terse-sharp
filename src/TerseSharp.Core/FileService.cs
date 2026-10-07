@@ -177,7 +177,7 @@ public static class FileService
             : Errors.Invalid(
                 "oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)",
                 MatchesDedented(before, oldText)
-                    ? "it matches only once indentation and blank lines are ignored, and that match starts mid-line or sits shallower than the anchor, so no re-indentation can be proven - re-read the lines with read_text verbose=true and copy the anchor from there"
+                    ? "it matches only once indentation and blank lines are ignored, but no one re-indentation offset fits every line - the file sits shallower than the anchor or its lines drift to different depths - re-read the lines with read_text verbose=true and copy the anchor from there"
                     : Nearest(before, oldText));
     }
 
@@ -1660,15 +1660,18 @@ public static class FileService
         }
     }
 
-    private static bool AtDepth(string newText, int depth) =>
-        newText.AsSpan().IsWhiteSpace() || SnippetSearch.Lead(newText).Length >= depth;
+    private static int HeadLength(ReadOnlySpan<char> text, bool midLine) =>
+        !midLine ? 0 : text.IndexOf('\n') is var at and >= 0 ? at + 1 : text.Length;
 
-    private static string Indented(string text, string indent)
+    private static bool AtDepth(ReadOnlySpan<char> newText, int depth) =>
+        newText.IsWhiteSpace() || SnippetSearch.Lead(newText).Length >= depth;
+
+    private static string Indented(ReadOnlySpan<char> text, string indent)
     {
         var builder = new StringBuilder(text.Length + (indent.Length * 4));
         var first = true;
 
-        foreach (var line in text.AsSpan().EnumerateLines())
+        foreach (var line in text.EnumerateLines())
         {
             if (!first)
                 builder.Append('\n');
@@ -1694,12 +1697,16 @@ public static class FileService
     private static string Reindented(string newText, SnippetMatch match, string oldText, List<string> notes)
     {
         var indent = match.Indent ?? string.Empty;
-        var shifted = indent.Length > 0 && !AtDepth(newText, indent.Length + SnippetSearch.Lead(oldText).Length);
+        var head = HeadLength(newText, match.MidLine);
+        var rest = newText.AsSpan(head);
+        var shifted = indent.Length > 0 && !AtDepth(rest, indent.Length + SnippetSearch.Lead(oldText.AsSpan(HeadLength(oldText, match.MidLine))).Length);
 
         if (match.Loose || shifted)
             notes.Add(Realigned(indent.Length, match.Loose, shifted));
 
-        return shifted ? Indented(newText, indent) : newText;
+        return !shifted ? newText
+            : head is 0 ? Indented(rest, indent)
+            : string.Concat(newText.AsSpan(0, head), Indented(rest, indent));
     }
 
     private const int MaxDirectoryEntries = 4;

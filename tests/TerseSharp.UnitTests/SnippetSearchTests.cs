@@ -149,4 +149,54 @@ public sealed class SnippetSearchTests
         Assert.Equal(0, match.Occurrences);
         Assert.Equal(-1, match.Start);
     }
+
+    [Fact]
+    public void Find_ForADedentedAnchorEndingMidLine_MatchesThroughTheLinePrefixAtOneOffset()
+    {
+        const string Text = "class A\n{\n    void M()\n    {\n        return Call(a,\n            b) + 1;\n    }\n}\n";
+        var match = SnippetSearch.Find(Text, "return Call(a,\n    b)", 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.Equal("        ", match.Indent);
+        Assert.False(match.MidLine);
+        Assert.Equal("        return Call(a,\n            b)", Text[match.Start..(match.Start + match.Length)]);
+    }
+
+    [Fact]
+    public void Find_ForADedentedAnchorStartingMidLine_StartsAtTheColumnAndFlagsMidLine()
+    {
+        const string Text = "class A\n{\n    int M() => Call(a,\n        b);\n}\n";
+        var match = SnippetSearch.Find(Text, "Call(a,\n    b);", 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.True(match.MidLine);
+        Assert.Equal("    ", match.Indent);
+        Assert.Equal("Call(a,\n        b);", Text[match.Start..(match.Start + match.Length)]);
+    }
+
+    [Fact]
+    public void Find_ForAnAnchorWhoseFirstLineLostItsIndentation_ReindentsTheRestByTheirCommonOffset()
+    {
+        const string Text = "class A\n{\n    void M()\n    {\n        if (x)\n        {\n            y();\n        }\n    }\n}\n";
+        var match = SnippetSearch.Find(Text, "if (x)\n    {\n        y();\n    }", 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.False(match.Loose);
+        Assert.True(match.MidLine);
+        Assert.Equal("    ", match.Indent);
+        Assert.Equal("if (x)\n        {\n            y();\n        }", Text[match.Start..(match.Start + match.Length)]);
+    }
+
+    [Fact]
+    public void Find_ForAMidLineAnchorWhoseLinesDriftToDifferentDepths_StaysUnmatched() =>
+        Assert.Equal(0, SnippetSearch.Find("    int M() => Call(a,\n        b,\n      c);\n", "Call(a,\n    b,\n    c);", 1).Occurrences);
+
+    [Fact]
+    public void Find_ForAMidLineAnchorThatFitsTwoPlaces_ReportsBothSoTheEditIsRefused()
+    {
+        var match = SnippetSearch.Find("    x = Call(a,\n        b);\n    y = Call(a,\n        b);\n", "Call(a,\n    b);", 1);
+
+        Assert.Equal(2, match.Occurrences);
+        Assert.False(match.IsUnique);
+    }
 }

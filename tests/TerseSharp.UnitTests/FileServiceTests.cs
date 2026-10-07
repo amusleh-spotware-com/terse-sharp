@@ -570,4 +570,29 @@ public sealed class FileServiceTests
 
         Assert.Equal<int>([2, 3], FileService.Matching(lines, "I609"));
     }
+
+    [Fact]
+    public async Task EditText_WithDedentedAnchorsThatStartOrEndMidLine_ReindentsNewTextByTheCommonOffset()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        using var lease = registry.Resolve(null, null).Value!;
+        var name = "terse-midline-" + Guid.NewGuid().ToString("N") + ".txt";
+        var path = Path.Combine(lease.Workspace.Root, name);
+        await File.WriteAllTextAsync(path, "class A\n{\n    void M()\n    {\n        if (x)\n        {\n            y();\n        }\n        return Call(a,\n            b) + 1;\n    }\n}\n", TestContext.Current.CancellationToken);
+        try
+        {
+            var head = await FileService.EditTextAsync(lease.Workspace, name, new FileService.EditRequest("if (x)\n    {\n        y();\n    }", "if (z)\n    {\n        w();\n    }", null, false, false, false), TestContext.Current.CancellationToken);
+            var tail = await FileService.EditTextAsync(lease.Workspace, name, new FileService.EditRequest("return Call(a,\n    b)", "return Call(c,\n    d)", null, false, false, false), TestContext.Current.CancellationToken);
+            var landed = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.True(head.IsOk, head.Error?.Message);
+            Assert.True(tail.IsOk, tail.Error?.Message);
+            Assert.Equal("class A\n{\n    void M()\n    {\n        if (z)\n        {\n            w();\n        }\n        return Call(c,\n            d) + 1;\n    }\n}\n", landed);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

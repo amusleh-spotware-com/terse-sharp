@@ -126,6 +126,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `GetSymbolSource_WithSymbolIdsHoldingAKeywordSpelledId_TagsOnlyThatEntryResolvedFromName`,
   `GetSymbol_WithSymbolIdsHoldingAMethodIdWithoutItsParameterList_SaysWhichIdItTook` and
   `GetTypeOutline_WithSymbolIdsHoldingAShortNamespaceTypeId_TagsThatEntryResolvedFromName`.
+- **`edit_text` matches a multi-line anchor pasted from a dedented payload when its first line starts
+  mid-line or lost its indentation, or its last line ends mid-line (I725).** A batch of anchors copied from
+  `get_symbol_source` failed 5 of 15 entries with `starts mid-line or sits shallower`, because the re-indent
+  matcher accepted only whole lines whose pad the first line fixed. Every line must now fit one common
+  indentation offset: interior lines match whole, the last may be a prefix of its file line, and a second pass
+  lets the first be a suffix of its file line. `newText` is re-indented by that offset, and its first line is
+  left unindented when the match starts mid-line, so it no longer lands four columns too deep. Lines at
+  different depths, a file shallower than the anchor and an anchor that fits twice are still refused. Covered
+  by `Find_ForADedentedAnchorEndingMidLine_MatchesThroughTheLinePrefixAtOneOffset`,
+  `Find_ForADedentedAnchorStartingMidLine_StartsAtTheColumnAndFlagsMidLine`,
+  `Find_ForAnAnchorWhoseFirstLineLostItsIndentation_ReindentsTheRestByTheirCommonOffset`,
+  `Find_ForAMidLineAnchorWhoseLinesDriftToDifferentDepths_StaysUnmatched`,
+  `Find_ForAMidLineAnchorThatFitsTwoPlaces_ReportsBothSoTheEditIsRefused`,
+  `EditText_WithDedentedAnchorsThatStartOrEndMidLine_ReindentsNewTextByTheCommonOffset` and
+  `EditText_ForAnEditsBatchOfDedentedAnchorsThatStartOrEndMidLine_AppliesEveryEntryReindented`.
 
 ## [0.74.0] - 2026-10-07
 

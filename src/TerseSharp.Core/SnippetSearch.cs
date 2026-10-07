@@ -7,6 +7,8 @@ public readonly record struct SnippetMatch(int Start, int Length, int Occurrence
     public string? Indent { get; init; }
 
     public bool Loose { get; init; }
+
+    public bool MidLine { get; init; }
 }
 
 public static class SnippetSearch
@@ -177,11 +179,6 @@ public static class SnippetSearch
         return text[start..(end < 0 ? text.Length : at + end)].TrimEnd('\r');
     }
 
-    private readonly record struct IndentedRegion(int End, int IndentStart, int IndentLength)
-    {
-        public static IndentedRegion None => new(-1, -1, 0);
-    }
-
     private static int LineEnd(ReadOnlySpan<char> text, int at) =>
         text[at..].IndexOf('\n') is var offset and >= 0 ? at + offset : text.Length;
 
@@ -218,45 +215,16 @@ public static class SnippetSearch
     private static int Closed(ReadOnlySpan<char> text, int end, bool trailing) =>
         trailing && end < text.Length ? end + 1 : end;
 
-    private static IndentedRegion MatchedRegion(ReadOnlySpan<char> text, int start, ReadOnlySpan<char> value)
-    {
-        var trailing = value.EndsWith("\n", StringComparison.Ordinal);
-        var body = trailing ? value[..^1] : value;
-        var at = start;
-        var end = -1;
-        var pad = -1;
-        var indentAt = -1;
-
-        foreach (var needle in body.EnumerateLines())
-        {
-            end = LineEnd(text, at);
-            var established = indentAt < 0 ? default : text.Slice(indentAt, pad);
-
-            if (!SameLine(text[at..end], needle, established, ref pad))
-                return IndentedRegion.None;
-
-            if (indentAt < 0 && pad >= 0)
-                indentAt = at;
-
-            at = end < text.Length ? end + 1 : end;
-        }
-
-        return pad < 0 ? IndentedRegion.None : new IndentedRegion(Closed(text, end, trailing), indentAt, pad);
-    }
-
     private static SnippetMatch LocateReindented(ReadOnlySpan<char> text, ReadOnlySpan<char> value, int occurrence)
     {
-        var found = IndentedRegion.None;
-        var chosen = -1;
+        var found = AnchorRegion.None;
         var occurrences = 0;
         var start = 0;
 
         while (start <= text.Length)
         {
-            var region = MatchedRegion(text, start, value);
-
-            if (region.End >= 0 && ++occurrences == occurrence)
-                (chosen, found) = (start, region);
+            if (AnchorAt(text, start, value) is { End: >= 0 } region && ++occurrences == occurrence)
+                found = region;
 
             if (text[start..].IndexOf('\n') is var offset and >= 0)
                 start += offset + 1;
@@ -266,7 +234,7 @@ public static class SnippetSearch
 
         var indent = found.IndentStart >= 0 ? text.Slice(found.IndentStart, found.IndentLength).ToString() : null;
 
-        return new SnippetMatch(chosen, chosen >= 0 ? found.End - chosen : value.Length, occurrences, false) { Indent = indent };
+        return new SnippetMatch(found.Start, found.End >= 0 ? found.End - found.Start : value.Length, occurrences, false) { Indent = indent, MidLine = found.MidLine };
     }
 
     private static SnippetMatch Reindented(string haystack, string needle, int occurrence)
@@ -277,7 +245,119 @@ public static class SnippetSearch
 
         return found.Start < 0 || ReferenceEquals(text, haystack)
             ? found
-            : Mapped(haystack, found) with { Indent = found.Indent };
+            : Mapped(haystack, found) with { Indent = found.Indent, MidLine = found.MidLine };
+    }
+
+    private enum AnchorLine
+    {
+        Body,
+        MidLineHead,
+        Tail,
+    }
+
+    private readonly record struct AnchorRegion(int Start, int End, int IndentStart, int IndentLength, bool MidLine)
+    {
+        public static AnchorRegion None => new(-1, -1, -1, -1, false);
+    }
+
+    private static int Depth(ReadOnlySpan<char> line) => line.Length - line.TrimStart().Length;
+
+    private static int LastLine(ReadOnlySpan<char> body)
+    {
+        var last = -1;
+
+        foreach (var _ in body.EnumerateLines())
+            last++;
+
+        return last;
+    }
+
+    private static bool SameIndent(ReadOnlySpan<char> text, ReadOnlySpan<char> lead, AnchorRegion region) =>
+        region.IndentStart >= 0 ? lead.SequenceEqual(text.Slice(region.IndentStart, region.IndentLength)) : lead.IsWhiteSpace();
+
+
+    private static bool Reaches(ReadOnlySpan<char> line, ReadOnlySpan<char> wanted, int pad) =>
+        pad >= 0 && line.Length >= pad + wanted.Length;
+
+
+    private static bool Fits(ReadOnlySpan<char> text, ReadOnlySpan<char> line, ReadOnlySpan<char> wanted, int pad, AnchorRegion region) =>
+        Reaches(line, wanted, pad) && SameIndent(text, line[..pad], region) && line[pad..].StartsWith(wanted, StringComparison.Ordinal);
+
+    private static AnchorRegion Headed(ReadOnlySpan<char> line, ReadOnlySpan<char> needle, int at, AnchorRegion region)
+    {
+        var wanted = needle.TrimEnd();
+        var trimmed = line.TrimEnd();
+
+        return wanted.IsEmpty || !trimmed.EndsWith(wanted, StringComparison.Ordinal)
+            ? AnchorRegion.None
+            : region with { Start = at + trimmed.Length - wanted.Length, End = at + line.Length, MidLine = true };
+    }
+
+    private static AnchorRegion Tailed(ReadOnlySpan<char> text, int at, int end, ReadOnlySpan<char> needle, AnchorRegion region)
+    {
+        var line = text[at..end];
+        var wanted = needle.TrimEnd();
+        var pad = region.IndentLength >= 0 ? region.IndentLength : Depth(line) - Depth(wanted);
+
+        return wanted.IsEmpty || !Fits(text, line, wanted, pad, region)
+            ? AnchorRegion.None
+            : region with { End = at + pad + wanted.Length, IndentStart = region.IndentStart >= 0 ? region.IndentStart : at, IndentLength = pad };
+    }
+
+    private static AnchorRegion NextLine(ReadOnlySpan<char> text, int at, ReadOnlySpan<char> needle, AnchorRegion region, AnchorLine kind)
+    {
+        var end = LineEnd(text, at);
+
+        if (kind is AnchorLine.MidLineHead)
+            return Headed(text[at..end], needle, at, region);
+
+        var pad = region.IndentLength;
+        var established = region.IndentStart < 0 ? default : text.Slice(region.IndentStart, pad);
+
+        return SameLine(text[at..end], needle, established, ref pad)
+            ? region with { End = end, IndentStart = region.IndentStart < 0 && pad >= 0 ? at : region.IndentStart, IndentLength = pad }
+            : kind is AnchorLine.Tail ? Tailed(text, at, end, needle, region)
+            : AnchorRegion.None;
+    }
+
+    private static AnchorLine LineKind(int index, int tail, bool midLineHead) => index switch
+    {
+        0 when midLineHead => AnchorLine.MidLineHead,
+        _ when index == tail => AnchorLine.Tail,
+        _ => AnchorLine.Body,
+    };
+
+    private static AnchorRegion Walked(ReadOnlySpan<char> text, int start, ReadOnlySpan<char> body, int tail, bool midLineHead)
+    {
+        var region = new AnchorRegion(start, start, -1, -1, false);
+        var at = start;
+        var index = 0;
+
+        foreach (var needle in body.EnumerateLines())
+        {
+            region = NextLine(text, at, needle, region, LineKind(index++, tail, midLineHead));
+
+            if (region.End < 0)
+                return AnchorRegion.None;
+
+            at = region.End < text.Length ? region.End + 1 : region.End;
+        }
+
+        return region;
+    }
+
+    private static AnchorRegion AnchorAt(ReadOnlySpan<char> text, int start, ReadOnlySpan<char> value)
+    {
+        var trailing = value.EndsWith("\n", StringComparison.Ordinal);
+        var body = trailing ? value[..^1] : value;
+        var last = LastLine(body);
+        var tail = trailing || last is 0 ? -1 : last;
+        var region = Walked(text, start, body, tail, midLineHead: false);
+
+        if (region.End < 0 && last > 0)
+            region = Walked(text, start, body, tail, midLineHead: true);
+
+        return region.End < 0 || region.IndentLength < 0 ? AnchorRegion.None : region with { End = Closed(text, region.End, trailing) };
     }
 
     private const int MaxRegionLines = 40;

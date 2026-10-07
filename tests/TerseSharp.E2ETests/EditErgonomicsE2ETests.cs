@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -1680,6 +1681,40 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = "TerseSharp.Server/Assets", ["delete"] = true });
             await server.CallAsync("write_text", new() { ["path"] = "TerseSharp.Server", ["delete"] = true });
             await server.CallAsync("write_text", new() { ["path"] = Other, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_ForAnEditsBatchOfDedentedAnchorsThatStartOrEndMidLine_AppliesEveryEntryReindented()
+    {
+        const string Probe = "terse-midline-probe.md";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\n    void A()\n    {\n        if (x)\n        {\n            y();\n        }\n        return Call(a,\n            b) + 1;\n    }\n" });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["oldText"] = "if (x)\n    {\n        y();\n    }", ["newText"] = "if (z)\n    {\n        w();\n    }" },
+                    new Dictionary<string, object?> { ["oldText"] = "return Call(a,\n    b)", ["newText"] = "return Call(c,\n    d)" },
+                },
+            });
+
+            Assert.DoesNotContain("FAILED", applied, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("        if (z)", read, StringComparison.Ordinal);
+            Assert.Contains("            w();", read, StringComparison.Ordinal);
+            Assert.Contains("        return Call(c,", read, StringComparison.Ordinal);
+            Assert.Contains("            d) + 1;", read, StringComparison.Ordinal);
+            Assert.DoesNotContain("y();", read, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
 }
