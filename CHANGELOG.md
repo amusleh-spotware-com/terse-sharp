@@ -8,6 +8,83 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+> **Behaviour and response-format change (MAJOR under this project's rules; on 0.x the MINOR segment
+> carries it).** The `PreToolUse` guard denies an `&&` chain carrying a replaced command whole instead of
+> stripping that link; the repeat footer of `build`/`run_tests`/`rerun_failed`/`list_tests`/`clean`
+> gains a third form for edits made outside terse; a semantic call that waited over 2 s while a build or
+> test held its solution ends with `NOTE queued <n>ms ...`; and `format`/`cleanup changed=true` reformat only the lines changed
+> against `HEAD` on a git tree. All from the 0.73.0 field reports.
+
+### Fixed
+
+- **`replace_symbol_body` lays a brace-less body out as a multi-line block.** A body passed without its
+  braces was wrapped as `{ statement; }` on one line, which every gate accepted and the formatter leaves
+  alone, so only a human reviewer caught it. The tool now wraps it as `{`, the statements on their own
+  lines at member indent plus one, and `}` - the shape `replace_symbol` with the whole declaration already
+  produced. Covered by `ReplaceSymbolBody_WithABracelessBody_LaysTheBlockOutOverSeveralLinesLikeItsSiblings`.
+- **The repeat footer no longer claims `nothing was written in between` after an edit made outside
+  terse.** It counted only terse's own writes, so a file deleted with `rm` between two identical
+  `run_tests` calls still read as no change. The file watcher's observations now feed it too: a repeat
+  after an external edit, delete or checkout ends `nothing was written through terse, but the file
+  watcher reported <n> change(s) on disk since - an external edit, a delete or a checkout`. The
+  `UNCHANGED` replay was never affected - its stamp already carried the watcher generations. Covered by
+  `RunTests_RepeatedAfterAnEditMadeOutsideTerse_SaysTheWatcherSawItInsteadOfNothingWasWritten`.
+- **A method documentation id without its parameter list resolves when exactly one overload carries the
+  name.** `M:Ns.Type.Method` named a parameterless method only, so a lone `Method(int)` answered
+  `SymbolNotFound` while listing itself as the only nearest candidate. It now resolves through the name
+  path and says `resolved from name: <id>`; two overloads still refuse. Covered by
+  `GetSymbolSource_ForAMethodIdWithoutItsParameterList_ResolvesTheOnlyOverloadAndSaysWhichIdItTook`.
+- **`SymbolNotFound` and `NOT_RESOLVED` suggest the requested type's own family first.** The nearest
+  list was the first three name matches across the solution, so the member on the implementing class
+  could be missing from it. Members of that name on the type itself, its base types, its interfaces, and
+  its implementations or derived classes now lead, then the name matches ordered by how much of the
+  requested namespace they share. Covered by
+  `GetSymbol_ForAnIdThatDoesNotResolve_SuggestsTheSameTypeAndItsImplementationsBeforeStrangers`.
+- **The guard follows a `cd` to a directory that does not exist yet.** A `cd /tmp/x/log && grep -n ERROR
+  log.txt`, where an earlier command was to create `log`, fell back to the session's working directory -
+  the .NET tree - and denied the read as in-tree. The target is now followed, and a `;` after it falls
+  back to the working directory, because a failed `cd` leaves the shell where it was. Covered by
+  `Guard_ForARelativeOperandAfterACdToAnOutOfTreeDirectoryNotCreatedYet_JudgesItThereAndAllowsIt` and
+  `Guard_ForACdThatCannotMoveTheShellOutOfTheTree_StillJudgesTheOperandInTheTree`.
+- **A backslash inside double quotes is no longer a whole-command fence unless it really escapes.**
+  `grep -nE "\| (ERROR|WARN)"` carries a literal backslash-pipe; only `\"`, `` \` ``, `\$`, `\\` and a
+  line continuation escape inside double quotes, and nothing escapes inside single quotes.
+- **A git revision carrying a brace - `stash@{0}`, `HEAD@{1}`, `@{u}` - is one opaque word.** It made the
+  whole batch unrewritable as a shell brace group. A brace expansion such as `a@{b,c}` still fences.
+  Covered by `Guard_ForAGitRevisionCarryingABrace_TreatsItAsOneOpaqueWordAndStripsOnlyTheReplacedPart`.
+
+### Changed
+
+- **The guard denies an `&&` chain carrying a replaced command whole.** Stripping a link from `a && b`
+  ungated what followed it - `dotnet test && git push` ran the push - and made the exit code that of a
+  different command. The denial names every segment's tool call and the allowed remainder, as other
+  whole-command refusals do; `;` and newline batches are still stripped and run. Covered by
+  `Guard_ForAnAndChainCarryingAReplacedLink_DeniesItWholeInsteadOfUngatingTheRest` and
+  `Guard_ForASemicolonBatchCarryingAReplacedLink_StillStripsOnlyThatLink`.
+- **`format changed=true` and `cleanup changed=true` reformat only the lines the working tree changed
+  against `HEAD`** on a git tree, and so do both of `gate`'s reformatting steps under `baseRef=`, so a
+  file whose convention Roslyn's defaults disagree with is no longer rewritten wholesale. The file is
+  formatted whole and only the text changes lying wholly inside a changed line are kept; a pure deletion
+  touches no line. Code fixes - an unused `using` removed - still apply to the whole file. Off a git tree
+  the changed files are formatted whole, as before.
+- **`format` reads `SPACE_AFTER_TYPECAST_PARENTHESES` from a ReSharper `.sln.DotSettings`** beside the
+  indentation it already read, where no `.editorconfig` sets `indent_style`, so `(T) x` survives in a
+  repository that spaces its casts. The ungoverned-formatting `NOTE` now ends `no ReSharper
+  .sln.DotSettings beside them sets indentation or cast spacing` instead of `a ReSharper .sln.DotSettings
+  is not read`, and a DotSettings that sets only the cast spacing is named as followed.
+
+### Added
+
+- **A semantic call that waited over 2 s while a build or test held its solution says so.** It ends
+  `NOTE queued <n>ms before this call ran, while run_tests was in flight on this solution for <s>s`, so
+  a slow answer is no longer charged to the tool. A wait with nothing in flight is the startup load,
+  which `workspace_status` already reports, so it adds no line.
+- **A `git show <ref>:<path>` piped into a quiet `cmp`, a `sha*sum` or `git hash-object --stdin` runs.**
+  Only a verdict or a digest reaches the screen - `cmp -l`, `-b` and `--verbose`, which print the bytes,
+  are still denied - and `read_text ref=` returns text, not bytes, so nothing here could
+  answer a byte comparison. Covered by `Guard_ForARevisionReadPipedIntoAByteComparison_AllowsIt` and
+  `Guard_ForARevisionReadThatStillReachesTheScreen_KeepsDenyingIt`.
+
 ## [0.73.0] - 2026-10-02
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**

@@ -57,10 +57,10 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
         cancellationToken);
 
     [McpServerTool(Name = "format")]
-    [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig using the Roslyn formatter. path takes a file, a directory or a glob, paths=[...] takes up to 10 of them in ONE pass exactly as analyze does - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded; verify=true returns a one-line verdict, replacing dotnet format --verify-no-changes. Reports one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replaces Bash dotnet format whitespace. Reformats C# to the project's .editorconfig - or, where none sets indent_style, the indentation and cast spacing of a ReSharper .sln.DotSettings - using the Roslyn formatter. path takes a file, a directory or a glob, paths=[...] takes up to 10 of them in ONE pass exactly as analyze does - Replaces one call per file - and changed=true limits the pass to files modified since the workspace loaded; verify=true returns a one-line verdict, replacing dotnet format --verify-no-changes. Reports one line per changed file; pass verbose=true for the diff.")]
     public Task<string> Format(
         [Description("File, directory or glob such as src/**/*.cs; empty formats every document.")] string? path = null,
-        [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
+        [Description("Only files modified since the workspace loaded and, on a git tree, only the lines they changed against HEAD, so a file the repo's convention disagrees with is not rewritten wholesale. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Report clean or VERIFY_FAILED with the files the Roslyn whitespace formatter would change, and write nothing. This is not the CI gate: dotnet format style and analyzers do not run the whitespace formatter, so a VERIFY_FAILED here can still be a green CI leg. Use cleanup verify=true fix=style and fix=analyzers to pre-empt CI.")] bool verify = false,
         [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
@@ -68,18 +68,21 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
         [Description("Several files, directories or globs formatted in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
         CancellationToken cancellationToken = default) =>
         GateSteered(
-            Guarded(workspace, path ?? First(paths), loaded =>
+            Guarded(workspace, path ?? First(paths), async loaded =>
             {
                 var scope = Scoped(loaded, path, paths);
 
-                return scope.IsOk
-                    ? FormatService.RunAsync(
-                        loaded,
-                        new FixScope(scope.Value, changed),
-                        new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
-                        new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
-                        cancellationToken)
-                    : Task.FromResult(Result.Fail<string>(scope.Error!));
+                if (!scope.IsOk)
+                    return Result.Fail<string>(scope.Error!);
+
+                var (touched, _) = changed ? await DefaultTouchedAsync(loaded.Root, cancellationToken).ConfigureAwait(false) : (null, null);
+
+                return await FormatService.RunAsync(
+                    loaded,
+                    new FixScope(scope.Value, changed, touched),
+                    new FixRequest(FixMode.None, [], DiagnosticSeverity.Info, verify),
+                    new EditOptions("format", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
+                    cancellationToken).ConfigureAwait(false);
             }),
             path,
             paths,
@@ -93,7 +96,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
         [Description("usings (default), style for IDE code fixes, analyzers for CA and third-party code fixes, ci for both CI rule sets in one pass, or all.")] string? fix = null,
         [Description("Optional comma-separated diagnostic ids to fix, e.g. IDE0005,CA1822.")] string? ids = null,
         [Description("Minimum severity to fix: error, warning, info, hidden. Default info.")] string? severity = null,
-        [Description("Only files modified since the workspace loaded. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
+        [Description("Only files modified since the workspace loaded and, on a git tree, reformatting only the lines they changed against HEAD. Use after an edit sweep to avoid drive-by changes.")] bool changed = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Report clean or VERIFY_FAILED with the files that would change, and write nothing. fix=ci verifies BOTH CI commands in one call, tagging each named file style, analyzers or style+analyzers; fix=style and fix=analyzers verify one each; fix=all and the default fix=usings are supersets and can name files CI accepts.")] bool verify = false,
         [Description("Return the full diff instead of one line per changed file.")] bool verbose = false,
@@ -107,18 +110,21 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
             return Task.FromResult(mode.Error!.Render());
 
         return GateSteered(
-            Guarded(workspace, path ?? First(paths), loaded =>
+            Guarded(workspace, path ?? First(paths), async loaded =>
             {
                 var scope = Scoped(loaded, path, paths);
 
-                return scope.IsOk
-                    ? FormatService.RunAsync(
-                        loaded,
-                        new FixScope(scope.Value, changed),
-                        new FixRequest(mode.Value, Split(ids), Severity(severity), verify) { MirrorsCi = verify },
-                        new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
-                        cancellationToken)
-                    : Task.FromResult(Result.Fail<string>(scope.Error!));
+                if (!scope.IsOk)
+                    return Result.Fail<string>(scope.Error!);
+
+                var (touched, _) = changed ? await DefaultTouchedAsync(loaded.Root, cancellationToken).ConfigureAwait(false) : (null, null);
+
+                return await FormatService.RunAsync(
+                    loaded,
+                    new FixScope(scope.Value, changed, touched),
+                    new FixRequest(mode.Value, Split(ids), Severity(severity), verify) { MirrorsCi = verify },
+                    new EditOptions("cleanup", dryRun, AllowErrors: false, Verbose: verbose, AllowPolicy: true),
+                    cancellationToken).ConfigureAwait(false);
             }),
             path,
             paths,

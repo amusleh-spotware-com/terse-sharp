@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TerseSharp.Core;
 using TerseSharp.Server;
 using TerseSharp.Server.Tools;
@@ -390,4 +391,46 @@ public sealed class ToolContextTests
         Assert.Equal("loaded", named);
         Assert.Equal("loaded", await context.WithRootAsync(null, root => Task.FromResult(root), () => Task.FromResult("loaded")));
     }
+
+    [Fact]
+    public void Queued_ForAShortWait_LeavesTheAnswerAlone()
+    {
+        var holder = new ActiveRun("run_tests", "", Stopwatch.GetTimestamp());
+
+        var answer = ToolContext.Queued("3 symbols", TimeSpan.FromMilliseconds(1999), holder);
+
+        Assert.Equal("3 symbols", answer);
+    }
+
+    [Fact]
+    public void Queued_WhileABuildOrTestRunIsInFlight_NamesItAndItsAge()
+    {
+        var holder = new ActiveRun("run_tests", "", Stopwatch.GetTimestamp() - (Stopwatch.Frequency * 38));
+
+        var answer = ToolContext.Queued("3 symbols", TimeSpan.FromMilliseconds(4200), holder);
+
+        Assert.Equal("3 symbols\nNOTE queued 4200ms before this call ran, while run_tests was in flight on this solution for 38s", answer);
+    }
+
+    [Fact]
+    public void Queued_WithNothingInFlight_LeavesTheAnswerAloneBecauseTheLoadIsReportedElsewhere()
+    {
+        var answer = ToolContext.Queued("3 symbols", TimeSpan.FromMilliseconds(2500), null);
+
+        Assert.Equal("3 symbols", answer);
+    }
+
+    [Fact]
+    public void Queued_ForARefusal_NeverAppendsANote()
+    {
+        var answer = ToolContext.Queued("ERROR SymbolNotFound: x", TimeSpan.FromSeconds(9), null);
+
+        Assert.Equal("ERROR SymbolNotFound: x", answer);
+    }
+
+    [Theory]
+    [InlineData("3 diagnostics\nNOTE queued 4200ms before this call ran, while build was in flight on this solution for 9s", "3 diagnostics")]
+    [InlineData("3 diagnostics\nNOTE queued 4200ms before this call ran, while build was in flight on this solution for 9s\nnext: gate", "3 diagnostics\nnext: gate")]
+    [InlineData("3 diagnostics\nnext: gate", "3 diagnostics\nnext: gate")]
+    public void Unqueued_DropsOnlyTheQueuedLine_SoAReplayNeverRepeatsAWaitThatIsOver(string answer, string remembered) => Assert.Equal(remembered, ToolContext.Unqueued(answer));
 }

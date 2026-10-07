@@ -124,18 +124,19 @@ public static class SymbolLookup
         CancellationToken cancellationToken)
     {
         var name = LastSegment(symbolId);
-        var found = await SymbolSearch.FindAsync(workspace, name, null, null, 3, cancellationToken).ConfigureAwait(false);
+        var container = Container(symbolId);
+        var family = await FamilyMembersAsync(workspace, container, name, cancellationToken).ConfigureAwait(false);
+        var found = await SymbolSearch.FindAsync(workspace, name, null, null, NearestPool, cancellationToken).ConfigureAwait(false);
+        var strangers = found.Ranked.OrderByDescending(symbol => SharedNamespace(symbol, container));
 
-        return [.. found.Ranked.Select(symbol => SymbolId.From(symbol).Value)];
+        return [.. family.Concat(strangers).Select(symbol => SymbolId.From(symbol).Value).Distinct(StringComparer.Ordinal).Take(NearestShown)];
     }
 
     private static string LastSegment(string symbolId)
     {
-        var text = symbolId.AsSpan();
-        var withoutPrefix = text.Length > 2 && text[1] is ':' ? text[2..] : text;
-        var withoutParameters = withoutPrefix.IndexOf('(') is var open and >= 0 ? withoutPrefix[..open] : withoutPrefix;
-        var separator = withoutParameters.LastIndexOf('.');
-        var name = separator < 0 ? withoutParameters : withoutParameters[(separator + 1)..];
+        var signature = Signature(symbolId);
+        var separator = signature.LastIndexOf('.');
+        var name = separator < 0 ? signature : signature[(separator + 1)..];
         var arity = name.IndexOf('`');
 
         return new string(arity < 0 ? name : name[..arity]);
@@ -332,9 +333,18 @@ public static class SymbolLookup
             false);
     }
 
-    private static async Task<ISymbol?> FromNameAsync(LoadedWorkspace workspace, string requested, CancellationToken cancellationToken)
+    private static async Task<ISymbol?> FromNameAsync(LoadedWorkspace workspace, string requested, CancellationToken cancellationToken) =>
+            await NamedAsync(workspace, requested, SymbolReference.AsName(requested), cancellationToken).ConfigureAwait(false)
+                ?? await NamedAsync(workspace, requested, SymbolReference.AsOverloadFreeName(requested), cancellationToken).ConfigureAwait(false);
+
+    private static bool SameKind(char kind, ISymbol symbol) =>
+        (kind, symbol) is ('M', IMethodSymbol) or ('T', INamedTypeSymbol) or ('P', IPropertySymbol) or ('F', IFieldSymbol) or ('E', IEventSymbol);
+
+    public readonly record struct SymbolResolution(Result<ISymbol> Symbol, bool FromName);
+
+    private static async Task<ISymbol?> NamedAsync(LoadedWorkspace workspace, string requested, string? name, CancellationToken cancellationToken)
     {
-        if (SymbolReference.AsName(requested) is not { } name)
+        if (name is null)
             return null;
 
         var found = await ByNameAsync(workspace, name, typesOnly: false, referenced: false, cancellationToken).ConfigureAwait(false);
@@ -342,8 +352,62 @@ public static class SymbolLookup
         return found is { IsOk: true, Value: { } symbol } && SameKind(requested[0], symbol) ? symbol : null;
     }
 
-    private static bool SameKind(char kind, ISymbol symbol) =>
-        (kind, symbol) is ('M', IMethodSymbol) or ('T', INamedTypeSymbol) or ('P', IPropertySymbol) or ('F', IFieldSymbol) or ('E', IEventSymbol);
+    private const int NearestPool = 25;
+    private const int NearestShown = 5;
 
-    public readonly record struct SymbolResolution(Result<ISymbol> Symbol, bool FromName);
+    private static ReadOnlySpan<char> Signature(string symbolId)
+    {
+        var text = symbolId.AsSpan();
+        var withoutPrefix = text.Length > 2 && text[1] is ':' ? text[2..] : text;
+
+        return withoutPrefix.IndexOf('(') is var open and >= 0 ? withoutPrefix[..open] : withoutPrefix;
+    }
+
+    private static string Container(string symbolId)
+    {
+        var signature = Signature(symbolId);
+        var separator = signature.LastIndexOf('.');
+
+        return separator < 0 ? string.Empty : new string(signature[..separator]);
+    }
+
+    private static async Task<IEnumerable<ISymbol>> FamilyMembersAsync(LoadedWorkspace workspace, string container, string name, CancellationToken cancellationToken)
+    {
+        if (container.Length is 0)
+            return [];
+
+        var types = await FindAllAsync(workspace, "T:" + container, cancellationToken).ConfigureAwait(false);
+
+        if (types.OfType<INamedTypeSymbol>().FirstOrDefault() is not { } type)
+            return [];
+
+        var family = await FamilyAsync(workspace, type, cancellationToken).ConfigureAwait(false);
+
+        return family.SelectMany(member => member.GetMembers(name)).Where(member => member.Locations.Any(location => location.IsInSource));
+    }
+
+    private static async Task<IReadOnlyList<INamedTypeSymbol>> FamilyAsync(LoadedWorkspace workspace, INamedTypeSymbol type, CancellationToken cancellationToken)
+    {
+        var related = new List<INamedTypeSymbol> { type };
+
+        for (var ancestor = type.BaseType; ancestor is not null; ancestor = ancestor.BaseType)
+            related.Add(ancestor);
+
+        related.AddRange(type.AllInterfaces);
+        related.AddRange(type.TypeKind is TypeKind.Interface
+            ? await SymbolFinder.FindImplementationsAsync(type, workspace.Solution, cancellationToken: cancellationToken).ConfigureAwait(false)
+            : await SymbolFinder.FindDerivedClassesAsync(type, workspace.Solution, cancellationToken: cancellationToken).ConfigureAwait(false));
+
+        return related;
+    }
+
+    private static int SharedNamespace(ISymbol symbol, string container) =>
+            symbol.ContainingNamespace is { IsGlobalNamespace: false } space
+                ? Enclosing(space.ToDisplayString(), container)
+                : 0;
+
+    private static int Enclosing(string space, string container) =>
+            container.StartsWith(space, StringComparison.Ordinal) && (container.Length == space.Length || container[space.Length] is '.')
+                ? space.Length
+                : 0;
 }

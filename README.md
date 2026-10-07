@@ -289,10 +289,10 @@ harness already delivers cost 22.5 h and 29.7% of all tool wall time in a measur
 those 272 calls followed a real completion notification and were legitimate.
 
 The compound-command rewrite is only attempted where it is provably sound: every top-level separator is
-`&&`, `;` or a newline, and a pipeline containing a covered stage is dropped whole, its redirects with
+`;` or a newline, and a pipeline containing a covered stage is dropped whole, its redirects with
 it — a plain `>`, `>>`, `2>` or `<` binds to the command it follows and no longer forces a refusal. A
-command carrying `||`, a background `&`, a subshell, a heredoc, a substitution, a comment, any backslash
-escape, a mixed `;`/`&&` run or a shell keyword falls back to denying the command as before. A covered read behind a background `&` or inside a `for` loop (its variable expanded to the loop's list) is caught and denies the whole command. A plain `$NAME` or `${NAME}` and a heredoc whose delimiter is quoted (`<<'EOF'`) and whose terminator line is present are opaque words, not fences, unless a shell reads the heredoc, the next line opens with an operator, or a covered command sits in its body; an unquoted heredoc, `$(…)`, `${X:-…}` and `$1` still fence. A `NAME=value` assigned earlier also expands into a heredoc's opener line. A literal `cd`/`pushd` to an existing directory earlier in a `;`/`&&` chain moves the directory later commands are judged in - never across a pipe, subshell, heredoc, backslash or background `&`. A shell text read of a path that is not .NET source is denied as "judged inside the .NET tree", never called C#/.NET source.
+command carrying `&&` (which gates every link on the one before it, so stripping one would change what runs), `||`, a background `&`, a subshell, a heredoc, a substitution, a comment, an unquoted backslash
+escape or a shell keyword falls back to denying the command as before. A git revision such as `stash@{0}` or `HEAD@{1}` is one opaque word, not a brace group. A covered read behind a background `&` or inside a `for` loop (its variable expanded to the loop's list) is caught and denies the whole command. A plain `$NAME` or `${NAME}` and a heredoc whose delimiter is quoted (`<<'EOF'`) and whose terminator line is present are opaque words, not fences, unless a shell reads the heredoc, the next line opens with an operator, or a covered command sits in its body; an unquoted heredoc, `$(…)`, `${X:-…}` and `$1` still fence. A `NAME=value` assigned earlier also expands into a heredoc's opener line. A literal `cd`/`pushd` earlier in a `;`/`&&` chain moves the directory later commands are judged in - to a directory not created yet as well, except across a `;`, where a failed `cd` leaves the shell where it was - never across a pipe, subshell, heredoc, backslash or background `&`. A shell text read of a path that is not .NET source is denied as "judged inside the .NET tree", never called C#/.NET source.
 
 Git rows fire only when the directory the command actually addresses sits under a
 `.sln`/`.slnx`/`.slnf`/`.csproj` — the `-C` target or a directory operand before the working directory —
@@ -300,7 +300,7 @@ because the hook is installed user-wide, so `git -C ../notes status` is allowed.
 `dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git mutation (`blame`,
 `add`, `commit`, `push`, and every `git tag` that creates, annotates or deletes) are allowed — nothing
 here replaces those. So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`,
-`git show <ref>:<path> > old.md`) unless the file is .NET source in the tree, and a diff flag no tool
+`git show <ref>:<path> > old.md`) unless the file is .NET source in the tree, a `git show <ref>:<path>` piped into `cmp`, a `sha*sum` or `git hash-object --stdin`, and a diff flag no tool
 serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`); `-w` routes to `ignoreWhitespace=true`
 and `-U<n>` to `diff_text unified=<n>`. `.git/` internals are never source, and on Windows a Git-Bash
 `/tmp/…` or `/c/…` path is judged as the directory it names. A denied command also tells the agent not

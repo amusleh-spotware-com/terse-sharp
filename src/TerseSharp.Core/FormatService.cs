@@ -1,9 +1,11 @@
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Formatting;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Formatting;
 using Microsoft.CodeAnalysis.Options;
+using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.Core;
 
@@ -29,7 +31,7 @@ public static class FormatService
             : new FixOutcome(workspace.Solution, []);
 
         var updated = request.Reformats
-            ? await RewriteAsync(outcome.Solution, documents, Rewriter(request), cancellationToken).ConfigureAwait(false)
+            ? await RewriteAsync(outcome.Solution, documents, Rewriter(request, scope.Touched), cancellationToken).ConfigureAwait(false)
             : outcome.Solution;
 
         if (request.Verify)
@@ -44,8 +46,10 @@ public static class FormatService
         return Annotated(applied, outcome.Unfixed, ungoverned);
     }
 
-    private static Func<Document, CancellationToken, Task<Document>> Rewriter(FixRequest request) =>
-        request.CleansUsings ? CleanDocumentAsync : FormatOnlyAsync;
+    private static Func<Document, CancellationToken, Task<Document>> Rewriter(FixRequest request, TouchedLines? touched) =>
+            request.CleansUsings
+                ? (document, cancellationToken) => CleanDocumentAsync(document, touched, cancellationToken)
+                : (document, cancellationToken) => FormatOnlyAsync(document, touched, cancellationToken);
 
     private static Result<string> Annotated(Result<string> applied, IReadOnlyList<string> unfixed, string? note = null)
     {
@@ -160,23 +164,97 @@ public static class FormatService
         return root is null ? solution : solution.WithDocumentSyntaxRoot(id, root);
     }
 
-    private static async Task<Document> FormatOnlyAsync(Document document, CancellationToken cancellationToken)
+    internal static async Task<Document> FormatOnlyAsync(Document document, TouchedLines? touched, CancellationToken cancellationToken)
     {
-        var options = await document.GetOptionsAsync(cancellationToken).ConfigureAwait(false);
-        var convention = await GovernedAsync(document, cancellationToken).ConfigureAwait(false)
-            ? default
-            : await DotSettingsFormat.FoundAsync(document.FilePath, cancellationToken).ConfigureAwait(false);
-        var formatted = await Formatter.FormatAsync(document, Applied(options, convention), cancellationToken).ConfigureAwait(false);
+        var spans = await TouchedSpansAsync(document, touched, cancellationToken).ConfigureAwait(false);
 
-        return await CollapsedAsync(formatted, cancellationToken).ConfigureAwait(false);
+        return spans switch
+        {
+            null => await FormattedAsync(document, cancellationToken).ConfigureAwait(false),
+            [] => document,
+            _ => await ConfinedAsync(document, spans, cancellationToken).ConfigureAwait(false),
+        };
     }
 
-    private static async Task<Document> CleanDocumentAsync(Document document, CancellationToken cancellationToken)
-    {
-        var withoutUnused = await RemoveUnusedUsingsAsync(document, cancellationToken).ConfigureAwait(false);
+    private static async Task<OptionSet> OptionsAsync(Document document, CancellationToken cancellationToken) =>
+            Applied(
+                await document.GetOptionsAsync(cancellationToken).ConfigureAwait(false),
+                await ConventionAsync(document, cancellationToken).ConfigureAwait(false));
 
-        return await FormatOnlyAsync(withoutUnused, cancellationToken).ConfigureAwait(false);
+    private static TextSpan[] Shifted(IReadOnlyList<TextSpan> spans, TextChange[] kept)
+    {
+        var shifted = new TextSpan[spans.Count];
+
+        for (var index = 0; index < spans.Count; index++)
+            shifted[index] = Shift(spans[index], kept);
+
+        return shifted;
     }
+
+    private static TextSpan Shift(TextSpan span, TextChange[] kept)
+    {
+        var (start, end) = (span.Start, span.End);
+
+        foreach (var change in kept)
+        {
+            var delta = (change.NewText?.Length ?? 0) - change.Span.Length;
+
+            if (Holds(span, change.Span))
+                end += delta;
+            else if (change.Span.End <= span.Start)
+                (start, end) = (start + delta, end + delta);
+        }
+
+        return TextSpan.FromBounds(start, end);
+    }
+
+    private static async Task<IReadOnlyList<TextSpan>?> TouchedSpansAsync(Document document, TouchedLines? touched, CancellationToken cancellationToken) =>
+            touched is null || document.FilePath is not { Length: > 0 } path
+                ? null
+                : touched.Spans(path, await document.GetTextAsync(cancellationToken).ConfigureAwait(false));
+
+    private static async Task<Document> FormattedAsync(Document document, CancellationToken cancellationToken)
+    {
+        var formatted = await Formatter.FormatAsync(document, await OptionsAsync(document, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+
+        return await CollapsedAsync(formatted, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<DotSettingsConvention> ConventionAsync(Document document, CancellationToken cancellationToken) =>
+            await GovernedAsync(document, cancellationToken).ConfigureAwait(false)
+                ? default
+                : await DotSettingsFormat.FoundAsync(document.FilePath, cancellationToken).ConfigureAwait(false);
+
+    private static async Task<Document> ConfinedAsync(Document document, IReadOnlyList<TextSpan> spans, CancellationToken cancellationToken)
+    {
+        if (await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is not { } root)
+            return document;
+
+        var options = await OptionsAsync(document, cancellationToken).ConfigureAwait(false);
+        var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var kept = Formatter.GetFormattedTextChanges(root, document.Project.Solution.Workspace, options, cancellationToken)
+            .Select(change => Minimal(change, text))
+            .Where(change => Contained(change.Span, spans))
+            .ToArray();
+
+        return await CollapsedAsync(document.WithText(text.WithChanges(kept)), Shifted(spans, kept), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static bool Contained(TextSpan change, IReadOnlyList<TextSpan> spans)
+    {
+        foreach (var touched in spans)
+        {
+            if (Holds(touched, change))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static async Task<Document> CleanDocumentAsync(Document document, TouchedLines? touched, CancellationToken cancellationToken) =>
+            touched is null
+                ? await FormatOnlyAsync(await RemoveUnusedUsingsAsync(document, cancellationToken).ConfigureAwait(false), null, cancellationToken).ConfigureAwait(false)
+                : await RemoveUnusedUsingsAsync(await FormatOnlyAsync(document, touched, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
 
     public static async Task<Document> RemoveUnusedUsingsAsync(Document document, CancellationToken cancellationToken)
     {
@@ -230,20 +308,22 @@ public static class FormatService
         request.Reformats
         && Array.Exists(changed, file => file.ChangedBy is "whitespace" or "fixers+whitespace");
 
-    private static async Task<Document> CollapsedAsync(Document document, CancellationToken cancellationToken)
+    private static async Task<Document> CollapsedAsync(Document document, IReadOnlyList<TextSpan>? scope, CancellationToken cancellationToken)
     {
         if (await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is not { } root)
             return document;
 
-        var collapsed = new BlankLineCollapser().Visit(root);
+        var collapsed = new BlankLineCollapser(scope).Visit(root);
 
         return collapsed is null || collapsed == root ? document : document.WithSyntaxRoot(collapsed);
     }
 
-    private sealed class BlankLineCollapser : CSharpSyntaxRewriter
+    private sealed class BlankLineCollapser(IReadOnlyList<TextSpan>? scope) : CSharpSyntaxRewriter
     {
         public override SyntaxToken VisitToken(SyntaxToken token) =>
-            token.HasLeadingTrivia ? token.WithLeadingTrivia(Collapsed(token.LeadingTrivia)) : token;
+            token.HasLeadingTrivia && InScope(token.LeadingTrivia.Span) ? token.WithLeadingTrivia(Collapsed(token.LeadingTrivia)) : token;
+
+        private bool InScope(TextSpan trivia) => scope is null || Contained(trivia, scope);
 
         private static SyntaxTriviaList Collapsed(SyntaxTriviaList trivia)
         {
@@ -412,7 +492,7 @@ public static class FormatService
             if (await GovernedAsync(document, cancellationToken).ConfigureAwait(false))
                 return null;
 
-            if (await DotSettingsFormat.FoundAsync(document.FilePath, cancellationToken).ConfigureAwait(false) is { Governs: true } convention)
+            if (await DotSettingsFormat.FoundAsync(document.FilePath, cancellationToken).ConfigureAwait(false) is { Path.Length: > 0 } convention && (convention.Governs || convention.SpaceAfterCast is not null))
                 return Followed(convention);
         }
 
@@ -427,22 +507,54 @@ public static class FormatService
             && document.Project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GetOptions(tree).TryGetValue("indent_style", out _);
     }
 
-    private const string Ungoverned = "NOTE no .editorconfig at or above these files sets indent_style, so whitespace followed Roslyn's own defaults - which may differ from this repository's convention; a ReSharper .sln.DotSettings is not read";
+    private const string Ungoverned = "NOTE no .editorconfig at or above these files sets indent_style, so whitespace followed Roslyn's own defaults - which may differ from this repository's convention; no ReSharper .sln.DotSettings beside them sets indentation or cast spacing";
 
-    private static OptionSet Applied(OptionSet options, DotSettingsConvention convention)
+    internal static OptionSet Applied(OptionSet options, DotSettingsConvention convention)
     {
         var applied = convention.UseTabs is { } tabs
             ? options.WithChangedOption(FormattingOptions.UseTabs, LanguageNames.CSharp, tabs)
             : options;
 
-        return convention.IndentSize is { } size
+        var sized = convention.IndentSize is { } size
             ? applied
                 .WithChangedOption(FormattingOptions.IndentationSize, LanguageNames.CSharp, size)
                 .WithChangedOption(FormattingOptions.TabSize, LanguageNames.CSharp, size)
             : applied;
+
+        return convention.SpaceAfterCast is { } spaced
+            ? sized.WithChangedOption(CSharpFormattingOptions.SpaceAfterCast, spaced)
+            : sized;
     }
 
     private static string Followed(DotSettingsConvention convention) => string.Create(
-        CultureInfo.InvariantCulture,
-        $"NOTE no .editorconfig at or above these files sets indent_style, so whitespace followed the ReSharper {Path.GetFileName(convention.Path.AsSpan())} beside them instead of Roslyn's own defaults");
+            CultureInfo.InvariantCulture,
+            $"NOTE no .editorconfig at or above these files sets indent_style, so whitespace followed the indentation and cast spacing the ReSharper {Path.GetFileName(convention.Path.AsSpan())} beside them sets, and Roslyn's own defaults for the rest");
+
+    private static bool Holds(TextSpan touched, TextSpan change) =>
+            touched.Contains(change) && (change.Length > 0 || change.Start < touched.End);
+
+    private static TextChange Minimal(TextChange change, SourceText text)
+    {
+        var before = text.ToString(change.Span);
+        var after = InEndingsOf(change.NewText ?? string.Empty, before);
+        var prefix = before.AsSpan().CommonPrefixLength(after);
+        var suffix = CommonSuffixLength(before.AsSpan(prefix), after.AsSpan(prefix));
+
+        return new TextChange(new TextSpan(change.Span.Start + prefix, before.Length - prefix - suffix), after[prefix..^suffix]);
+    }
+
+    private static int CommonSuffixLength(ReadOnlySpan<char> before, ReadOnlySpan<char> after)
+    {
+        var length = 0;
+
+        while (length < before.Length && length < after.Length && before[^(length + 1)] == after[^(length + 1)])
+            length++;
+
+        return length;
+    }
+
+    private static string InEndingsOf(string after, string before) =>
+            after.Contains('\r', StringComparison.Ordinal) && !before.Contains('\r', StringComparison.Ordinal)
+                ? after.Replace("\r\n", "\n", StringComparison.Ordinal)
+                : after;
 }

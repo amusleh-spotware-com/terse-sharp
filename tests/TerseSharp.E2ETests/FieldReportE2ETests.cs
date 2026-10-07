@@ -369,6 +369,45 @@ public sealed class FieldReportE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task FormatAndCleanup_ChangedOnly_ReformatTheEditedLineToTheDotSettingsAndLeaveTheUntidyCommittedLinesAlone()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: true, Token, UntidyCommittedAsync);
+
+        await solution.CallAsync("edit_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/Untidy.cs",
+            ["oldText"] = "public long B(int x) => x;",
+            ["newText"] = "public long B(int x){return (long)x;}",
+            ["force"] = true,
+        });
+
+        var format = await solution.CallAsync("format", new() { ["changed"] = true, ["dryRun"] = true });
+        var cleanup = await solution.CallAsync("cleanup", new() { ["changed"] = true, ["fix"] = "all", ["dryRun"] = true });
+
+        foreach (var answer in new[] { format, cleanup })
+        {
+            Assert.Contains("+    public long B(int x) { return (long) x; }", answer, StringComparison.Ordinal);
+            Assert.DoesNotContain("A() { return 1; }", answer, StringComparison.Ordinal);
+        }
+    }
+
+    private static async Task UntidyCommittedAsync(string root)
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "src", "Fixture.Trading", "Untidy.cs"),
+            "namespace Fixture.Trading;\n\npublic sealed class Untidy\n{\n    public int A(){return  1;}\n\n    public long B(int x) => x;\n}\n",
+            Token);
+        await File.WriteAllTextAsync(Path.Combine(root, "Fixture.sln.DotSettings"), SpacedCastSettings, Token);
+        await CommittedAsync(root);
+    }
+
+    private const string SpacedCastSettings = """
+        <wpf:ResourceDictionary xml:space="preserve" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:s="clr-namespace:System;assembly=mscorlib" xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+          <s:Boolean x:Key="/Default/CodeStyle/CodeFormatting/CSharpFormat/SPACE_AFTER_TYPECAST_PARENTHESES/@EntryValue">True</s:Boolean>
+        </wpf:ResourceDictionary>
+        """;
+
+    [Fact]
     public async Task LoadWorkspace_WhileCompilationsAreCold_SaysHowLongTheyAreKept()
     {
         await using var solution = await TerseTempSolution.StartAsync(watch: false, Token);

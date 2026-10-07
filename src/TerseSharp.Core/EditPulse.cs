@@ -32,6 +32,12 @@ public static class EditPulse
             Remember(path, Interlocked.Increment(ref material));
     }
 
+    private static int observed;
+
+    public static int Observed => Volatile.Read(ref observed);
+
+    public static void Observe() => Interlocked.Increment(ref observed);
+
     private static void Remember(string path, int at)
     {
         lock (Gate)

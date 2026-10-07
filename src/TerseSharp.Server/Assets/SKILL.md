@@ -200,7 +200,7 @@ forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it 
 **And issue independent calls in ONE message.** Several `tool_use` blocks in one message run
 concurrently; one call per message pays a **6 136 ms (p50)** model gap before its tool even starts.
 Measured: eight `get_file_outline` calls one-per-message cost **151.4 s**, one `paths=[...]` call
-**10.2 s** - 98% of the gap was model round trips, not tool time. Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
+**10.2 s**. Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
 `find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
 message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
@@ -236,12 +236,11 @@ check, so never shell out for them - and **`cleanup verify=true fix=ci` is both 
 
 **One replaced command no longer kills a batch.** The guard strips those commands, rewrites the
 rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
-rewrites only sound shapes: uniform `&&`/`;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with its pipeline; `$NAME`, `${NAME}` and a quoted, terminated heredoc not fed to a shell are opaque words; other heredocs, a target-less redirect and `>&-` fence. `||`, a background `&`, a subshell, a substitution, a comment, a backslash escape, a mixed `;`/`&&` run or a shell keyword is **denied
+rewrites only sound shapes: uniform `;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with its pipeline; `$NAME`, `${NAME}` and a quoted, terminated heredoc not fed to a shell are opaque words; other heredocs, a target-less redirect and `>&-` fence. `&&` (each link is gated on the last), `||`, a background `&`, a subshell, a substitution, a comment, an unquoted backslash escape or a shell keyword is **denied
 whole** — `NO part of the command ran`, and `Call this instead:` names each denied segment's tool call
 **and** every segment nothing replaces — chained with `&&` when re-issuing them together is sound,
-listed one by one when it is not, because printing a segment executes nothing. A whole-command
-refusal also names the construct that forced it and its offset, so you re-issue that ONE segment rather
-than re-deriving the command. A remainder of bare `echo`/`printf` framing is denied whole too.
+listed one by one when it is not. A whole-command
+refusal also names the construct that forced it and its offset. A remainder of bare `echo`/`printf` framing is denied whole too.
 
 **A `maxResults=` you pass is taken as your bound.** `search_text`, `search_regex`, `find_files`,
 `changed_files` and `history` still say the cap bit - `2/38 matches truncated` - but never advise
@@ -253,9 +252,9 @@ raising a number you chose; the steer returns as soon as you drop the argument.
 `diff_text` — **all three take `staged=true`**, and all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. A diff of a path
-that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, and so does a diff flag no tool serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`). Running them in
+that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, as does one piped into `cmp`, a `sha*sum` or `git hash-object --stdin`, and so does a diff flag no tool serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`). Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
-directory the command actually addresses (`-C` target, then a directory operand, then a literal earlier `cd`, then the working
+directory the command actually addresses (`-C` target, then a directory operand, then a literal earlier `cd`, even one not created yet, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
 `git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`, and a `git tag` **listing** —
 bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. A tag listing of
@@ -314,7 +313,7 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 `surface=<n> tools <t> tokens`.
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold`, and the first semantic call that realizes them appends
-`compilations=realized in Nms (once per load, not per call)` — a one-off, not the per-call cost of the tool that paid it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation.
+`compilations=realized in Nms (once per load, not per call)` — a one-off, not the per-call cost of the tool that paid it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation; one that waited over 2 s while a build or test held the solution ends `NOTE queued Nms`, naming it.
 **Compilations are given back once the server has served no call for 15 minutes** (`--idle-minutes`,
 `TERSE_IDLE_MINUTES`, `0` to disable; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
@@ -421,8 +420,8 @@ edit, climb only as high as the edit reaches:
 | 4 | `run_tests` over the whole solution | 85 s+, p99 **16 min** | ONCE, at the end of the task |
 | — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
 
-A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call - the payload is repeated verbatim with a `NOTE <tool> UNCHANGED` line under it, and `reload=true` (or `sinceLast=true`, or any different argument) re-runs. A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` - read that as the answer you already have. Banned: a full-suite run between two edits of one
-slice · re-issuing `build` or `run_tests` with identical arguments when nothing was written in between - neither lets you any more: a repeat of a call that already answered GREEN (`run_tests PASSED`, `build ok`), with no edit and no watcher event on any loaded workspace since, answers `run_tests UNCHANGED` / `build UNCHANGED` naming the previous verdict and its age instead of running, and `force=true` opts out; a repeat that re-runs anyway ends `NOTE re-ran: stamp moved <what> a->b`. `rerun_failed` is never memoized and always runs, because the failure list it replays is not named by any of its arguments · a
+A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call - the payload is repeated verbatim with a `NOTE <tool> UNCHANGED` line under it, and `reload=true` (or `sinceLast=true`, or any different argument) re-runs. A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` (or what the file watcher saw change on disk) - the answer you already have. Banned: a full-suite run between two edits of one
+slice · re-issuing an identical `build` or `run_tests` with nothing written since - a repeat of a call that already answered GREEN (`run_tests PASSED`, `build ok`), with no edit and no watcher event on any loaded workspace since, answers `run_tests UNCHANGED` / `build UNCHANGED` naming the previous verdict and its age instead of running, and `force=true` opts out; a repeat that re-runs anyway ends `NOTE re-ran: stamp moved <what> a->b`. `rerun_failed` is never memoized and always runs, because the failure list it replays is not named by any of its arguments · a
 run to "confirm" one that already passed · reading a test result before the build result.
 
 **Analyse — at the end of a task, call `gate` and stop there.** An UNSCOPED `analyze`, `format` or
@@ -469,7 +468,7 @@ so a raw string literal is safe. `cleanup fix=all` and `fix=usings` fold too; `f
 block System-first is a rewrite neither CI command makes. A directive `usings=` adds still lands
 sorted. **And a run that REFORMATTED text where no `.editorconfig` at or above those files sets
 `indent_style` says so**: whitespace then follows Roslyn's own defaults, which may not be the repo's
-convention, and a ReSharper `*.sln.DotSettings` is **not** read. `fix=style`, `fix=analyzers` and
+convention, and a ReSharper `*.sln.DotSettings` is read for indentation and cast spacing only. `fix=style`, `fix=analyzers` and
 `fix=ci` never reformat, so they never say it, and a run that changed nothing says nothing.
 
 **`fix=all` withholds a fix that would rewrite the shape of an externally visible member** - today
@@ -690,7 +689,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
 1. **Address a symbol by the name a response printed.** An outline prints `OrderService.Submit`, and
    adds the parameter list (`Reconcile(Order, decimal)`) only where the type overloads that name;
    every tool taking a `symbolId` accepts that, the full documentation id
-   (`M:Trading.OrderService.Submit(Trading.Order)`; one typed with `(string)` resolves by name and says `resolved from name:`), a bare `Submit`, or any qualifier in between.
+   (`M:Trading.OrderService.Submit(Trading.Order)`; one typed with `(string)`, or with no parameter list for a lone overload, resolves by name and says `resolved from name:`), a bare `Submit`, or any qualifier in between.
    A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
    guess**. Constructors, operators, indexers, generics and explicit interface implementations keep
    their documentation id in outlines, because a name cannot address them. `Type.#ctor` and `Type..ctor` address constructors; a primary one answers its type header. Every one of those tools

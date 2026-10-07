@@ -14,9 +14,9 @@ public static class IdenticalCall
     private static readonly Dictionary<string, Seen> Calls = new(StringComparer.Ordinal);
 
     public static string? Note(string tool, CallToolRequestParams parameters, CallToolResult result) =>
-        Watched.Contains(tool) && !IsStatusRead(parameters)
-            ? Record(tool, Key(tool, parameters), Verdict(result), Stopwatch.GetTimestamp(), EditPulse.Changed)
-            : null;
+            Watched.Contains(tool) && !IsStatusRead(parameters)
+                ? Record(tool, Key(tool, parameters), Verdict(result), Stopwatch.GetTimestamp(), EditPulse.Changed, EditPulse.Observed)
+                : null;
 
     private static bool IsStatusRead(CallToolRequestParams parameters) =>
         parameters.Arguments is { } arguments
@@ -24,15 +24,15 @@ public static class IdenticalCall
         && status.ValueKind is JsonValueKind.String
     && status.GetString() is { Length: > 0 };
 
-    internal static string? Record(string tool, string key, string verdict, long timestamp, int pulse)
+    internal static string? Record(string tool, string key, string verdict, long timestamp, int pulse, int observed = 0)
     {
         lock (Gate)
         {
             var seen = Calls.TryGetValue(key, out var previous) ? previous : default;
 
-            Calls[key] = new Seen(seen.Count + 1, timestamp, pulse, verdict);
+            Calls[key] = new Seen(seen.Count + 1, timestamp, pulse, observed, verdict);
 
-            return seen.Count is 0 ? null : Rendered(tool, seen, timestamp, pulse);
+            return seen.Count is 0 ? null : Rendered(tool, seen, timestamp, pulse, observed);
         }
     }
 
@@ -42,17 +42,19 @@ public static class IdenticalCall
             Calls.Clear();
     }
 
-    private static string Rendered(string tool, Seen seen, long timestamp, int pulse) =>
-        string.Create(
-            CultureInfo.InvariantCulture,
-            $"repeat #{seen.Count + 1} of this exact {tool} call {Seconds(timestamp - seen.Timestamp)}s ago - previous verdict: {seen.Verdict}; {Documents(pulse - seen.Pulse)}");
+    private static string Rendered(string tool, Seen seen, long timestamp, int pulse, int observed) =>
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"repeat #{seen.Count + 1} of this exact {tool} call {Seconds(timestamp - seen.Timestamp)}s ago - previous verdict: {seen.Verdict}; {Documents(pulse - seen.Pulse, observed - seen.Observed)}");
 
     private static long Seconds(long ticks) => Math.Max(0, ticks) / Stopwatch.Frequency;
 
-    private static string Documents(int changed) =>
-        changed > 0
-            ? string.Create(CultureInfo.InvariantCulture, $"{changed} document(s) changed since")
-            : "nothing was written in between";
+    private static string Documents(int changed, int observed) => (changed, observed) switch
+    {
+        ( > 0, _) => string.Create(CultureInfo.InvariantCulture, $"{changed} document(s) changed since"),
+        (_, > 0) => string.Create(CultureInfo.InvariantCulture, $"nothing was written through terse, but the file watcher reported {observed} change(s) on disk since - an external edit, a delete or a checkout"),
+        _ => "nothing was written in between",
+    };
 
     internal static string Key(string tool, CallToolRequestParams parameters)
     {
@@ -93,7 +95,7 @@ public static class IdenticalCall
         return new string(line.Length > MaxVerdict ? line[..MaxVerdict] : line);
     }
 
-    private readonly record struct Seen(int Count, long Timestamp, int Pulse, string Verdict);
+    private readonly record struct Seen(int Count, long Timestamp, int Pulse, int Observed, string Verdict);
 
     private static readonly string Separator = new((char)31, 1);
 }

@@ -1129,11 +1129,11 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git add src && git commit -m \"x\" && git show --stat HEAD" },
+            new JsonObject { ["command"] = "git add src; git commit -m \"x\"; git show --stat HEAD" },
             Fixtures.RepositoryRoot);
 
         Assert.True(verdict.Denied);
-        Assert.Equal("git add src && git commit -m \"x\"", verdict.Rewrite);
+        Assert.Equal("git add src; git commit -m \"x\"", verdict.Rewrite);
         Assert.Contains("the rest of it RAN", verdict.Reason, StringComparison.Ordinal);
         Assert.Contains("'git show --stat HEAD'", verdict.Reason, StringComparison.Ordinal);
         Assert.DoesNotContain("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
@@ -1144,11 +1144,11 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git fetch origin && git tag --list && gh auth status" },
+            new JsonObject { ["command"] = "git fetch origin; git tag --list; gh auth status" },
             Fixtures.RepositoryRoot);
 
         Assert.Equal("history tags=true", verdict.Routing);
-        Assert.Equal("git fetch origin && gh auth status", verdict.Rewrite);
+        Assert.Equal("git fetch origin; gh auth status", verdict.Rewrite);
     }
 
     [Fact]
@@ -1156,7 +1156,7 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git branch -a && git status --short | head -20" },
+            new JsonObject { ["command"] = "git branch -a; git status --short | head -20" },
             Fixtures.RepositoryRoot);
 
         Assert.Equal("git branch -a", verdict.Rewrite);
@@ -1167,10 +1167,10 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git branch -a | head -40 && echo mid && git log --oneline -3 && git remote -v" },
+            new JsonObject { ["command"] = "git branch -a | head -40; echo mid; git log --oneline -3; git remote -v" },
             Fixtures.RepositoryRoot);
 
-        Assert.Equal("git branch -a | head -40 && echo mid && git remote -v", verdict.Rewrite);
+        Assert.Equal("git branch -a | head -40; echo mid; git remote -v", verdict.Rewrite);
     }
 
     [Fact]
@@ -1235,17 +1235,112 @@ public sealed class ToolGuardTests
         Assert.Null(verdict.Rewrite);
     }
 
+    [Theory]
+    [InlineData("cd {0} && grep -n ERROR log.txt")]
+    [InlineData("cd {0} && grep -nE \"\\| (ERROR|WARN|FATAL)|Exception\" log.txt")]
+    [InlineData("cd {0} && mkdir -p unpacked && ls -la unpacked")]
+    public void Guard_ForARelativeOperandAfterACdToAnOutOfTreeDirectoryNotCreatedYet_JudgesItThereAndAllowsIt(string shape)
+    {
+        var command = string.Format(CultureInfo.InvariantCulture, shape, "/tmp/terse-missing-" + Guid.NewGuid().ToString("N"));
+
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("cd {0}; grep -n ERROR appsettings.json")]
+    [InlineData("cd src/terse-not-there-yet && cat appsettings.json")]
+    public void Guard_ForACdThatCannotMoveTheShellOutOfTheTree_StillJudgesTheOperandInTheTree(string shape)
+    {
+        var command = string.Format(CultureInfo.InvariantCulture, shape, "/tmp/terse-missing-" + Guid.NewGuid().ToString("N"));
+
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+    }
+
+    [Theory]
+    [InlineData("git stash show --include-untracked --name-only stash@{0}; git status --short", "git stash show --include-untracked --name-only stash@{0}")]
+    [InlineData("git rev-parse HEAD@{1}; git status --short", "git rev-parse HEAD@{1}")]
+    [InlineData("git rev-parse @{u}; git status --short", "git rev-parse @{u}")]
+    public void Guard_ForAGitRevisionCarryingABrace_TreatsItAsOneOpaqueWordAndStripsOnlyTheReplacedPart(string command, string rewrite)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal(rewrite, verdict.Rewrite);
+    }
+
+    [Theory]
+    [InlineData("echo a@{b,c}; git status --short")]
+    [InlineData("echo a@{b..d}; git status --short")]
+    public void Guard_ForABraceExpansionAfterAnAt_KeepsDenyingTheBatchWhole(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+    }
+
+    [Theory]
+    [InlineData("git show HEAD:src/Foo.cs | cmp - src/Foo.cs")]
+    [InlineData("git show HEAD:src/Foo.cs | sha256sum")]
+    [InlineData("git show HEAD:src/Foo.cs | git hash-object --stdin")]
+    [InlineData("F=src/Foo.cs; git show \"stash@{0}^3:$F\" | cmp - \"$F\" && rm \"$F\"")]
+    public void Guard_ForARevisionReadPipedIntoAByteComparison_AllowsIt(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("git show HEAD:src/Foo.cs | head -5")]
+    [InlineData("git show HEAD:src/Foo.cs | cmp -l - src/Foo.cs")]
+    [InlineData("git show HEAD:src/Foo.cs | cmp --verbose - src/Foo.cs")]
+    [InlineData("git show HEAD:src/Foo.cs | git hash-object -w src/Foo.cs")]
+    [InlineData("git show HEAD:src/Foo.cs")]
+    public void Guard_ForARevisionReadThatStillReachesTheScreen_KeepsDenyingIt(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+    }
+
+    [Theory]
+    [InlineData("git stash push -u -m \"msg\" -- src/a.cs && git status --short")]
+    [InlineData("dotnet test && git push")]
+    [InlineData("git fetch && git status --short && git log --oneline -3")]
+    public void Guard_ForAnAndChainCarryingAReplacedLink_DeniesItWholeInsteadOfUngatingTheRest(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+        Assert.Contains("an '&&' chain", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForASemicolonBatchCarryingAReplacedLink_StillStripsOnlyThatLink()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git stash list; git status --short" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("git stash list", verdict.Rewrite);
+    }
+
     [Fact]
     public void Render_ForAStrippableBatch_EmitsUpdatedInputAndNoPermissionDecision()
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git branch -a && git log --oneline -3 && git remote -v" },
+            new JsonObject { ["command"] = "git branch -a; git log --oneline -3; git remote -v" },
             Fixtures.RepositoryRoot);
 
         var hook = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!.AsObject();
 
-        Assert.Equal("git branch -a && git remote -v", hook["updatedInput"]!["command"]!.GetValue<string>());
+        Assert.Equal("git branch -a; git remote -v", hook["updatedInput"]!["command"]!.GetValue<string>());
         Assert.False(hook.ContainsKey("permissionDecision"));
         Assert.Contains("history", hook["additionalContext"]!.GetValue<string>(), StringComparison.Ordinal);
     }
@@ -1271,13 +1366,13 @@ public sealed class ToolGuardTests
             {
               "tool_name": "Bash",
               "session_id": "s-1",
-              "tool_input": { "command": "git branch -a && git log --oneline -3" }
+              "tool_input": { "command": "git branch -a; git log --oneline -3" }
             }
             """;
 
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git branch -a && git log --oneline -3" },
+            new JsonObject { ["command"] = "git branch -a; git log --oneline -3" },
             Fixtures.RepositoryRoot);
 
         var line = ToolGuard.Entry(payload, verdict);
@@ -1292,7 +1387,7 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "gh run list && cat src\\App\\Notes.txt && git log --oneline -3" },
+            new JsonObject { ["command"] = "gh run list; cat src\\App\\Notes.txt; git log --oneline -3" },
             Fixtures.RepositoryRoot);
 
         Assert.Equal("gh run list", verdict.Rewrite);
@@ -1385,7 +1480,7 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "git status && git commit -q -m subject" },
+            new JsonObject { ["command"] = "git status; echo finished" },
             Fixtures.RepositoryRoot);
 
         Assert.True(verdict.Denied);
@@ -1406,7 +1501,7 @@ public sealed class ToolGuardTests
     [Fact]
     public void Inspect_ForAReplacedCommandCarryingAnFdDuplication_StripsItInsteadOfRefusingTheWholeCommand()
     {
-        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build 2>&1 && npm test" });
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build 2>&1; npm test" });
 
         Assert.True(verdict.Denied);
         Assert.Contains("build", verdict.Routing ?? string.Empty, StringComparison.Ordinal);
@@ -1416,7 +1511,7 @@ public sealed class ToolGuardTests
     [Fact]
     public void Inspect_ForAReplacedCommandCarryingAFileRedirection_StripsItWithItsRedirect()
     {
-        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build > build.log && npm test" });
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build > build.log; npm test" });
 
         Assert.True(verdict.Denied);
         Assert.Equal("npm test", verdict.Rewrite);
@@ -1666,11 +1761,11 @@ public sealed class ToolGuardTests
     }
 
     [Theory]
-    [InlineData("echo finished > out.txt && git log --oneline -3", "echo finished > out.txt")]
-    [InlineData("sort < in.txt > out.txt && grep foo out.txt", "sort < in.txt > out.txt")]
-    [InlineData("grep foo src > hits.txt && gh auth status", "gh auth status")]
-    [InlineData("echo a 2> err.txt && git status", "echo a 2> err.txt")]
-    [InlineData("npm test >> all.log && git log --oneline -2", "npm test >> all.log")]
+    [InlineData("echo finished > out.txt; git log --oneline -3", "echo finished > out.txt")]
+    [InlineData("sort < in.txt > out.txt; grep foo out.txt", "sort < in.txt > out.txt")]
+    [InlineData("grep foo src > hits.txt; gh auth status", "gh auth status")]
+    [InlineData("echo a 2> err.txt; git status", "echo a 2> err.txt")]
+    [InlineData("npm test >> all.log; git log --oneline -2", "npm test >> all.log")]
     public void Guard_ForABatchWithAPlainRedirect_StripsTheReplacedPipelinesAndRunsTheRest(string command, string rewrite)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
@@ -1846,11 +1941,11 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "echo '=== push' && git push && git show --stat HEAD" },
+            new JsonObject { ["command"] = "echo '=== push'; git push; git show --stat HEAD" },
             Fixtures.RepositoryRoot);
 
         Assert.True(verdict.Denied);
-        Assert.Equal("echo '=== push' && git push", verdict.Rewrite);
+        Assert.Equal("echo '=== push'; git push", verdict.Rewrite);
     }
 
     [Fact]
@@ -1858,7 +1953,7 @@ public sealed class ToolGuardTests
     {
         var verdict = ToolGuard.Inspect(
             "Bash",
-            new JsonObject { ["command"] = "echo y | gh auth status && git show --stat HEAD" },
+            new JsonObject { ["command"] = "echo y | gh auth status; git show --stat HEAD" },
             Fixtures.RepositoryRoot);
 
         Assert.True(verdict.Denied);
@@ -2231,8 +2326,8 @@ public sealed class ToolGuardTests
     }
 
     [Theory]
-    [InlineData("git status && npm test ${FLAGS}", "npm test ${FLAGS}")]
-    [InlineData("git status && cp $SRC $DST", "cp $SRC $DST")]
+    [InlineData("git status; npm test ${FLAGS}", "npm test ${FLAGS}")]
+    [InlineData("git status; cp $SRC $DST", "cp $SRC $DST")]
     [InlineData("git commit -q -F - <<'EOF'\nsubject; body && more\nEOF\ngit status", "git commit -q -F - <<'EOF'\nsubject; body && more\nEOF")]
     [InlineData("npm pack <<-'END'\n\tdata\n\tEND\ngit status", "npm pack <<-'END'\n\tdata\n\tEND")]
     public void Guard_ForABatchCarryingAPlainVariableOrAQuotedHeredoc_RewritesIt(string command, string rewrite)

@@ -303,6 +303,16 @@ public static class SymbolReference
         return documentationId[0] is 'M' && open < 0 ? string.Concat(signature, "()".AsSpan()) : signature.ToString();
     }
 
+    public static string? AsOverloadFreeName(string documentationId)
+    {
+        if (!IsDocumentationId(documentationId) || documentationId[0] is not 'M' || documentationId.AsSpan(2).ContainsAny('(', '~'))
+            return null;
+
+        var name = documentationId.AsSpan(2);
+
+        return Mappable(name, name) ? name.ToString() : null;
+    }
+
     private static bool Mappable(ReadOnlySpan<char> signature, ReadOnlySpan<char> name) =>
         !signature.ContainsAny(Unmappable) && ConstructorHashOnly(name) && !IsConversion(name);
 

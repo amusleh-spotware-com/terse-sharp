@@ -185,6 +185,7 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     internal void Gap()
     {
         Interlocked.Increment(ref gaps);
+        EditPulse.Observe();
         Rebuild();
     }
 
@@ -377,6 +378,9 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
             foreach (var kind in kinds.Where(Countable))
                 generations = generations.Bump(kind);
         }
+
+        if (kinds.Count > 0)
+            EditPulse.Observe();
     }
     private static SourceText Read(string path)
     {
@@ -410,6 +414,8 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
     {
         lock (generationGate)
             generations = generations.Bump(kind);
+
+        EditPulse.Observe();
     }
 
     public void Noticed(string path, ChangeKind kind)

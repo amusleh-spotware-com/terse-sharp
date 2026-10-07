@@ -1,9 +1,10 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
-public sealed class TestToolsE2ETests(TerseServerFixture server)
+public sealed partial class TestToolsE2ETests(TerseServerFixture server)
 {
     private const string TestProject = "tests/Fixture.Trading.Tests/Fixture.Trading.Tests.csproj";
 
@@ -615,6 +616,54 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         }
     }
 
+    [Fact]
+    public async Task RunTests_RepeatedAfterAnEditMadeOutsideTerse_SaysTheWatcherSawItInsteadOfNothingWasWritten()
+    {
+        var arguments = new Dictionary<string, object?>
+        {
+            ["project"] = TestProject,
+            ["test"] = PassingTest,
+            ["timeoutSeconds"] = 420,
+        };
+
+        var source = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
+        var bytes = await File.ReadAllBytesAsync(source, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(source);
+
+        await server.CallAsync("run_tests", new(arguments));
+
+        try
+        {
+            var before = await WatcherGenerationAsync();
+
+            await File.WriteAllBytesAsync(source, [.. bytes, (byte)'\n'], TestContext.Current.CancellationToken);
+            await WatcherMovedAsync(before);
+
+            var repeat = await server.CallAsync("run_tests", new(arguments));
+
+            Assert.Contains("nothing was written through terse, but the file watcher reported", repeat, StringComparison.Ordinal);
+            Assert.DoesNotContain("nothing was written in between", repeat, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllBytesAsync(source, bytes, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(source, stamp);
+        }
+    }
+
+    private async Task<string> WatcherGenerationAsync()
+    {
+        var status = await server.CallAsync("workspace_status", new() { ["verbose"] = true });
+
+        return MyRegex().Match(status).Groups[1].Value;
+    }
+
+    private async Task WatcherMovedAsync(string before)
+    {
+        for (var attempt = 0; attempt < 100 && await WatcherGenerationAsync() == before; attempt++)
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+    }
+
     private async Task<string> ReplayedOnceSettledAsync(Dictionary<string, object?> arguments)
     {
         var answer = string.Empty;
@@ -638,4 +687,7 @@ public sealed class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("FAIL Fixture.Trading.Tests.DeliberateOutcomesTests.FailsAssertion", text, StringComparison.Ordinal);
         Assert.DoesNotContain("no failing test is remembered", text, StringComparison.Ordinal);
     }
+
+    [GeneratedRegex(@"gen=(\S+)")]
+    private static partial Regex MyRegex();
 }

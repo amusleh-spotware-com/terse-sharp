@@ -1,3 +1,5 @@
+using System.Globalization;
+using Microsoft.CodeAnalysis.Text;
 using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
@@ -85,5 +87,18 @@ public sealed class TouchedLinesTests
 
         Assert.True(touched.CoversRecord("TERSE101 info Policy src\\Trading\\OrderService.cs:11:5: OrderService.Added - too long"));
         Assert.False(touched.CoversRecord("TERSE101 info Policy src\\Trading\\OrderService.cs:40:5: OrderService.Old - too long"));
+    }
+
+    [Fact]
+    public void Spans_CoverTheAddedLinesOfATouchedFile_AllOfAnUntrackedOne_AndNoneOfAnUntouchedOne()
+    {
+        var touched = TouchedLines.From(Diff, ["src/Trading/Fresh.cs"], Root);
+        var text = SourceText.From(string.Join("\n", Enumerable.Range(1, 20).Select(number => "line" + number.ToString(CultureInfo.InvariantCulture))));
+
+        var spans = touched.Spans(Path.Combine(Root, "src/Trading/OrderService.cs"), text);
+
+        Assert.Equal([TextSpan.FromBounds(text.Lines[10].Start, text.Lines[12].EndIncludingLineBreak)], spans);
+        Assert.Null(touched.Spans(Path.Combine(Root, "src/Trading/Fresh.cs"), text));
+        Assert.Empty(touched.Spans(Path.Combine(Root, "src/Trading/Other.cs"), text)!);
     }
 }

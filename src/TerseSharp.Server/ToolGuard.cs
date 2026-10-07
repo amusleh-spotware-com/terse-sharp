@@ -743,7 +743,7 @@ public static class ToolGuard
     private static string Masked(string command)
     {
         if (command.AsSpan().IndexOfAny('"', '\'') < 0)
-            return Redirections(command);
+            return Revisions(Redirections(command));
 
         var masked = command.ToCharArray();
         var quote = '\0';
@@ -759,6 +759,7 @@ public static class ToolGuard
         }
 
         MaskRedirections(masked);
+        MaskRevisions(masked);
 
         return new string(masked);
     }
@@ -807,13 +808,13 @@ public static class ToolGuard
         name.Equals("sed", StringComparison.OrdinalIgnoreCase)
             && Array.Exists(command, token => token.StartsWith("-i", StringComparison.Ordinal) || token.Equals("--in-place", StringComparison.Ordinal));
 
-    private static GuardVerdict Denial(string segment, string? cwd, bool compound, string unfenceable = "", bool fed = false)
+    private static GuardVerdict Denial(Stage stage, string? cwd, bool compound, string unfenceable = "")
     {
-        var direct = Direct(segment, cwd, compound, unfenceable, fed);
+        var direct = Direct(stage, cwd, compound, unfenceable);
 
-        return direct.Denied || !segment.Contains("$(", StringComparison.Ordinal)
+        return direct.Denied || !stage.Text.Contains("$(", StringComparison.Ordinal)
             ? direct
-            : Direct(segment.Replace("$(", " ", StringComparison.Ordinal), cwd, compound, unfenceable, false);
+            : Direct(stage with { Text = stage.Text.Replace("$(", " ", StringComparison.Ordinal), Fed = false }, cwd, compound, unfenceable);
     }
 
     private static string Reissue(List<string> calls, List<string> allowed, bool anded)
@@ -939,7 +940,7 @@ public static class ToolGuard
     {
         foreach (var stage in Stages(pipeline))
         {
-            var verdict = Denial(stage.Text, cwd, false, fed: stage.Fed);
+            var verdict = Denial(stage, cwd, false);
 
             if (verdict.Denied)
                 return verdict;
@@ -1008,7 +1009,7 @@ public static class ToolGuard
         for (var index = 0; index < judged.Length; index++)
         {
             var stage = judged[index];
-            var verdict = Denial(Unkeyworded(stage.Text), directories is null ? cwd : directories[index], compound, unfenceable, stage.Fed);
+            var verdict = Denial(stage with { Text = Unkeyworded(stage.Text) }, directories is null ? cwd : directories[index], compound, unfenceable);
 
             if (!verdict.Denied)
             {
@@ -1056,16 +1057,21 @@ public static class ToolGuard
 
     private static bool Escaping(ReadOnlySpan<char> command)
     {
-        var index = command.IndexOf('\\');
+        var quote = '\0';
 
-        while (index >= 0)
+        for (var index = 0; index < command.Length; index++)
         {
-            if (index + 1 == command.Length || Escapable.Contains(command[index + 1]))
+            if (command[index] is not '\\' || quote is '\'')
+            {
+                quote = Quote(quote, command[index]);
+
+                continue;
+            }
+
+            if (index + 1 == command.Length || Escapes(quote, command[index + 1]))
                 return true;
 
-            var next = command[(index + 2)..].IndexOf('\\');
-
-            index = next < 0 ? -1 : index + 2 + next;
+            index++;
         }
 
         return false;
@@ -1106,7 +1112,12 @@ public static class ToolGuard
         if (Backgrounded(masked.AsSpan()))
             return "a background '&'";
 
-        return Keyworded(masked) ? "a shell keyword" : string.Empty;
+        if (Keyworded(masked))
+            return "a shell keyword";
+
+        return masked.Contains("&&", StringComparison.Ordinal)
+            ? "an '&&' chain, which gates every link on the one before it, so stripping one link would change what runs and what the exit code means"
+            : string.Empty;
     }
 
     private static string Because(string unfenceable) => unfenceable.Length is 0
@@ -1350,9 +1361,11 @@ public static class ToolGuard
 
     private static readonly SearchValues<char> Letters = SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
 
-    private static GuardVerdict Direct(string segment, string? cwd, bool compound, string unfenceable, bool fed)
+    private static GuardVerdict Direct(Stage stage, string? cwd, bool compound, string unfenceable)
     {
-        if (Replaced(segment, cwd) is { } subcommand)
+        var segment = stage.Text;
+
+        if (Replaced(segment, cwd) is { } subcommand && !Digested(subcommand, stage.Sink))
         {
             return new GuardVerdict(
                 true,
@@ -1361,7 +1374,7 @@ public static class ToolGuard
                 BuildReplacement(Diffing(subcommand, segment)));
         }
 
-        if (!Denies(segment, cwd, fed))
+        if (!Denies(segment, cwd, stage.Fed))
             return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
 
         var trimmed = segment.Trim();
@@ -1733,7 +1746,7 @@ public static class ToolGuard
         return text.IndexOfAny('|', '>') < 0 && (end < 0 ? text : text[..end]) is "echo" or "printf" or "true" or ":";
     }
 
-    private readonly record struct Stage(string Text, bool Fed);
+    private readonly record struct Stage(string Text, bool Fed, string? Sink = null);
 
     private static Stage[] Stages(string command)
     {
@@ -1761,7 +1774,7 @@ public static class ToolGuard
         stages.Add(new Stage(command[start..], fed));
         stages.RemoveAll(stage => stage.Text.AsSpan().Trim().IsEmpty);
 
-        return [.. stages];
+        return Plumbed(stages);
     }
 
     private static bool ReadsStdin(string segment)
@@ -2101,7 +2114,7 @@ public static class ToolGuard
             fed = false;
         }
 
-        detached.Add(new Stage(stage.Text[start..], fed));
+        detached.Add(new Stage(stage.Text[start..], fed, stage.Sink));
     }
 
     private static bool Followable(string command)
@@ -2133,6 +2146,7 @@ public static class ToolGuard
 
             directories.Add(current);
             (here, conditional) = Stepped(Entered(pipeline.Text, current, cwd), current, conditional && anded, anded);
+            conditional |= here is { Length: > 0 } && !Directory.Exists(here);
         }
 
         return directories;
@@ -2174,12 +2188,7 @@ public static class ToolGuard
             ? PosixOnWindows(expanded)
             : expanded;
 
-        if (native is null)
-            return null;
-
-        var located = Under(here is { Length: > 0 } ? here : Environment.CurrentDirectory, native);
-
-        return Directory.Exists(located) ? located : null;
+        return native is null ? null : Under(here is { Length: > 0 } ? here : Environment.CurrentDirectory, native);
     }
 
     private static string Sealed(string command)
@@ -2348,6 +2357,74 @@ public static class ToolGuard
 
     private static bool Dynamic(ReadOnlySpan<char> name) =>
             name is "_" or "LINENO" or "PIPESTATUS" or "BASH_COMMAND" or "BASH_LINENO" or "SECONDS" or "RANDOM";
+
+    private static readonly SearchValues<char> QuotedEscapable = SearchValues.Create("\"`\\$\r\n");
+
+    private static bool Escapes(char quote, char next) => quote is '"' ? QuotedEscapable.Contains(next) : Escapable.Contains(next);
+
+    private static readonly SearchValues<char> RevisionStops = SearchValues.Create("} \t\r\n;&|<>(){$`\"',");
+
+    private static string Revisions(string text)
+    {
+        if (!text.Contains("@{", StringComparison.Ordinal))
+            return text;
+
+        var masked = text.ToCharArray();
+
+        MaskRevisions(masked);
+
+        return new string(masked);
+    }
+
+    private static void MaskRevisions(char[] masked)
+    {
+        var index = masked.AsSpan().IndexOf("@{");
+
+        while (index >= 0)
+        {
+            if (RevisionClose(masked.AsSpan(index + 2)) is var close and > 0)
+                masked.AsSpan(index + 1, close + 2).Fill('x');
+
+            var next = masked.AsSpan(index + 2).IndexOf("@{");
+
+            index = next < 0 ? -1 : index + 2 + next;
+        }
+    }
+
+    private static int RevisionClose(ReadOnlySpan<char> rest)
+    {
+        var close = rest.IndexOfAny(RevisionStops);
+
+        return close > 0 && rest[close] is '}' && !rest[..close].Contains("..", StringComparison.Ordinal) ? close : -1;
+    }
+
+    private static Stage[] Plumbed(List<Stage> stages)
+    {
+        for (var index = 0; index + 1 < stages.Count; index++)
+        {
+            if (stages[index + 1].Fed)
+                stages[index] = stages[index] with { Sink = stages[index + 1].Text };
+        }
+
+        return [.. stages];
+    }
+
+    private static readonly string[] ByteDigests = ["cksum", "b2sum", "md5sum", "shasum", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum"];
+
+    private static bool Digested(string subcommand, string? sink) =>
+            subcommand is "show-file" && sink is not null && Digests(Command(sink));
+
+    private static bool Digests(string[] tokens) => tokens switch
+    {
+        [var driver, .. var rest] when Driver(driver) is "cmp" => Array.TrueForAll(rest, Quiet),
+        [var driver, ..] when ByteDigests.Contains(Driver(driver), StringComparer.Ordinal) => true,
+        [var driver, "hash-object", ..] => Driver(driver) is "git" && tokens.Contains("--stdin", StringComparer.Ordinal),
+        _ => false,
+    };
+
+    private static string Driver(string token) => Path.GetFileNameWithoutExtension(token);
+
+    private static bool Quiet(string token) => !token.StartsWith('-') || token is "-" or "-s" or "--quiet" or "--silent";
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

@@ -21,7 +21,7 @@ public sealed class ReplayGate(ToolContext context, UnchangedRun unchanged)
         var text = await run().ConfigureAwait(false);
 
         if (!text.StartsWith("ERROR", StringComparison.Ordinal) && RunStamp.Taken(context.Registry, out _) is { } settled)
-            unchanged.Remember(key, settled, text, Stopwatch.GetTimestamp());
+            unchanged.Remember(key, settled, ToolContext.Unqueued(text), Stopwatch.GetTimestamp());
 
         return text;
     }

@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.Core;
 
@@ -97,6 +98,35 @@ public sealed class TouchedLines
 
     public bool Touches(string? path) =>
         path is { Length: > 0 } && Holds(Keyed(Path.GetFullPath(path)));
+
+    public IReadOnlyList<TextSpan>? Spans(string path, SourceText text)
+    {
+        var keyed = Keyed(Path.GetFullPath(path));
+
+        if (whole.Contains(keyed))
+            return null;
+
+        if (!hunks.TryGetValue(keyed, out var bucket))
+            return [];
+
+        var spans = new List<TextSpan>(bucket.Count);
+
+        foreach (var hunk in bucket)
+        {
+            if (hunk.Count > 0)
+                spans.Add(LineSpan(text.Lines, hunk));
+        }
+
+        return spans;
+    }
+
+    private static TextSpan LineSpan(TextLineCollection lines, DiffHunk hunk)
+    {
+        var first = Math.Clamp(hunk.Start, 1, lines.Count) - 1;
+        var last = Math.Clamp(hunk.End, 1, lines.Count) - 1;
+
+        return TextSpan.FromBounds(lines[first].Start, lines[last].EndIncludingLineBreak);
+    }
 
     private bool Holds(string keyed) => whole.Contains(keyed) || hunks.ContainsKey(keyed);
 }

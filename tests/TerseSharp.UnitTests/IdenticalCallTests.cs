@@ -40,6 +40,19 @@ public sealed class IdenticalCallTests
     }
 
     [Fact]
+    public void Record_WhenOnlyTheFileWatcherSawAChange_SaysSoInsteadOfClaimingNothingWasWritten()
+    {
+        IdenticalCall.Forget();
+        IdenticalCall.Record("run_tests", "run_tests|whole", "FAILED exitCode=1", 0, 3, observed: 10);
+
+        var note = IdenticalCall.Record("run_tests", "run_tests|whole", "FAILED exitCode=1", Stopwatch.Frequency * 50, 3, observed: 11);
+
+        Assert.Equal(
+            "repeat #2 of this exact run_tests call 50s ago - previous verdict: FAILED exitCode=1; nothing was written through terse, but the file watcher reported 1 change(s) on disk since - an external edit, a delete or a checkout",
+            note);
+    }
+
+    [Fact]
     public void Record_ForADifferentArgumentSet_AnswersNothing()
     {
         IdenticalCall.Forget();

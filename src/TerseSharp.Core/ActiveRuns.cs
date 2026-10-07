@@ -29,5 +29,11 @@ public static class ActiveRuns
             Running.Remove(solutionPath);
     }
 
+    public static ActiveRun? Holding(string solutionPath)
+    {
+        lock (Gate)
+            return Running.TryGetValue(solutionPath, out var holder) ? holder : null;
+    }
+
     public static TimeSpan Age(ActiveRun holder) => Stopwatch.GetElapsedTime(holder.StartedTicks);
 }

@@ -1050,8 +1050,31 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("resolved from name: M:Fixture.Trading.SplitHandler.Route(System.Int32)~System.Int32", source, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task GetSymbolSource_ForAMethodIdWithoutItsParameterList_ResolvesTheOnlyOverloadAndSaysWhichIdItTook()
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "M:Fixture.Trading.OrderBook.Remove" });
+
+        Assert.Contains("orders.Remove(order)", source, StringComparison.Ordinal);
+        Assert.Contains("resolved from name: M:Fixture.Trading.OrderBook.Remove(Fixture.Trading.Order)~System.Boolean", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbol_ForAnIdThatDoesNotResolve_SuggestsTheSameTypeAndItsImplementationsBeforeStrangers()
+    {
+        var sameType = await server.CallAsync("get_symbol", new() { ["symbolId"] = "P:Fixture.Trading.OrderService.Submit" });
+        var family = await server.CallAsync("get_symbol", new() { ["symbolId"] = "P:Fixture.Trading.IOrderRepository.Submit" });
+        var implementation = family.IndexOf("M:Fixture.Trading.NullOrderRepository.Submit", StringComparison.Ordinal);
+        var stranger = family.IndexOf("M:Fixture.Trading.OrderService.Submit", StringComparison.Ordinal);
+
+        Assert.Contains("): M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)~System.Boolean", sameType, StringComparison.Ordinal);
+        Assert.Contains("): M:Fixture.Trading.IOrderRepository.Submit(Fixture.Trading.Order)~System.Boolean", family, StringComparison.Ordinal);
+        Assert.InRange(implementation, 0, stranger < 0 ? int.MaxValue : stranger);
+    }
+
     [Theory]
     [InlineData("M:Fixture.Trading.SplitHandler.Route(long)")]
+    [InlineData("M:Fixture.Trading.SplitHandler.Route")]
     [InlineData("P:Fixture.Trading.SplitHandler.Dispatch")]
     [InlineData("F:Fixture.Trading.SplitHandler.Route(string)")]
     public async Task FindUsages_ForADocumentationIdTheNamePathCannotProve_KeepsRefusing(string id)

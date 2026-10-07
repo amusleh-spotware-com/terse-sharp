@@ -67,7 +67,7 @@ public sealed class MultiTargetE2ETests : IAsyncLifetime
 
         Assert.Contains("1 files changed", text, StringComparison.Ordinal);
         Assert.Contains(Ungoverned, text, StringComparison.Ordinal);
-        Assert.Contains(".sln.DotSettings is not read", text, StringComparison.Ordinal);
+        Assert.Contains("no ReSharper .sln.DotSettings beside them sets indentation or cast spacing", text, StringComparison.Ordinal);
     }
 
     [Fact]

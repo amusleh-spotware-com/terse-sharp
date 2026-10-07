@@ -376,6 +376,21 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
         Assert.Contains("changedLines=4", text, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ReplaceSymbolBody_WithABracelessBody_LaysTheBlockOutOverSeveralLinesLikeItsSiblings()
+    {
+        var text = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "OrderBook.Remove",
+            ["body"] = "return false;",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("{ return false; }", text, StringComparison.Ordinal);
+        Assert.Contains("@@ -22,9 +22,1 @@", text, StringComparison.Ordinal);
+        Assert.Matches(@"\n\+ {8}return false;\r?\n", text);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

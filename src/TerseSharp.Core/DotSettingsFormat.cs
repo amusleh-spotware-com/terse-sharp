@@ -2,7 +2,7 @@ using System.Xml.Linq;
 
 namespace TerseSharp.Core;
 
-public readonly record struct DotSettingsConvention(string? Path, bool? UseTabs, int? IndentSize)
+public readonly record struct DotSettingsConvention(string? Path, bool? UseTabs, int? IndentSize, bool? SpaceAfterCast = null)
 {
     public bool Governs => Path is { Length: > 0 } && (UseTabs is not null || IndentSize is not null);
 }
@@ -82,7 +82,7 @@ public static class DotSettingsFormat
         {
             var document = XDocument.Parse(await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false));
 
-            return new DotSettingsConvention(file, Tabs(document), Size(document));
+            return new DotSettingsConvention(file, Tabs(document), Size(document), Flag(document, "SPACE_AFTER_TYPECAST_PARENTHESES"));
         }
         catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
@@ -119,4 +119,11 @@ public static class DotSettingsFormat
         element.Attributes().Any(attribute =>
             string.Equals(attribute.Name.LocalName, "Key", StringComparison.Ordinal)
             && attribute.Value.EndsWith("/" + setting + "/@EntryValue", StringComparison.Ordinal));
+
+    private static bool? Flag(XDocument document, string setting)
+    {
+        var value = Entry(document, setting);
+
+        return value is not null && bool.TryParse(value, out var flag) ? flag : null;
+    }
 }

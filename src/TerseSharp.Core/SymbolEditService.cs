@@ -375,7 +375,7 @@ public static class SymbolEditService
 
         return IsExpressionBodied(node) && WithExpression(node, "=>" + trimmed) is { } expression
             ? expression
-            : AsBlock(node, "{" + body + "}");
+            : AsBlock(node, "{\n" + trimmed + "\n}");
     }
 
     private static SyntaxNode? WithBody(SyntaxNode node, BlockSyntax block) => Bodied(node, block) is { } bodied
