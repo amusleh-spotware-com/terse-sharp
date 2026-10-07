@@ -58,4 +58,30 @@ public static class WorkspaceDiscovery
 
     private static bool IsWorkspaceFile(string file) =>
             IsSolution(file) || Path.GetExtension(file.AsSpan()).Equals(".csproj", StringComparison.OrdinalIgnoreCase);
+
+    public static Result<string> SolutionIn(string directory)
+    {
+        var candidates = DirectCandidates(new DirectoryInfo(Path.GetFullPath(directory)));
+
+        return candidates switch
+        {
+            [var only] => Result.Ok(only),
+            [] => Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{directory}' is a directory with no .slnx, .sln, .slnf or .csproj directly in it"),
+                string.Create(CultureInfo.InvariantCulture, $"load_workspace path={directory} discover=true lists the candidates below it"))),
+            _ => Result.Fail<string>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"'{directory}' is a directory holding {candidates.Length} candidates"),
+                "pass one of them as path=: " + string.Join(" | ", candidates.Select(candidate => Path.Join(directory.AsSpan(), Path.GetFileName(candidate.AsSpan())))))),
+        };
+    }
+
+    private static string[] DirectCandidates(DirectoryInfo directory) => SolutionsIn(directory) switch
+    {
+        [] => [.. directory.GetFiles("*.csproj").Select(file => file.FullName)],
+        var solutions when Array.FindAll(solutions, IsWholeSolution) is { Length: > 0 } whole => whole,
+        var solutions => solutions,
+    };
+
+    private static bool IsWholeSolution(string path) =>
+        !path.EndsWith(".slnf", StringComparison.OrdinalIgnoreCase);
 }

@@ -7,9 +7,9 @@ namespace TerseSharp.Server.Tools;
 public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
 {
     [McpServerTool(Name = "load_workspace")]
-    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see - and it is also the way to re-run a load this process has already answered, because an identical load with nothing written and no watcher event since replays that answer instead of paying for it again. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it. It also warns when the PreToolUse guard or the skill is not installed.")]
+    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, a directory to load the one solution directly in it, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see - and it is also the way to re-run a load this process has already answered, because an identical load with nothing written and no watcher event since replays that answer instead of paying for it again. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it. It also warns when the PreToolUse guard or the skill is not installed.")]
     public Task<string> LoadWorkspace(
-        [Description("Path to the solution or project. Empty = discover upwards from the working directory.")] string? path = null,
+        [Description("Path to the solution or project, or a directory holding exactly one - a .slnx or .sln beside its own .slnf counts as one. Empty = discover upwards from the working directory.")] string? path = null,
         [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared. It always runs, so it is also the escape from a replayed answer.")] bool reload = false,
         [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
         [Description("List the MSBuild messages the load reported, not just their count. Default false.")] bool verbose = false,
@@ -25,11 +25,12 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
                 if (discover)
                     return WorkspaceDiscovery.Discover(path ?? Directory.GetCurrentDirectory(), NavigationTools.Cap(maxResults, 100));
 
-                var target = string.IsNullOrWhiteSpace(path) ? Discover() : path;
+                var resolved = Target(path);
 
-                if (target is null)
-                    return Errors.Invalid("no solution or project found", "pass an explicit path").Render();
+                if (resolved.Error is { } error)
+                    return error.Render();
 
+                var target = resolved.Value!;
                 var before = context.Served();
 
                 var result = reload
@@ -556,4 +557,13 @@ CancellationToken cancellationToken = default) =>
     }
 
     private const int MaxUnresolvedAnalyzers = 5;
+
+    private static Result<string> Target(string? path) => path switch
+    {
+        _ when string.IsNullOrWhiteSpace(path) => Discover() is { } found
+            ? Result.Ok(found)
+            : Result.Fail<string>(Errors.Invalid("no solution or project found", "pass an explicit path")),
+        _ when Directory.Exists(path) => WorkspaceDiscovery.SolutionIn(path),
+        _ => Result.Ok(path),
+    };
 }

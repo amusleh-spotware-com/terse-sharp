@@ -17,6 +17,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   compile-gated edit; a declaration that is not an enum value is refused at its own index. Covered by
   `AddMember_WithTypeSymbolIdsPairingAnEnumWithAClass_LandsTheEnumValueAndItsFirstUseAsOneEdit` and
   `AddMember_WithTypeSymbolIdsSendingAMethodToAnEnum_IsRefusedAsNotEnumMembersAtItsIndex`.
+- **`load_workspace path=<directory>` loads the one solution directly in it (I709).** A directory answered
+  `ERROR InvalidArgument: FileNotFoundException` with a remedy pointing at `search_symbols`/`find_files`,
+  so every directory load cost a retry. A directory holding exactly one `.slnx`/`.sln`/`.slnf` - or, with
+  none, one `.csproj` - now loads it, and a whole solution beside its own `.slnf` counts as one. Several
+  candidates answer `InvalidArgument` naming each as a `path=` to pass; none directly in the directory
+  answers a remedy naming `discover=true`. Covered by
+  `LoadWorkspace_WithADirectoryHoldingASolutionAndItsFilter_LoadsTheSolution`,
+  `LoadWorkspace_WithADirectoryHoldingTwoProjects_ListsThemAsPathsToPass`,
+  `LoadWorkspace_WithADirectoryHoldingNoSolutionDirectly_PointsAtDiscover`,
+  `SolutionIn_ASolutionBesideItsFilter_AnswersTheWholeSolution` and
+  `SolutionIn_TwoSolutions_RefusesAndNamesBothAsPathsToPass`.
 
 ### Fixed
 

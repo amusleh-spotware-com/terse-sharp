@@ -1,3 +1,4 @@
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -374,5 +375,60 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
         });
 
         Assert.Contains("startLine=9000 is past the last line (total=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LoadWorkspace_WithADirectoryHoldingASolutionAndItsFilter_LoadsTheSolution()
+    {
+        var named = await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx") });
+        var directory = await server.CallAsync("load_workspace", new() { ["path"] = TerseServerFixture.FixtureRoot });
+
+        Assert.DoesNotContain("ERROR", directory, StringComparison.Ordinal);
+        Assert.DoesNotContain(".slnf", directory, StringComparison.Ordinal);
+        Assert.Equal(named, directory);
+    }
+
+    [Fact]
+    public async Task LoadWorkspace_WithADirectoryHoldingTwoProjects_ListsThemAsPathsToPass()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-e2e-dir-load-").FullName;
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory, "Alpha.csproj"), "<Project />", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(directory, "Beta.csproj"), "<Project />", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("load_workspace", new() { ["path"] = directory });
+
+            Assert.StartsWith("ERROR InvalidArgument:", text, StringComparison.Ordinal);
+            Assert.Contains("holding 2 candidates", text, StringComparison.Ordinal);
+            Assert.Contains(Path.Join(directory, "Alpha.csproj"), text, StringComparison.Ordinal);
+            Assert.Contains(Path.Join(directory, "Beta.csproj"), text, StringComparison.Ordinal);
+            Assert.DoesNotContain("FileNotFoundException", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task LoadWorkspace_WithADirectoryHoldingNoSolutionDirectly_PointsAtDiscover()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-e2e-dir-load-").FullName;
+
+        try
+        {
+            var text = await server.CallAsync("load_workspace", new() { ["path"] = directory });
+
+            Assert.StartsWith("ERROR InvalidArgument:", text, StringComparison.Ordinal);
+            Assert.Contains("no .slnx, .sln, .slnf or .csproj directly in it", text, StringComparison.Ordinal);
+            Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"load_workspace path={directory} discover=true"), text, StringComparison.Ordinal);
+            Assert.DoesNotContain("search_symbols", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 }
