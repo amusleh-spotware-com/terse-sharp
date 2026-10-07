@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using TerseSharp.Server;
 
 namespace TerseSharp.E2ETests;
 
@@ -445,4 +446,45 @@ public sealed class InstallCommandE2ETests : IDisposable
         Assert.DoesNotContain("InvalidArgument", output, StringComparison.Ordinal);
         Assert.Contains("Fixture.Trading", output, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Call_WorkspaceStatusWithTools_PricesEveryPromotedExampleToolExactlyAsTheStdioSessionDoes()
+    {
+        var solution = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+        var called = await RunAsync("call", "workspace_status", "--workspace", solution, "--json", "{\"tools\": true}");
+        var server = await TerseServerProcess.StartAsync(
+            TerseServerFixture.FixtureRoot,
+            [TerseServerFixture.ServerAssemblyPath(), "serve", "--workspace", solution],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["TERSE_HOME"] = home,
+                ["CLAUDE_CONFIG_DIR"] = ConfigDirectory,
+                ["TERSE_UPDATE"] = "0",
+            },
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+            var served = await server.CallAsync(
+                "workspace_status",
+                new Dictionary<string, object?>(StringComparer.Ordinal) { ["tools"] = true },
+                TestContext.Current.CancellationToken);
+
+            Assert.True(ToolExamples.Promoted.Count >= 3, "the promoted set went vacuous");
+
+            foreach (var name in ToolExamples.Promoted)
+                Assert.Equal(PricedLine(served, name), PricedLine(called, name));
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    private static string PricedLine(string output, string tool) => output
+        .Split('\n')
+        .Select(line => line.TrimEnd('\r'))
+        .Single(line => line.StartsWith("  " + tool + " ", StringComparison.Ordinal));
 }

@@ -50,6 +50,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `SearchSymbols_WithAnUnknownKind_IsRefusedNamingTheAcceptedKinds`,
   `IsKnown_AcceptsEveryAdvertisedKindAndNoKind`, `IsKnown_RefusesAKindNoSymbolCanCarry` and
   `Refusal_NamesTheKindAndEveryAcceptedKind`.
+- **`terse call workspace_status tools=true` prices the worked-example tools as the MCP session does
+  (I707).** The CLI path advertised the surface without the `example:` suffix the stdio `tools/list`
+  appends to `find_files`, `search_text`, `search_regex`, `package_add` and `package_remove`, so a probe
+  under-priced each by its suffix (`find_files 752` against `765`) and disagreed with the schema census.
+  Both paths now decorate through one `ToolExamples.Decorate`. Covered by
+  `Call_WorkspaceStatusWithTools_PricesEveryPromotedExampleToolExactlyAsTheStdioSessionDoes` and
+  `Decorate_AppendsTheExampleToAPromotedToolOnceAndLeavesEveryOtherToolAlone`.
 
 ## [0.74.0] - 2026-10-07
 

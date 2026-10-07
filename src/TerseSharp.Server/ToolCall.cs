@@ -232,6 +232,8 @@ internal static class ToolCall
         foreach (var advertised in whole)
             advertised.InputSchema = SchemaCompactor.Compact(advertised.InputSchema);
 
+        ToolExamples.Decorate(whole);
+
         var served = await context.ServedAsync(cancellationToken).ConfigureAwait(false);
 
         AdvertisedCost.Observe([.. whole.Where(advertised => ToolProfile.Advertises(context.Surface, served, advertised.Name))], whole);

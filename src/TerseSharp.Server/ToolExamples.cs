@@ -46,14 +46,19 @@ public static class ToolExamples
         {
             var listed = await next(request, cancellationToken).ConfigureAwait(false);
 
-            foreach (var tool in listed.Tools)
-            {
-                if (Advertised.Contains(tool.Name) && tool.Description is { Length: > 0 } text && !text.Contains(Separator, StringComparison.Ordinal))
-                    tool.Description = text + Separator + Worked[tool.Name];
-            }
+            Decorate(listed.Tools);
 
             return listed;
         };
+
+    public static void Decorate(IList<Tool> tools)
+    {
+        foreach (var tool in tools)
+        {
+            if (Advertised.Contains(tool.Name) && tool.Description is { Length: > 0 } text && !text.Contains(Separator, StringComparison.Ordinal))
+                tool.Description = text + Separator + Worked[tool.Name];
+        }
+    }
 
     public const string Separator = "  example: ";
 
