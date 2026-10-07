@@ -1172,7 +1172,7 @@ naming `MSB3026`. Run the probe from a copy outside the solution. Its stderr end
 
 ## When a tool refuses
 
-Errors are `ERROR <Code>` plus a `remedy:` line. `Timeout`, `FileLocked` and `RunNotFound` are runtime conditions - narrow with `path=`/`baseRef=`, retry later, or start the run again; never rewrite the arguments. `SymbolNotFound` suggests the nearest names;
+Errors are `ERROR <Code>` plus a `remedy:` line. `Timeout`, `Cancelled`, `Incomplete`, `FileLocked` and `RunNotFound` are runtime conditions - narrow with `path=`/`baseRef=` or retry; never rewrite the arguments. `SymbolNotFound` suggests the nearest names;
 `AmbiguousSymbol` lists the candidates and says how many of the total it shows; `SaturatedName` means
 too many symbols carry that name **exactly** - a unique exact match resolves however many fuzzy
 candidates share its letters, and an already-dotted name is told to pass `symbolId="T:<fqn>"`. It is

@@ -273,6 +273,11 @@ public static class Errors
     public static TerseError Timeout(string message, string remedy) =>
         new(TerseErrorCode.Timeout, message, remedy);
 
+    public static TerseError Cancelled(string message, string remedy) => new(TerseErrorCode.Cancelled, message, remedy);
+
+
+    public static TerseError Incomplete(string message, string remedy) => new(TerseErrorCode.Incomplete, message, remedy);
+
     public static TerseError RunNotFound(string id) => new(
         TerseErrorCode.RunNotFound,
         string.Create(CultureInfo.InvariantCulture, $"no detached run has id '{id}' in this server - ids live only as long as the process that answered them, so one a restarted server never issued cannot be found"),

@@ -18,6 +18,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `AddMember_WithTypeSymbolIdsPairingAnEnumWithAClass_LandsTheEnumValueAndItsFirstUseAsOneEdit` and
   `AddMember_WithTypeSymbolIdsSendingAMethodToAnEnum_IsRefusedAsNotEnumMembersAtItsIndex`.
 
+### Fixed
+
+- **A cancelled or undrained git read stops answering `ERROR InvalidArgument` (I705).** Every git-backed
+  tool (`changed_files`, `diff_symbols`, `diff_text`, `history`, `read_text ref=`, `analyze changed=`)
+  told the agent its arguments were wrong when the request was cancelled or git's output stream stayed
+  open after it exited. Response-format change: a cancelled read now answers `ERROR Cancelled` and an
+  undrained one `ERROR Incomplete` - a new code - each with a remedy saying the arguments were fine. A
+  git timeout still answers `Timeout`, and a non-zero git exit still answers `InvalidArgument`. Covered by
+  `GitRunner_ACancelledRead_AnswersCancelledRatherThanAnArgumentError`,
+  `GitRunner_AnUndrainedStream_AnswersIncompleteRatherThanAnArgumentError`,
+  `GitRunner_ARunKilledAtTheDeadline_AnswersTimeoutBeforeCancelled` and
+  `GitRunner_ANonZeroExit_KeepsTodaysArgumentAnswer`.
+
 ## [0.74.0] - 2026-10-07
 
 > **Behaviour and response-format change (MAJOR under this project's rules; on 0.x the MINOR segment

@@ -11,21 +11,19 @@ internal static class GitRunner
     {
         var run = await ChildProcess.RunAsync("git", arguments, workingDirectory, Deadline, cancellationToken, Unattended, Utf8).ConfigureAwait(false);
 
-        if (run.TimedOut)
-            return Result.Fail<string>(Errors.Timeout("git did not answer within 60 s and was killed - the arguments were valid, the walk was too long", "narrow the walk, not the argument: path= limits it to one path and baseRef= to a range such as HEAD~200..HEAD; a history contains= pickaxe diffs every commit it visits, so it needs both"));
-
-        if (run.Stopped)
-            return Result.Fail<string>(Errors.Invalid("the request was cancelled before git answered, and the process tree was killed", "re-issue the call; nothing about the repository is known to be wrong"));
-
-        if (!run.Drained)
-            return Result.Fail<string>(Errors.Invalid("git exited but its output stream stayed open, so what was read is incomplete", "narrow the request with path=, or run the command yourself; answering from a partial stream would be a wrong answer, not a short one"));
-
-        return run.ExitCode is 0
-            ? Result.Ok(run.StandardOutput)
-            : Result.Fail<string>(Errors.Invalid(
-                "git exited " + run.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + Head(run.StandardError),
-                "check that this workspace is a git repository and that baseRef names a commit that exists"));
+        return Answer(run);
     }
+
+    internal static Result<string> Answer(ProcessRun run) => run switch
+    {
+        { TimedOut: true } => Result.Fail<string>(Errors.Timeout("git did not answer within 60 s and was killed - the arguments were valid, the walk was too long", "narrow the walk, not the argument: path= limits it to one path and baseRef= to a range such as HEAD~200..HEAD; a history contains= pickaxe diffs every commit it visits, so it needs both")),
+        { Stopped: true } => Result.Fail<string>(Errors.Cancelled("the request was cancelled before git answered, and the process tree was killed", "re-issue the same call - the arguments were fine, and nothing about the repository is known to be wrong")),
+        { Drained: false } => Result.Fail<string>(Errors.Incomplete("git exited but its output stream stayed open, so what was read is incomplete", "the arguments were fine: retry the same call, and if it repeats narrow it with path= or run the command yourself - answering from a partial stream would be a wrong answer, not a short one")),
+        { ExitCode: 0 } => Result.Ok(run.StandardOutput),
+        _ => Result.Fail<string>(Errors.Invalid(
+            "git exited " + run.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + Head(run.StandardError),
+            "check that this workspace is a git repository and that baseRef names a commit that exists")),
+    };
 
     private static readonly System.Text.UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
 

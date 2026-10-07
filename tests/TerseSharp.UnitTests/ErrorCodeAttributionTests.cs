@@ -54,4 +54,42 @@ public sealed class ErrorCodeAttributionTests
         Assert.StartsWith("ERROR RunNotFound: no detached run has id 't7'", text, StringComparison.Ordinal);
         Assert.Contains("remedy: start the run again", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GitRunner_ACancelledRead_AnswersCancelledRatherThanAnArgumentError()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        var read = await GitRunner.ReadAsync(Path.GetTempPath(), ["--version"], cancellation.Token);
+
+        Assert.Equal(TerseErrorCode.Cancelled, read.Error!.Code);
+        Assert.Contains("the arguments were fine", read.Error.Remedy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GitRunner_AnUndrainedStream_AnswersIncompleteRatherThanAnArgumentError()
+    {
+        var read = GitRunner.Answer(new ProcessRun(0, "partial", 12, StandardOutput: "partial", Drained: false));
+
+        Assert.Equal(TerseErrorCode.Incomplete, read.Error!.Code);
+        Assert.Contains("the arguments were fine", read.Error.Remedy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GitRunner_ARunKilledAtTheDeadline_AnswersTimeoutBeforeCancelled()
+    {
+        var read = GitRunner.Answer(new ProcessRun(-1, "", 60_000, TimedOut: true, Drained: false, Stopped: true));
+
+        Assert.Equal(TerseErrorCode.Timeout, read.Error!.Code);
+    }
+
+    [Fact]
+    public void GitRunner_ANonZeroExit_KeepsTodaysArgumentAnswer()
+    {
+        var read = GitRunner.Answer(new ProcessRun(128, "", 5, StandardError: "fatal: bad revision 'nope'\n"));
+
+        Assert.Equal(TerseErrorCode.InvalidArgument, read.Error!.Code);
+        Assert.Equal("git exited 128: fatal: bad revision 'nope'", read.Error.Message);
+    }
 }
