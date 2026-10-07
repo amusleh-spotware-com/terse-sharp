@@ -56,12 +56,9 @@ public sealed class ErrorCodeAttributionTests
     }
 
     [Fact]
-    public async Task GitRunner_ACancelledRead_AnswersCancelledRatherThanAnArgumentError()
+    public void GitRunner_ACancelledRead_AnswersCancelledRatherThanAnArgumentError()
     {
-        using var cancellation = new CancellationTokenSource();
-        await cancellation.CancelAsync();
-
-        var read = await GitRunner.ReadAsync(Path.GetTempPath(), ["--version"], cancellation.Token);
+        var read = GitRunner.Answer(new ProcessRun(-1, "", 3, Drained: false, Stopped: true));
 
         Assert.Equal(TerseErrorCode.Cancelled, read.Error!.Code);
         Assert.Contains("the arguments were fine", read.Error.Remedy, StringComparison.Ordinal);

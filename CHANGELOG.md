@@ -8,6 +8,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.75.1] - 2026-10-07
+
+### Fixed
+
+- **The 0.75.0 release workflow went red on a timing-dependent test, so 0.75.0 was never published; 0.75.1
+  carries the same changes.** `GitRunner_ACancelledRead_AnswersCancelledRatherThanAnArgumentError` drove a
+  real `git --version` with a pre-cancelled token, and on the release runner git exited before the
+  cancellation was observed, so the read succeeded. It now asserts the `Stopped` to `Cancelled` mapping on
+  `GitRunner.Answer` directly, like its three siblings. No tool behaviour changed.
+
 ## [0.75.0] - 2026-10-07
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).** A
@@ -7447,7 +7457,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.75.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.75.1...HEAD
+[0.75.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.75.1
 [0.75.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.75.0
 [0.74.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.74.0
 [0.73.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.73.0
