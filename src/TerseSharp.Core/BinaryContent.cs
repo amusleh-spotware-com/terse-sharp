@@ -64,4 +64,7 @@ public static class BinaryContent
         HasNullCodeUnit(probe)
             ? new BinaryProbe(Binary(displayPath, length), null)
             : new BinaryProbe(null, Utf16WithoutMark.Detect(probe));
+
+    public static BinaryProbe Probe(ReadOnlySpan<byte> content, string displayPath, long length) =>
+            Probed(content[..Math.Min(content.Length, ProbeBytes)], displayPath, length);
 }

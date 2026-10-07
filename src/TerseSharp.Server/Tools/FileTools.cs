@@ -7,7 +7,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no line range, lines, ranges or tail - answers its OUTLINE plus a steer, a third of the tokens; verbose=true or any line range returns the text. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N is how a long log is read, and a clipped read names the line to continue from. ref= reads the file at a git ref instead of shelling out.")]
+    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no line range, lines, ranges or tail - answers its OUTLINE plus a steer, a third of the tokens; verbose=true or any line range returns the text. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N is how a long log is read, and a clipped read names the line to continue from. ref= reads the file at a git ref instead of shelling out. path=<absolute .zip or .nupkg>!/<entry> reads one text entry of an archive.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
                 [Description("Several files answered in one response, at most 10. Combines with path, which is taken first; a blank or 11th entry is refused by name rather than dropped.")] string?[]? paths = null,
@@ -293,7 +293,7 @@ bool verbose) =>
     }
 
     [McpServerTool(Name = "find_files", ReadOnly = true)]
-    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are excluded; .claude/commands, agents, skills and hooks ARE listed. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. A listing of zero for a CONCRETE path answers ABSENT, EXCLUDED naming the rule that skips it, or EXISTS. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell. depth=N answers the shape of a tree instead of its files: everything below the Nth path segment folds into one src/Core/**  xN files row, and the count line still counts every file. root= lists any absolute directory instead of the workspace, tagged outside-workspace, so no shell ls is needed. Pass globs to answer up to 10 globs in ONE response. Replaces one call per glob: each is answered under its own header line with its own count.")]
+    [Description("Replaces Bash git ls-files. Locate files by glob under the workspace root, or by name= for a plain file-name substring that needs no glob syntax at all, and with tracked=true only the files git tracks - which is how a checked-in fixture is told apart from build output or another session's scratch file. Use instead of Glob; bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are excluded; .claude/commands, agents, skills and hooks ARE listed. name= combines with glob=, which selects first, and a glob that matched nothing is told to try it. A listing of zero for a CONCRETE path answers ABSENT, EXCLUDED naming the rule that skips it, or EXISTS. stamps=true adds each file's UTC last-write time and byte length, so \"when was this written, and how big is it?\" needs no shell. depth=N answers the shape of a tree instead of its files: everything below the Nth path segment folds into one src/Core/**  xN files row, and the count line still counts every file. root= lists any absolute directory instead of the workspace, tagged outside-workspace, so no shell ls is needed - or the entries of a .zip or .nupkg file. Pass globs to answer up to 10 globs in ONE response. Replaces one call per glob: each is answered under its own header line with its own count.")]
     public Task<string> FindFiles(
             [Description("Glob such as *.csproj, *Tests.cs, or a path glob like **/Views/*.xaml. ** spans directories, * and ? stop at a separator, and {a,b} matches either alternative.")] string? glob = null,
             [Description("Workspace or worktree name.")] string? workspace = null,
@@ -305,7 +305,7 @@ bool verbose) =>
             [Description("List only the files git tracks. Needs a git repository. Default false.")] bool tracked = false,
             [Description("Keep only the files whose FILE NAME contains this text, case-insensitively - no glob to get right. Used alone it searches every file; with glob= it filters what the glob selected.")] string? name = null,
             [Description("Fold every file below the Nth path segment into one directory row with its file count, so the answer is the shape of the tree. A directory with a single match stays that file. 0, the default, lists every file.")] int depth = 0,
-            [Description("Absolute directory to list instead of the workspace, tagged outside-workspace; its paths= line carries full paths. Refused beside tracked=true.")] string? root = null,
+            [Description("Absolute directory to list instead of the workspace, tagged outside-workspace; its paths= line carries full paths. Refused beside tracked=true. An absolute .zip or .nupkg FILE lists its entries instead.")] string? root = null,
             [Description("Several globs in ONE response, at most 10. Replaces one call per glob: each gets its own header line and count, so a glob that matched nothing is visible. Combines with glob, taken first, and with root=.")] string?[]? globs = null,
             CancellationToken cancellationToken = default)
     {
@@ -315,6 +315,9 @@ bool verbose) =>
             return Task.FromResult(chosen.Error!.Render());
 
         var matcher = chosen.Value;
+
+        if (root is { Length: > 0 } archive && File.Exists(archive))
+            return Archived(archive, matcher, globs, maxResults, stamps, name, tracked, cancellationToken);
 
         if (matcher is not { Length: > 0 } && name is not { Length: > 0 } && globs is not { Length: > 0 })
         {
@@ -711,14 +714,38 @@ context.RejectWrite() is { } rejection
         bool whole,
         string? workspace,
         CancellationToken cancellationToken) =>
-        whole && path.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !Unhoused(path)
-            ? context.WithWorkspaceAsync(
-                workspace,
-                path,
-                async loaded => NavigationTools.Unwrap(
-                    await OutlineService.OrTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false)),
-                cancellationToken: cancellationToken)
-            : Read(path, request, workspace, cancellationToken);
+        ArchiveService.Entry(path) is { } entry
+            ? ToolBoundary.RunAsync(async () => NavigationTools.Unwrap(
+                await ArchiveService.ReadAsync(entry, request, cancellationToken).ConfigureAwait(false)))
+            : whole && path.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !Unhoused(path)
+                ? context.WithWorkspaceAsync(
+                    workspace,
+                    path,
+                    async loaded => NavigationTools.Unwrap(
+                        await OutlineService.OrTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false)),
+                    cancellationToken: cancellationToken)
+                : Read(path, request, workspace, cancellationToken);
+
+    private static Task<string> Archived(
+        string archive,
+        string? matcher,
+        string?[]? globs,
+        int maxResults,
+        bool stamps,
+        string? name,
+        bool tracked,
+        CancellationToken cancellationToken) =>
+        (tracked, globs is { Length: > 0 }) switch
+        {
+            (true, _) => Task.FromResult(Errors.Invalid(
+                "'tracked' was passed with an archive root=, and git tracks no archive entry",
+                "drop tracked=true to list the archive's entries").Render()),
+            (_, true) => Task.FromResult(Errors.Invalid(
+                "'globs' was passed with an archive root=",
+                "pass one glob= to filter the archive's entries, or drop it to list them all").Render()),
+            _ => ToolBoundary.RunAsync(async () => NavigationTools.Unwrap(await ArchiveService.ListAsync(
+                archive, matcher is { Length: > 0 } ? matcher : "**", NavigationTools.Cap(maxResults, 100), stamps, name, maxResults > 0, cancellationToken).ConfigureAwait(false))),
+        };
 
     private async Task<string> ReadManyAsync(
     ImmutableArray<string> paths,

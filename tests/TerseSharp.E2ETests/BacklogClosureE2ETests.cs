@@ -2416,4 +2416,140 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             File.Delete(probe);
         }
     }
+
+    private static async Task<string> PackedArchiveAsync()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "terse-archive-" + Path.GetRandomFileName() + ".nupkg");
+        var cancellation = TestContext.Current.CancellationToken;
+
+        await using (var archive = await System.IO.Compression.ZipFile.OpenAsync(path, System.IO.Compression.ZipArchiveMode.Create, cancellation))
+        {
+            archive.CreateEntry("tools/");
+            await EntryWrittenAsync(archive, "terse.nuspec", "<package><id>terse</id></package>"u8.ToArray());
+            await EntryWrittenAsync(archive, "tools/net10.0/any/DotnetToolSettings.xml", "<DotNetCliTool Version=\"2\"><Commands><Command Name=\"terse\" EntryPoint=\"terse.dll\" Runner=\"dotnet\" /></Commands></DotNetCliTool>"u8.ToArray());
+            await EntryWrittenAsync(archive, "tools/net10.0/any/terse.dll", [0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00]);
+        }
+
+        return path;
+    }
+
+    private static async Task EntryWrittenAsync(System.IO.Compression.ZipArchive archive, string name, byte[] content)
+    {
+        await using var stream = await archive.CreateEntry(name).OpenAsync(TestContext.Current.CancellationToken);
+        await stream.WriteAsync(content, TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithAnArchiveRoot_ListsItsFileEntriesWithTheirSizes()
+    {
+        var archive = await PackedArchiveAsync();
+
+        try
+        {
+            var text = await server.CallAsync("find_files", new() { ["root"] = archive, ["stamps"] = true });
+
+            Assert.StartsWith("3 entries", text, StringComparison.Ordinal);
+            Assert.Matches(@"terse\.nuspec  \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ  33", text);
+            Assert.Contains("tools/net10.0/any/DotnetToolSettings.xml", text, StringComparison.Ordinal);
+            Assert.Matches(@"tools/net10\.0/any/terse\.dll  \S+  10", text);
+            Assert.Contains("outside-workspace", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(archive);
+        }
+    }
+
+    [Fact]
+    public async Task FindFiles_WithAnArchiveRootAndAGlob_KeepsOnlyTheMatchingEntries()
+    {
+        var archive = await PackedArchiveAsync();
+
+        try
+        {
+            var text = await server.CallAsync("find_files", new() { ["root"] = archive, ["glob"] = "**/*.xml" });
+
+            Assert.Contains("tools/net10.0/any/DotnetToolSettings.xml", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("terse.nuspec", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("terse.dll", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(archive);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_WithAnArchiveEntryPath_ReadsThatEntrysText()
+    {
+        var archive = await PackedArchiveAsync();
+
+        try
+        {
+            var text = await server.CallAsync("read_text", new() { ["path"] = archive + "!/tools/net10.0/any/DotnetToolSettings.xml" });
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("<Command Name=\"terse\" EntryPoint=\"terse.dll\" Runner=\"dotnet\" />", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(archive);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_WithABinaryArchiveEntry_RefusesItAsBinary()
+    {
+        var archive = await PackedArchiveAsync();
+
+        try
+        {
+            var text = await server.CallAsync("read_text", new() { ["path"] = archive + "!/tools/net10.0/any/terse.dll" });
+
+            Assert.Contains("looks binary (10 bytes)", text, StringComparison.Ordinal);
+            Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(archive);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_WithAMissingArchiveEntry_NamesTheListingCall()
+    {
+        var archive = await PackedArchiveAsync();
+
+        try
+        {
+            var text = await server.CallAsync("read_text", new() { ["path"] = archive + "!/lib/missing.xml" });
+
+            Assert.Contains("'lib/missing.xml' is not a file entry of", text, StringComparison.Ordinal);
+            Assert.Contains("find_files root=", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(archive);
+        }
+    }
+
+    [Fact]
+    public async Task FindFiles_WithARootFileThatIsNotAnArchive_SaysSo()
+    {
+        var plain = Path.Combine(Path.GetTempPath(), "terse-plain-" + Path.GetRandomFileName() + ".zip");
+
+        await File.WriteAllTextAsync(plain, "not a zip", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("find_files", new() { ["root"] = plain });
+
+            Assert.Contains("is a file but not a zip archive", text, StringComparison.Ordinal);
+            Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(plain);
+        }
+    }
 }

@@ -62,9 +62,9 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` |
-| **Files** | `ls` in a directory outside the workspace | `find_files(glob, root: "C:/logs")` |
+| **Files** | `ls` a directory, or `unzip -l` an archive, outside the workspace | `find_files(glob, root: "C:/logs")`; `read_text(path: "x.nupkg!/a.xml")` |
 | **Files** | one `find_files` call per glob | `find_files(globs: [...])` |
-| **Files** | `Glob` / `ls` | `find_files(glob)` — a concrete path matching nothing answers `ABSENT`, `EXCLUDED` or `EXISTS` |
+| **Files** | `Glob` / `ls` | `find_files(glob)` |
 | **Files** | globbing a whole tree to learn its shape | `find_files(glob, depth: 2)` |
 | **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` |
 | **Files** | `Bash: git ls-files` | `find_files(glob, tracked: true)` |

@@ -10,6 +10,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ### Added
 
+- **`find_files root=` lists the entries of a `.zip` or `.nupkg` file, and `read_text path=<archive>!/<entry>`
+  reads one (I703).** Inspecting the packed packages for I686 cost 3 `python zipfile` Bash calls, and log zips
+  cost the same in other repositories - about 10 of 264 sessions. An absolute archive file passed as `root=`
+  answers `N entries`, one entry path per line, directory entries skipped, with `glob=` and `name=` filtering
+  entry paths and `stamps=true` adding each entry's UTC last-write time and uncompressed bytes. `read_text`
+  reads one text entry through the same presentation as a file - `maxChars=`, `tail=`, line ranges,
+  `headings=` - refuses a binary entry the way it refuses a binary file, and refuses an entry over 16 MB
+  uncompressed rather than inflating it. A file that is not a zip answers `is a file but not a zip archive`,
+  and a missing entry names the `find_files root=` call that lists them. No parameter was added. Covered by
+  `FindFiles_WithAnArchiveRoot_ListsItsFileEntriesWithTheirSizes`,
+  `FindFiles_WithAnArchiveRootAndAGlob_KeepsOnlyTheMatchingEntries`,
+  `ReadText_WithAnArchiveEntryPath_ReadsThatEntrysText`, `ReadText_WithABinaryArchiveEntry_RefusesItAsBinary`,
+  `ReadText_WithAMissingArchiveEntry_NamesTheListingCall`, `FindFiles_WithARootFileThatIsNotAnArchive_SaysSo`
+  and `Entry_SplitsAnExistingAbsoluteArchiveAtItsBang`.
+
 - **`analyze ids=` and `cleanup ids=` accept a trailing-wildcard prefix (I726).** `ids=CS*,CA*,IDE*,xUnit*`
   answered `NOT_ENABLED` for every entry, because each was compared as a whole id, so a family filter cost
   one re-run per family. An entry ending in `*` now keeps every diagnostic whose id starts with the rest,
