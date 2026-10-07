@@ -2267,4 +2267,72 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task SearchText_WithGlobAndADifferentPath_IsRefusedNamingBothInsteadOfDroppingThePath()
+    {
+        var text = await server.CallAsync("search_text", new()
+        {
+            ["query"] = "PendingCount",
+            ["path"] = "src",
+            ["glob"] = "**/*.cs",
+            ["countOnly"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("'glob' and 'path' name the same parameter", text, StringComparison.Ordinal);
+        Assert.Contains("glob=\"src/**/*.cs\"", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeliberateOutcomesTests.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_FollowingTheComposedGlobRemedy_CountsOnlyTheFilesUnderThatDirectory()
+    {
+        var text = (await server.CallAsync("search_text", new()
+        {
+            ["query"] = "PendingCount",
+            ["glob"] = "src/**/*.cs",
+            ["countOnly"] = true,
+        })).Replace('\\', '/');
+
+        Assert.Contains("src/Fixture.Trading/OrderService.cs", text, StringComparison.Ordinal);
+        Assert.Contains("src/Fixture.Trading/IOrderRepository.cs", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeliberateOutcomesTests.cs", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchRegex_WithQueryAndADifferentPattern_IsRefusedOfferingQueriesInsteadOfDroppingOne()
+    {
+        var text = await server.CallAsync("search_regex", new()
+        {
+            ["query"] = "PendingCount",
+            ["pattern"] = "TotalVolume",
+            ["glob"] = "*.cs",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("'query' and 'pattern' name the same parameter", text, StringComparison.Ordinal);
+        Assert.Contains("queries=[\"PendingCount\", \"TotalVolume\"]", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithTwoSpellingsOfGlob_RefusesDifferentValuesAndAcceptsTheSameOne()
+    {
+        var conflicting = await server.CallAsync("find_files", new()
+        {
+            ["pattern"] = "*.cs",
+            ["path"] = "tests",
+        });
+
+        var agreeing = (await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "src/**/*.cs",
+            ["path"] = "src/**/*.cs",
+        })).Replace('\\', '/');
+
+        Assert.Contains("'pattern' and 'path' name the same parameter", conflicting, StringComparison.Ordinal);
+        Assert.Contains("glob=\"tests/**/*.cs\"", conflicting, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", agreeing, StringComparison.Ordinal);
+        Assert.Contains("src/Fixture.Trading/OrderService.cs", agreeing, StringComparison.Ordinal);
+    }
 }

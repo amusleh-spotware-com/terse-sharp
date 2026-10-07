@@ -309,7 +309,12 @@ bool verbose) =>
             [Description("Several globs in ONE response, at most 10. Replaces one call per glob: each gets its own header line and count, so a glob that matched nothing is visible. Combines with glob, taken first, and with root=.")] string?[]? globs = null,
             CancellationToken cancellationToken = default)
     {
-        var matcher = glob ?? pattern ?? query ?? path;
+        var chosen = Aliases.Chosen(Aliases.ScopeRemedy, new ParameterSpelling("glob", glob), new ParameterSpelling("pattern", pattern), new ParameterSpelling("query", query), new ParameterSpelling("path", path));
+
+        if (!chosen.IsOk)
+            return Task.FromResult(chosen.Error!.Render());
+
+        var matcher = chosen.Value;
 
         if (matcher is not { Length: > 0 } && name is not { Length: > 0 } && globs is not { Length: > 0 })
         {
@@ -379,7 +384,7 @@ bool verbose) =>
         [Description("Match whole words only: kept only where neither side is a letter, digit or underscore. Applies to query= and every queries= entry. Default false.")] bool word = false,
         [Description("Several globs OR-ed into one file set, at most 10; combines with glob, taken first.")] string?[]? paths = null,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, word, Globs: paths), cancellationToken);
+        Search(new TextQuery(query, glob, workspace, maxResults, Regex: false, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, word, Globs: paths, TextAlias: pattern, GlobAlias: path), cancellationToken);
 
     [McpServerTool(Name = "search_regex", ReadOnly = true)]
     [Description("Regular-expression search across the workspace, or across any absolute directory with root=. Pass queries to search up to 10 expressions in ONE pass over the same file set. Replaces one call per expression, and every record is tagged q1..qN by the position of its expression in queries=, which is what an alternation cannot do: it returns one undifferentiated list. A line matching several of them is ONE record carrying all of their tags, comma-separated in query order (q1,q3). An expression that spans a line break - a literal newline, [\\s\\S] or (?s). - is reported once, at the line its text starts on, and the scan resumes on the next line, so every other expression still sees the lines it spanned. The count line is how many matching LINES exist, at most one per line, and a zero result proves absence in the files it searched - bin, obj, .git, .vs, .idea, artifacts, TestResults, node_modules, directory symlinks and .claude session state are skipped; .claude/commands, agents, skills and hooks ARE searched. ^ and $ anchor each line, and a match that spans several lines is reported once, at the first line carrying its text. countOnly=true answers ONE line per file with its match count and no matched text, tagged q1=N per expression. context=N adds the surrounding lines so a hit needs no follow-up read, matchesOnly=true prints the matched span instead of the whole line the way grep -o does, unique=true collapses identical matching lines to one record with x<count>, and exclude= drops the paths a glob= cannot leave out. containers=true names the C# declaration each hit sits in, so a hit is an id get_symbol_source takes; word= belongs to search_text, because \\b answers it here. paths= ORs up to 10 globs into one file set. Results are tagged HEURISTIC.")]
@@ -400,9 +405,32 @@ bool verbose) =>
         [Description("Name the C# declaration each hit sits in - Type.Member, from syntax - so the record is an id get_symbol_source takes. .cs only; refused beside countOnly=. Default false.")] bool containers = false,
         [Description("Several globs OR-ed into one file set, at most 10; combines with glob, taken first.")] string?[]? paths = null,
         CancellationToken cancellationToken = default) =>
-        Search(new TextQuery(query ?? pattern, glob ?? path, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, Globs: paths), cancellationToken);
+        Search(new TextQuery(query, glob, workspace, maxResults, Regex: true, context, unique, root, exclude, matchesOnly, queries, countOnly, containers, Globs: paths, TextAlias: pattern, GlobAlias: path), cancellationToken);
 
-    private Task<string> Search(TextQuery request, CancellationToken cancellationToken)
+    private Task<string> Search(TextQuery asked, CancellationToken cancellationToken)
+    {
+        var spelled = Spelled(asked);
+
+        return spelled.IsOk
+            ? Searched(spelled.Value, cancellationToken)
+            : Task.FromResult(spelled.Error!.Render());
+    }
+
+    private static Result<TextQuery> Spelled(TextQuery asked)
+    {
+        var text = Aliases.Chosen(Aliases.TextRemedy, new ParameterSpelling("query", asked.Text), new ParameterSpelling("pattern", asked.TextAlias));
+
+        if (!text.IsOk)
+            return Result.Fail<TextQuery>(text.Error!);
+
+        var scope = Aliases.Chosen(Aliases.ScopeRemedy, new ParameterSpelling("glob", asked.Glob), new ParameterSpelling("path", asked.GlobAlias));
+
+        return scope.IsOk
+            ? Result.Ok(asked with { Text = text.Value, Glob = scope.Value })
+            : Result.Fail<TextQuery>(scope.Error!);
+    }
+
+    private Task<string> Searched(TextQuery request, CancellationToken cancellationToken)
     {
         if (Refusable(request) is { } refusal)
             return Task.FromResult(refusal.Render());
@@ -475,21 +503,23 @@ bool verbose) =>
             cancellationToken));
 
     private readonly record struct TextQuery(
-        string? Text,
-        string? Glob,
-        string? Workspace,
-        int MaxResults,
-        bool Regex,
-        int Context = 0,
-        bool Unique = false,
-        string? Root = null,
-        string? Exclude = null,
-        bool MatchesOnly = false,
-        IReadOnlyList<string?>? Texts = null,
-        bool CountOnly = false,
-        bool Containers = false,
-        bool Word = false,
-        string?[]? Globs = null);
+            string? Text,
+            string? Glob,
+            string? Workspace,
+            int MaxResults,
+            bool Regex,
+            int Context = 0,
+            bool Unique = false,
+            string? Root = null,
+            string? Exclude = null,
+            bool MatchesOnly = false,
+            IReadOnlyList<string?>? Texts = null,
+            bool CountOnly = false,
+            bool Containers = false,
+            bool Word = false,
+            string?[]? Globs = null,
+            string? TextAlias = null,
+            string? GlobAlias = null);
 
     private Task<string> Guarded(
 string? workspace,

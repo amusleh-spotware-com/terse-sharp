@@ -68,6 +68,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `outside-workspace`. Covered by
   `ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould` and
   `ReadText_OfAnAbsoluteCsPathWhileThePreloadIsRunning_AnswersTheOutlineTheLoadedWorkspaceWould`.
+- **`search_text`, `search_regex` and `find_files` refuse an alias passed beside its parameter with a
+  different value instead of silently dropping one (I724).** `path=` is an alias for `glob=` (and on
+  `find_files` so are `pattern=` and `query=`), and `pattern=` an alias for `query=`; `search_text
+  path=fixtures/FixtureSolution glob=**/*.cs` kept the glob and searched the whole tree, answering 32 lines
+  from 18 files of which 13 lay outside the directory asked for. Response-format change: the pair now answers
+  `ERROR InvalidArgument` naming both parameters and both values; where the two are a directory and a pattern
+  whose meaning survives the join, the remedy carries the ready glob (`glob="fixtures/FixtureSolution/**/*.cs"`),
+  and for two queries it offers `queries=[...]`. The same value under both spellings, or one left blank, is
+  still accepted. Covered by `SearchText_WithGlobAndADifferentPath_IsRefusedNamingBothInsteadOfDroppingThePath`,
+  `SearchText_FollowingTheComposedGlobRemedy_CountsOnlyTheFilesUnderThatDirectory`,
+  `SearchRegex_WithQueryAndADifferentPattern_IsRefusedOfferingQueriesInsteadOfDroppingOne`,
+  `FindFiles_WithTwoSpellingsOfGlob_RefusesDifferentValuesAndAcceptsTheSameOne`,
+  `ScopeRemedy_WithADirectoryAndAPattern_NamesTheGlobThatSearchesThePatternInsideIt`,
+  `ScopeRemedy_WithARootAnchoredPattern_OffersNoComposedGlobBecauseItsMeaningWouldChange` and
+  `Chosen_WithOneValueOrTheSameValueTwice_AnswersThatValue`.
 
 ## [0.74.0] - 2026-10-07
 
