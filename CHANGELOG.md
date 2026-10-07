@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.74.0] - 2026-10-07
+
 > **Behaviour and response-format change (MAJOR under this project's rules; on 0.x the MINOR segment
 > carries it).** The `PreToolUse` guard denies an `&&` chain carrying a replaced command whole instead of
 > stripping that link; the repeat footer of `build`/`run_tests`/`rerun_failed`/`list_tests`/`clean`
@@ -7287,7 +7289,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.73.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.74.0...HEAD
+[0.74.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.74.0
 [0.73.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.73.0
 [0.72.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.72.0
 [0.71.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.71.1
