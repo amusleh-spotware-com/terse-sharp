@@ -98,7 +98,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
                     loaded => TextAsync(loaded.Root, baseRef, scoped, NavigationTools.Cap(maxLines, MaxDiffLines), null, shape, skipLines, cancellationToken)));
     }
 
-    private static async Task<string> ListAsync(
+    private async Task<string> ListAsync(
             string root,
             string? baseRef,
             string? path,
@@ -109,27 +109,55 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             bool chosen,
             CancellationToken cancellationToken)
     {
+        var listing = await ListTimedAsync(root, baseRef, path, exclude, maxResults, outside, scope, chosen, cancellationToken).ConfigureAwait(false);
+
+        return listing.Timing.Appended(listing.Text, listings.SlowAfter);
+    }
+
+    private static async Task<Listing> ListTimedAsync(
+        string root,
+        string? baseRef,
+        string? path,
+        string? exclude,
+        int maxResults,
+        string? outside,
+        ChangeScope scope,
+        bool chosen,
+        CancellationToken cancellationToken)
+    {
         var command = scope.Command;
+        var started = Stopwatch.GetTimestamp();
         var numstat = await GitRunner.ReadAsync(root, Arguments([.. command, "--numstat"], baseRef, path), cancellationToken).ConfigureAwait(false);
+        var numstatDone = Stopwatch.GetTimestamp();
+        var status = numstat.IsOk ? await GitRunner.ReadAsync(root, Arguments([.. command, "--name-status"], baseRef, path), cancellationToken).ConfigureAwait(false) : numstat;
+        var statusDone = Stopwatch.GetTimestamp();
+        var untracked = status.IsOk ? await UntrackedAsync(root, baseRef, path, scope, cancellationToken).ConfigureAwait(false) : status;
+        var timing = new GitTiming(TimeSpan.Zero, Stopwatch.GetElapsedTime(started, numstatDone), Stopwatch.GetElapsedTime(numstatDone, statusDone), Stopwatch.GetElapsedTime(statusDone));
 
-        if (!numstat.IsOk)
-            return numstat.Error!.Render();
+        return untracked.IsOk
+            ? new Listing(Render(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen, new ListingRoot(root, baseRef?.Contains("..", StringComparison.Ordinal) is not true)), timing)
+            : new Listing(untracked.Error!.Render(), default);
+    }
 
-        var status = await GitRunner.ReadAsync(root, Arguments([.. command, "--name-status"], baseRef, path), cancellationToken).ConfigureAwait(false);
-
-        if (!status.IsOk)
-            return status.Error!.Render();
-
-        var untracked = baseRef is { Length: > 0 } || scope.Staged || !scope.Untracked
+    private static async Task<Result<string>> UntrackedAsync(string root, string? baseRef, string? path, ChangeScope scope, CancellationToken cancellationToken) =>
+        baseRef is { Length: > 0 } || scope.Staged || !scope.Untracked
             ? Result.Ok(string.Empty)
             : await GitRunner.ReadAsync(
                 root,
                 ["--no-optional-locks", "ls-files", "--others", "--exclude-standard", "--", path is { Length: > 0 } pathspec ? pathspec : "."],
                 cancellationToken).ConfigureAwait(false);
 
-        return untracked.IsOk
-            ? Render(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen, new ListingRoot(root, baseRef?.Contains("..", StringComparison.Ordinal) is not true))
-            : untracked.Error!.Render();
+    private readonly record struct Listing(string Text, GitTiming Timing);
+
+    internal readonly record struct GitTiming(TimeSpan Stamp, TimeSpan NumStat, TimeSpan NameStatus, TimeSpan LsFiles)
+    {
+        public TimeSpan Total => Stamp + NumStat + NameStatus + LsFiles;
+
+        public string Appended(string response, TimeSpan slowAfter) => Total > slowAfter
+            ? string.Create(CultureInfo.InvariantCulture, $"{response}\ntiming stamp={WholeMilliseconds(Stamp)} numstat={WholeMilliseconds(NumStat)} name-status={WholeMilliseconds(NameStatus)} ls-files={WholeMilliseconds(LsFiles)}")
+            : response;
+
+        private static long WholeMilliseconds(TimeSpan span) => (long)span.TotalMilliseconds;
     }
 
     private static string Render(
@@ -350,7 +378,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         var full = Path.GetFullPath(root);
 
-        return Directory.Exists(full) ? Result.Ok(full) : Result.Fail<string>(Errors.DocumentNotFound(root));
+        return Directory.Exists(full) ? Result.Ok(full) : Result.Fail<string>(MissingDirectory.Refused(root));
     }
 
     private static Task<string> OutsideAsync(string root, Func<string, Task<string>> action)
@@ -778,19 +806,20 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         bool capped,
         CancellationToken cancellationToken)
     {
+        var started = Stopwatch.GetTimestamp();
         var stamp = await GitStampAsync(loaded, cancellationToken).ConfigureAwait(false);
+        var stamped = Stopwatch.GetElapsedTime(started);
         var key = string.Join('\u0001', loaded.Root, path, exclude, maxResults.ToString(CultureInfo.InvariantCulture), scope.ToString(), capped.ToString());
-        var now = Stopwatch.GetTimestamp();
 
-        if (stamp is not null && listings.Replay(key, stamp, now) is { } replay)
+        if (stamp is not null && listings.Replay(key, stamp, started) is { } replay)
             return replay;
 
-        var text = await ListAsync(loaded.Root, null, path, exclude, maxResults, null, scope, capped, cancellationToken).ConfigureAwait(false);
+        var listing = await ListTimedAsync(loaded.Root, null, path, exclude, maxResults, null, scope, capped, cancellationToken).ConfigureAwait(false);
 
-        if (stamp is not null && !text.StartsWith("ERROR", StringComparison.Ordinal))
-            listings.Remember(key, stamp, text, now);
+        if (stamp is not null && !listing.Text.StartsWith("ERROR", StringComparison.Ordinal))
+            listings.Remember(key, stamp, listing.Text, started);
 
-        return text;
+        return (listing.Timing with { Stamp = stamped }).Appended(listing.Text, listings.SlowAfter);
     }
 
     private static async Task<string?> GitStampAsync(LoadedWorkspace loaded, CancellationToken cancellationToken)

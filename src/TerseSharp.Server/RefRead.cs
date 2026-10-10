@@ -17,7 +17,7 @@ internal static class RefRead
         var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
 
         if (!shown.IsOk)
-            return shown.Error!.Render();
+            return Failed(shown.Error!, relative, reference);
 
         var label = relative + "@" + reference;
         var text = shown.Value!;
@@ -44,7 +44,7 @@ internal static class RefRead
         var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
 
         if (!shown.IsOk)
-            return shown.Error!.Render();
+            return Failed(shown.Error!, relative, reference);
 
         var outline = NavigationTools.Unwrap(OutlineService.FromText(
             relative + "@" + reference,
@@ -62,6 +62,14 @@ internal static class RefRead
     private static string Historical(string reference) => string.Create(
         CultureInfo.InvariantCulture,
         $"at {reference} - the ids above address that revision's text, not the loaded solution; read a body with read_text ref={reference}");
+
+    internal static bool IsAbsent(TerseError error) =>
+            error.Code == TerseErrorCode.InvalidArgument
+            && error.Message.Contains("exists on disk, but not in", StringComparison.Ordinal);
+
+    private static string Failed(TerseError error, string relative, string reference) => IsAbsent(error)
+        ? string.Create(CultureInfo.InvariantCulture, $"ABSENT  {relative} at {reference} - the working tree holds it and that revision does not, so it was added after {reference}")
+        : error.Render();
 
     public static TerseError Batched(string parameter) => Errors.Invalid(
         "ref= reads one file at a git ref and cannot be combined with " + parameter,
@@ -108,7 +116,7 @@ internal static class RefRead
         var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
 
         if (!shown.IsOk)
-            return shown.Error!.Render();
+            return Failed(shown.Error!, relative, reference);
 
         var source = await SourceService.FromTextAsync(
             workspace.Root,

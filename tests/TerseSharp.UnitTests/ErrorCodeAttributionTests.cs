@@ -89,4 +89,20 @@ public sealed class ErrorCodeAttributionTests
         Assert.Equal(TerseErrorCode.InvalidArgument, read.Error!.Code);
         Assert.Equal("git exited 128: fatal: bad revision 'nope'", read.Error.Message);
     }
+
+    [Fact]
+    public void RefRead_AFileAddedAfterTheRef_IsRecognisedAsAbsent()
+    {
+        var read = GitRunner.Answer(new ProcessRun(128, "", 5, StandardError: "fatal: path 'notes.md' exists on disk, but not in 'HEAD~3'\n"));
+
+        Assert.True(RefRead.IsAbsent(read.Error!));
+    }
+
+    [Fact]
+    public void RefRead_ABadRevision_IsNotMistakenForAnAbsentFile()
+    {
+        var read = GitRunner.Answer(new ProcessRun(128, "", 5, StandardError: "fatal: bad revision 'nope'\n"));
+
+        Assert.False(RefRead.IsAbsent(read.Error!));
+    }
 }

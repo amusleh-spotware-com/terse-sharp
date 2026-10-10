@@ -970,7 +970,7 @@ context.RejectWrite() is { } rejection
         var shown = await GitRunner.ShowAsync(loaded.Root, reference, relative, cancellationToken).ConfigureAwait(false);
 
         if (!shown.IsOk)
-            return shown.Error!.Render();
+            return Unrestorable(shown.Error!, relative, reference);
 
         if (shown.Value is not { Length: > 0 } && !allowEmpty)
         {
@@ -982,6 +982,12 @@ context.RejectWrite() is { } rejection
         return NavigationTools.Unwrap(await FileService.WriteTextAsync(
             loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, overwrite: true, cancellationToken).ConfigureAwait(false));
     }
+
+    private static string Unrestorable(TerseError error, string relative, string reference) => RefRead.IsAbsent(error)
+        ? Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"{relative} is ABSENT at {reference} - it was added after it, so there is no content to restore"),
+            string.Create(CultureInfo.InvariantCulture, $"to return the file to its state at {reference}, delete it: write_text path=\"{relative}\" delete=true, plus force=true for a .cs file")).Render()
+        : error.Render();
 
     private static async Task<string> RowMovedAsync(
         LoadedWorkspace loaded,

@@ -2619,4 +2619,19 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             File.Delete(archive);
         }
     }
+
+    [Fact]
+    public async Task FindFiles_WithARootThatDoesNotExist_NamesItsNearestExistingAncestor()
+    {
+        var missing = Path.Combine(Path.GetTempPath(), "terse-no-such-directory-4b7c", "deeper");
+
+        var text = await server.CallAsync("find_files", new()
+        {
+            ["glob"] = "*",
+            ["root"] = missing,
+        });
+
+        Assert.StartsWith("ERROR DocumentNotFound: directory '" + missing + "' does not exist - the nearest existing ancestor is '" + Path.TrimEndingDirectorySeparator(Path.GetTempPath()) + "'", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("is not a document in the loaded workspace", text, StringComparison.Ordinal);
+    }
 }

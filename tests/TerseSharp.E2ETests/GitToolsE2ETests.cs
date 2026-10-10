@@ -766,6 +766,66 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("names nothing on disk", text, StringComparison.Ordinal);
         Assert.DoesNotContain("names nothing on disk", magic, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_AtARefThatPredatesTheFile_AnswersAbsentRatherThanBlamingTheRef()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            CommittedUnicodeProbeAsync);
+        await File.WriteAllTextAsync(Path.Combine(solution.Root, "added-later.md"), "new\n", TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("read_text", new()
+        {
+            ["path"] = "added-later.md",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.StartsWith("ABSENT  added-later.md at HEAD - the working tree holds it and that revision does not", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("baseRef names a commit", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_AtARefThatPredatesTheFile_AnswersAbsent()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            CommittedUnicodeProbeAsync);
+        await File.WriteAllTextAsync(Path.Combine(solution.Root, "Later.cs"), "namespace Later;\n\npublic sealed class Added;\n", TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("get_file_outline", new()
+        {
+            ["path"] = "Later.cs",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.StartsWith("ABSENT  Later.cs at HEAD - ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Added", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_RestoringFromARefThatPredatesTheFile_NamesDeleteAsTheRestoreAndWritesNothing()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            CommittedUnicodeProbeAsync);
+        var added = Path.Combine(solution.Root, "added-later.md");
+        await File.WriteAllTextAsync(added, "new\n", TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("write_text", new()
+        {
+            ["path"] = "added-later.md",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument: added-later.md is ABSENT at HEAD - it was added after it", text, StringComparison.Ordinal);
+        Assert.Contains("write_text path=\"added-later.md\" delete=true", text, StringComparison.Ordinal);
+        Assert.Equal("new\n", await File.ReadAllTextAsync(added, TestContext.Current.CancellationToken));
+    }
 }
 
 internal static class DiffSymbolProbe

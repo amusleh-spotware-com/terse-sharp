@@ -9,6 +9,12 @@ public sealed class ListingMemo
     private readonly Lock gate = new();
     private readonly Dictionary<string, Entry> listings = new(MaxRemembered, StringComparer.Ordinal);
 
+    public TimeSpan SlowAfter { get; init; } = Configured(Environment.GetEnvironmentVariable("TERSE_LISTING_TIMING_MS"));
+
+    private static TimeSpan Configured(string? milliseconds) => long.TryParse(milliseconds, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+        ? TimeSpan.FromMilliseconds(parsed)
+        : TimeSpan.FromSeconds(10);
+
     private readonly record struct Entry(string Stamp, string Response, long Timestamp);
 
     public string? Replay(string key, string stamp, long timestamp)

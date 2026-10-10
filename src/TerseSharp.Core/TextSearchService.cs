@@ -82,7 +82,7 @@ public static class TextSearchService
         var full = Path.GetFullPath(root);
 
         if (!Directory.Exists(full))
-            return Result.Fail<List<WorkspacePath>>(Errors.DocumentNotFound(root));
+            return Result.Fail<List<WorkspacePath>>(MissingDirectory.Refused(root));
 
         var matcher = FileGlob.Compile(DirectoryGlob(full, glob));
         var matched = new List<WorkspacePath>(1024);
