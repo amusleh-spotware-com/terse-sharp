@@ -2364,4 +2364,101 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", agreeing, StringComparison.Ordinal);
         Assert.Contains("src/Fixture.Trading/OrderService.cs", agreeing, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task EditText_WithForceOnACompiledFile_RollsBackAnEditThatIntroducesACompileError()
+    {
+        const string Probe = "src/Fixture.Trading/GateProbe.cs";
+
+        var written = await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class GateProbe\n{\n    public int Value => Seed();\n\n    private static int Seed() => 7;\n}\n",
+        });
+
+        try
+        {
+            Assert.DoesNotContain("ERROR", written, StringComparison.Ordinal);
+
+            var previewed = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["force"] = true, ["dryRun"] = true, ["oldText"] = "=> Seed();", ["newText"] = "=> Missing();" });
+
+            Assert.Contains("errors=", previewed, StringComparison.Ordinal);
+            Assert.Contains("CS0103", previewed, StringComparison.Ordinal);
+
+            var refused = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["force"] = true, ["oldText"] = "=> Seed();", ["newText"] = "=> Missing();" });
+
+            Assert.Contains("CompileRegression", refused, StringComparison.Ordinal);
+            Assert.Contains("CS0103", refused, StringComparison.Ordinal);
+            Assert.Contains("=> Seed();", await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true }), StringComparison.Ordinal);
+
+            var gated = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["force"] = true, ["oldText"] = "=> 7;", ["newText"] = "=> 8;" });
+
+            Assert.DoesNotContain("ERROR", gated, StringComparison.Ordinal);
+            Assert.Contains("GateProbe.cs  changedLines=1", gated, StringComparison.Ordinal);
+
+            var raw = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["force"] = true, ["allowErrors"] = true, ["oldText"] = "=> Seed();", ["newText"] = "=> Missing();" });
+
+            Assert.DoesNotContain("ERROR", raw, StringComparison.Ordinal);
+            Assert.Contains("=> Missing();", await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true }), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithABatchAcrossTwoCompiledFiles_GatesItAsOneChange()
+    {
+        const string SeedFile = "src/Fixture.Trading/GateProbeSeed.cs";
+        const string CallerFile = "src/Fixture.Trading/GateProbeCaller.cs";
+        const string NotesFile = "gate-probe-notes.md";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["files"] = new object[]
+            {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = SeedFile, ["content"] = "namespace Fixture.Trading;\n\npublic static class GateProbeSeed\n{\n    public static int Seed() => 7;\n}\n" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = CallerFile, ["content"] = "namespace Fixture.Trading;\n\npublic static class GateProbeCaller\n{\n    public static int Value() => GateProbeSeed.Seed();\n}\n" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = NotesFile, ["content"] = "# Notes\n\nmarker\n" },
+            },
+        });
+
+        try
+        {
+            var alone = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = NotesFile, ["oldText"] = "marker", ["newText"] = "MARKER" },
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = SeedFile, ["oldText"] = "int Seed()", ["newText"] = "int Sow()", ["force"] = true },
+                },
+            });
+
+            Assert.Contains("CompileRegression", alone, StringComparison.Ordinal);
+            Assert.Contains("marker", await server.CallAsync("read_text", new() { ["path"] = NotesFile, ["verbose"] = true }), StringComparison.Ordinal);
+
+            var together = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = SeedFile, ["oldText"] = "int Seed()", ["newText"] = "int Sow()", ["force"] = true },
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = CallerFile, ["oldText"] = "GateProbeSeed.Seed()", ["newText"] = "GateProbeSeed.Sow()", ["force"] = true },
+                },
+            });
+
+            Assert.DoesNotContain("ERROR", together, StringComparison.Ordinal);
+            Assert.Contains("GateProbeSeed.cs  changedLines=1", together, StringComparison.Ordinal);
+            Assert.Contains("GateProbeCaller.cs  changedLines=1", together, StringComparison.Ordinal);
+            Assert.Contains("GateProbeSeed.Sow()", await server.CallAsync("read_text", new() { ["path"] = CallerFile, ["verbose"] = true }), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = CallerFile, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = SeedFile, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = NotesFile, ["delete"] = true });
+        }
+    }
 }

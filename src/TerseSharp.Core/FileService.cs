@@ -146,6 +146,13 @@ public static class FileService
         IReadOnlyList<string> notes,
         CancellationToken cancellationToken)
     {
+        var pending = new List<PendingWrite>(1);
+
+        Gateable(Pending(workspace, path, full, before, after), pending);
+
+        if (await CompileGatedAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false) is { } gated)
+            return Annotated(gated, notes, before, after, request.Context);
+
         var inside = workspace.Contains(full);
 
         if (!request.DryRun)
@@ -427,7 +434,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0, int CellChars = 0, bool Stamp = false, long Ticks = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false, bool AllowErrors = false);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters, IReadOnlyList<LineSpan>? Spans = null)
     {
@@ -762,7 +769,7 @@ public static class FileService
         return response.ToString();
     }
 
-    public static async Task<Result<string>> EditTextBatchAsync(
+    private static async Task<Result<BatchEdit>> RewrittenAsync(
         LoadedWorkspace workspace,
         string path,
         IReadOnlyList<TextEdit> edits,
@@ -772,36 +779,13 @@ public static class FileService
         var opened = await OpenedAsync(workspace, path, request.Force, cancellationToken).ConfigureAwait(false);
 
         if (!opened.IsOk)
-            return Result.Fail<string>(opened.Error!);
+            return Result.Fail<BatchEdit>(opened.Error!);
 
         var (full, before) = opened.Value;
-        var inside = workspace.Contains(full);
-        var failed = new string?[edits.Count];
-        List<string> notes = inside ? [] : ["outside-workspace  " + full];
-        var after = before;
-        var applied = 0;
+        List<string> notes = workspace.Contains(full) ? [] : ["outside-workspace  " + full];
+        var (after, failed, applied) = Rewritten(before, edits, request, notes);
 
-        foreach (var index in Order(before, edits))
-        {
-            var rewritten = edits[index].NewText is null
-                ? Result.Fail<string>(Errors.Blank("newText"))
-                : Rewrite(after, Requested(edits[index], request), notes);
-
-            if (rewritten.IsOk)
-            {
-                after = rewritten.Value!;
-                applied++;
-            }
-            else
-            {
-                failed[index] = Failed(index + 1, rewritten.Error!);
-            }
-        }
-
-        if (applied > 0 && !request.DryRun)
-            await StoredAsync(workspace, full, after, inside, cancellationToken).ConfigureAwait(false);
-
-        return Result.Ok(BatchResponse(path, before, after, [.. failed.OfType<string>()], notes, applied, edits.Count, request));
+        return Result.Ok(new BatchEdit(Pending(workspace, path, full, before, after), new BatchTally(failed, notes, applied, edits.Count), request));
     }
 
     private static int ReachableLines(LineSelection selection) =>
@@ -813,20 +797,24 @@ public static class FileService
         EditRequest request,
         CancellationToken cancellationToken)
     {
-        var applied = new List<string>(groups.Count);
-        var refused = new List<string>();
-        var failures = new List<string>();
+        var rewrites = new List<(string Path, Result<BatchEdit> Rewrite)>(groups.Count);
+        var pending = new List<PendingWrite>(groups.Count);
 
         foreach (var group in groups)
         {
-            var answer = await EditTextBatchAsync(workspace, group.Path, group.Edits, Forced(request, group.Edits), cancellationToken).ConfigureAwait(false);
+            var rewrite = await RewrittenAsync(workspace, group.Path, group.Edits, Forced(request, group.Edits), cancellationToken).ConfigureAwait(false);
 
-            Sort(answer, group.Path, applied, refused, failures);
+            if (rewrite is { IsOk: true, Value: var edit })
+                Gateable(edit.Write, pending);
+
+            rewrites.Add((group.Path, rewrite));
         }
 
-        return Result.Ok(applied.Count is 0
-            ? string.Join('\n', failures)
-            : string.Join('\n', applied.Concat(refused)));
+        var gated = await CompileGatedAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false);
+
+        return gated is { IsOk: false }
+            ? gated.Value
+            : Result.Ok(await AnsweredAsync(workspace, rewrites, gated is null ? [] : pending, gated, cancellationToken).ConfigureAwait(false));
     }
 
     public readonly record struct FileWrite(string Path, string Content, bool Force = false);
@@ -2267,4 +2255,103 @@ public static class FileService
     }
 
     private const int MaxReplaceAll = 500;
+
+    private readonly record struct BatchEdit(PendingWrite Write, BatchTally Tally, EditRequest Request);
+
+    private readonly record struct BatchTally(List<string> Failed, List<string> Notes, int Applied, int Total);
+
+    private static (string After, List<string> Failed, int Applied) Rewritten(string before, IReadOnlyList<TextEdit> edits, EditRequest request, List<string> notes)
+    {
+        var failed = new string?[edits.Count];
+        var after = before;
+        var applied = 0;
+
+        foreach (var index in Order(before, edits))
+        {
+            var rewritten = edits[index].NewText is null
+                ? Result.Fail<string>(Errors.Blank("newText"))
+                : Rewrite(after, Requested(edits[index], request), notes);
+
+            if (rewritten.IsOk)
+            {
+                after = rewritten.Value!;
+                applied++;
+            }
+            else
+            {
+                failed[index] = Failed(index + 1, rewritten.Error!);
+            }
+        }
+
+        return (after, [.. failed.OfType<string>()], applied);
+    }
+
+    private static void Gateable(PendingWrite candidate, List<PendingWrite> pending)
+    {
+        if (candidate.Document is not null && !string.Equals(candidate.Before, candidate.After, StringComparison.Ordinal))
+            pending.Add(candidate);
+    }
+
+    private static async Task<Result<string>?> CompileGatedAsync(LoadedWorkspace workspace, List<PendingWrite> pending, EditRequest request, CancellationToken cancellationToken) =>
+        request.AllowErrors || pending.Count is 0
+            ? null
+            : await GateManyAsync(workspace, pending, new EditOptions("edit_text", request.DryRun, false, request.Verbose, AllowPolicy: true), cancellationToken).ConfigureAwait(false);
+
+    private static Result<string> Annotated(Result<string> gated, IReadOnlyList<string> notes, string before, string after, int context)
+    {
+        if (!gated.IsOk || (notes.Count is 0 && context is 0))
+            return gated;
+
+        List<string> lines = [gated.Value!, .. notes];
+        var window = context is 0 ? string.Empty : UnifiedDiff.Around(before, after, Math.Clamp(context, 0, MaxEditContext), MaxContextWindow);
+
+        if (window.Length > 0)
+            lines.Add(window);
+
+        return Result.Ok(string.Join('\n', lines));
+    }
+
+    private static async Task<Result<string>> StoredBatchAsync(
+        LoadedWorkspace workspace,
+        Result<BatchEdit> rewrite,
+        List<PendingWrite> gatedWrites,
+        CancellationToken cancellationToken)
+    {
+        if (!rewrite.IsOk)
+            return Result.Fail<string>(rewrite.Error!);
+
+        var (write, tally, request) = rewrite.Value;
+
+        if (gatedWrites.Exists(entry => string.Equals(entry.Full, write.Full, StringComparison.Ordinal)))
+            return Result.Ok(string.Join('\n', tally.Failed.Concat(tally.Notes)));
+
+        if (tally.Applied > 0 && !request.DryRun)
+            await StoredAsync(workspace, write.Full, write.After, workspace.Contains(write.Full), cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(BatchResponse(write.Path, write.Before, write.After, tally.Failed, tally.Notes, tally.Applied, tally.Total, request));
+    }
+
+    private static async Task<string> AnsweredAsync(
+        LoadedWorkspace workspace,
+        List<(string Path, Result<BatchEdit> Rewrite)> rewrites,
+        List<PendingWrite> gatedWrites,
+        Result<string>? gated,
+        CancellationToken cancellationToken)
+    {
+        var applied = new List<string>(rewrites.Count + 1);
+        var refused = new List<string>();
+        var failures = new List<string>();
+
+        if (gated is { } verdict)
+            applied.Add(verdict.Value!);
+
+        foreach (var (path, rewrite) in rewrites)
+            Sort(await StoredBatchAsync(workspace, rewrite, gatedWrites, cancellationToken).ConfigureAwait(false), path, applied, refused, failures);
+
+        applied.RemoveAll(line => line.Length is 0);
+
+        return applied.Count is 0
+            ? string.Join('\n', failures)
+            : string.Join('\n', applied.Concat(refused));
+    }
 }

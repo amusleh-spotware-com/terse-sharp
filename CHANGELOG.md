@@ -31,6 +31,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Analyze_WithAPrefixId_KeepsTheFindingsItNamesAndDropsEveryOther`,
   `EditText_WhenTheSnippetIsAbsent_RefusesAndSaysHowManyItMatched` and
   `EditText_ForAnAnchorWhoseLinesDriftToDifferentDepths_SaysNoOneReindentationFits`.
+- **`edit_text force=true` on a compiled `.cs` file runs through the compile gate (I740).** It was the second most
+  common C# edit path - 2 654 of 6 759 C#-source edits (39%) over 30 days - and ungated: builds preceded only by such
+  edits came back red with a `CS` error 8.7% of the time (17/196), against 2.3% (3/130) after gated edits. The text
+  edit is applied exactly as before - any snippet, an attribute, a using block - and then staged through `EditGate`:
+  a new compile error rolls it back with `ERROR CompileRegression`, a `dryRun` prints `errors=N (+D) warnings=N (+D)`,
+  and an `edits=` batch touching several `.cs` files is gated as ONE change, so a rename and its caller land
+  together; a regression in a batch writes none of its files, markdown entries included. Response-format change: a
+  gated success names the workspace-relative path where it named the bare file. A `.cs` file no project compiles,
+  and one outside the workspace, stay a plain text write; the new optional `allowErrors=true` restores the raw
+  write. Covered by `EditText_WithForceOnACompiledFile_RollsBackAnEditThatIntroducesACompileError` and
+  `EditText_WithABatchAcrossTwoCompiledFiles_GatesItAsOneChange`.
 ### Fixed
 
 - **Every remaining alias pair refuses two different values instead of silently keeping the first (I731).**

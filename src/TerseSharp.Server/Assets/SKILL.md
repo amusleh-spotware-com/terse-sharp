@@ -74,7 +74,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Files** | `Grep -C3` / a search then a read | `search_text(query, context: 3)` |
 | **Files** | a text hit, then "which declaration is that line in?" | `search_text(query, containers: true)` / `search_regex(query, containers: true)` — each hit becomes an id `get_symbol_source` takes |
 | **Files** | `grep -w` | `search_text(query, word: true)` — `search_regex` answers it with `\b` |
-| **Edits** | change a declaration's **attributes** — a tool `[Description]`, an `[Obsolete]` — without re-sending it | `edit_text(path, force: true, oldText: "<short unique fragment>")` — NOT compile-gated, so `analyze` the file after |
+| **Edits** | change a declaration's **attributes** — a tool `[Description]`, an `[Obsolete]` — without re-sending it | `edit_text(path, force: true, oldText: "<short unique fragment>")` — compile-gated; `allowErrors: true` skips it |
 | **Files** | `grep -o` | `search_regex(query, matchesOnly: true)` — compose with `unique: true`; `search_text` refuses it |
 | **Files** | `grep -c` / "is X in these files at all?" | `search_text(query, countOnly: true)` |
 | **Files** | `grep -r` in a log folder outside the repo | `search_text(query, root: "C:/logs")` |

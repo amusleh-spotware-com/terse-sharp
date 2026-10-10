@@ -305,7 +305,7 @@ internal static class ToolCensus
         new("cleanup", "the code-fix pass is one of the policy's own fixers and constructs its EditOptions with AllowPolicy: true"),
         new("gate", "the analyze-format-cleanup composite runs those same exempt fixers and authors no declaration of its own"),
         new("clean", "deletes bin and obj; it never edits a document, so no EditGate call and no policy evaluation exists to bypass"),
-        new("edit_text", "writes the file directly and never reaches EditGate.ApplyAsync, so the policy does not evaluate it; write_text force=true is the gated path"),
+        new("edit_text", "a forced .cs edit is compile-gated through EditGate.ApplyAsync with AllowPolicy: true because the tool declares no allowPolicy of its own; write_text force=true is the policy-gated path"),
         new("xaml_set_property", "XamlEditService writes markup through its own path, not EditGate.ApplyAsync"),
         new("xaml_add_element", "XamlEditService writes markup through its own path, not EditGate.ApplyAsync"),
         new("xaml_remove_element", "XamlEditService writes markup through its own path, not EditGate.ApplyAsync"),

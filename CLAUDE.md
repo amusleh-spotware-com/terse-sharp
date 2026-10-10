@@ -820,8 +820,8 @@ Each burned real tokens in a past session in this repo. They are the fast path, 
   `EditGate`; the shell rewrite does not, and it is the precise fallback this repo exists to remove.
 - **A `[Description]` edit is an `edit_text force=true`, not a `replace_symbol`.** Re-sending a whole
   declaration to change two lines of a tool description cost ~1 175 tokens on `read_text`; a short
-  unique anchor inside the attribute costs ~30. `edit_text` is not compile-gated, so `analyze` the
-  file after it - that is the trade, and it is cheaper than the re-send.
+  unique anchor inside the attribute costs ~30. Since I740 a forced `edit_text` on a compiled `.cs` file
+  is compile-gated like `replace_symbol`, so the anchor is the whole price; `allowErrors=true` is the raw path.
 - **More than one workspace is usually loadable here, so pass `workspace:` on the first call.**
   `.claude/worktrees/agent-*` holds whole copies of this tree, and a task that loads
   `fixtures/FixtureSolution` alongside the solution makes every un-hinted call ambiguous.

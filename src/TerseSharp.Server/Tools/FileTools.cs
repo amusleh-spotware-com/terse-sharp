@@ -215,14 +215,15 @@ bool verbose) =>
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null, bool Overwrite = false);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. With toPath=, section= MOVES the section into another markdown file, row=\"I286\" moves ONE table row, and rows= moves up to 25. edits=[{oldText,newText}, ...] applies several edits in one call. Replaces one call per edit and, with rows=, one per row: an entry may carry its own path to edit ANOTHER file, and one whose anchor fails is reported on its own line while the rest land. Line endings are normalized first, so a CRLF file accepts an LF oldText. A match that is not unique is refused naming the closest lines; occurrence=N picks the Nth and replaceAll=true replaces EVERY one in a single pass - up to 500 - so an anchor that deliberately repeats costs one call instead of N. On a .cs file force=true applies it as a plain text edit - any snippet, an attribute or a using block as much as a statement inside a body - and it is NOT compile-gated, so analyze after.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. With toPath=, section= MOVES the section into another markdown file, row=\"I286\" moves ONE table row, and rows= moves up to 25. edits=[{oldText,newText}, ...] applies several edits in one call. Replaces one call per edit and, with rows=, one per row: an entry may carry its own path to edit ANOTHER file, and one whose anchor fails is reported on its own line while the rest land. Line endings are normalized first, so a CRLF file accepts an LF oldText. A match that is not unique is refused naming the closest lines; occurrence=N picks the Nth and replaceAll=true replaces EVERY one in a single pass - up to 500 - so an anchor that deliberately repeats costs one call instead of N. On a .cs file force=true applies it as a plain text edit - any snippet, an attribute or a using block as much as a statement inside a body - and it is compile-gated like replace_symbol: rolled back on a new compile error unless allowErrors=true, and edits= across several .cs files is gated as ONE change.")]
     public Task<string> EditText(
     [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry carrying no path of its own.")] string? path = null,
     [Description("Replacement text. With section=, the whole new section including its heading, unless place= writes inside it. With row=, the row as it should read in the target.")] string? newText = null,
         [Description("Exact text to replace; must occur exactly once unless occurrence= picks one.")] string? oldText = null,
         [Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed. With place=, written inside; with toPath=, moved there.")] string? section = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Allow editing a .cs file, bypassing the compile-gated symbol tools.")] bool force = false,
+        [Description("Allow editing a .cs file as text. A file a project compiles is still compile-gated; allowErrors=true writes it raw.")] bool force = false,
+        [Description("With force=true on a .cs file, apply the edit even if it introduces compile errors, as a plain text write that skips the compile gate. Default false.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("1-based index of the match to replace when it repeats - the oldText match, or beside section= that heading. Default 0 requires one.")] int occurrence = 0,
@@ -254,7 +255,7 @@ bool verbose) =>
             loaded => Raced(loaded, targets, ifUnchangedSince) ?? EditedAsync(
                 loaded,
                 path ?? target,
-                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context, replaceAll),
+                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context, replaceAll, allowErrors),
                 newText,
                 edits,
                 rows,
