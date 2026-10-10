@@ -21,6 +21,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `glob`, `name`, `globs`, `root` or `depth` is still refused, and its remedy now names `depth=1`. Covered by
   `FindFiles_WithOnlyRootOrOnlyDepth_ListsEveryFileInsteadOfAskingForAGlob` and
   `FindFiles_WithNoGlobNameRootOrDepth_IsRefusedNamingTheShapeListing`.
+- **`edit_text` splits a re-indented anchor once per search instead of once per file line (I737).** Matches are
+  unchanged. Covered by `Find_ForTheSecondOccurrenceOfADedentedAnchor_AnswersTheSecondRegion`,
+  `Find_ForAnAnchorEndingWithANewline_ConsumesTheFilesLineBreak`,
+  `Find_ForADedentedAnchorStartingMidLine_StartsAtTheColumnAndFlagsMidLine`,
+  `Find_ForADedentedAnchorEndingMidLine_MatchesThroughTheLinePrefixAtOneOffset` and
+  `Find_ForADedentedAnchorThatOccursTwice_ReportsBothOccurrences`.
+- **The `analyze` prefix filter and the reworded `edit_text` no-match answer are pinned by tests (I738).** Covered by
+  `Analyze_WithAPrefixId_KeepsTheFindingsItNamesAndDropsEveryOther`,
+  `EditText_WhenTheSnippetIsAbsent_RefusesAndSaysHowManyItMatched` and
+  `EditText_ForAnAnchorWhoseLinesDriftToDifferentDepths_SaysNoOneReindentationFits`.
 ### Fixed
 
 - **Every remaining alias pair refuses two different values instead of silently keeping the first (I731).**

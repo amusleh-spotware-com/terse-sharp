@@ -1114,4 +1114,16 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.DoesNotContain("outside ids=", named, StringComparison.Ordinal);
         Assert.DoesNotContain("outside ids=", unfiltered, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Analyze_WithAPrefixId_KeepsTheFindingsItNamesAndDropsEveryOther()
+    {
+        var analyzers = await CallAsync("analyze", new() { ["path"] = "src/Fixture.Broken/Calculator.cs", ["ids"] = "CA*", ["includeDeadCode"] = false });
+        var compiler = await CallAsync("analyze", new() { ["path"] = "src/Fixture.Broken/Calculator.cs", ["ids"] = "CS*", ["includeDeadCode"] = false });
+
+        Assert.Contains("CA1822", analyzers, StringComparison.Ordinal);
+        Assert.DoesNotContain("CS0029", analyzers, StringComparison.Ordinal);
+        Assert.Contains("CS0029", compiler, StringComparison.Ordinal);
+        Assert.DoesNotContain("CA1822", compiler, StringComparison.Ordinal);
+    }
 }

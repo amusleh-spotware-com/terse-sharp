@@ -217,13 +217,23 @@ public static class SnippetSearch
 
     private static SnippetMatch LocateReindented(ReadOnlySpan<char> text, ReadOnlySpan<char> value, int occurrence)
     {
+        var trailing = value.EndsWith("\n", StringComparison.Ordinal);
+        var body = trailing ? value[..^1] : value;
+        var (found, occurrences) = NthAnchor(text, body, LastLine(body), trailing, occurrence);
+        var indent = found.IndentStart >= 0 ? text.Slice(found.IndentStart, found.IndentLength).ToString() : null;
+
+        return new SnippetMatch(found.Start, found.End >= 0 ? found.End - found.Start : value.Length, occurrences, false) { Indent = indent, MidLine = found.MidLine };
+    }
+
+    private static (AnchorRegion Found, int Occurrences) NthAnchor(ReadOnlySpan<char> text, ReadOnlySpan<char> body, int last, bool trailing, int occurrence)
+    {
         var found = AnchorRegion.None;
         var occurrences = 0;
         var start = 0;
 
         while (start <= text.Length)
         {
-            if (AnchorAt(text, start, value) is { End: >= 0 } region && ++occurrences == occurrence)
+            if (AnchorAt(text, start, body, last, trailing) is { End: >= 0 } region && ++occurrences == occurrence)
                 found = region;
 
             if (text[start..].IndexOf('\n') is var offset and >= 0)
@@ -232,9 +242,7 @@ public static class SnippetSearch
                 break;
         }
 
-        var indent = found.IndentStart >= 0 ? text.Slice(found.IndentStart, found.IndentLength).ToString() : null;
-
-        return new SnippetMatch(found.Start, found.End >= 0 ? found.End - found.Start : value.Length, occurrences, false) { Indent = indent, MidLine = found.MidLine };
+        return (found, occurrences);
     }
 
     private static SnippetMatch Reindented(string haystack, string needle, int occurrence)
@@ -344,11 +352,8 @@ public static class SnippetSearch
         return region;
     }
 
-    private static AnchorRegion AnchorAt(ReadOnlySpan<char> text, int start, ReadOnlySpan<char> value)
+    private static AnchorRegion AnchorAt(ReadOnlySpan<char> text, int start, ReadOnlySpan<char> body, int last, bool trailing)
     {
-        var trailing = value.EndsWith("\n", StringComparison.Ordinal);
-        var body = trailing ? value[..^1] : value;
-        var last = LastLine(body);
         var tail = trailing || last is 0 ? -1 : last;
         var region = Walked(text, start, body, tail, midLineHead: false);
 

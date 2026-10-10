@@ -595,4 +595,28 @@ public sealed class FileServiceTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task EditText_ForAnAnchorWhoseLinesDriftToDifferentDepths_SaysNoOneReindentationFits()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        using var lease = registry.Resolve(null, null).Value!;
+        var name = "terse-drift-" + Guid.NewGuid().ToString("N") + ".txt";
+        var path = Path.Combine(lease.Workspace.Root, name);
+        await File.WriteAllTextAsync(path, "    int M() => Call(a,\n        b,\n      c);\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var result = await FileService.EditTextAsync(lease.Workspace, name, new FileService.EditRequest("Call(a,\n    b,\n    c);", "Call(x,\n    y,\n    z);", null, false, false, false), TestContext.Current.CancellationToken);
+
+            Assert.False(result.IsOk);
+            Assert.Contains("matched 0 times", result.Error!.Message, StringComparison.Ordinal);
+            Assert.Contains("no one re-indentation offset fits every line", result.Error.Remedy, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

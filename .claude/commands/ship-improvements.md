@@ -185,21 +185,30 @@ Per plan, in order:
    test asserts (a new `CA1822` in the fixture widened `gate` past its budget once).
 4. `analyze` the touched files at `severity=info`. Fix what this row introduced. Ignore the
    repo-wide `.terse.json` policy rows it did not author.
-5. **DOCS, same row, all four**: `CHANGELOG.md` under `## [Unreleased]` naming the covering tests
-   verbatim, `src/TerseSharp.Server/Assets/SKILL.md`, `README.md`, `NUGET_README.md`. Size a SKILL.md
+5. **DOCS, same row, all four**: `src/TerseSharp.Server/Assets/SKILL.md`, `README.md`, `NUGET_README.md`
+   here, and the `CHANGELOG.md` bullet under `## [Unreleased]`, naming the covering tests verbatim, in
+   step 6's call - never in a call of its own. Size a SKILL.md
    change in ONE call: `read_text path=src/TerseSharp.Server/Assets/SKILL.md tokens=true lines="1"` ends
    `budget=N used=N left=N` (or `over=N`), the exact number `TheShippedSkill_StaysWithinItsTokenBudget`
    asserts. Never run the test to learn it. A renamed test
    breaks `ChangelogReferenceTests` against the *previous* release's section too — follow the rename
    there as well.
-6. **Move the row out of `## Open`** with `edit_text rows=[…] toPath="IMPROVEMENTS-ARCHIVE.md"`,
-   which moves up to 25 rows in one call. Five open columns collapse to four closed ones.
+6. **Move the row out of `## Open` AND write its CHANGELOG bullet in ONE `edit_text` call** - never
+   two: `edit_text path="IMPROVEMENTS.md" rows=[{row: "I<n>", newText: "<4-cell archive row>"}]
+   toPath="IMPROVEMENTS-ARCHIVE.md" edits=[{path: "CHANGELOG.md", section: "## [Unreleased]", place:
+   "append", newText: "### <Kind>\n\n- **<bullet>** Covered by `<Test>`."}]`. Once `## [Unreleased]`
+   already holds that `### <Kind>` (an earlier row this run wrote it), the entry is `{path:
+   "CHANGELOG.md", section: "### <Kind>", occurrence: 1, place: "append", newText: "- …"}` instead -
+   never before, or occurrence 1 is the previous release's heading. `rows=` takes up to 25 rows, so
+   rows landed together move in ONE call with one `edits=` entry each. Five open columns collapse to
+   four closed ones.
    - a. **shipped** → `Change` is what shipped, `Outcome` names the gate that locks it and the
      **measured** saving. "Improved" without a number is not closure.
    - b. **closed as a measured decision** → `Outcome` carries the evidence, the refutation and the
      reopen condition.
-7. **Commit the row, by path**: `Bash: git commit -m "<type>: <what> (<row id>)"`. No
-   `Co-Authored-By`. This is the checkpoint that makes an interrupted run worth something.
+7. **Commit by path, once per batch**: the rows applied together in one step-2 batch share ONE
+   `Bash: git commit -m "<type>: <what> (<id>, <id>)" -- <paths>`; a row applied alone gets its own.
+   No `Co-Authored-By`. This is the checkpoint that makes an interrupted run worth something.
 
 **Exit criteria of P1:** `read_text IMPROVEMENTS.md section="## Open"` shows no row table; every
 Ledger task is `completed`; every shipped row has a test observed failing first and a commit.

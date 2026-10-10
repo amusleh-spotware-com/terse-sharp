@@ -216,7 +216,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         });
 
         Assert.Contains("ERROR", text, StringComparison.Ordinal);
-        Assert.Contains("matched 0 times", text, StringComparison.Ordinal);
+        Assert.Contains("oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)", text, StringComparison.Ordinal);
     }
 
     [Fact]

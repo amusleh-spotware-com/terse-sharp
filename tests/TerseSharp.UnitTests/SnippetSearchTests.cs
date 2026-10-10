@@ -199,4 +199,15 @@ public sealed class SnippetSearchTests
         Assert.Equal(2, match.Occurrences);
         Assert.False(match.IsUnique);
     }
+
+    [Fact]
+    public void Find_ForTheSecondOccurrenceOfADedentedAnchor_AnswersTheSecondRegion()
+    {
+        var twice = Source + "\n\nclass B\n{\n    public int Value()\n    {\n        return 1;\n    }\n}";
+        var match = SnippetSearch.Find(twice, Dedented, 2);
+
+        Assert.Equal(2, match.Occurrences);
+        Assert.Equal(twice.LastIndexOf("    public int Value()", StringComparison.Ordinal), match.Start);
+        Assert.Equal("    ", match.Indent);
+    }
 }
