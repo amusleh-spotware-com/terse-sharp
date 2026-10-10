@@ -1951,7 +1951,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
 
         try
         {
-            var applied = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Content, ["force"] = true });
+            var applied = await server.WriteAsync(new() { ["path"] = Probe, ["content"] = Content, ["force"] = true });
             var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
 
             Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
