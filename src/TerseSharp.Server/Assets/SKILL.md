@@ -542,8 +542,8 @@ members above that member and `after="Submit"` below it, by short name or docume
 two anchors together, an anchor beside `position=`, an anchor naming two overloads - the refusal
 names each overload's signature, and passing one of those verbatim places it - and any placement
 beside `path=` are refused rather than one being dropped - an indexer, operator, destructor or
-explicit interface implementation cannot be anchored on. The placement is **not** held by a
-`retryWith` token, as `add=` and `rename=` are not.
+explicit interface implementation cannot be anchored on. An `add_member` token holds no
+placement; a `replace_symbol` token holds `rename=`, `addBefore=`, `addAfter=` and `addPosition=`.
 **The default `last` is region-aware**: a trailing `#endregion` lives in the close brace's leading
 trivia, so an append lands above the region the type closes rather than inside it - where a new
 constant used to be filed silently under "Nested types". `replace_symbol add=` shares that default and takes
@@ -1182,7 +1182,7 @@ a `Type.Member` whose member name saturates is resolved through the members of t
 answers `SymbolNotFound` listing its members instead of a saturation count; `OutOfWorkspace` means the path
 escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
 no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
-parameter means the argument names were wrong, and the remedy lists the ones the tool declares - though a sibling's or `Grep`'s spelling (`typeName`, `name`, `code`, `contains`, `-C`, `output_mode`) binds to its canonical parameter; an
+parameter means the argument names were wrong, and the remedy lists the ones the tool declares - though a sibling's, `Grep`'s or `Read`'s spelling (`typeName`, `offset`, `-C`) binds to its canonical parameter; an
 `InvalidArgument` carrying a `JsonException` also names the **array** parameter it could not convert
 and quotes the ~80 characters around the offending byte, so a 9 000-character `declarations=` is
 located without re-sending it - and a declaration that reaches the parser and fails there is answered
