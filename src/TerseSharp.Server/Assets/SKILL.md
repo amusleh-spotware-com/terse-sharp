@@ -62,7 +62,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **What grep cannot reach** | "where is `IFoo` registered?" | `find_registrations(query)` |
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` |
-| **Files** | `ls` a directory, or list an archive, outside the workspace | `find_files(glob, root: "C:/logs")`; `read_text(path: "C:/p/x.nupkg!/a.xml")` |
+| **Files** | `ls` a directory, or list an archive, outside the workspace | `find_files(root: "C:/logs")`; `read_text(path: "C:/p/x.nupkg!/a.xml")` |
 | **Files** | one `find_files` call per glob | `find_files(globs: [...])` |
 | **Files** | `Glob` / `ls` | `find_files(glob)` |
 | **Files** | globbing a whole tree to learn its shape | `find_files(glob, depth: 2)` |

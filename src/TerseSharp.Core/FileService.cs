@@ -582,7 +582,7 @@ public static class FileService
         return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static bool SharingViolation(IOException failure) => (failure.HResult & 0xFFFF) is SharingViolationCode or LockViolationCode;
+    internal static bool SharingViolation(IOException failure) => (failure.HResult & 0xFFFF) is SharingViolationCode or LockViolationCode;
 
     private const string OutsideSuffix = "  " + OutsideMarker;
 

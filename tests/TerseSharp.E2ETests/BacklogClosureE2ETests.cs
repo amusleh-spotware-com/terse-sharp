@@ -2552,4 +2552,71 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             File.Delete(plain);
         }
     }
+
+    [Fact]
+    public async Task ReadText_WithAWorkspaceRelativeArchiveUnderADirectoryWithABang_ReadsThatEntrysText()
+    {
+        const string Folder = "terse-archive-probe!";
+        var packed = await PackedArchiveAsync();
+        var folder = Path.Combine(TerseServerFixture.FixtureRoot, Folder);
+
+        try
+        {
+            Directory.CreateDirectory(folder);
+            File.Copy(packed, Path.Combine(folder, "pkg.nupkg"));
+
+            var text = await server.CallAsync("read_text", new() { ["path"] = Folder + "/pkg.nupkg!/tools/net10.0/any/DotnetToolSettings.xml" });
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("<Command Name=\"terse\" EntryPoint=\"terse.dll\" Runner=\"dotnet\" />", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+            File.Delete(packed);
+        }
+    }
+
+    [Fact]
+    public async Task ReadText_OnAnArchiveHeldWithNoReadSharing_AnswersFileLockedForTheReadAndTheListing()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "only Windows makes FileShare.None a mandatory lock, so only there can a held handle stop a read");
+        var archive = await PackedArchiveAsync();
+
+        try
+        {
+            await using (new FileStream(archive, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                var read = await server.CallAsync("read_text", new() { ["path"] = archive + "!/terse.nuspec" });
+                var listed = await server.CallAsync("find_files", new() { ["root"] = archive });
+
+                Assert.Contains("ERROR FileLocked", read, StringComparison.Ordinal);
+                Assert.Contains("ERROR FileLocked", listed, StringComparison.Ordinal);
+                Assert.DoesNotContain("Internal", read + listed, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            File.Delete(archive);
+        }
+    }
+
+    [Fact]
+    public async Task FindFiles_WithAnArchiveRootAndDepth_RefusesTheFoldInsteadOfIgnoringIt()
+    {
+        var archive = await PackedArchiveAsync();
+
+        try
+        {
+            var text = await server.CallAsync("find_files", new() { ["root"] = archive, ["depth"] = 1 });
+
+            Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+            Assert.Contains("'depth' was passed with an archive root=", text, StringComparison.Ordinal);
+            Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(archive);
+        }
+    }
 }

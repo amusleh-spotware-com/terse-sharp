@@ -7,7 +7,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class FileTools(ToolContext context)
 {
     [McpServerTool(Name = "read_text", ReadOnly = true)]
-    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no line range, lines, ranges or tail - answers its OUTLINE plus a steer, a third of the tokens; verbose=true or any line range returns the text. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N reads a long log; a clipped read names the line to continue from. ref= reads it at a git ref; <absolute x.zip>!/<entry> reads one archive entry.")]
+    [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no line range, lines, ranges or tail - answers its OUTLINE plus a steer, a third of the tokens; verbose=true or any line range returns the text. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N reads a long log; a clipped read names the line to continue from. ref= reads it at a git ref; <x.zip>!/<entry> reads one archive entry.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
                 [Description("Several files answered in one response, at most 10. Combines with path, which is taken first; a blank or 11th entry is refused by name rather than dropped.")] string?[]? paths = null,
@@ -317,13 +317,13 @@ bool verbose) =>
         var matcher = chosen.Value;
 
         if (root is { Length: > 0 } archive && File.Exists(archive))
-            return Archived(archive, matcher, globs, maxResults, stamps, name, tracked, cancellationToken);
+            return Archived(archive, matcher, globs, maxResults, stamps, name, tracked, depth, cancellationToken);
 
-        if (matcher is not { Length: > 0 } && name is not { Length: > 0 } && globs is not { Length: > 0 })
+        if ((matcher, name, globs, root, depth) is (null or "", null or "", null or [], null or "", 0))
         {
             return Task.FromResult(Errors.Invalid(
                 "neither 'glob' nor 'name' was supplied",
-                "pass a glob, spelled glob or pattern or query or path, or 'name' to match a file name substring instead").Render());
+                "pass a glob, spelled glob or pattern or query or path, or 'name' to match a file name substring instead - or depth=1 for the shape of the whole tree").Render());
         }
 
         if (depth < 0)
@@ -714,38 +714,43 @@ context.RejectWrite() is { } rejection
         bool whole,
         string? workspace,
         CancellationToken cancellationToken) =>
-        ArchiveService.Entry(path) is { } entry
-            ? ToolBoundary.RunAsync(async () => NavigationTools.Unwrap(
-                await ArchiveService.ReadAsync(entry, request, cancellationToken).ConfigureAwait(false)))
-            : whole && path.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !Unhoused(path)
-                ? context.WithWorkspaceAsync(
-                    workspace,
-                    path,
-                    async loaded => NavigationTools.Unwrap(
-                        await OutlineService.OrTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false)),
-                    cancellationToken: cancellationToken)
-                : Read(path, request, workspace, cancellationToken);
+            ArchiveService.Entry(path) is { } entry
+                ? ToolBoundary.RunAsync(() => ArchiveTextAsync(entry, request, cancellationToken))
+                : ArchiveService.RelativeEntry(path)
+                    ? RootedAsync(path, request, workspace, cancellationToken)
+                    : whole && path.AsSpan().EndsWith(".cs", StringComparison.OrdinalIgnoreCase) && !Unhoused(path)
+                        ? context.WithWorkspaceAsync(
+                            workspace,
+                            path,
+                            async loaded => NavigationTools.Unwrap(
+                                await OutlineService.OrTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false)),
+                            cancellationToken: cancellationToken)
+                        : Read(path, request, workspace, cancellationToken);
 
     private static Task<string> Archived(
-        string archive,
-        string? matcher,
-        string?[]? globs,
-        int maxResults,
-        bool stamps,
-        string? name,
-        bool tracked,
-        CancellationToken cancellationToken) =>
-        (tracked, globs is { Length: > 0 }) switch
-        {
-            (true, _) => Task.FromResult(Errors.Invalid(
-                "'tracked' was passed with an archive root=, and git tracks no archive entry",
-                "drop tracked=true to list the archive's entries").Render()),
-            (_, true) => Task.FromResult(Errors.Invalid(
-                "'globs' was passed with an archive root=",
-                "pass one glob= to filter the archive's entries, or drop it to list them all").Render()),
-            _ => ToolBoundary.RunAsync(async () => NavigationTools.Unwrap(await ArchiveService.ListAsync(
-                archive, matcher is { Length: > 0 } ? matcher : "**", NavigationTools.Cap(maxResults, 100), stamps, name, maxResults > 0, cancellationToken).ConfigureAwait(false))),
-        };
+            string archive,
+            string? matcher,
+            string?[]? globs,
+            int maxResults,
+            bool stamps,
+            string? name,
+            bool tracked,
+            int depth,
+            CancellationToken cancellationToken) =>
+            (tracked, globs is { Length: > 0 }, depth) switch
+            {
+                (true, _, _) => Task.FromResult(Errors.Invalid(
+                    "'tracked' was passed with an archive root=, and git tracks no archive entry",
+                    "drop tracked=true to list the archive's entries").Render()),
+                (_, true, _) => Task.FromResult(Errors.Invalid(
+                    "'globs' was passed with an archive root=",
+                    "pass one glob= to filter the archive's entries, or drop it to list them all").Render()),
+                (_, _, not 0) => Task.FromResult(Errors.Invalid(
+                    "'depth' was passed with an archive root=, and an archive's entries are listed whole, never folded",
+                    "drop depth= to list the archive's entries, or pass glob=\"tools/**\" to keep one subtree").Render()),
+                _ => ToolBoundary.RunAsync(async () => NavigationTools.Unwrap(await ArchiveService.ListAsync(
+                    archive, matcher is { Length: > 0 } ? matcher : "**", NavigationTools.Cap(maxResults, 100), stamps, name, maxResults > 0, cancellationToken).ConfigureAwait(false))),
+            };
 
     private async Task<string> ReadManyAsync(
     ImmutableArray<string> paths,
@@ -1340,4 +1345,22 @@ context.RejectWrite() is { } rejection
                 string.Create(CultureInfo.InvariantCulture, $"'lines' value '{lines}' is not a line or a line range"),
                 "pass lines=\"42\" for one line or lines=\"40-200\" for a range, 1-based, with the end not before the start"));
     }
+
+    private static async Task<string> ArchiveTextAsync(ArchiveService.ArchiveEntryPath entry, FileService.ReadRequest request, CancellationToken cancellationToken) =>
+            NavigationTools.Unwrap(await ArchiveService.ReadAsync(entry, request, cancellationToken).ConfigureAwait(false));
+
+    private Task<string> RootedAsync(string path, FileService.ReadRequest request, string? workspace, CancellationToken cancellationToken) =>
+            context.WithRootAsync(
+                workspace,
+                root => ArchiveService.Entry(path, root) is { } entry
+                    ? ArchiveTextAsync(entry, request, cancellationToken)
+                    : Read(path, request, workspace, cancellationToken),
+                () => context.WithWorkspaceAsync(
+                    workspace,
+                    path,
+                    loaded => ArchiveService.Entry(path, loaded.Root) is { } entry
+                        ? ArchiveTextAsync(entry, request, cancellationToken)
+                        : UnwrappedAsync(FileService.ReadTextAsync(loaded, path, request, cancellationToken)),
+                    semantic: false,
+                    cancellationToken));
 }

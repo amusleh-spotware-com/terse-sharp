@@ -9,18 +9,15 @@ public static class ArchiveService
 
     public readonly record struct ArchiveEntryPath(string Archive, string Entry);
 
-    public static ArchiveEntryPath? Entry(string path)
+    public static ArchiveEntryPath? Entry(string path, string? root = null)
     {
-        var at = Bang(path);
+        for (var at = Bang(path, 0); at >= 0; at = Bang(path, at + 2))
+        {
+            if (Existing(path[..at], root) is { } archive)
+                return new ArchiveEntryPath(archive, path[(at + 2)..].Replace('\\', '/'));
+        }
 
-        if (at <= 0 || !Path.IsPathFullyQualified(path.AsSpan(0, at)))
-            return null;
-
-        var archive = Path.GetFullPath(path[..at]);
-
-        return File.Exists(archive)
-            ? new ArchiveEntryPath(archive, path[(at + 2)..].Replace('\\', '/'))
-            : null;
+        return null;
     }
 
     public static async Task<Result<string>> ListAsync(
@@ -44,6 +41,10 @@ public static class ArchiveService
         {
             return Result.Fail<string>(NotAnArchive(full));
         }
+        catch (IOException failure) when (FileService.SharingViolation(failure))
+        {
+            return Result.Fail<string>(Errors.FileLocked(full));
+        }
     }
 
     public static async Task<Result<string>> ReadAsync(ArchiveEntryPath target, FileService.ReadRequest request, CancellationToken cancellationToken)
@@ -60,13 +61,19 @@ public static class ArchiveService
         {
             return Result.Fail<string>(NotAnArchive(target.Archive));
         }
+        catch (IOException failure) when (FileService.SharingViolation(failure))
+        {
+            return Result.Fail<string>(Errors.FileLocked(target.Archive));
+        }
     }
 
-    private static int Bang(ReadOnlySpan<char> path)
+    private static int Bang(ReadOnlySpan<char> path, int from)
     {
-        var at = path.IndexOf('!');
+        var forward = path[from..].IndexOf("!/", StringComparison.Ordinal);
+        var backward = path[from..].IndexOf("!\\", StringComparison.Ordinal);
+        var at = forward < 0 || (backward >= 0 && backward < forward) ? backward : forward;
 
-        return at >= 0 && at + 1 < path.Length && (path[at + 1] is '/' or '\\') ? at : -1;
+        return at < 0 ? -1 : from + at;
     }
 
     private static string Listed(ZipArchive archive, string full, string glob, int maxResults, bool stamps, string? name, bool chosen)
@@ -149,4 +156,18 @@ public static class ArchiveService
     private static TerseError Oversized(string label, long length) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"'{label}' is {length} bytes uncompressed, over the {MaxEntryBytes} bytes an archive entry is read up to"),
         "read a smaller entry, or extract this one and read_text the extracted file with tail= or a line range");
+
+    public static bool RelativeEntry(string path) => Bang(path, 0) >= 0 && !Path.IsPathFullyQualified(path);
+
+    private static string? Existing(string prefix, string? root)
+    {
+        var full = (Path.IsPathFullyQualified(prefix), root) switch
+        {
+            (true, _) => Path.GetFullPath(prefix),
+            (false, { Length: > 0 } basePath) when prefix.Length > 0 => Path.GetFullPath(prefix, basePath),
+            _ => null,
+        };
+
+        return full is not null && File.Exists(full) ? full : null;
+    }
 }

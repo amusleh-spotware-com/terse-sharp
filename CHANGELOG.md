@@ -16,6 +16,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   workspace-relative and in file order, at most 5, then `+N more - find_usages lists them all`, on both the
   single-id and `symbolIds=` paths. Covered by `DeleteSymbol_StillReferenced_NamesEachUsageByFileLineAndDeclaration`
   and `DeleteSymbol_WithSymbolIdsWhereOneIsReferencedOnlyInsideAnother_DeletesBothAsOneEdit`.
+- **`find_files` answers `root=` or `depth=` alone instead of asking for a glob (I742).** `find_files root="C:/logs"`
+  lists every file there and `find_files depth=1` answers the shape of the whole workspace. A call with none of
+  `glob`, `name`, `globs`, `root` or `depth` is still refused, and its remedy now names `depth=1`. Covered by
+  `FindFiles_WithOnlyRootOrOnlyDepth_ListsEveryFileInsteadOfAskingForAGlob` and
+  `FindFiles_WithNoGlobNameRootOrDepth_IsRefusedNamingTheShapeListing`.
 ### Fixed
 
 - **Every remaining alias pair refuses two different values instead of silently keeping the first (I731).**
@@ -48,6 +53,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Inspect_ForAnInTreeOperandBesideASinkRedirectOrAnEditScript_StillDeniesItAndNeverRoutesToTheRedirect`,
   `Inspect_ForAnInPlaceSedOfAnInTreeFile_RoutesToTheFileNotTheScript` and
   `Inspect_ForABatchListingASubstitutedDirectory_StripsItAndNeverRoutesToItsRedirect`.
+- **Archive reads resolve the way a path does (I736).** `read_text` takes a workspace-relative archive
+  (`artifacts/nupkg/x.nupkg!/a.xml`), resolved against the workspace root; a `!` inside a directory name no longer
+  splits the path, because each `!/` is tried until its prefix is an existing file. Response-format change: a
+  `.zip`/`.nupkg` held open with no read sharing answers `ERROR FileLocked` from `read_text` and `find_files root=`
+  instead of `ERROR Internal`, and `depth=` beside an archive `root=` is refused instead of silently ignored.
+  Covered by `Entry_ResolvesARelativeArchiveAgainstTheRootAndSkipsABangInADirectoryName`,
+  `ListAsync_OnAnArchiveHeldWithNoReadSharing_AnswersFileLocked`,
+  `ReadText_WithAWorkspaceRelativeArchiveUnderADirectoryWithABang_ReadsThatEntrysText`,
+  `ReadText_OnAnArchiveHeldWithNoReadSharing_AnswersFileLockedForTheReadAndTheListing` and
+  `FindFiles_WithAnArchiveRootAndDepth_RefusesTheFoldInsteadOfIgnoringIt`.
 
 ## [0.75.1] - 2026-10-07
 

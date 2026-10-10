@@ -654,13 +654,42 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task FindFiles_WithNeitherGlobNorName_IsRefusedNamingBoth()
+    public async Task FindFiles_WithNoGlobNameRootOrDepth_IsRefusedNamingTheShapeListing()
     {
         var text = await server.CallAsync("find_files", []);
 
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("neither 'glob' nor 'name' was supplied", text, StringComparison.Ordinal);
         Assert.Contains("'name' to match a file name substring", text, StringComparison.Ordinal);
+        Assert.Contains("depth=1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindFiles_WithOnlyRootOrOnlyDepth_ListsEveryFileInsteadOfAskingForAGlob()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "terse-ls-" + Path.GetRandomFileName());
+        Directory.CreateDirectory(Path.Combine(outside, "nested"));
+        await File.WriteAllTextAsync(Path.Combine(outside, "top.txt"), "a", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(outside, "nested", "one.txt"), "b", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(outside, "nested", "two.txt"), "c", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var listed = await server.CallAsync("find_files", new() { ["root"] = outside });
+            var folded = await server.CallAsync("find_files", new() { ["root"] = outside, ["depth"] = 1 });
+            var shape = await server.CallAsync("find_files", new() { ["depth"] = 1 });
+
+            Assert.StartsWith("3 files", listed, StringComparison.Ordinal);
+            Assert.Contains("top.txt", listed, StringComparison.Ordinal);
+            Assert.Contains("two.txt", listed, StringComparison.Ordinal);
+            Assert.Contains("nested/**  x2 files", folded, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", shape, StringComparison.Ordinal);
+            Assert.Contains("notes.md", shape, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
     }
 
     [Fact]
