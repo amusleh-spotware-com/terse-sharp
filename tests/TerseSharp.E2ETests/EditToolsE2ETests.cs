@@ -1469,12 +1469,12 @@ public sealed class RegionTail
         const string Probe = "src/Fixture.Trading/UsageListProbe.cs";
         var file = Path.Combine("src", "Fixture.Trading", "UsageListProbe.cs");
 
-        await server.CallAsync("write_text", new()
+        Assert.DoesNotContain("ERROR", await server.WriteAsync(new()
         {
             ["path"] = Probe,
             ["content"] = "namespace Fixture.Trading;\n\npublic static class UsageListProbe\n{\n    private static int Helper() => 1;\n    public static int A() => Helper();\n    public static int B() => Helper();\n    public static int C() => Helper();\n    public static int D() => Helper();\n    public static int E() => Helper();\n    public static int F() => Helper();\n    public static int G() => Helper();\n}\n",
             ["force"] = true,
-        });
+        }), StringComparison.Ordinal);
 
         try
         {

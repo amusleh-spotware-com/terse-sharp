@@ -2370,7 +2370,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     {
         const string Probe = "src/Fixture.Trading/GateProbe.cs";
 
-        var written = await server.CallAsync("write_text", new()
+        var written = await server.WriteAsync(new()
         {
             ["path"] = Probe,
             ["force"] = true,
@@ -2415,7 +2415,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         const string CallerFile = "src/Fixture.Trading/GateProbeCaller.cs";
         const string NotesFile = "gate-probe-notes.md";
 
-        await server.CallAsync("write_text", new()
+        Assert.DoesNotContain("ERROR", await server.WriteAsync(new()
         {
             ["force"] = true,
             ["files"] = new object[]
@@ -2424,7 +2424,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
                 new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = CallerFile, ["content"] = "namespace Fixture.Trading;\n\npublic static class GateProbeCaller\n{\n    public static int Value() => GateProbeSeed.Seed();\n}\n" },
                 new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = NotesFile, ["content"] = "# Notes\n\nmarker\n" },
             },
-        });
+        }), StringComparison.Ordinal);
 
         try
         {
@@ -2468,7 +2468,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         const string FirstFile = "src/Fixture.Trading/GateTallyFirst.cs";
         const string SecondFile = "src/Fixture.Trading/GateTallySecond.cs";
 
-        await server.CallAsync("write_text", new()
+        Assert.DoesNotContain("ERROR", await server.WriteAsync(new()
         {
             ["force"] = true,
             ["files"] = new object[]
@@ -2476,7 +2476,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
                 new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = FirstFile, ["content"] = "namespace Fixture.Trading;\n\npublic static class GateTallyFirst\n{\n    public static int One() => 1;\n}\n" },
                 new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = SecondFile, ["content"] = "namespace Fixture.Trading;\n\npublic static class GateTallySecond\n{\n    public static int Two() => 2;\n}\n" },
             },
-        });
+        }), StringComparison.Ordinal);
 
         try
         {
