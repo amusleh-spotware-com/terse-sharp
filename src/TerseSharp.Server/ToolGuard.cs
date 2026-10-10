@@ -1441,19 +1441,29 @@ public static class ToolGuard
     {
         var command = Command(segment);
         var operands = new List<string>(command.Length);
-        var patterns = Patterned(command) && !ScriptFlagged(command) ? 1 : 0;
+        var patterned = Patterned(command);
+        var patterns = patterned && !ScriptFlagged(command) ? 1 : 0;
 
         for (var index = 1; index < command.Length; index++)
-        {
-            var token = command[index];
-
-            if (RedirectOperatorLength(token) is > 0 and var length)
-                index += Redirected(command, index, length, operands);
-            else if (Positional(token) && patterns-- <= 0 && IsPathLike(token))
-                operands.Add(token);
-        }
+            index += Scanned(command, index, patterned, ref patterns, operands);
 
         return operands;
+    }
+
+    private static int Scanned(string[] command, int index, bool patterned, ref int patterns, List<string> operands)
+    {
+        var token = command[index];
+
+        if (RedirectOperatorLength(token) is > 0 and var length)
+            return Redirected(command, index, length, operands);
+
+        if (patterned && IsSeparatedScriptFlag(token))
+            return 1;
+
+        if (Positional(token) && patterns-- <= 0 && IsPathLike(token))
+            operands.Add(token);
+
+        return 0;
     }
 
     private static bool Positional(string token) => !token.StartsWith('-') && !IsCount(token);
@@ -2488,16 +2498,14 @@ public static class ToolGuard
         return false;
     }
 
-    private static bool IsScriptFlag(string token)
+    private static bool IsScriptFlag(string token) => token switch
     {
-        foreach (var flag in ScriptFlags)
-        {
-            if (token.StartsWith(flag, StringComparison.Ordinal))
-                return true;
-        }
+        _ when IsSeparatedScriptFlag(token) => true,
+        ['-', 'e' or 'f', _, ..] => true,
+        _ => token.StartsWith("--regexp=", StringComparison.Ordinal) || token.StartsWith("--expression=", StringComparison.Ordinal) || token.StartsWith("--file=", StringComparison.Ordinal),
+    };
 
-        return false;
-    }
+    private static bool IsSeparatedScriptFlag(string token) => token is "-e" or "-f" or "--regexp" or "--expression" or "--file";
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

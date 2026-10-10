@@ -2021,6 +2021,8 @@ public sealed class ToolGuardTests
     [InlineData("ls \"SCRATCH\" 2>/dev/null", "no-tool ls")]
     [InlineData("grep -n \"a/b\" SCRATCH/notes.log", "no-tool grep")]
     [InlineData("cat SCRATCH/notes.log >SCRATCH/copy.log", "no-tool cat")]
+    [InlineData("sed -i -e \"s/a/b/\" SCRATCH/x.py", "no-tool sed")]
+    [InlineData("grep -e \"a/b\" SCRATCH/notes.log", "no-tool grep")]
     public void Inspect_ForAScriptOrRedirectThatLooksLikeAPathBesideAnOperandOutsideTheTree_AllowsIt(string template, string allowance)
     {
         var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
@@ -2044,6 +2046,7 @@ public sealed class ToolGuardTests
     [InlineData("ls \"$(dirname SCRATCH/a.py)\" 2>/dev/null")]
     [InlineData("grep -eTODO README.md SCRATCH/x.log")]
     [InlineData("sed --expression=s/a/b/ notes/todo.md SCRATCH/x.log")]
+    [InlineData("sed -e s/a/b/ notes/todo.md")]
     public void Inspect_ForAnInTreeOperandBesideASinkRedirectOrAnEditScript_StillDeniesItAndNeverRoutesToTheRedirect(string template)
     {
         var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
