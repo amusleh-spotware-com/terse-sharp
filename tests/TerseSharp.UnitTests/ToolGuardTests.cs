@@ -2017,6 +2017,67 @@ public sealed class ToolGuardTests
     }
 
     [Theory]
+    [InlineData("sed -i \"s/rec\\['lines'\\]/rec['n']/\" SCRATCH/extract.py", "no-tool sed")]
+    [InlineData("ls \"SCRATCH\" 2>/dev/null", "no-tool ls")]
+    [InlineData("grep -n \"a/b\" SCRATCH/notes.log", "no-tool grep")]
+    [InlineData("cat SCRATCH/notes.log >SCRATCH/copy.log", "no-tool cat")]
+    public void Inspect_ForAScriptOrRedirectThatLooksLikeAPathBesideAnOperandOutsideTheTree_AllowsIt(string template, string allowance)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch");
+        var command = template.Replace("SCRATCH", scratch, StringComparison.Ordinal);
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+        Assert.Equal(allowance, verdict.Allowance);
+    }
+
+    [Theory]
+    [InlineData("sed -i s/a/b/ src/TerseSharp.Core/Errors.cs")]
+    [InlineData("ls src 2>/dev/null")]
+    [InlineData("ls 2>/dev/null")]
+    [InlineData("ls 2> /dev/null")]
+    [InlineData("cat README.md")]
+    [InlineData("cat README.md 2>/dev/null")]
+    [InlineData("sed -i s/a/b/ notes/todo.md")]
+    [InlineData("cat SCRATCH/notes.log >notes.md")]
+    [InlineData("ls \"$(dirname SCRATCH/a.py)\" 2>/dev/null")]
+    public void Inspect_ForAnInTreeOperandBesideASinkRedirectOrAnEditScript_StillDeniesItAndNeverRoutesToTheRedirect(string template)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch");
+        var command = template.Replace("SCRATCH", scratch, StringComparison.Ordinal);
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+        Assert.DoesNotContain("/dev/null", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForAnInPlaceSedOfAnInTreeFile_RoutesToTheFileNotTheScript()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "sed -i s/a/b/ notes/todo.md" }, root);
+
+        Assert.True(verdict.Denied, verdict.Reason);
+        Assert.Contains("edit_text path=\"notes/todo.md\"", verdict.Routing, StringComparison.Ordinal);
+        Assert.DoesNotContain("s/a/b/", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForABatchListingASubstitutedDirectory_StripsItAndNeverRoutesToItsRedirect()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch", "a.py");
+        var command = "type rg; ls \"$(dirname " + scratch + ")\" 2>/dev/null";
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal("type rg", verdict.Rewrite);
+        Assert.DoesNotContain("2>/dev/null", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("S=\"SCRATCH\"; wc -l \"$S/release-fail.log\"")]
     [InlineData("S=SCRATCH; wc -l ${S}/release-fail.log && tail -5 \"$S/release-fail.log\"")]
     [InlineData("S=\"SCRATCH\"\nwc -l \"$S/release-fail.log\"")]

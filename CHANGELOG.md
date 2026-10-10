@@ -37,6 +37,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `SearchSymbols_WithACapitalisedTypeKindAndNoSourceMatch_AnswersFromTheReferencedAssemblies`,
   `SearchSymbols_WithKindInterfaceAndOnlyAReferencedClassMatching_ListsNoClass` and
   `SearchSymbols_WithKindInterfaceInAnyCase_StillListsAReferencedInterface`.
+- **The guard no longer takes a `sed`/`grep` script or a `2>/dev/null` for a path in the tree (I741).** A scratch
+  command such as `sed -i "s/a/b/" <temp>/extract.py` or `ls <temp> 2>/dev/null` was denied as "judged inside the
+  .NET tree" and routed to `edit_text path="s/..."` or `find_files glob="2>/dev/null"`. A pattern command's first
+  positional token is now its script, a redirect to a sink or a file descriptor is never an operand, and a redirect
+  to a file is judged by its target. `sed -i` of a `.cs` file, `ls src 2>/dev/null`, `cat README.md`, a write
+  redirect into the tree and a `$(...)` substitution stay denied, and `ls 2> /dev/null` in a .NET tree, which was
+  allowed, is now denied like `ls`. Covered by
+  `Inspect_ForAScriptOrRedirectThatLooksLikeAPathBesideAnOperandOutsideTheTree_AllowsIt`,
+  `Inspect_ForAnInTreeOperandBesideASinkRedirectOrAnEditScript_StillDeniesItAndNeverRoutesToTheRedirect`,
+  `Inspect_ForAnInPlaceSedOfAnInTreeFile_RoutesToTheFileNotTheScript` and
+  `Inspect_ForABatchListingASubstitutedDirectory_StripsItAndNeverRoutesToItsRedirect`.
 
 ## [0.75.1] - 2026-10-07
 

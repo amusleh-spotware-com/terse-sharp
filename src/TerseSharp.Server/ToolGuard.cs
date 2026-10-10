@@ -1344,8 +1344,7 @@ public static class ToolGuard
 
     private static readonly SearchValues<char> Digits = SearchValues.Create("0123456789");
 
-    private static bool IsPathLike(string token) =>
-            token.AsSpan().ContainsAny(PathMarks) || HasExtension(token.AsSpan());
+    private static bool IsPathLike(string token) => PathShaped(token);
 
     private static bool HasExtension(ReadOnlySpan<char> token)
     {
@@ -1442,14 +1441,64 @@ public static class ToolGuard
     {
         var command = Command(segment);
         var operands = new List<string>(command.Length);
+        var patterns = Patterned(command) ? 1 : 0;
 
         for (var index = 1; index < command.Length; index++)
         {
-            if (!command[index].StartsWith('-') && IsPathLike(command[index]))
-                operands.Add(command[index]);
+            var token = command[index];
+
+            if (RedirectOperatorLength(token) is > 0 and var length)
+                index += Redirected(command, index, length, operands);
+            else if (Positional(token) && patterns-- <= 0 && IsPathLike(token))
+                operands.Add(token);
         }
 
         return operands;
+    }
+
+    private static bool Positional(string token) => !token.StartsWith('-') && !IsCount(token);
+
+    private static int Redirected(string[] command, int index, int length, List<string> operands)
+    {
+        var attached = command[index].Length > length;
+        var target = attached ? command[index].AsSpan(length).Trim(Wrappers) : Following(command, index);
+
+        if (Reached(target))
+            operands.Add(target.ToString());
+
+        return attached ? 0 : 1;
+    }
+
+    private static ReadOnlySpan<char> Following(string[] command, int index) =>
+        index + 1 < command.Length ? command[index + 1] : [];
+
+    private static bool Reached(ReadOnlySpan<char> target) =>
+        target is not ([] or ['&', ..]) && PathShaped(target) && !Sunk(target);
+
+    private static bool PathShaped(ReadOnlySpan<char> token) => token.ContainsAny(PathMarks) || HasExtension(token);
+
+    private static bool Sunk(ReadOnlySpan<char> target)
+    {
+        foreach (var sink in Sinks)
+        {
+            if (target.Equals(sink, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool Patterned(string[] command)
+    {
+        var name = command.Length > 0 ? Path.GetFileNameWithoutExtension(command[0].AsSpan()) : [];
+
+        foreach (var pattern in PatternCommands)
+        {
+            if (name.Equals(pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private static bool OutsideTree(string segment, string? cwd)
