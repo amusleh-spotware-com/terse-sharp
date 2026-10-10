@@ -8,6 +8,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Changed
+
+- **`delete_symbol` names the usages that block it (I730).** A refusal used to say only `'observed' still has
+  1 usages`, though the description says it lists them, and one reporter blamed the wrong batch member. The
+  first line is unchanged; under it come one `path:line:col  Type.Member` line per outside usage,
+  workspace-relative and in file order, at most 5, then `+N more - find_usages lists them all`, on both the
+  single-id and `symbolIds=` paths. Covered by `DeleteSymbol_StillReferenced_NamesEachUsageByFileLineAndDeclaration`
+  and `DeleteSymbol_WithSymbolIdsWhereOneIsReferencedOnlyInsideAnother_DeletesBothAsOneEdit`.
+
 ## [0.75.1] - 2026-10-07
 
 ### Fixed

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -113,10 +114,10 @@ public static class SymbolEditService
         EditOptions options,
         CancellationToken cancellationToken)
     {
-        var usages = await UsageCountAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
+        var usages = await UsagesAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
 
-        if (usages > 0 && !force)
-            return Result.Fail<string>(UsageBlocked(symbol, usages));
+        if (usages.Length > 0 && !force)
+            return Result.Fail<string>(await UsageBlockedAsync(workspace.Root, symbol, usages, cancellationToken).ConfigureAwait(false));
 
         if (await RazorAsync(workspace, symbol, RazorMemberEdit.Delete, string.Empty, options, cancellationToken).ConfigureAwait(false) is { } razor)
             return razor;
@@ -216,16 +217,16 @@ public static class SymbolEditService
     {
         foreach (var deletion in deletions)
         {
-            var usages = await OutsideCountAsync(workspace, deletion.Symbol, deletions, cancellationToken).ConfigureAwait(false);
+            var usages = await OutsideUsagesAsync(workspace, deletion.Symbol, deletions, cancellationToken).ConfigureAwait(false);
 
-            if (usages > 0)
-                return UsageBlocked(deletion.Symbol, usages);
+            if (usages.Length > 0)
+                return await UsageBlockedAsync(workspace.Root, deletion.Symbol, usages, cancellationToken).ConfigureAwait(false);
         }
 
         return null;
     }
 
-    private static async Task<int> OutsideCountAsync(
+    private static async Task<Location[]> OutsideUsagesAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
         IReadOnlyList<Deletion> deleted,
@@ -234,8 +235,14 @@ public static class SymbolEditService
         var references = await Microsoft.CodeAnalysis.FindSymbols.SymbolFinder
             .FindReferencesAsync(symbol, workspace.Solution, cancellationToken)
             .ConfigureAwait(false);
+        Location[] outside = [.. references
+            .SelectMany(reference => reference.Locations)
+            .Where(location => !location.IsImplicit && !Inside(location.Location, deleted))
+            .Select(location => location.Location)];
 
-        return references.Sum(reference => reference.Locations.Count(location => !location.IsImplicit && !Inside(location.Location, deleted)));
+        Array.Sort(outside, Positional);
+
+        return outside;
     }
 
     private static bool Inside(Location location, IReadOnlyList<Deletion> deleted)
@@ -247,6 +254,25 @@ public static class SymbolEditService
         }
 
         return false;
+    }
+
+    private const int MaxListedUsages = 5;
+
+    private static int Positional(Location left, Location right)
+    {
+        var byFile = string.CompareOrdinal(left.SourceTree?.FilePath, right.SourceTree?.FilePath);
+
+        return byFile != 0 ? byFile : left.SourceSpan.Start.CompareTo(right.SourceSpan.Start);
+    }
+
+    private static async Task<string> UsageLineAsync(string root, Location usage, CancellationToken cancellationToken)
+    {
+        var syntax = usage.SourceTree is { } tree ? await tree.GetRootAsync(cancellationToken).ConfigureAwait(false) : null;
+        var position = PositionFormat.Describe(root, usage);
+
+        return UsageContainer.Of(syntax, usage.SourceSpan) is { } container
+            ? string.Create(CultureInfo.InvariantCulture, $"{position}  {container}")
+            : position;
     }
 
     private static async Task<Result<string>> RemovedManyAsync(
@@ -297,15 +323,29 @@ public static class SymbolEditService
     private static RazorEditOptions Razor(EditOptions options) =>
         new(options.Tool, options.DryRun, options.AllowErrors);
 
-    private static TerseError UsageBlocked(ISymbol symbol, int usages) => Errors.Invalid(
-        string.Create(CultureInfo.InvariantCulture, $"'{symbol.Name}' still has {usages} usages"),
-        "remove the usages first, or pass force=true");
+    private static async Task<TerseError> UsageBlockedAsync(
+        string root,
+        ISymbol symbol,
+        Location[] usages,
+        CancellationToken cancellationToken)
+    {
+        var message = new StringBuilder(string.Create(CultureInfo.InvariantCulture, $"'{symbol.Name}' still has {usages.Length} usages"));
+        var listed = Math.Min(usages.Length, MaxListedUsages);
 
-    private static Task<int> UsageCountAsync(
+        for (var index = 0; index < listed; index++)
+            message.Append("\n  ").Append(await UsageLineAsync(root, usages[index], cancellationToken).ConfigureAwait(false));
+
+        if (usages.Length > MaxListedUsages)
+            message.Append(CultureInfo.InvariantCulture, $"\n  +{usages.Length - MaxListedUsages} more - find_usages lists them all");
+
+        return Errors.Invalid(message.ToString(), "remove the usages first, or pass force=true");
+    }
+
+    private static Task<Location[]> UsagesAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
         CancellationToken cancellationToken) =>
-        OutsideCountAsync(workspace, symbol, [], cancellationToken);
+        OutsideUsagesAsync(workspace, symbol, [], cancellationToken);
 
     private static async Task<EditTarget?> TargetAsync(
         LoadedWorkspace workspace,

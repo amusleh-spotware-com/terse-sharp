@@ -1291,6 +1291,7 @@ public sealed class RegionTail
 
             Assert.Contains("ERROR InvalidArgument", alone, StringComparison.Ordinal);
             Assert.Contains("'OnlyEntryCalls' still has 1 usages", alone, StringComparison.Ordinal);
+            Assert.Contains($"\n  {Path.Combine("src", "Fixture.Trading", "BatchDeleteProbe.cs")}:5:34  BatchDeleteProbe.Entry", alone, StringComparison.Ordinal);
             Assert.DoesNotContain("ERROR", batched, StringComparison.Ordinal);
             Assert.DoesNotContain("OnlyEntryCalls", remaining, StringComparison.Ordinal);
             Assert.DoesNotContain("Entry()", remaining, StringComparison.Ordinal);
@@ -1460,5 +1461,39 @@ public sealed class RegionTail
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
         Assert.Contains("+public sealed class Scattered(int offset, int scale)", text, StringComparison.Ordinal);
         Assert.DoesNotContain("-    public int Between() => offset;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_StillReferenced_NamesEachUsageByFileLineAndDeclaration()
+    {
+        const string Probe = "src/Fixture.Trading/UsageListProbe.cs";
+        var file = Path.Combine("src", "Fixture.Trading", "UsageListProbe.cs");
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class UsageListProbe\n{\n    private static int Helper() => 1;\n    public static int A() => Helper();\n    public static int B() => Helper();\n    public static int C() => Helper();\n    public static int D() => Helper();\n    public static int E() => Helper();\n    public static int F() => Helper();\n    public static int G() => Helper();\n}\n",
+            ["force"] = true,
+        });
+
+        try
+        {
+            var text = await server.CallAsync("delete_symbol", new()
+            {
+                ["symbolId"] = "UsageListProbe.Helper",
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("ERROR InvalidArgument: 'Helper' still has 7 usages", text, StringComparison.Ordinal);
+            Assert.Contains($"\n  {file}:6:30  UsageListProbe.A", text, StringComparison.Ordinal);
+            Assert.Contains($"\n  {file}:10:30  UsageListProbe.E", text, StringComparison.Ordinal);
+            Assert.DoesNotContain($"{file}:11:30", text, StringComparison.Ordinal);
+            Assert.Contains("\n  +2 more - find_usages lists them all", text, StringComparison.Ordinal);
+            Assert.Contains("remedy: remove the usages first, or pass force=true", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
     }
 }
