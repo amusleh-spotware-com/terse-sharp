@@ -936,11 +936,11 @@ public static class ToolGuard
         return pipelines;
     }
 
-    private static GuardVerdict Judged(string pipeline, string? cwd)
+    private static GuardVerdict Judged(string pipeline, string? cwd, bool adrift = false)
     {
         foreach (var stage in Stages(pipeline))
         {
-            var verdict = Denial(stage, cwd, false);
+            var verdict = Denial(stage with { Adrift = adrift }, cwd, false);
 
             if (verdict.Denied)
                 return verdict;
@@ -1009,7 +1009,8 @@ public static class ToolGuard
         for (var index = 0; index < judged.Length; index++)
         {
             var stage = judged[index];
-            var verdict = Denial(stage with { Text = Unkeyworded(stage.Text) }, directories is null ? cwd : directories[index], compound, unfenceable);
+            var directory = directories is null ? new StageDirectory(cwd, false) : directories[index];
+            var verdict = Denial(stage with { Text = Unkeyworded(stage.Text), Adrift = directory.Adrift }, directory.Here, compound, unfenceable);
 
             if (!verdict.Denied)
             {
@@ -1373,7 +1374,7 @@ public static class ToolGuard
                 BuildReplacement(Diffing(subcommand, segment)));
         }
 
-        if (!Denies(segment, cwd, stage.Fed))
+        if (!Denies(segment, cwd, stage.Fed, stage.Adrift))
             return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
 
         var trimmed = segment.Trim();
@@ -1511,14 +1512,14 @@ public static class ToolGuard
         return false;
     }
 
-    private static bool OutsideTree(string segment, string? cwd)
+    private static bool OutsideTree(string segment, string? cwd, bool adrift = false)
     {
         if (Marker(cwd) is not { } marker || Path.GetDirectoryName(marker) is not { Length: > 0 } root)
             return false;
 
         var operands = PathOperands(segment);
 
-        return operands.Count > 0 && !operands.Exists(operand => Inside(root, operand));
+        return operands.Count > 0 && !operands.Exists(operand => Proven(root, operand, adrift));
     }
 
     private static readonly string[] PowerShellHosts = ["powershell", "pwsh"];
@@ -1678,10 +1679,10 @@ public static class ToolGuard
 
     private static readonly string[] Sinks = ["/dev/null", "nul", "/dev/stdout", "/dev/stderr", "$null"];
 
-    private static bool Denies(string segment, string? cwd, bool fed) =>
+    private static bool Denies(string segment, string? cwd, bool fed, bool adrift = false) =>
         IsTextRead(segment)
         && !(fed && ReadsStdin(segment))
-        && (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment) && !OutsideTree(segment, cwd)));
+        && (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment) && !OutsideTree(segment, cwd, adrift)));
 
     private static int Written(ReadOnlySpan<char> token)
     {
@@ -1805,7 +1806,7 @@ public static class ToolGuard
         return text.IndexOfAny('|', '>') < 0 && (end < 0 ? text : text[..end]) is "echo" or "printf" or "true" or ":";
     }
 
-    private readonly record struct Stage(string Text, bool Fed, string? Sink = null);
+    private readonly record struct Stage(string Text, bool Fed, string? Sink = null, bool Adrift = false);
 
     private static Stage[] Stages(string command)
     {
@@ -2122,7 +2123,11 @@ public static class ToolGuard
         var judged = new List<Judgement>(written.Count);
 
         for (var index = 0; index < written.Count; index++)
-            judged.Add(new Judgement(written[index], Judged(written[index].Text, directories is null ? cwd : directories[index])));
+        {
+            var directory = directories is null ? new StageDirectory(cwd, false) : directories[index];
+
+            judged.Add(new Judgement(written[index], Judged(written[index].Text, directory.Here, directory.Adrift)));
+        }
 
         return judged;
     }
@@ -2183,7 +2188,7 @@ public static class ToolGuard
         return masked.IndexOfAny(Unfollowable) < 0 && !Backgrounded(masked);
     }
 
-    private static string?[]? Directories(string command, string? cwd, int count)
+    private static StageDirectory[]? Directories(string command, string? cwd, int count)
     {
         if (!Followable(command))
             return null;
@@ -2193,19 +2198,19 @@ public static class ToolGuard
         return directories.Count == count ? [.. directories] : null;
     }
 
-    private static List<string?> Walked(string command, string? cwd)
+    private static List<StageDirectory> Walked(string command, string? cwd)
     {
-        var directories = new List<string?>();
-        var (here, conditional) = (cwd, false);
+        var directories = new List<StageDirectory>();
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var (here, conditional) = (new StageDirectory(cwd, false), false);
 
         foreach (var pipeline in Pipelines(command).FindAll(pipeline => pipeline.Text.Trim().Length > 0))
         {
             var anded = pipeline.Lead.AsSpan().Trim() is "&&";
-            var current = !anded && conditional ? cwd : here;
+            var current = !anded && conditional ? new StageDirectory(cwd, false) : here;
 
             directories.Add(current);
-            (here, conditional) = Stepped(Entered(pipeline.Text, current, cwd), current, conditional && anded, anded);
-            conditional |= here is { Length: > 0 } && !Directory.Exists(here);
+            (here, conditional) = Walking(Entered(Remembered(pipeline, values), current, cwd), current, conditional && anded, anded);
         }
 
         return directories;
@@ -2214,7 +2219,7 @@ public static class ToolGuard
     private static (string? Here, bool Conditional) Stepped(string? entered, string? current, bool carried, bool anded) =>
         string.Equals(entered, current, StringComparison.Ordinal) ? (current, carried) : (entered, carried || anded);
 
-    private static string? Entered(string statement, string? here, string? origin)
+    private static StageDirectory Entered(string statement, StageDirectory current, string? origin)
     {
         var trimmed = statement.AsSpan().Trim();
         var gap = trimmed.IndexOfAny(' ', '\t');
@@ -2223,11 +2228,11 @@ public static class ToolGuard
 
         return verb switch
         {
-            "popd" => origin,
-            "pushd" when gap < 0 => origin,
-            "cd" or "pushd" when Literal(operand) is { } target => Located(here, target) ?? here,
-            "cd" or "pushd" => origin,
-            _ => here,
+            "popd" => new(origin, false),
+            "pushd" when gap < 0 => new(origin, false),
+            "cd" or "pushd" when Literal(operand) is { } target => new(Located(current.Here, target) ?? current.Here, current.Adrift && !Path.IsPathRooted(Expanded(target))),
+            "cd" or "pushd" => new(origin, operand.ContainsAny(Expansions)),
+            _ => current,
         };
     }
 
@@ -2504,6 +2509,30 @@ public static class ToolGuard
     };
 
     private static bool IsSeparatedScriptFlag(string token) => token is "-e" or "-f" or "--regexp" or "--expression" or "--file";
+
+    private static bool Proven(string root, string operand, bool adrift) =>
+        Inside(root, operand) && (!adrift || Path.IsPathRooted(Expanded(operand)));
+
+    private static string Remembered(Pipeline pipeline, Dictionary<string, string> values)
+    {
+        var text = Filled(pipeline.Text, values);
+
+        if (Sequential(pipeline.Lead))
+            Recorded(text, values);
+
+        return text;
+    }
+
+    private static (StageDirectory Here, bool Conditional) Walking(StageDirectory entered, StageDirectory current, bool carried, bool anded)
+    {
+        var (here, conditional) = Stepped(entered.Here, current.Here, carried, anded);
+
+        return (entered with { Here = here }, conditional || (here is { Length: > 0 } && !Directory.Exists(here)));
+    }
+
+    private readonly record struct StageDirectory(string? Here, bool Adrift);
+
+    private static readonly SearchValues<char> Expansions = SearchValues.Create("$`");
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

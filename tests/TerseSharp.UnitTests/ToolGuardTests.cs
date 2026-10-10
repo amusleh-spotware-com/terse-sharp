@@ -2403,4 +2403,32 @@ public sealed class ToolGuardTests
         Assert.True(verdict.Denied, command);
         Assert.Equal(rewrite, verdict.Rewrite);
     }
+
+    [Theory]
+    [InlineData("cd \"$TERSE_GUARD_NO_SUCH_VARIABLE\"; cat notes.md")]
+    [InlineData("cd \"$TERSE_GUARD_NO_SUCH_VARIABLE\" && wc -l dump.txt")]
+    [InlineData("pushd \"${TERSE_GUARD_NO_SUCH_VARIABLE}\" && tail -3 dump.txt")]
+    [InlineData("S=/tmp/terse-guard; cd \"$(cygpath -u \"$S\")\"; cat notes.md")]
+    [InlineData("cd \"$(mktemp -d)\" && head -5 notes.md")]
+    public void Guard_ForATextReadAfterACdItCannotResolve_AllowsTheRelativeOperandItCannotProveInTree(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("S=src; cd \"$S\"; cat notes.md")]
+    [InlineData("S=src; cd \"$S\" && wc -l notes.md")]
+    [InlineData("cd src; cat notes.md")]
+    [InlineData("cd \"$TERSE_GUARD_NO_SUCH_VARIABLE\"; cat Foo.cs")]
+    [InlineData("cd \"$(mktemp -d)\" && cat src/App/OrderService.cs")]
+    [InlineData("cd \"$(mktemp -d)\" && cat ROOT/README.md")]
+    [InlineData("cd \"$TERSE_GUARD_NO_SUCH_VARIABLE\"; cd ROOT/src; cat notes.md")]
+    public void Guard_ForATextReadAfterACdThatResolvesInTheTreeOrThatNamesSource_StillDeniesIt(string template)
+    {
+        var command = template.Replace("ROOT", Fixtures.RepositoryRoot.Replace('\\', '/'), StringComparison.Ordinal);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+    }
 }
