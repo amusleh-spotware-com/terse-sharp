@@ -324,18 +324,22 @@ public sealed class ToolContextTests
     public async Task RootOnlyTools_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
+        using var solution = await TemporarySolution.CreateRepositoryAsync(cancellationToken);
+        await File.AppendAllTextAsync(solution.OrderServicePath, "// I748" + Environment.NewLine, cancellationToken);
         using var registry = new WorkspaceRegistry();
         using var context = new ToolContext(registry, readOnly: false);
         var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        context.Preload(preload.Task, Fixtures.SolutionPath);
+        context.Preload(preload.Task, solution.SolutionPath);
 
         var early = await RootOnlyAnswersAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
 
-        await registry.LoadAsync(Fixtures.SolutionPath, cancellationToken);
+        await registry.LoadAsync(solution.SolutionPath, cancellationToken);
         preload.SetResult();
 
         Assert.Equal(await RootOnlyAnswersAsync(context, cancellationToken), early);
+        Assert.All(early, answer => Assert.False(answer.StartsWith("ERROR", StringComparison.Ordinal), answer));
+        Assert.Contains("OrderService.cs", early[3], StringComparison.Ordinal);
     }
 
     private static Task<string[]> RootOnlyAnswersAsync(ToolContext context, CancellationToken cancellationToken)

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace TerseSharp.UnitTests;
 
 public sealed class TemporarySolution : IDisposable
@@ -27,6 +29,51 @@ public sealed class TemporarySolution : IDisposable
         File.WriteAllText(Path.Combine(root, ".git"), "gitdir: none");
 
         return new TemporarySolution(root);
+    }
+
+    public static async Task<TemporarySolution> CreateRepositoryAsync(CancellationToken cancellationToken)
+    {
+        var solution = Create();
+
+        try
+        {
+            await solution.CommitEverythingAsync(cancellationToken);
+
+            return solution;
+        }
+        catch
+        {
+            solution.Dispose();
+            throw;
+        }
+    }
+
+    private async Task CommitEverythingAsync(CancellationToken cancellationToken)
+    {
+        File.Delete(Path.Combine(Root, ".git"));
+        File.WriteAllText(Path.Combine(Root, ".gitignore"), "bin/\nobj/\n.vs/\n");
+
+        await GitAsync(["init", "--quiet", "--initial-branch=main"], cancellationToken);
+        await GitAsync(["config", "core.autocrlf", "false"], cancellationToken);
+        await GitAsync(["add", "--all"], cancellationToken);
+        await GitAsync(["-c", "user.name=terse", "-c", "user.email=terse@example.invalid", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture"], cancellationToken);
+    }
+
+    private async Task GitAsync(string[] arguments, CancellationToken cancellationToken)
+    {
+        var start = new ProcessStartInfo("git") { WorkingDirectory = Root, RedirectStandardOutput = true, RedirectStandardError = true };
+
+        foreach (var argument in arguments)
+            start.ArgumentList.Add(argument);
+
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("git did not start");
+        var error = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        await process.StandardOutput.ReadToEndAsync(cancellationToken);
+        await process.WaitForExitAsync(cancellationToken);
+
+        if (process.ExitCode is not 0)
+            throw new InvalidOperationException("git " + string.Join(' ', arguments) + " failed: " + await error);
     }
 
     public void Dispose() => Delete(Root);
