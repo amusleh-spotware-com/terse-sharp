@@ -160,4 +160,102 @@ public static class AnchorSignature
 
         return actual.IsEmpty && requested.IsEmpty;
     }
+
+    public static string FromDocumentationId(string reference)
+    {
+        var text = reference.AsSpan();
+        var signature = text.IndexOf('~') is var returns and >= 0 ? text[..returns] : text;
+        var buffer = signature.Length <= StackLimit ? stackalloc char[StackLimit] : new char[signature.Length];
+        var angled = buffer[..signature.Length];
+
+        signature.CopyTo(angled);
+        angled.Replace('{', '<');
+        angled.Replace('}', '>');
+
+        return Respelled(angled);
+    }
+
+    private static string Respelled(ReadOnlySpan<char> signature)
+    {
+        var open = signature.IndexOf('(');
+        var close = signature.LastIndexOf(')');
+        var builder = new StringBuilder(signature.Length).Append(MemberName(open < 0 ? signature : signature[..open]));
+
+        if (open < 0 || close <= open)
+            return builder.ToString();
+
+        RespelledParameters(builder.Append('('), signature[(open + 1)..close]);
+
+        return builder.Append(')').ToString();
+    }
+
+    private static ReadOnlySpan<char> MemberName(ReadOnlySpan<char> head)
+    {
+        var name = head[(head.LastIndexOf('.') + 1)..];
+
+        return name is "#ctor" ? ".ctor".AsSpan() : name;
+    }
+
+    private static void RespelledParameters(StringBuilder builder, ReadOnlySpan<char> list)
+    {
+        var rest = list;
+        var first = true;
+
+        while (!rest.IsEmpty)
+        {
+            if (!first)
+                builder.Append(',');
+
+            RespelledType(builder, Next(ref rest));
+            first = false;
+        }
+    }
+
+    private static void RespelledType(StringBuilder builder, ReadOnlySpan<char> element)
+    {
+        var open = element.IndexOf('<');
+        var close = element.LastIndexOf('>');
+
+        if (open < 0 || close < open)
+        {
+            RespelledLeaf(builder, element);
+            return;
+        }
+
+        var nullable = element[..open] is "System.Nullable";
+
+        if (!nullable)
+            builder.Append(element[..open]).Append('<');
+
+        RespelledParameters(builder, element[(open + 1)..close]);
+        builder.Append(nullable ? '?' : '>').Append(element[(close + 1)..]);
+    }
+
+    private static void RespelledLeaf(StringBuilder builder, ReadOnlySpan<char> element)
+    {
+        var bracket = element.IndexOf('[');
+        var name = bracket < 0 ? element : element[..bracket];
+
+        builder.Append(Keyword(name)).Append(element[name.Length..]);
+    }
+
+    private static ReadOnlySpan<char> Keyword(ReadOnlySpan<char> name) => name switch
+    {
+        "System.Boolean" => "bool",
+        "System.Byte" => "byte",
+        "System.SByte" => "sbyte",
+        "System.Char" => "char",
+        "System.Decimal" => "decimal",
+        "System.Double" => "double",
+        "System.Single" => "float",
+        "System.Int16" => "short",
+        "System.UInt16" => "ushort",
+        "System.Int32" => "int",
+        "System.UInt32" => "uint",
+        "System.Int64" => "long",
+        "System.UInt64" => "ulong",
+        "System.Object" => "object",
+        "System.String" => "string",
+        _ => name,
+    };
 }

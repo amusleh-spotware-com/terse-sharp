@@ -355,4 +355,23 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
         Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
         Assert.DoesNotContain("+using System.Linq;", text, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("T:Fixture.Trading.Scattered", "before", "M:Fixture.Trading.Scattered.Pick(System.String)~System.Int32", 44, 46)]
+    [InlineData("T:Fixture.Trading.Scattered", "after", "M:Fixture.Trading.Scattered.Pick(System.Int32)~System.Int32", 43, 45)]
+    [InlineData("T:Fixture.Trading.Awkward", "before", "M:Fixture.Trading.Awkward.Weigh(Fixture.Trading.Boxed{Fixture.Trading.IHandler})~System.Int32", 21, 22)]
+    public async Task AddMember_AnchoredOnADocumentationIdWithKeywordAliasesOrBraces_LandsBesideThatOverload(string type, string side, string anchor, int low, int high)
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = type,
+            ["declaration"] = "public int Respelled() => 1;",
+            [side] = anchor,
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("Respelled", text, StringComparison.Ordinal);
+        Assert.InRange(InsertedAt(text), low, high);
+    }
 }

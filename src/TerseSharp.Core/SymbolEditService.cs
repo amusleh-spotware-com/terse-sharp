@@ -1553,11 +1553,12 @@ public static class SymbolEditService
     private static Result<int> Indexed(TypeDeclarationSyntax type, string wanted, int offset, string parameter)
     {
         var reference = Reference(wanted);
+        var respelled = SymbolReference.IsDocumentationId(wanted) ? AnchorSignature.FromDocumentationId(reference) : null;
         var widest = new AnchorMatch(-1, -1, 0);
 
         foreach (var tier in AnchorTiers)
         {
-            widest = Anchored(type, reference, tier);
+            widest = Widest(type, reference, respelled, tier);
 
             if (widest.Adjacent)
                 return Result.Ok(offset is 0 ? widest.First : widest.Last + 1);
@@ -1855,6 +1856,13 @@ public static class SymbolEditService
         first.Type is INamedTypeSymbol { TypeKind: TypeKind.Enum }
             ? string.Concat(first.Declaration.AsSpan().TrimEnd().TrimEnd(','), ",\n", next)
             : string.Concat(first.Declaration, "\n\n", next);
+
+    private static AnchorMatch Widest(TypeDeclarationSyntax type, string reference, string? respelled, AnchorTier tier)
+    {
+        var match = Anchored(type, reference, tier);
+
+        return match.Adjacent || respelled is null || tier is AnchorTier.Name ? match : Anchored(type, respelled, tier);
+    }
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node, ISymbol Symbol);

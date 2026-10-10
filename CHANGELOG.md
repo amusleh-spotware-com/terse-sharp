@@ -76,6 +76,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   before the directive is written. Covered by
   `AddMember_WithTypeSymbolIdsAndAUsingTheImplicitGlobalUsingsImport_LandsNoDirective` and
   `AddMember_WithAGloballyImportedUsingBesideOneTheFileNeeds_LandsOnlyTheNeededOne`.
+- **`add_member before=`/`after=` and `replace_symbol` addBefore/addAfter place a documentation-id anchor on its
+  overload (I733).** A doc id spelled with keyword-alias types (`Pick(System.String)`) or braced generics
+  (`Weigh(Fixture.Trading.Boxed{Fixture.Trading.IHandler})`) never matched the source spelling, so overloads that sit
+  apart were refused as ambiguous and adjacent ones landed beside the first overload. The id is now also respelled
+  the way source declares it and tried after the raw spelling at every tier but the name-only one. Covered by
+  `AddMember_AnchoredOnADocumentationIdWithKeywordAliasesOrBraces_LandsBesideThatOverload`,
+  `FromDocumentationId_RespellsTheParameterListTheWaySourceDeclaresIt` and
+  `FromDocumentationId_OfABracedGenericParameter_IsStructurallyTheOutlineSpelling`.
 
 ## [0.75.1] - 2026-10-07
 

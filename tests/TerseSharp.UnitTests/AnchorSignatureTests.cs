@@ -52,4 +52,21 @@ public sealed class AnchorSignatureTests
     [InlineData("Pick(int)", "Pick(int, int)", false)]
     public void SameStructure_ComparesTheMemberAndEachParameterBySuffix(string signature, string reference, bool expected) =>
             Assert.Equal(expected, AnchorSignature.SameStructure(signature, reference));
+
+    [Theory]
+    [InlineData("Fixture.Trading.Scattered.Pick(System.String)~System.Int32", "Pick(string)")]
+    [InlineData("A.B.F(System.Collections.Generic.Dictionary{System.String,System.Int32},System.Int32[])", "F(System.Collections.Generic.Dictionary<string,int>,int[])")]
+    [InlineData("A.B.F(System.Nullable{System.Int32},System.Nullable{System.Int32}[])", "F(int?,int?[])")]
+    [InlineData("A.B.#ctor(System.Int32)", ".ctor(int)")]
+    [InlineData("A.B.Unused~System.Int32", "Unused")]
+    [InlineData("A.B.F(System.IntPtr,Ns.Order)", "F(System.IntPtr,Ns.Order)")]
+    public void FromDocumentationId_RespellsTheParameterListTheWaySourceDeclaresIt(string reference, string expected) =>
+            Assert.Equal(expected, AnchorSignature.FromDocumentationId(reference));
+
+
+    [Fact]
+    public void FromDocumentationId_OfABracedGenericParameter_IsStructurallyTheOutlineSpelling() =>
+        Assert.True(AnchorSignature.SameStructure(
+            "Weigh(Boxed<IHandler>)",
+            AnchorSignature.FromDocumentationId("Fixture.Trading.Awkward.Weigh(Fixture.Trading.Boxed{Fixture.Trading.IHandler})~System.Int32")));
 }
