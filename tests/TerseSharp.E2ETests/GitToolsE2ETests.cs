@@ -826,6 +826,25 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Contains("write_text path=\"added-later.md\" delete=true", text, StringComparison.Ordinal);
         Assert.Equal("new\n", await File.ReadAllTextAsync(added, TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public async Task GetSymbolSource_AtARefThatPredatesTheFile_AnswersAbsent()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(
+            watch: false,
+            TestContext.Current.CancellationToken,
+            CommittedUnicodeProbeAsync);
+        await File.WriteAllTextAsync(Path.Combine(solution.Root, "Later.cs"), "namespace Later;\n\npublic sealed class Added;\n", TestContext.Current.CancellationToken);
+
+        var text = await solution.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "Added",
+            ["path"] = "Later.cs",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.StartsWith("ABSENT  Later.cs at HEAD - ", text, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe

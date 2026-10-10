@@ -2,7 +2,14 @@ namespace TerseSharp.Core;
 
 public static class MissingDirectory
 {
-    public static TerseError Refused(string root) => Named(root, NearestAncestor(Path.GetFullPath(root)));
+    public static TerseError Refused(string root) => File.Exists(Path.GetFullPath(root))
+        ? NotADirectory(root)
+        : Named(root, NearestAncestor(Path.GetFullPath(root)));
+
+    private static TerseError NotADirectory(string root) => new(
+        TerseErrorCode.DocumentNotFound,
+        string.Create(CultureInfo.InvariantCulture, $"'{root}' is a file, not a directory"),
+        string.Create(CultureInfo.InvariantCulture, $"pass the directory that holds it as root=, or read it with read_text path=\"{root}\""));
 
     private static TerseError Named(string root, string? ancestor) => ancestor is null
         ? new(

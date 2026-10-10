@@ -8,6 +8,7 @@ public sealed record DocumentDiff(string Path, string Text, int ChangedLines, st
         Solution before,
         Solution after,
         DocumentId id,
+        bool priced,
         CancellationToken cancellationToken)
     {
         var original = before.GetDocument(id);
@@ -25,7 +26,7 @@ public sealed record DocumentDiff(string Path, string Text, int ChangedLines, st
         var path = updated.FilePath ?? updated.Name;
         var report = UnifiedDiff.Report(path, originalText, updatedText);
 
-        return new DocumentDiff(path, report.Text, report.ChangedLines, await SchemaAsync(original, updated, updatedText, cancellationToken).ConfigureAwait(false));
+        return new DocumentDiff(path, report.Text, report.ChangedLines, priced ? await SchemaAsync(original, updated, updatedText, cancellationToken).ConfigureAwait(false) : string.Empty);
     }
 
     private static async Task<string> Read(Document document, CancellationToken cancellationToken)

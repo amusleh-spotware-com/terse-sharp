@@ -819,7 +819,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         if (stamp is not null && !listing.Text.StartsWith("ERROR", StringComparison.Ordinal))
             listings.Remember(key, stamp, listing.Text, started);
 
-        return (listing.Timing with { Stamp = stamped }).Appended(listing.Text, listings.SlowAfter);
+        return listing.Timing == default ? listing.Text : (listing.Timing with { Stamp = stamped }).Appended(listing.Text, listings.SlowAfter);
     }
 
     private static async Task<string?> GitStampAsync(LoadedWorkspace loaded, CancellationToken cancellationToken)

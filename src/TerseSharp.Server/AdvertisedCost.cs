@@ -97,7 +97,7 @@ public static class AdvertisedCost
                 var listed = await next(request, cancellationToken).ConfigureAwait(false);
 
                 Volatile.Write(ref unnarrowed, Measure(listed.Tools));
-            ToolSchemaEstimate.Publish(Installed, ToolExamples.DecorationLength);
+                ToolSchemaEstimate.Publish(Installed, ToolExamples.DecorationLength);
 
                 return listed;
             };

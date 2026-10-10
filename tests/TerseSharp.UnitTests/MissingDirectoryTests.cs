@@ -22,4 +22,23 @@ public sealed class MissingDirectoryTests
             Directory.Delete(existing);
         }
     }
+
+    [Fact]
+    public void Refused_AnExistingFile_SaysItIsAFileRatherThanAMissingDirectory()
+    {
+        var file = Path.GetTempFileName();
+
+        try
+        {
+            var error = MissingDirectory.Refused(file);
+
+            Assert.Equal(TerseErrorCode.DocumentNotFound, error.Code);
+            Assert.Equal("'" + file + "' is a file, not a directory", error.Message);
+            Assert.EndsWith("read it with read_text path=\"" + file + "\"", error.Remedy, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
 }

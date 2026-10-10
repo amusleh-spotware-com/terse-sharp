@@ -16,7 +16,7 @@ public static class EditGate
         CancellationToken cancellationToken)
     {
         var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
-        var diff = await DiffAsync(workspace.Solution, adopted, changed, cancellationToken).ConfigureAwait(false);
+        var diff = await DiffAsync(workspace.Solution, adopted, changed, !options.AllowErrors, cancellationToken).ConfigureAwait(false);
 
         var report = options.AllowErrors
             ? null
@@ -125,13 +125,14 @@ public static class EditGate
         Solution before,
         Solution after,
         IReadOnlyList<DocumentId> changed,
+        bool priced,
         CancellationToken cancellationToken)
     {
         var diffs = new List<DocumentDiff>(changed.Count);
 
         foreach (var id in changed)
         {
-            var diff = await DocumentDiff.CreateAsync(before, after, id, cancellationToken).ConfigureAwait(false);
+            var diff = await DocumentDiff.CreateAsync(before, after, id, priced, cancellationToken).ConfigureAwait(false);
 
             if (diff is not null)
                 diffs.Add(diff);

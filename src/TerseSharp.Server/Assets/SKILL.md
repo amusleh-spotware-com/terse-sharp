@@ -252,11 +252,11 @@ raising a number you chose; the steer returns as soon as you drop the argument.
 `diff_text` — **all three take `staged=true`**, and all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. A diff of a path
-that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, as does one piped into `cmp`, a `sha*sum` or `git hash-object --stdin`, and so does a diff flag no tool serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`). Running them in
+that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, as does one piped into `cmp` or a `sha*sum`, and so does a diff flag no tool serves (`-b`, `--check`). Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then a literal earlier `cd`, even one not created yet, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
-`git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`, and a `git tag` **listing** —
+`git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=` (a file added after the ref answers `ABSENT`), and a `git tag` **listing** —
 bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. A tag listing of
 **origin** — `git ls-remote --tags` — is `history tags=true remote=true`, which merges both lists and
 tags every row `local=yes|no remote=yes|no`; `--heads`, another remote and a bare `git ls-remote` are left alone. Still on the shell: `git blame`
@@ -608,7 +608,7 @@ edit_text section="..."`, naming up to six of them - so the anchor a `read_text`
 replaced by an address. It rides only on a read that carried no `headings=`, `section=`, `columns=`
 or line range.
 
-**A `changed_files` listing carrying both kinds says how many of each** (`tracked=N untracked=N`), so
+**A `changed_files` listing over 10 s ends with a `timing` line per git phase. One carrying both kinds says how many of each** (`tracked=N untracked=N`), so
 a capped listing can never read as though the tracked half was all of it, and one carrying tracked
 changes ends with the exact `next: diff_symbols ...` call for them - take that before `diff_text`.
 
@@ -712,11 +712,9 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
 3. **`dryRun: true` first on any edit you are unsure about.** You get the unified diff, the diagnostic
    counts, and nothing is written; the response says `dryRun` so it can never be mistaken for a write.
 4. **A successful edit answers in one line per changed file, not a diff.**
-   `<workspace-relative path>  changedLines=N` - and that count is the lines that actually changed,
-   summed over each separate change, not the span between the first and the last one; a diff is one
-   `@@` hunk per change. You already know what you wrote, so the diff is not
-   repeated back to you, and there is no `N files changed` line above it, because the lines are the
-   count. `edit_text` and `write_text` print the **file name alone**, because you
+   `<workspace-relative path>  changedLines=N` - the lines that actually changed, summed over each
+   change, not the span between the first and the last; a changed tool schema adds
+   `  schema <tool>=N tokens (cap 1024, left=M)`. `edit_text` and `write_text` print the **file name alone**, because you
    passed the path in; a `write_text` over a file that already had content opens with `overwrote existing  `, so an overwrite you took for a create is visible without the diff. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
    there is a non-zero count or delta to report. Pass `verbose=true` on any edit, refactor,
    `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*`
@@ -1123,7 +1121,7 @@ up to three of them**, workspace-relative, in parentheses after the count.
 so a *hung* test is named in
 `WARNING the run was stopped while these test(s) were still running: <name>`; a merely *slow* one
 answers `FAILED timed out after <n> ms`, a `remedy:` naming the `timeoutSeconds=` to retry with
-(600 is the default; 3600 the maximum) and the lines it printed.
+(600 is the default; 3600 the maximum; `build` takes it too) and the lines it printed.
 `WARNING … output stream stayed open` means the capture is partial.
 
 **A batch is concurrent by default**, `parallel` at a time (default per-core); each is built before
@@ -1180,7 +1178,7 @@ otherwise reached only by a **bare** name:
 a `Type.Member` whose member name saturates is resolved through the members of the types called
 `Type`, so qualifying the name really is the fix the remedy names, and a type declaring no such member
 answers `SymbolNotFound` listing its members instead of a saturation count; `OutOfWorkspace` means the path
-escaped the workspace root; `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
+escaped the workspace root (a project file there, or `WorkspaceNotFound` on a visible directory, names the `load_workspace` call); `ProjectNotFound` and `AmbiguousProject` come from a `project=` that names
 no project or two, and list the candidates; `InvalidArgument` naming a **missing** or **unrecognized**
 parameter means the argument names were wrong, and the remedy lists the ones the tool declares - though a sibling's, `Grep`'s or `Read`'s spelling (`typeName`, `offset`, `-C`) binds to its canonical parameter; an
 `InvalidArgument` carrying a `JsonException` also names the **array** parameter it could not convert

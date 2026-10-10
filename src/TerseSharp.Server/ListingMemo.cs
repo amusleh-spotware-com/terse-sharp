@@ -11,7 +11,7 @@ public sealed class ListingMemo
 
     public TimeSpan SlowAfter { get; init; } = Configured(Environment.GetEnvironmentVariable("TERSE_LISTING_TIMING_MS"));
 
-    private static TimeSpan Configured(string? milliseconds) => long.TryParse(milliseconds, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+    private static TimeSpan Configured(string? milliseconds) => long.TryParse(milliseconds, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed <= int.MaxValue
         ? TimeSpan.FromMilliseconds(parsed)
         : TimeSpan.FromSeconds(10);
 

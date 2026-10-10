@@ -1760,4 +1760,28 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         public string NotATool(string ignored) => ignored;
     }
     """;
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAllowErrorsOnAToolDescription_StaysTheCheapDiffWithNoSchemaEstimate()
+    {
+        const string Probe = "src/Fixture.Trading/TerseSchemaRawProbe.cs";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = SchemaProbe("abc").Replace("SchemaProbe;", "SchemaRawProbe;", StringComparison.Ordinal), ["force"] = true });
+        try
+        {
+            var raw = await server.CallAsync("replace_symbol", new()
+            {
+                ["symbolId"] = "Fixture.Trading.SchemaRawProbe.ProbeTools.Fake",
+                ["declaration"] = "[McpServerTool(Name = \"fake_tool\")]\n[Description(\"abcd\")]\npublic string Fake([Description(\"xy\")] string workspace = \"\") => workspace;",
+                ["allowErrors"] = true,
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("abcd", raw, StringComparison.Ordinal);
+            Assert.DoesNotContain("schema ", raw, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }
