@@ -2042,6 +2042,8 @@ public sealed class ToolGuardTests
     [InlineData("sed -i s/a/b/ notes/todo.md")]
     [InlineData("cat SCRATCH/notes.log >notes.md")]
     [InlineData("ls \"$(dirname SCRATCH/a.py)\" 2>/dev/null")]
+    [InlineData("grep -eTODO README.md SCRATCH/x.log")]
+    [InlineData("sed --expression=s/a/b/ notes/todo.md SCRATCH/x.log")]
     public void Inspect_ForAnInTreeOperandBesideASinkRedirectOrAnEditScript_StillDeniesItAndNeverRoutesToTheRedirect(string template)
     {
         var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;

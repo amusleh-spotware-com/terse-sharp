@@ -137,37 +137,38 @@ public static class UsingDirectives
         if (usings.IsDefaultOrEmpty || await document.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false) is not { } compilation)
             return usings;
 
+        var imported = await GlobalImportsAsync(compilation, cancellationToken).ConfigureAwait(false);
         var kept = ImmutableArray.CreateBuilder<string>(usings.Length);
 
         foreach (var requested in usings)
         {
-            if (!await GloballyImportedAsync(compilation, requested.Trim(), cancellationToken).ConfigureAwait(false))
+            if (!imported.Contains(requested.Trim()))
                 kept.Add(requested);
         }
 
         return kept.Count == usings.Length ? usings : kept.ToImmutable();
     }
 
-    private static async Task<bool> GloballyImportedAsync(Compilation compilation, string name, CancellationToken cancellationToken)
+    private static async Task<HashSet<string>> GlobalImportsAsync(Compilation compilation, CancellationToken cancellationToken)
     {
+        var imported = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var tree in compilation.SyntaxTrees)
         {
-            if (await tree.GetRootAsync(cancellationToken).ConfigureAwait(false) is CompilationUnitSyntax unit && ImportsGlobally(unit, name))
-                return true;
+            if (await tree.GetRootAsync(cancellationToken).ConfigureAwait(false) is CompilationUnitSyntax unit)
+                CollectGlobalImports(unit, imported);
         }
 
-        return false;
+        return imported;
     }
 
-    private static bool ImportsGlobally(CompilationUnitSyntax unit, string name)
+    private static void CollectGlobalImports(CompilationUnitSyntax unit, HashSet<string> imported)
     {
         foreach (var directive in unit.Usings)
         {
-            if (IsGlobalNamespaceImport(directive) && WithoutGlobalAlias(Named(directive)).SequenceEqual(name))
-                return true;
+            if (IsGlobalNamespaceImport(directive))
+                imported.Add(WithoutGlobalAlias(Named(directive)).ToString());
         }
-
-        return false;
     }
 
     private static bool IsGlobalNamespaceImport(UsingDirectiveSyntax directive) =>

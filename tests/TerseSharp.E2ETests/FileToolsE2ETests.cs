@@ -2461,4 +2461,48 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = NotesFile, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_WithAGatedBatchWhereAnAnchorMisses_NamesTheFileAndItsTallyAboveEachFailure()
+    {
+        const string FirstFile = "src/Fixture.Trading/GateTallyFirst.cs";
+        const string SecondFile = "src/Fixture.Trading/GateTallySecond.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["force"] = true,
+            ["files"] = new object[]
+            {
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = FirstFile, ["content"] = "namespace Fixture.Trading;\n\npublic static class GateTallyFirst\n{\n    public static int One() => 1;\n}\n" },
+                new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = SecondFile, ["content"] = "namespace Fixture.Trading;\n\npublic static class GateTallySecond\n{\n    public static int Two() => 2;\n}\n" },
+            },
+        });
+
+        try
+        {
+            var text = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = FirstFile, ["oldText"] = "=> 1;", ["newText"] = "=> 10;", ["force"] = true },
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = FirstFile, ["oldText"] = "no-such-anchor-first", ["newText"] = "x", ["force"] = true },
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = SecondFile, ["oldText"] = "=> 2;", ["newText"] = "=> 20;", ["force"] = true },
+                    new Dictionary<string, object>(StringComparer.Ordinal) { ["path"] = SecondFile, ["oldText"] = "no-such-anchor-second", ["newText"] = "x", ["force"] = true },
+                },
+            });
+
+            var first = text.IndexOf("GateTallyFirst.cs  edits=1/2", StringComparison.Ordinal);
+            var second = text.IndexOf("GateTallySecond.cs  edits=1/2", StringComparison.Ordinal);
+
+            Assert.InRange(first, 0, text.Length);
+            Assert.InRange(second, first + 1, text.Length);
+            Assert.InRange(text.IndexOf("FAILED edit 2", first, StringComparison.Ordinal), first + 1, second - 1);
+            Assert.InRange(text.IndexOf("FAILED edit 2", second, StringComparison.Ordinal), second + 1, text.Length);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = SecondFile, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = FirstFile, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

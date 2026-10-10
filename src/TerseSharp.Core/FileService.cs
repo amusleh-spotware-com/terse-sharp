@@ -2288,7 +2288,7 @@ public static class FileService
 
     private static void Gateable(PendingWrite candidate, List<PendingWrite> pending)
     {
-        if (candidate.Document is not null && !string.Equals(candidate.Before, candidate.After, StringComparison.Ordinal))
+        if (candidate is { Document: not null, IsNew: false } && !string.Equals(candidate.Before, candidate.After, StringComparison.Ordinal))
             pending.Add(candidate);
     }
 
@@ -2323,7 +2323,7 @@ public static class FileService
         var (write, tally, request) = rewrite.Value;
 
         if (gatedWrites.Exists(entry => string.Equals(entry.Full, write.Full, StringComparison.Ordinal)))
-            return Result.Ok(string.Join('\n', tally.Failed.Concat(tally.Notes)));
+            return Result.Ok(GatedTally(write.Path, tally, request));
 
         if (tally.Applied > 0 && !request.DryRun)
             await StoredAsync(workspace, write.Full, write.After, workspace.Contains(write.Full), cancellationToken).ConfigureAwait(false);
@@ -2353,5 +2353,23 @@ public static class FileService
         return applied.Count is 0
             ? string.Join('\n', failures)
             : string.Join('\n', applied.Concat(refused));
+    }
+
+    private static string GatedTally(string path, BatchTally tally, EditRequest request)
+    {
+        if (tally.Failed.Count is 0 && tally.Notes.Count is 0)
+            return string.Empty;
+
+        var response = new ResponseBuilder("edit_text", request.DryRun ? "dryRun" : "applied").Verbose(request.Verbose);
+
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  edits={tally.Applied}/{tally.Total}"));
+
+        foreach (var note in tally.Notes)
+            response.Note(note);
+
+        foreach (var failure in tally.Failed)
+            response.Note(failure);
+
+        return response.ToString();
     }
 }

@@ -41,7 +41,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   gated success names the workspace-relative path where it named the bare file. A `.cs` file no project compiles,
   and one outside the workspace, stay a plain text write; the new optional `allowErrors=true` restores the raw
   write. Covered by `EditText_WithForceOnACompiledFile_RollsBackAnEditThatIntroducesACompileError` and
-  `EditText_WithABatchAcrossTwoCompiledFiles_GatesItAsOneChange`.
+  `EditText_WithABatchAcrossTwoCompiledFiles_GatesItAsOneChange`. Only a file that is already a document is gated,
+  so one its project excludes (`<Compile Remove>`) stays a raw write
+  (`EditText_WithForceOnAFileItsProjectExcludesFromCompile_WritesItRawInsteadOfGatingIt`). In a gated batch, a file
+  whose own anchors partly missed answers `<file>  edits=a/t` with its `FAILED edit N` lines under it
+  (`EditText_WithAGatedBatchWhereAnAnchorMisses_NamesTheFileAndItsTallyAboveEachFailure`).
+
 ### Fixed
 
 - **Every remaining alias pair refuses two different values instead of silently keeping the first (I731).**
@@ -66,7 +71,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 - **The guard no longer takes a `sed`/`grep` script or a `2>/dev/null` for a path in the tree (I741).** A scratch
   command such as `sed -i "s/a/b/" <temp>/extract.py` or `ls <temp> 2>/dev/null` was denied as "judged inside the
   .NET tree" and routed to `edit_text path="s/..."` or `find_files glob="2>/dev/null"`. A pattern command's first
-  positional token is now its script, a redirect to a sink or a file descriptor is never an operand, and a redirect
+  positional token is now its script unless `-e`/`-f`/`--regexp`/`--expression`/`--file` already gave it, a redirect to a sink or a file descriptor is never an operand, and a redirect
   to a file is judged by its target. `sed -i` of a `.cs` file, `ls src 2>/dev/null`, `cat README.md`, a write
   redirect into the tree and a `$(...)` substitution stay denied, and `ls 2> /dev/null` in a .NET tree, which was
   allowed, is now denied like `ls`. Covered by

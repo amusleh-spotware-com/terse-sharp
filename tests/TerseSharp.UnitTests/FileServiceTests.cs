@@ -619,4 +619,31 @@ public sealed class FileServiceTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task EditText_WithForceOnAFileItsProjectExcludesFromCompile_WritesItRawInsteadOfGatingIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-excluded-" + Guid.NewGuid().ToString("N"));
+        var template = Path.Combine(root, "Excluded", "Template.cs");
+        Directory.CreateDirectory(Path.Combine(root, ".git"));
+        Directory.CreateDirectory(Path.Combine(root, "Excluded"));
+        await File.WriteAllTextAsync(Path.Combine(root, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><Compile Remove=\"Excluded/**\" /></ItemGroup></Project>", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "Kept.cs"), "namespace Probe;\n\npublic static class Kept\n{\n    public static int One() => 1;\n}\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(template, "namespace Probe;\n\npublic static class Template\n{\n    public static int Value() => Seed();\n}\n", TestContext.Current.CancellationToken);
+
+        try
+        {
+            using var registry = new WorkspaceRegistry();
+            await registry.LoadAsync(Path.Combine(root, "Probe.csproj"), TestContext.Current.CancellationToken);
+            using var lease = registry.Resolve(null, null).Value!;
+            var result = await FileService.EditTextAsync(lease.Workspace, "Excluded/Template.cs", new FileService.EditRequest("=> Seed();", "=> Missing();", null, false, true, false), TestContext.Current.CancellationToken);
+
+            Assert.True(result.IsOk, result.Error?.Render());
+            Assert.Contains("=> Missing();", await File.ReadAllTextAsync(template, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

@@ -1441,7 +1441,7 @@ public static class ToolGuard
     {
         var command = Command(segment);
         var operands = new List<string>(command.Length);
-        var patterns = Patterned(command) ? 1 : 0;
+        var patterns = Patterned(command) && !ScriptFlagged(command) ? 1 : 0;
 
         for (var index = 1; index < command.Length; index++)
         {
@@ -2474,6 +2474,30 @@ public static class ToolGuard
     private static string Driver(string token) => Path.GetFileNameWithoutExtension(token);
 
     private static bool Quiet(string token) => !token.StartsWith('-') || token is "-" or "-s" or "--quiet" or "--silent";
+
+    private static readonly string[] ScriptFlags = ["-e", "-f", "--regexp", "--expression", "--file"];
+
+    private static bool ScriptFlagged(string[] command)
+    {
+        for (var index = 1; index < command.Length; index++)
+        {
+            if (IsScriptFlag(command[index]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsScriptFlag(string token)
+    {
+        foreach (var flag in ScriptFlags)
+        {
+            if (token.StartsWith(flag, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);
