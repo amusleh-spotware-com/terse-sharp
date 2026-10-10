@@ -284,4 +284,75 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
         Assert.Contains("Suffixed", text, StringComparison.Ordinal);
         Assert.InRange(InsertedAt(text), 21, 22);
     }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsNamingOneTypeTwice_JoinsItsDeclarationsIntoOneInsertion()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.TwinAlpha", "T:Fixture.Trading.TwinAlpha", "T:Fixture.Trading.TwinBravo" },
+            ["declarations"] = new[] { "public int Doubled() => Count() * 2;", "public int Tripled() => Count() * 3;", "public int Doubled() => Count() * 2;" },
+            ["dryRun"] = true,
+        });
+
+        var doubled = text.IndexOf("+    public int Doubled() => Count() * 2;", StringComparison.Ordinal);
+        var tripled = text.IndexOf("+    public int Tripled() => Count() * 3;", StringComparison.Ordinal);
+
+        Assert.DoesNotContain("overlap", text, StringComparison.Ordinal);
+        Assert.Contains("2 files changed", text, StringComparison.Ordinal);
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.InRange(doubled, 0, tripled - 1);
+    }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsNamingOneEnumInTwoSpellings_JoinsItsValuesIntoOneInsertion()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.OrderSide", "OrderSide" },
+            ["declarations"] = new[] { "Hold", "Hedge" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Matches(@"(?m)^\+\s+Hold,?\r?$", text);
+        Assert.Matches(@"(?m)^\+\s+Hedge,?\r?$", text);
+        Assert.InRange(text.IndexOf("Hold", StringComparison.Ordinal), 0, text.IndexOf("Hedge", StringComparison.Ordinal) - 1);
+    }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsAndAUsingTheImplicitGlobalUsingsImport_LandsNoDirective()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.TwinAlpha", "T:Fixture.Trading.TwinBravo" },
+            ["declarations"] = new[]
+            {
+                "public int Summed() => Enumerable.Range(0, Count()).Sum();",
+                "public int Doubled() => Count() * 2;",
+            },
+            ["usings"] = new[] { "System.Linq" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("2 files changed", text, StringComparison.Ordinal);
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("+using System.Linq;", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithAGloballyImportedUsingBesideOneTheFileNeeds_LandsOnlyTheNeededOne()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.TwinAlpha",
+            ["declaration"] = "public int Summed() => new StringBuilder(\"ab\").Length + Enumerable.Range(0, Count()).Sum();",
+            ["usings"] = new[] { "System.Linq", "System.Text" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+using System.Text;", text, StringComparison.Ordinal);
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("+using System.Linq;", text, StringComparison.Ordinal);
+    }
 }

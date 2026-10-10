@@ -622,7 +622,8 @@ public static class SymbolEditService
     EditOptions options,
     CancellationToken cancellationToken)
     {
-        var withUsings = UsingDirectives.Ensured(unit, options.Usings);
+        var imports = await UsingDirectives.UnimportedAsync(document, options.Usings, cancellationToken).ConfigureAwait(false);
+        var withUsings = UsingDirectives.Ensured(unit, imports);
         var formatted = await IndentedAsync(document.WithSyntaxRoot(withUsings), cancellationToken).ConfigureAwait(false);
         var updated = workspace.Solution.WithDocumentSyntaxRoot(document.Id, formatted);
 
@@ -742,7 +743,8 @@ public static class SymbolEditService
         if (!rewritten.IsOk)
             return Result.Fail<Solution>(rewritten.Error!);
 
-        var updated = UsingDirectives.Ensured(rewritten.Value!, usings);
+        var imports = await UsingDirectives.UnimportedAsync(document, usings, cancellationToken).ConfigureAwait(false);
+        var updated = UsingDirectives.Ensured(rewritten.Value!, imports);
         var formatted = await IndentedAsync(document.WithSyntaxRoot(updated), cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(solution.WithDocumentSyntaxRoot(document.Id, formatted));
@@ -1696,19 +1698,11 @@ public static class SymbolEditService
             EditOptions options,
             CancellationToken cancellationToken)
     {
-        var planned = new PlannedEdit[typeSymbolIds.Count];
+        var types = await ResolvedTypesAsync(workspace, typeSymbolIds, cancellationToken).ConfigureAwait(false);
 
-        for (var index = 0; index < planned.Length; index++)
-        {
-            var one = await AdditionAsync(workspace, typeSymbolIds[index], declarations[index], options, cancellationToken).ConfigureAwait(false);
-
-            if (!one.IsOk)
-                return Result.Fail<PlannedEdit[]>(Attributed(one.Error!, index, "typeSymbolIds"));
-
-            planned[index] = one.Value;
-        }
-
-        return Result.Ok(planned);
+        return types.IsOk
+            ? await PlannedAdditionsAsync(workspace, GroupedByType(types.Value!, declarations), options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<PlannedEdit[]>(types.Error!);
     }
 
     private static async Task<Result<PlannedEdit>> AdditionAsync(
@@ -1720,19 +1714,9 @@ public static class SymbolEditService
     {
         var symbol = await SymbolLookup.ResolveAsync(workspace, typeSymbolId, null, cancellationToken, typesOnly: true).ConfigureAwait(false);
 
-        if (!symbol.IsOk)
-            return Result.Fail<PlannedEdit>(symbol.Error!);
-
-        var target = await TargetAsync(workspace, symbol.Value!, cancellationToken).ConfigureAwait(false);
-
-        return target?.Node switch
-        {
-            TypeDeclarationSyntax type => Insertion(target, type, declaration, options),
-            EnumDeclarationSyntax enumeration => EnumInsertion(target, enumeration, declaration),
-            _ => Result.Fail<PlannedEdit>(Errors.Invalid(
-                "the target is not a type declaration",
-                "pass a type or enum symbol id - a path= file takes one add_member call")),
-        };
+        return symbol.IsOk
+            ? await PlannedAdditionAsync(workspace, symbol.Value!, declaration, options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<PlannedEdit>(symbol.Error!);
     }
 
     private static Result<PlannedEdit> Insertion(EditTarget target, TypeDeclarationSyntax type, string declaration, EditOptions options)
@@ -1776,6 +1760,101 @@ public static class SymbolEditService
 
     private static string DroppedMembers(IReadOnlyList<PlannedEdit> planned) => string.Concat(
         planned.Select(edit => DroppedDeclarations.Replaced(edit.Target.Node, edit.Nodes) is { } warning ? "\n" + warning : string.Empty));
+
+    private readonly record struct TypedAddition(ISymbol Type, string Declaration, int Index);
+
+    private static async Task<Result<PlannedEdit>> PlannedAdditionAsync(
+            LoadedWorkspace workspace,
+            ISymbol type,
+            string declaration,
+            EditOptions options,
+            CancellationToken cancellationToken)
+    {
+        var target = await TargetAsync(workspace, type, cancellationToken).ConfigureAwait(false);
+
+        return target?.Node switch
+        {
+            TypeDeclarationSyntax declared => Insertion(target, declared, declaration, options),
+            EnumDeclarationSyntax enumeration => EnumInsertion(target, enumeration, declaration),
+            _ => Result.Fail<PlannedEdit>(Errors.Invalid(
+                "the target is not a type declaration",
+                "pass a type or enum symbol id - a path= file takes one add_member call")),
+        };
+    }
+
+    private static async Task<Result<PlannedEdit[]>> PlannedAdditionsAsync(
+            LoadedWorkspace workspace,
+            List<TypedAddition> grouped,
+            EditOptions options,
+            CancellationToken cancellationToken)
+    {
+        var planned = new PlannedEdit[grouped.Count];
+
+        for (var index = 0; index < planned.Length; index++)
+        {
+            var one = await PlannedAdditionAsync(workspace, grouped[index].Type, grouped[index].Declaration, options, cancellationToken).ConfigureAwait(false);
+
+            if (!one.IsOk)
+                return Result.Fail<PlannedEdit[]>(Attributed(one.Error!, grouped[index].Index, "typeSymbolIds"));
+
+            planned[index] = one.Value;
+        }
+
+        return Result.Ok(planned);
+    }
+
+    private static async Task<Result<ISymbol[]>> ResolvedTypesAsync(
+            LoadedWorkspace workspace,
+            IReadOnlyList<string> typeSymbolIds,
+            CancellationToken cancellationToken)
+    {
+        var types = new ISymbol[typeSymbolIds.Count];
+
+        for (var index = 0; index < types.Length; index++)
+        {
+            var symbol = await SymbolLookup.ResolveAsync(workspace, typeSymbolIds[index], null, cancellationToken, typesOnly: true).ConfigureAwait(false);
+
+            if (!symbol.IsOk)
+                return Result.Fail<ISymbol[]>(Attributed(symbol.Error!, index, "typeSymbolIds"));
+
+            types[index] = symbol.Value!;
+        }
+
+        return Result.Ok(types);
+    }
+
+    private static List<TypedAddition> GroupedByType(ISymbol[] types, IReadOnlyList<string> declarations)
+    {
+        var grouped = new List<TypedAddition>(types.Length);
+
+        for (var index = 0; index < types.Length; index++)
+        {
+            var slot = TypeSlot(grouped, types[index]);
+
+            if (slot < 0)
+                grouped.Add(new TypedAddition(types[index], declarations[index], index));
+            else
+                grouped[slot] = grouped[slot] with { Declaration = MergedDeclaration(grouped[slot], declarations[index]) };
+        }
+
+        return grouped;
+    }
+
+    private static int TypeSlot(List<TypedAddition> grouped, ISymbol type)
+    {
+        for (var index = 0; index < grouped.Count; index++)
+        {
+            if (SymbolEqualityComparer.Default.Equals(grouped[index].Type, type))
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static string MergedDeclaration(TypedAddition first, string next) =>
+        first.Type is INamedTypeSymbol { TypeKind: TypeKind.Enum }
+            ? string.Concat(first.Declaration.AsSpan().TrimEnd().TrimEnd(','), ",\n", next)
+            : string.Concat(first.Declaration, "\n\n", next);
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node, ISymbol Symbol);

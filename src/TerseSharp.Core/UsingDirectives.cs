@@ -131,4 +131,50 @@ public static class UsingDirectives
         Named(directive) is "System" || Named(directive).StartsWith("System.", StringComparison.Ordinal);
 
     private static string Named(UsingDirectiveSyntax directive) => directive.Name?.ToString() ?? string.Empty;
+
+    public static async Task<ImmutableArray<string>> UnimportedAsync(Document document, ImmutableArray<string> usings, CancellationToken cancellationToken)
+    {
+        if (usings.IsDefaultOrEmpty || await document.Project.GetCompilationAsync(cancellationToken).ConfigureAwait(false) is not { } compilation)
+            return usings;
+
+        var kept = ImmutableArray.CreateBuilder<string>(usings.Length);
+
+        foreach (var requested in usings)
+        {
+            if (!await GloballyImportedAsync(compilation, requested.Trim(), cancellationToken).ConfigureAwait(false))
+                kept.Add(requested);
+        }
+
+        return kept.Count == usings.Length ? usings : kept.ToImmutable();
+    }
+
+    private static async Task<bool> GloballyImportedAsync(Compilation compilation, string name, CancellationToken cancellationToken)
+    {
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            if (await tree.GetRootAsync(cancellationToken).ConfigureAwait(false) is CompilationUnitSyntax unit && ImportsGlobally(unit, name))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ImportsGlobally(CompilationUnitSyntax unit, string name)
+    {
+        foreach (var directive in unit.Usings)
+        {
+            if (IsGlobalNamespaceImport(directive) && WithoutGlobalAlias(Named(directive)).SequenceEqual(name))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsGlobalNamespaceImport(UsingDirectiveSyntax directive) =>
+        directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword)
+        && directive.Alias is null
+        && !directive.StaticKeyword.IsKind(SyntaxKind.StaticKeyword);
+
+    private static ReadOnlySpan<char> WithoutGlobalAlias(ReadOnlySpan<char> name) =>
+        name.StartsWith("global::", StringComparison.Ordinal) ? name["global::".Length..] : name;
 }

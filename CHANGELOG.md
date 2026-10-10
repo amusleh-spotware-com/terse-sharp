@@ -63,6 +63,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `ReadText_WithAWorkspaceRelativeArchiveUnderADirectoryWithABang_ReadsThatEntrysText`,
   `ReadText_OnAnArchiveHeldWithNoReadSharing_AnswersFileLockedForTheReadAndTheListing` and
   `FindFiles_WithAnArchiveRootAndDepth_RefusesTheFoldInsteadOfIgnoringIt`.
+- **`add_member typeSymbolIds=` naming one type twice joins its declarations into one insertion (I734).** It
+  answered `two of the batched edits overlap - one declaration contains the other`, a message about nesting, and the
+  retry re-sent every declaration grouped by type. Entries resolving to the same type - under any spelling - now
+  land as one insertion in the order sent; an enum's values join with a comma. Covered by
+  `AddMember_WithTypeSymbolIdsNamingOneTypeTwice_JoinsItsDeclarationsIntoOneInsertion` and
+  `AddMember_WithTypeSymbolIdsNamingOneEnumInTwoSpellings_JoinsItsValuesIntoOneInsertion`.
+- **`usings=` skips a namespace a global using already imports (I735).** `add_member`, `replace_symbol` and
+  `replace_symbol_body` added `using System.Globalization;` to every file of a batch whose project declares
+  `global using System.Globalization;`, leaving one `CS8019` per file. A requested namespace that a `global using` of
+  the document's own compilation imports - a `GlobalUsings.cs` or the SDK's implicit-usings file - is now dropped
+  before the directive is written. Covered by
+  `AddMember_WithTypeSymbolIdsAndAUsingTheImplicitGlobalUsingsImport_LandsNoDirective` and
+  `AddMember_WithAGloballyImportedUsingBesideOneTheFileNeeds_LandsOnlyTheNeededOne`.
 
 ## [0.75.1] - 2026-10-07
 
