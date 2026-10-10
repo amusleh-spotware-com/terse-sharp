@@ -257,6 +257,8 @@ BATCH = {'read_text': 'paths', 'write_text': 'files', 'edit_text': 'edits',
          'replace_symbol': 'symbolIds'}
 NARROW = ('project', 'filter', 'projects', 'test', 'path', 'paths', 'changed', 'baseRef')
 CODE_KEYS = ('newText', 'new_string', 'content', 'body', 'source', 'code', 'members', 'declaration')
+CODE_LISTS = ('declarations',)
+RANGED = ('startLine', 'endLine', 'lines', 'ranges', 'section', 'tail', 'ref')
 PATH_KEYS = ('path', 'file_path', 'filePath', 'file', 'symbolId', 'symbol')
 TARGET_KEYS = ('path', 'file', 'filePath', 'symbolId', 'symbol', 'query', 'pattern', 'name', 'command')
 SHAPE_KEYS = ('symbolId', 'symbol', 'path', 'file', 'filePath', 'name')
@@ -402,6 +404,8 @@ def harvest(node, out):
         for key, value in node.items():
             if key in CODE_KEYS and isinstance(value, str):
                 out.append(value)
+            elif key in CODE_LISTS and isinstance(value, list):
+                out.extend(item for item in value if isinstance(item, str))
             else:
                 harvest(value, out)
     elif isinstance(node, list):
@@ -652,7 +656,7 @@ for path, project, spilled in walk():
         if fanout:
             by_message[mid] += fanout
             if mid not in msg_calls:
-                msg_calls[mid] = [at, []]
+                msg_calls[mid] = [at, [], len(marks)]
                 msg_order.append(mid)
         for block in blocks:
             if not isinstance(block, dict):
@@ -769,7 +773,7 @@ for path, project, spilled in walk():
                                 if needle in text:
                                     traps[label] += 1
                                     trap_input[label] += len(json.dumps(arguments, sort_keys=True))
-                    elif CHANGED.search(text) and (tool in INSERTS or tool in REPLACERS):
+                    elif CHANGED.search(text) and (tool in INSERTS or tool in REPLACERS) and not arguments.get('retryWith'):
                         chunks = []
                         harvest(arguments, chunks)
                         asked = sum(chunk.count('\n') + 1 for chunk in chunks)
@@ -780,8 +784,9 @@ for path, project, spilled in walk():
                         asked += sum(str(helper).count('\n') + 2 for helper in asked_helpers)
                         asked += len(asked_usings) + 1 if asked_usings else 0
                         if asked:
-                            reported = int(CHANGED.search(text).group(1))
-                            allowed = asked + 1 if tool in INSERTS else asked * 2 + 2
+                            files = len(CHANGED.findall(text))
+                            reported = sum(int(value) for value in CHANGED.findall(text))
+                            allowed = asked + files if tool in INSERTS else asked * 2 + 2 * files
                             bounded[tool] += 1
                             excess[min(max(reported - allowed, -1), 9)] += 1
                             if reported > allowed:
@@ -819,7 +824,7 @@ for path, project, spilled in walk():
             dupes[tool] += count - 1
     for i in range(len(msg_order) - 1):
         first, second = msg_calls[msg_order[i]], msg_calls[msg_order[i + 1]]
-        if len(first[1]) != 1 or len(second[1]) != 1:
+        if len(first[1]) != 1 or len(second[1]) != 1 or first[2] != second[2]:
             continue
         produced = result_text.get(first[1][0][2], '')
         wanted = []
@@ -855,7 +860,8 @@ for path, project, spilled in walk():
         while j + 1 < len(arg_order) and arg_order[j + 1][0] == arg_order[i][0]:
             j += 1
         key = BATCH.get(arg_order[i][0])
-        if key and j > i and not any(arg_order[k][1].get(key) for k in range(i, j + 1)):
+        if key and j > i and not any(arg_order[k][1].get(key) for k in range(i, j + 1)) \
+                and not any(arg_order[k][1].get(field) for k in range(i, j + 1) for field in RANGED):
             batch_missed[arg_order[i][0]] += j - i + 1
         i = j + 1
     for i in range(len(arg_order) - 1):
@@ -1213,7 +1219,7 @@ Run it as `python <script> <WEEKS>` **in the background**, and read the **whole*
 lands. **Do not** re-derive any number by hand afterwards — the script is the measurement of record,
 and the next run must be comparable.
 
-**Eight corrections this script encodes, each one a measured under-report in a version before it:**
+**Nine corrections this script encodes, each one a measured mis-report in a version before it:**
 
 1. **It reads every record class, not just the ones with a `message.content` list.** That guard alone
    dropped **73 915 of 282 061 records (26.2%)** — every `turn_duration` (348.0 h of wall clock),
@@ -1311,6 +1317,17 @@ and the next run must be comparable.
      `command`, or every failed shell retry lands in it. This is the fingerprint of a resolver
      refusing a name the caller already had right, and `dupes` cannot see it because the arguments
      are not identical.
+
+9. **It counts what a batched edit asked for, and pairs only messages inside one turn.** The
+   2026-10-10 run (`I755`) found three over-reports: `harvest()` skipped `declarations=[...]` string
+   arrays and a `retryWith` replay carries no payload at all, so collateral read **35 calls / 748
+   lines** where the truth was **27 / 62**; the unspent-parallelism gap summed **760 h** against a
+   71.7 h turn wall because a pair could straddle a user prompt; and the `read_text` unused-batch
+   count included runs carrying a line range, which `paths=` cannot express (`I283`). The collateral
+   bound now sums `changedLines=` over every file and allows one separator per file, a replay is
+   skipped, each message records the user-turn index it fell in so only same-turn messages pair, and a
+   `read_text` run counts toward `BATCH` only when no entry carries a range. A trend across this fix is
+   not comparable on those three counters - say so rather than reporting an improvement.
 
 **Two refinements, so the script does not over-claim either:**
 
