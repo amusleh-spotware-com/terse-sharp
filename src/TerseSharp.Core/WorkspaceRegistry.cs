@@ -209,7 +209,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         return best switch
         {
             [var only] => Ok(only, semantic),
-            [] => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Names(loaded))),
+            [] => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Names(loaded), Unloaded([.. loaded.Select(workspace => workspace.Root)], hint))),
             _ => Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(best))),
         };
     }
@@ -395,6 +395,8 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     internal static long Pressure(long availableBytes) => Math.Max(PressureFloor, availableBytes / 5 * 3);
 
     private static readonly TimeSpan MinimumIdle = TimeSpan.FromMinutes(1);
+    private static readonly string[] SolutionExtensions = [".sln", ".slnx", ".slnf"];
+    private static readonly string[] ProjectFileExtensions = [".csproj", ".vbproj", ".fsproj"];
 
     public TimeSpan IdleFor { get; init; }
 
@@ -440,4 +442,34 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     }
 
     public Func<bool> Pressured { get; init; } = static () => GC.GetTotalMemory(forceFullCollection: false) >= PressureBytes;
+
+    internal static string[] Unloaded(IReadOnlyList<string> roots, string hint)
+    {
+        if (hint.AsSpan().IndexOfAny('*', '?', '\0') >= 0)
+            return [];
+
+        try
+        {
+            return [.. Candidates(roots, hint).Where(Directory.Exists).SelectMany(Loadable).Distinct(StringComparer.OrdinalIgnoreCase)];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return [];
+        }
+    }
+
+    private static IEnumerable<string> Candidates(IReadOnlyList<string> roots, string hint) => Path.IsPathRooted(hint)
+        ? [Path.GetFullPath(hint)]
+        : roots.Select(root => Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root))))
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(parent => Path.GetFullPath(Path.Combine(parent, hint)));
+
+    private static string[] Loadable(string directory) =>
+        Entries(directory, SolutionExtensions) is { Length: > 0 } solutions ? solutions : Entries(directory, ProjectFileExtensions);
+
+    private static string[] Entries(string directory, string[] extensions) =>
+        [.. Directory.EnumerateFiles(directory)
+        .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+        .Order(StringComparer.Ordinal)];
 }

@@ -165,4 +165,50 @@ public sealed class WorkspaceTargetTests
         Assert.False(resolved.IsOk);
         Assert.StartsWith("ERROR OutOfWorkspace", resolved.Error!.Render(), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ResolveProject_ForAnExistingProjectFileOutsideTheRoot_NamesLoadWorkspaceAndTheWorkspaceToPassNext()
+    {
+        var outside = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i751-" + Guid.NewGuid().ToString("N"))).FullName;
+        var project = Path.Combine(outside, "Probe.csproj");
+        await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var error = Target(Trading).ResolveProject(project).Error!;
+
+            Assert.Equal(TerseErrorCode.OutOfWorkspace, error.Code);
+            Assert.Equal("load_workspace path=" + project + " loads it; then pass workspace=Probe to build, run_tests, list_tests or clean", error.Remedy);
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveProject_ForAMissingProjectFileOutsideTheRoot_KeepsThePlainRemedy()
+    {
+        var resolved = Target(Trading).ResolveProject(Path.Combine(Path.GetTempPath(), "terse-i751-missing-" + Guid.NewGuid().ToString("N"), "Other.csproj"));
+
+        Assert.Equal(TerseErrorCode.OutOfWorkspace, resolved.Error!.Code);
+        Assert.Equal("pass a path inside the loaded workspace", resolved.Error.Remedy);
+    }
+
+    [Fact]
+    public async Task ResolveProject_ForAnExistingNonProjectFileOutsideTheRoot_KeepsThePlainRemedy()
+    {
+        var outside = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i751-" + Guid.NewGuid().ToString("N"))).FullName;
+        var notes = Path.Combine(outside, "notes.txt");
+        await File.WriteAllTextAsync(notes, string.Empty, TestContext.Current.CancellationToken);
+
+        try
+        {
+            Assert.Equal("pass a path inside the loaded workspace", Target(Trading).ResolveProject(notes).Error!.Remedy);
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
 }

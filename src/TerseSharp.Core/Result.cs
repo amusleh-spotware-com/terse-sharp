@@ -19,10 +19,12 @@ public static class Errors
         "no workspace is loaded",
         "call load_workspace(path) or start the server inside a solution directory");
 
-    public static TerseError WorkspaceNotFound(string hint, IReadOnlyList<string> loaded) => new(
+    public static TerseError WorkspaceNotFound(string hint, IReadOnlyList<string> loaded, IReadOnlyList<string> unloaded) => new(
         TerseErrorCode.WorkspaceNotFound,
         string.Create(CultureInfo.InvariantCulture, $"no loaded workspace matches '{hint}'"),
-        "loaded: " + string.Join(", ", loaded));
+        unloaded.Count is 0
+            ? "loaded: " + string.Join(", ", loaded)
+            : UnloadedSolutions(unloaded) + "; loaded: " + string.Join(", ", loaded));
 
     public static TerseError AmbiguousWorkspace(IReadOnlyList<string> loaded) => new(
         TerseErrorCode.AmbiguousWorkspace,
@@ -64,6 +66,11 @@ public static class Errors
         TerseErrorCode.OutOfWorkspace,
         string.Create(CultureInfo.InvariantCulture, $"'{path}' resolves outside the workspace root"),
         "pass a path inside the loaded workspace");
+
+    public static TerseError ProjectOutOfWorkspace(string project) => new(
+            TerseErrorCode.OutOfWorkspace,
+            string.Create(CultureInfo.InvariantCulture, $"'{project}' resolves outside the workspace root"),
+            string.Create(CultureInfo.InvariantCulture, $"load_workspace path={project} loads it; then pass workspace={Path.GetFileNameWithoutExtension(project)} to build, run_tests, list_tests or clean"));
 
     public static TerseError CompileRegression(
                 IReadOnlyList<string> diagnostics,
@@ -289,6 +296,10 @@ public static class Errors
         TerseErrorCode.FileLocked,
         exception.Message,
         "retry once the other process closes the file - no argument of this call helps, because every attempt opens it the same way; find_files stamps=true still answers its size and last-write time");
+
+    private static string UnloadedSolutions(IReadOnlyList<string> unloaded) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"it is not loaded - {(unloaded.Count is 1 ? "load_workspace path=" + unloaded[0] : "load_workspace path= one of " + string.Join(", ", unloaded))} loads it; find_files, search_text, search_regex and changed_files answer it without a load with root={Path.GetDirectoryName(unloaded[0])}");
 }
 
 public readonly record struct RollbackHints(

@@ -19,12 +19,19 @@ public readonly record struct WorkspaceTarget(
 
     public Result<string> ResolveProject(string project)
     {
-        if (Loaded(PathGuard.Full(Root, project)) is { } loaded)
+        var full = PathGuard.Full(Root, project);
+
+        if (Loaded(full) is { } loaded)
             return Result.Ok(loaded);
 
         var resolved = PathGuard.Resolve(Root, project);
 
-        return resolved.IsOk && !Exists(resolved.Value!) ? Named(project) : resolved;
+        return resolved switch
+        {
+            { IsOk: false } when IsProjectFile(full) => Result.Fail<string>(Errors.ProjectOutOfWorkspace(full)),
+            { IsOk: true } when !Exists(resolved.Value!) => Named(project),
+            _ => resolved,
+        };
     }
 
     private string? Loaded(string full)
@@ -42,6 +49,8 @@ public readonly record struct WorkspaceTarget(
     }
 
     private static bool Exists(string path) => File.Exists(path) || Directory.Exists(path);
+
+    private static bool IsProjectFile(string path) => HasProjectExtension(path) && File.Exists(path);
 
     private Result<string> Named(string project)
     {

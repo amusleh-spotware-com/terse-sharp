@@ -458,4 +458,45 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         Assert.Contains("did you mean", text, StringComparison.Ordinal);
         Assert.Contains(passed + " -> " + expected, text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetSymbolSource_WithAWorkspaceHintNamingAnUnloadedDirectory_NamesLoadWorkspaceForItsSolution()
+    {
+        var unloaded = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i750-" + Guid.NewGuid().ToString("N"))).FullName;
+        var solution = Path.Combine(unloaded, "Probe.slnx");
+        await File.WriteAllTextAsync(solution, "<Solution />", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("get_symbol_source", new() { ["symbol"] = "OrderService", ["workspace"] = unloaded });
+
+            Assert.StartsWith("ERROR WorkspaceNotFound", text, StringComparison.Ordinal);
+            Assert.Contains("load_workspace path=" + solution + " loads it", text, StringComparison.Ordinal);
+            Assert.Contains("without a load with root=" + unloaded + "; loaded: ", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(unloaded, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Build_ForAnExistingProjectFileOutsideTheWorkspace_NamesLoadWorkspaceAndTheWorkspaceToPassNext()
+    {
+        var outside = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i751-" + Guid.NewGuid().ToString("N"))).FullName;
+        var project = Path.Combine(outside, "Probe.csproj");
+        await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\" />", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("build", new() { ["project"] = project });
+
+            Assert.StartsWith("ERROR OutOfWorkspace", text, StringComparison.Ordinal);
+            Assert.Contains("remedy: load_workspace path=" + project + " loads it; then pass workspace=Probe to build, run_tests, list_tests or clean", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(outside, recursive: true);
+        }
+    }
 }

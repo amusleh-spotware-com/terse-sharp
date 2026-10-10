@@ -685,4 +685,115 @@ public sealed class WorkspaceRegistryTests
         Assert.True(warming.IsCompletedSuccessfully);
         Assert.Same(warming, workspace.Warming);
     }
+
+    [Fact]
+    public async Task Unloaded_ForASiblingOfALoadedRootHoldingOneSolution_NamesThatSolutionAndNotItsProject()
+    {
+        var parent = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i750-" + Guid.NewGuid().ToString("N"))).FullName;
+        var root = Directory.CreateDirectory(Path.Combine(parent, "Repo")).FullName;
+        var sibling = Directory.CreateDirectory(Path.Combine(parent, "Repo-XT-18592")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(sibling, "Repo.slnx"), "<Solution />", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(sibling, "Repo.csproj"), "<Project />", TestContext.Current.CancellationToken);
+
+        try
+        {
+            string[] expected = [Path.Combine(sibling, "Repo.slnx")];
+
+            Assert.Equal(expected, WorkspaceRegistry.Unloaded([root], "Repo-XT-18592"));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Unloaded_ForAnAbsoluteDirectoryHoldingTwoSolutions_NamesBothInOrdinalOrder()
+    {
+        var directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i750-" + Guid.NewGuid().ToString("N"))).FullName;
+        await File.WriteAllTextAsync(Path.Combine(directory, "B.slnx"), "<Solution />", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(directory, "A.sln"), string.Empty, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(directory, "notes.txt"), string.Empty, TestContext.Current.CancellationToken);
+
+        try
+        {
+            string[] expected = [Path.Combine(directory, "A.sln"), Path.Combine(directory, "B.slnx")];
+
+            Assert.Equal(expected, WorkspaceRegistry.Unloaded([Path.Combine(Path.GetTempPath(), "elsewhere")], directory));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Unloaded_ForADirectoryWithNoSolutionButAProject_NamesTheProject()
+    {
+        var directory = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i750-" + Guid.NewGuid().ToString("N"))).FullName;
+        await File.WriteAllTextAsync(Path.Combine(directory, "Only.csproj"), "<Project />", TestContext.Current.CancellationToken);
+
+        try
+        {
+            string[] expected = [Path.Combine(directory, "Only.csproj")];
+
+            Assert.Equal(expected, WorkspaceRegistry.Unloaded([], directory));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("terse-no-such-sibling-i750")]
+    [InlineData("Repo*")]
+    [InlineData("Re?o")]
+    public void Unloaded_ForAHintNamingNoDirectoryOrCarryingAWildcard_NamesNothing(string hint) =>
+        Assert.Empty(WorkspaceRegistry.Unloaded([Path.Combine(Path.GetTempPath(), "Repo")], hint));
+
+    [Fact]
+    public void WorkspaceNotFound_WithAnUnloadedSolution_NamesLoadWorkspaceAndTheRootTools()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Repo-XT-1");
+        var solution = Path.Combine(directory, "Repo.slnx");
+
+        var error = Errors.WorkspaceNotFound("Repo-XT-1", ["Repo.slnx (Repo) -> C:/Repo/Repo.slnx"], [solution]);
+
+        Assert.Equal(TerseErrorCode.WorkspaceNotFound, error.Code);
+        Assert.Equal(
+            "it is not loaded - load_workspace path=" + solution + " loads it; find_files, search_text, search_regex and changed_files answer it without a load with root=" + directory + "; loaded: Repo.slnx (Repo) -> C:/Repo/Repo.slnx",
+            error.Remedy);
+    }
+
+    [Fact]
+    public void WorkspaceNotFound_WithNothingUnloadedNearby_KeepsTheLoadedListAsItsWholeRemedy()
+    {
+        var error = Errors.WorkspaceNotFound("nope", ["A.slnx (A) -> C:/A/A.slnx"], []);
+
+        Assert.Equal("loaded: A.slnx (A) -> C:/A/A.slnx", error.Remedy);
+    }
+
+    [Fact]
+    public async Task Resolve_WithAHintNamingAnUnloadedDirectoryHoldingASolution_NamesLoadWorkspaceForIt()
+    {
+        using var registry = new WorkspaceRegistry(maxWorkspaces: 2);
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        var unloaded = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "terse-i750-" + Guid.NewGuid().ToString("N"))).FullName;
+        var solution = Path.Combine(unloaded, "Probe.slnx");
+        await File.WriteAllTextAsync(solution, "<Solution />", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var result = registry.Resolve(unloaded, null);
+
+            Assert.False(result.IsOk);
+            Assert.Equal(TerseErrorCode.WorkspaceNotFound, result.Error!.Code);
+            Assert.StartsWith("it is not loaded - load_workspace path=" + solution + " loads it;", result.Error.Remedy, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(unloaded, recursive: true);
+        }
+    }
 }
