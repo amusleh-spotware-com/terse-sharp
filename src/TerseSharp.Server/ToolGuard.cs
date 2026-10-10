@@ -2485,8 +2485,6 @@ public static class ToolGuard
 
     private static bool Quiet(string token) => !token.StartsWith('-') || token is "-" or "-s" or "--quiet" or "--silent";
 
-    private static readonly string[] ScriptFlags = ["-e", "-f", "--regexp", "--expression", "--file"];
-
     private static bool ScriptFlagged(string[] command)
     {
         for (var index = 1; index < command.Length; index++)
