@@ -72,7 +72,7 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
 [Description("Solution or project path to unload.")] string? path = null,
 [Description("Alias for path; the solution path, not a worktree name.")] string? workspace = null,
 CancellationToken cancellationToken = default) =>
-(path ?? workspace) is { Length: > 0 } target
+Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("workspace", workspace)) is { } clash ? Task.FromResult(clash) : (path ?? workspace) is { Length: > 0 } target
     ? ToolBoundary.RunAsync(async () =>
     {
         await context.ReadyAsync().ConfigureAwait(false);

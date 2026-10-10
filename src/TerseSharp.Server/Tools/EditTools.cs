@@ -24,7 +24,7 @@ public sealed class EditTools(ToolContext context)
             [Description(RetryHelp)] string? retryWith = null,
             CancellationToken cancellationToken = default)
     {
-        if (RejectedUsings(usings) is { } rejected)
+        if ((RejectedUsings(usings) ?? Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol))) is { } rejected)
             return Task.FromResult(rejected);
 
         var held = Held(retryWith, "replace_symbol_body");
@@ -71,7 +71,7 @@ public sealed class EditTools(ToolContext context)
     {
         var placement = Placement(addBefore, addAfter, addPosition, PlacementNames.Added);
 
-        if (Refused(usings, add, placement) is { } refusal)
+        if ((Refused(usings, add, placement) ?? Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol))) is { } refusal)
             return Task.FromResult(refusal);
 
         var held = Held(retryWith, "replace_symbol");
@@ -152,7 +152,7 @@ public sealed class EditTools(ToolContext context)
                 [Description("Coarse slot instead of an anchor: first, afterFields (after the last field) or last. Default last. Not with before= or after=.")] string? position = null,
                 CancellationToken cancellationToken = default)
     {
-        if (Malformed(usings, declarations, typeSymbolIds, declaration, path) is { } refusal)
+        if ((Malformed(usings, declarations, typeSymbolIds, declaration, path) ?? Aliases.Clash(new ParameterSpelling("typeSymbolId", typeSymbolId), new ParameterSpelling("symbol", symbol), new ParameterSpelling("symbolId", symbolId))) is { } refusal)
             return Task.FromResult(refusal);
 
         var placement = Placement(before, after, position);
@@ -245,6 +245,9 @@ public sealed class EditTools(ToolContext context)
         [Description("Symbol ids deleted together as ONE compile-gated edit, at most 20; a reference inside another listed member does not count. Not with symbolId=.")] string[]? symbolIds = null,
         CancellationToken cancellationToken = default)
     {
+        if (Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash)
+            return Task.FromResult(clash);
+
         var options = Options("delete_symbol", dryRun, allowErrors, verbose, allowPolicy: allowPolicy);
 
         return symbolIds is { Length: > 0 }
@@ -263,7 +266,9 @@ public sealed class EditTools(ToolContext context)
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for symbolId.")] string? symbol = null,
             CancellationToken cancellationToken = default) =>
-            Supplied(workspace, symbolId ?? symbol, newName, "newName", (loaded, resolved) => RenameService.RenameAsync(
+            Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+                ? Task.FromResult(clash)
+                : Supplied(workspace, symbolId ?? symbol, newName, "newName", (loaded, resolved) => RenameService.RenameAsync(
                 loaded, resolved, newName, Options("rename_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
     private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null, string? addTo = null, bool rename = false, bool allowPolicy = false, MemberPlacement? placement = null) =>

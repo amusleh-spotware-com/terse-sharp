@@ -37,4 +37,33 @@ public sealed class AliasesTests
         Assert.True(chosen.IsOk);
         Assert.Equal(expected, chosen.Value);
     }
+
+    [Fact]
+    public void Clash_WithTwoDifferentValues_NamesBothSpellingsAndOffersEachAlone()
+    {
+        var clash = Aliases.Clash(new ParameterSpelling("symbolId", "OrderService.Submit"), new ParameterSpelling("symbol", "IOrderRepository"));
+
+        Assert.NotNull(clash);
+        Assert.Contains("ERROR InvalidArgument", clash, StringComparison.Ordinal);
+        Assert.Contains("'symbolId' and 'symbol' name the same parameter", clash, StringComparison.Ordinal);
+        Assert.Contains("remedy: pass only one of them - symbolId=\"OrderService.Submit\" or symbol=\"IOrderRepository\"", clash, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("OrderService", "OrderService")]
+    [InlineData("OrderService", null)]
+    [InlineData(null, "OrderService")]
+    [InlineData("", "OrderService")]
+    [InlineData(null, null)]
+    public void Clash_WithOneValueOrTheSameValueTwice_AnswersNull(string? symbolId, string? symbol) =>
+        Assert.Null(Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)));
+
+    [Fact]
+    public void Clash_WithAThirdSpellingDifferingFromTheFirst_IsRefusedNamingThatPair()
+    {
+        var clash = Aliases.Clash(new ParameterSpelling("typeSymbolId", "OrderService"), new ParameterSpelling("symbol", null), new ParameterSpelling("symbolId", "Order"));
+
+        Assert.NotNull(clash);
+        Assert.Contains("'typeSymbolId' and 'symbolId' name the same parameter", clash, StringComparison.Ordinal);
+    }
 }

@@ -1151,4 +1151,47 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.InRange(note, 0, text.IndexOf("\nOrderService  ", StringComparison.Ordinal));
         Assert.Equal(-1, text.IndexOf("resolved from name", note + 1, StringComparison.Ordinal));
     }
+
+    [Theory]
+    [InlineData("get_symbol", "symbolId", "symbol", false)]
+    [InlineData("get_symbol_source", "symbolId", "symbol", false)]
+    [InlineData("get_type_outline", "symbolId", "symbol", false)]
+    [InlineData("find_usages", "symbolId", "symbol", false)]
+    [InlineData("find_implementations", "symbolId", "symbol", false)]
+    [InlineData("replace_symbol_body", "symbolId", "symbol", true)]
+    [InlineData("replace_symbol", "symbolId", "symbol", true)]
+    [InlineData("delete_symbol", "symbolId", "symbol", true)]
+    [InlineData("rename_symbol", "symbolId", "symbol", true)]
+    [InlineData("change_signature", "symbolId", "symbol", true)]
+    [InlineData("add_member", "typeSymbolId", "symbol", true)]
+    [InlineData("add_member", "typeSymbolId", "symbolId", true)]
+    [InlineData("extract_interface", "typeSymbolId", "symbol", true)]
+    [InlineData("move_type_to_file", "typeSymbolId", "symbol", true)]
+    [InlineData("move_type_to_namespace", "typeSymbolId", "symbol", true)]
+    [InlineData("analyze", "minSeverity", "severity", false)]
+    [InlineData("get_diagnostics", "minSeverity", "severity", false)]
+    [InlineData("unload_workspace", "path", "workspace", false)]
+    public async Task AliasedParameter_PassedTwiceWithDifferentValues_IsRefusedNamingBothInsteadOfDroppingOne(string tool, string first, string second, bool mutating)
+    {
+        var text = await server.CallAsync(tool, mutating
+            ? new() { [first] = "OrderService", [second] = "IOrderRepository", ["dryRun"] = true }
+            : new() { [first] = "OrderService", [second] = "IOrderRepository" });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("'" + first + "' and '" + second + "' name the same parameter", text, StringComparison.Ordinal);
+        Assert.Contains("remedy: pass only one of them - " + first + "=\"OrderService\"", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithSymbolIdAndTheSameSymbol_AnswersThatMember()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolId"] = "OrderService.Submit",
+            ["symbol"] = "OrderService.Submit",
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("public bool Submit(Order order)", text, StringComparison.Ordinal);
+    }
 }

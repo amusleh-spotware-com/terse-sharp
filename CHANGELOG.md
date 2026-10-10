@@ -16,6 +16,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   workspace-relative and in file order, at most 5, then `+N more - find_usages lists them all`, on both the
   single-id and `symbolIds=` paths. Covered by `DeleteSymbol_StillReferenced_NamesEachUsageByFileLineAndDeclaration`
   and `DeleteSymbol_WithSymbolIdsWhereOneIsReferencedOnlyInsideAnother_DeletesBothAsOneEdit`.
+### Fixed
+
+- **Every remaining alias pair refuses two different values instead of silently keeping the first (I731).**
+  `symbolId`/`symbol` on `get_symbol`, `get_symbol_source`, `get_type_outline`, `find_usages`,
+  `find_implementations`, `replace_symbol_body`, `replace_symbol`, `delete_symbol`, `rename_symbol` and
+  `change_signature`; `typeSymbolId`/`symbol` on `extract_interface`, `move_type_to_file` and
+  `move_type_to_namespace`; `typeSymbolId`/`symbol`/`symbolId` on `add_member`; `minSeverity`/`severity` on
+  `analyze` and `get_diagnostics`; and `path`/`workspace` on `unload_workspace` answer `ERROR InvalidArgument`
+  naming both spellings and values, as the file tools have since 0.75.0. The same value twice is still accepted.
+  Covered by `AliasedParameter_PassedTwiceWithDifferentValues_IsRefusedNamingBothInsteadOfDroppingOne`,
+  `GetSymbolSource_WithSymbolIdAndTheSameSymbol_AnswersThatMember`,
+  `Clash_WithTwoDifferentValues_NamesBothSpellingsAndOffersEachAlone`,
+  `Clash_WithOneValueOrTheSameValueTwice_AnswersNull` and
+  `Clash_WithAThirdSpellingDifferingFromTheFirst_IsRefusedNamingThatPair`.
 
 ## [0.75.1] - 2026-10-07
 

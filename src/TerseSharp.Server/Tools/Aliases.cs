@@ -32,6 +32,12 @@ internal static class Aliases
     public static string TextRemedy(ParameterSpelling first, ParameterSpelling second) =>
         string.Create(CultureInfo.InvariantCulture, $"pass one of them, or queries=[\"{first.Value}\", \"{second.Value}\"] to search for both in one pass");
 
+    public static string? Clash(params ReadOnlySpan<ParameterSpelling> spellings) =>
+            Chosen(OneRemedy, spellings) is { IsOk: false } refused ? refused.Error!.Render() : null;
+
+    public static string OneRemedy(ParameterSpelling first, ParameterSpelling second) =>
+        string.Create(CultureInfo.InvariantCulture, $"pass only one of them - {first.Name}=\"{first.Value}\" or {second.Name}=\"{second.Value}\"");
+
     private static TerseError Conflict(ParameterSpelling first, ParameterSpelling second, Func<ParameterSpelling, ParameterSpelling, string> remedy) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"'{first.Name}' and '{second.Name}' name the same parameter and were passed different values, \"{first.Value}\" and \"{second.Value}\" - one of them would be silently dropped"),
         remedy(first, second));

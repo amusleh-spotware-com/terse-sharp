@@ -17,7 +17,9 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Alias for typeSymbolId.")] string? symbol = null,
         [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
-        Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.ExtractInterfaceAsync(
+        Aliases.Clash(new ParameterSpelling("typeSymbolId", typeSymbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.ExtractInterfaceAsync(
             loaded, resolved, interfaceName, Options("extract_interface", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_file")]
@@ -30,7 +32,9 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Alias for typeSymbolId.")] string? symbol = null,
         [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
-        Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToFileAsync(
+        Aliases.Clash(new ParameterSpelling("typeSymbolId", typeSymbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToFileAsync(
             loaded, resolved, Options("move_type_to_file", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "move_type_to_namespace")]
@@ -44,7 +48,9 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Alias for typeSymbolId.")] string? symbol = null,
         [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
-        Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToNamespaceAsync(
+        Aliases.Clash(new ParameterSpelling("typeSymbolId", typeSymbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : Guarded(workspace, typeSymbolId ?? symbol, (loaded, resolved) => RefactorService.MoveTypeToNamespaceAsync(
             loaded, resolved, targetNamespace, Options("move_type_to_namespace", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "change_signature")]
@@ -59,7 +65,9 @@ public sealed class RefactorTools(ToolContext context)
         [Description("Alias for symbolId.")] string? symbol = null,
         [Description("Apply an edit the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         CancellationToken cancellationToken = default) =>
-        Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => RefactorService.ChangeSignatureAsync(
+        Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => RefactorService.ChangeSignatureAsync(
             loaded, resolved, parameters, new EditOptions("change_signature", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "undo_last_change")]

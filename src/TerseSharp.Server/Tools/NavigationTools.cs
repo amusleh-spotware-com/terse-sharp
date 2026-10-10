@@ -85,7 +85,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("List every member instead of the first 40; the default counts the rest.")] bool all = false,
         [Description("Several types in ONE response, at most 20. Replaces one call per type: each under its own header line, an id that does not resolve reported inline as NOT_RESOLVED.")] string[]? symbolIds = null,
         CancellationToken cancellationToken = default) =>
-        Outlined(
+        Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : Outlined(
             Requested(symbolId ?? symbol, symbolIds),
             symbolIds is { Length: > 0 },
             workspace,
@@ -104,7 +106,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Several symbol ids described in one response. Replaces one call per symbol; an id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call.")] string[]? symbolIds = null,
         [Description("Answer what this symbol IS rather than only its signature: usage counts in src and tests, implementations, XAML sites and the files it is used in. One symbol at a time. Default false.")] bool usages = false,
         CancellationToken cancellationToken = default) =>
-        usages && symbolIds is not { Length: > 0 }
+        Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : usages && symbolIds is not { Length: > 0 }
             ? context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
                 ExploreService.ExploreAsync(loaded, resolved, cancellationToken), cancellationToken)
             : Described(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, verbose, path, cancellationToken);
@@ -122,6 +126,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Git ref to read the member at, e.g. main. Takes one symbol id and requires path=; the declaration is resolved from that revision's own text.")] string? @ref = null,
         CancellationToken cancellationToken = default)
     {
+        if (Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash)
+            return Task.FromResult(clash);
+
         if (@ref is not { Length: > 0 } reference)
             return SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, new SourceFormat(verbose, comments), path, cancellationToken);
 
@@ -173,7 +180,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Answer the blast radius instead of the reference list: referencing files, XAML sites and every project that would recompile. Default false.")] bool impact = false,
         [Description("With impact=true, also list the test classes that reference this symbol, each as a ready run_tests test= argument. They are the DIRECT references only, so they narrow a run rather than replacing one. Default false.")] bool tests = false,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => impact
+        Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => impact
             ? ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
             : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken), cancellationToken);
 
@@ -210,7 +219,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Max results (100).")] int maxResults = 0,
         [Description("Alias for symbolId.")] string? symbol = null,
         CancellationToken cancellationToken = default) =>
-        context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
+        Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
+            ? Task.FromResult(clash)
+            : context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
             ReferenceService.FindImplementationsAsync(loaded, resolved, Cap(maxResults, 100), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "get_diagnostics", ReadOnly = true)]
@@ -223,7 +234,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             [Description("Max results (100).")] int maxResults = 0,
             [Description("Report only diagnostics on a line the working tree added or changed against this git ref, e.g. HEAD or main, folding the rest to one pre-existing count. A file git does not track counts whole. Empty reports every diagnostic in scope.")] string? baseRef = null,
             CancellationToken cancellationToken = default) =>
-            replay.ReplayedAsync(
+            Aliases.Clash(new ParameterSpelling("minSeverity", minSeverity), new ParameterSpelling("severity", severity)) is { } clash
+            ? Task.FromResult(clash)
+            : replay.ReplayedAsync(
                 "get_diagnostics",
                 ReplayGate.Key("get_diagnostics", path, minSeverity, severity, workspace, maxResults.ToString(CultureInfo.InvariantCulture), baseRef),
                 force: baseRef is { Length: > 0 },
