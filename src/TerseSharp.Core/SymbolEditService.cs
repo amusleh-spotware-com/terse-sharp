@@ -431,16 +431,51 @@ public static class SymbolEditService
         _ => null,
     };
 
+    private static SyntaxTriviaList Unspaced(SyntaxTriviaList leading)
+    {
+        var cut = 0;
+
+        for (var index = 0; index < leading.Count && leading[index].Kind() is SyntaxKind.WhitespaceTrivia or SyntaxKind.EndOfLineTrivia; index++)
+        {
+            if (leading[index].IsKind(SyntaxKind.EndOfLineTrivia))
+                cut = index + 1;
+        }
+
+        return cut is 0 ? leading : SyntaxFactory.TriviaList(leading.Skip(cut));
+    }
+
+    private static SyntaxTriviaList EndedOnce(SyntaxTriviaList trailing)
+    {
+        var end = trailing.Count;
+
+        while (end > 0 && trailing[end - 1].Kind() is SyntaxKind.WhitespaceTrivia or SyntaxKind.EndOfLineTrivia)
+            end--;
+
+        return SyntaxFactory.TriviaList(trailing.Take(end)).Add(SyntaxFactory.ElasticCarriageReturnLineFeed);
+    }
+
+    private static TerseError? Unparsable(ISymbol[] types, IReadOnlyList<string> declarations)
+    {
+        for (var index = 0; index < types.Length; index++)
+        {
+            var error = types[index] is INamedTypeSymbol { TypeKind: TypeKind.Enum }
+                ? MemberDeclaration.ParseEnumMembers(declarations[index]).Error
+                : MemberDeclaration.ParseAll(declarations[index]).Error;
+
+            if (error is not null)
+                return Attributed(error, index, "typeSymbolIds");
+        }
+
+        return null;
+    }
+
     private static MemberDeclarationSyntax Separated(MemberDeclarationSyntax member, bool blankLineBefore)
     {
-        var leading = member.GetLeadingTrivia();
-        var spaced = blankLineBefore
-            ? leading.Insert(0, SyntaxFactory.ElasticCarriageReturnLineFeed)
-            : leading;
+        var leading = Unspaced(member.GetLeadingTrivia());
 
         return member
-            .WithLeadingTrivia(spaced)
-            .WithTrailingTrivia(member.GetTrailingTrivia().Add(SyntaxFactory.ElasticCarriageReturnLineFeed));
+            .WithLeadingTrivia(blankLineBefore ? leading.Insert(0, SyntaxFactory.ElasticCarriageReturnLineFeed) : leading)
+            .WithTrailingTrivia(EndedOnce(member.GetTrailingTrivia()));
     }
 
     private static TypeDeclarationSyntax Appended(TypeDeclarationSyntax type, IReadOnlyList<MemberDeclarationSyntax> members, int index)
@@ -450,7 +485,7 @@ public static class SymbolEditService
 
         foreach (var member in members)
         {
-            updated = updated.WithMembers(updated.Members.Insert(at, Separated(member, at > 0 && NeedsBlankLine(member))));
+            updated = updated.WithMembers(updated.Members.Insert(at, Separated(member, at > 0)));
             at++;
         }
 
@@ -1701,9 +1736,14 @@ public static class SymbolEditService
     {
         var types = await ResolvedTypesAsync(workspace, typeSymbolIds, cancellationToken).ConfigureAwait(false);
 
-        return types.IsOk
-            ? await PlannedAdditionsAsync(workspace, GroupedByType(types.Value!, declarations), options, cancellationToken).ConfigureAwait(false)
-            : Result.Fail<PlannedEdit[]>(types.Error!);
+        if (!types.IsOk)
+            return Result.Fail<PlannedEdit[]>(types.Error!);
+
+        var grouped = GroupedByType(types.Value!, declarations);
+
+        return grouped.Count < typeSymbolIds.Count && Unparsable(types.Value!, declarations) is { } unparsed
+            ? Result.Fail<PlannedEdit[]>(unparsed)
+            : await PlannedAdditionsAsync(workspace, grouped, options, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<PlannedEdit>> AdditionAsync(

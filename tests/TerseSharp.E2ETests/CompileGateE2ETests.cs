@@ -1126,4 +1126,53 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("CS0029", compiler, StringComparison.Ordinal);
         Assert.DoesNotContain("CA1822", compiler, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ARenamingBatchRetriedWithFix_KeepsTheRenameTheTokenHolds()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "Calculator.NoMemberSpelledLikeThis" },
+            ["declarations"] = new[] { "public int Wellness() => 11;", "public int PreExistingError() => 2;" },
+            ["rename"] = true,
+        });
+
+        var retried = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "M:Fixture.Broken.Calculator.PreExistingError" },
+            ["fix"] = new[] { "1=public int PreExistingError() => 4242;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("retryWith=", rejected, StringComparison.Ordinal);
+        Assert.DoesNotContain("declares 'Wellness', but the paired symbolId addresses 'Healthy'", retried, StringComparison.Ordinal);
+        Assert.Contains("public int Wellness() => 11;", retried, StringComparison.Ordinal);
+        Assert.Contains("public int PreExistingError() => 4242;", retried, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AHeldPlacement_LandsTheAddedHelperWhereTheRejectedCallAskedFor()
+    {
+        var rejected = await CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "Calculator.NoMemberSpelledLikeThis" },
+            ["declarations"] = new[] { "public int Healthy() => HeldHelper();", "public int PreExistingError() => 2;" },
+            ["add"] = new[] { "private static int HeldHelper() => 11;" },
+            ["addPosition"] = "first",
+        });
+
+        var retried = await CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = Token(rejected),
+            ["symbolIds"] = new[] { "M:Fixture.Broken.Calculator.Healthy", "M:Fixture.Broken.Calculator.PreExistingError" },
+            ["dryRun"] = true,
+        });
+
+        var helper = retried.IndexOf("private static int HeldHelper() => 11;", StringComparison.Ordinal);
+        var healthy = retried.IndexOf("public int Healthy() => HeldHelper();", StringComparison.Ordinal);
+
+        Assert.Contains("retryWith=", rejected, StringComparison.Ordinal);
+        Assert.InRange(helper, 0, healthy - 1);
+    }
 }

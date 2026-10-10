@@ -96,10 +96,12 @@ public sealed class EditTools(ToolContext context)
         var helpers = Kept(add, held is null ? null : Patched(held.Add, fix, add: true));
         var container = addTo ?? held?.AddTo;
 
-        if (RejectedPlacement(placement.Value, helpers) is { } misplaced)
+        var anchor = placement.Value ?? held?.Placement;
+
+        if (RejectedPlacement(anchor, helpers) is { } misplaced)
             return Task.FromResult(misplaced);
 
-        var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename, allowPolicy, placement.Value);
+        var options = Options("replace_symbol", dryRun, allowErrors, verbose, imports, helpers, container, rename || held is { Rename: true }, allowPolicy, anchor);
 
         if (held is not null && append)
         {
@@ -127,7 +129,7 @@ public sealed class EditTools(ToolContext context)
         return Supplied(workspace, target, text, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
             loaded, resolved, text, options, cancellationToken),
             cancellationToken,
-            new Carry("replace_symbol", [target ?? string.Empty], [text], helpers, container, imports),
+            new Carry("replace_symbol", [target ?? string.Empty], [text], helpers, container, imports, options.Rename, options.Placement),
             held?.Root);
     }
     [McpServerTool(Name = "add_member")]
@@ -345,7 +347,7 @@ public sealed class EditTools(ToolContext context)
         string[]? usings = null)
     {
         var rejection = context.RejectWrite();
-        var carry = new Carry("replace_symbol", symbolIds, declarations, add, addTo, usings);
+        var carry = new Carry("replace_symbol", symbolIds, declarations, add, addTo, usings, options.Rename, options.Placement);
 
         return rejection is not null
             ? Task.FromResult(rejection)
@@ -365,7 +367,9 @@ public sealed class EditTools(ToolContext context)
         string[]? Payloads,
         string[]? Add = null,
         string? AddTo = null,
-        string[]? Usings = null);
+        string[]? Usings = null,
+        bool Rename = false,
+        MemberPlacement? Placement = null);
 
     internal static string Carried(Result<string> result, Carry carry, string root) =>
         result.IsOk ? result.Value! : Rejected(result.Error!, carry, root);
@@ -442,7 +446,7 @@ public sealed class EditTools(ToolContext context)
     private static string Rejected(TerseError error, Carry carry, string root) =>
             carry.Tool is { Length: > 0 } tool && Holdable(error.Code) && Worth(carry)
                 ? error.Render() + "\n" + RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0) + "\nretryWith=" + RejectedEdits.Remember(
-                    root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings)
+                    root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement)
                 : error.Render();
 
     private static bool Holdable(TerseErrorCode code) =>

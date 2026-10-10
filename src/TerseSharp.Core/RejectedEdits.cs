@@ -8,7 +8,9 @@ public sealed record RejectedEdit(
     IReadOnlyList<string> Payloads,
     IReadOnlyList<string> Add,
     string? AddTo,
-    IReadOnlyList<string> Usings);
+    IReadOnlyList<string> Usings,
+    bool Rename = false,
+    MemberPlacement? Placement = null);
 
 public static class RejectedEdits
 {
@@ -27,13 +29,15 @@ public static class RejectedEdits
         IReadOnlyList<string> payloads,
         IReadOnlyList<string>? add = null,
         string? addTo = null,
-        IReadOnlyList<string>? usings = null)
+        IReadOnlyList<string>? usings = null,
+        bool rename = false,
+        MemberPlacement? placement = null)
     {
         lock (Gate)
         {
             var token = "r" + (++counter).ToString(CultureInfo.InvariantCulture);
 
-            Held.Enqueue(new RejectedEdit(token, root, tool, targets, payloads, add ?? [], addTo, usings ?? []));
+            Held.Enqueue(new RejectedEdit(token, root, tool, targets, payloads, add ?? [], addTo, usings ?? [], rename, placement));
 
             while (Held.Count > Capacity)
                 Held.Dequeue();

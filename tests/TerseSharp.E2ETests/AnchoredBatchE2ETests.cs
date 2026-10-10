@@ -374,4 +374,50 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
         Assert.Contains("Respelled", text, StringComparison.Ordinal);
         Assert.InRange(InsertedAt(text), low, high);
     }
+
+    [Fact]
+    public async Task AddMember_WithABlankLineBetweenItsDeclarations_SeparatesThemByExactlyOneBlankLine()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.TwinAlpha",
+            ["declaration"] = "public int Doubled() =>\n    Count() * 2;\n\npublic int Tripled() => Count() * 3;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.Contains("changedLines=5", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("+\n+\n", text.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsJoiningTwoEntries_SeparatesThemByExactlyOneBlankLine()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.TwinAlpha", "T:Fixture.Trading.TwinAlpha" },
+            ["declarations"] = new[] { "public int Doubled() => Count() * 2;", "public int Tripled() => Count() * 3;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.Contains("+    public int Tripled() => Count() * 3;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("+\n+\n", text.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsJoiningAnUnparsableEntry_NamesThatEntrysOwnIndex()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.TwinAlpha", "T:Fixture.Trading.TwinAlpha", "T:Fixture.Trading.TwinBravo" },
+            ["declarations"] = new[] { "public int Doubled() => Count() * 2;", "public int Tripled( => Count() * 3;", "public int Doubled() => Count() * 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("declarations[1]:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("declarations[0]:", text, StringComparison.Ordinal);
+        Assert.Contains("of 35: public int Tripled( => Count() * 3;", text, StringComparison.Ordinal);
+    }
 }
