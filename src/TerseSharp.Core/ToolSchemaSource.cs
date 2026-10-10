@@ -21,6 +21,15 @@ public static class ToolSchemaSource
         return declared;
     }
 
+    public static async Task<IReadOnlyList<DeclaredTool>> DeclaredAsync(Document document, CancellationToken cancellationToken)
+    {
+        var declared = new List<DeclaredTool>();
+
+        await CollectAsync(document, declared, cancellationToken).ConfigureAwait(false);
+
+        return declared;
+    }
+
     private static async Task CollectAsync(Document document, List<DeclaredTool> declared, CancellationToken cancellationToken)
     {
         if (await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is not { } root)

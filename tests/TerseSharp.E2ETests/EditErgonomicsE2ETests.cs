@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.E2ETests;
 
@@ -1717,4 +1718,46 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_ForcedOnAToolDescription_EndsItsSuccessLineWithThatToolsSchemaEstimateAndTheCap()
+    {
+        const string Probe = "src/Fixture.Trading/TerseSchemaProbe.cs";
+        const string Trailer = "  schema fake_tool=26 tokens (cap 1024, left=998)";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = SchemaProbe("abc"), ["force"] = true });
+        try
+        {
+            var previewed = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "\"abc\"", ["newText"] = "\"abcd\"", ["force"] = true, ["dryRun"] = true });
+            var applied = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "\"abc\"", ["newText"] = "\"abcd\"", ["force"] = true });
+            var elsewhere = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "=> ignored;", ["newText"] = "=> ignored + \"!\";", ["force"] = true });
+
+            var line = applied.Split('\n').Single(l => l.Contains("changedLines=", StringComparison.Ordinal)).TrimEnd('\r');
+
+            Assert.EndsWith("TerseSchemaProbe.cs  changedLines=1" + Trailer, line, StringComparison.Ordinal);
+            Assert.Contains("changedLines=1" + Trailer, previewed, StringComparison.Ordinal);
+            Assert.Contains("TerseSchemaProbe.cs  changedLines=1", elsewhere, StringComparison.Ordinal);
+            Assert.DoesNotContain("schema ", elsewhere, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    private static string SchemaProbe(string description) => $$"""
+    namespace Fixture.Trading.SchemaProbe;
+
+    public sealed class McpServerToolAttribute : System.Attribute { public string Name { get; set; } = ""; }
+
+    public sealed class DescriptionAttribute(string text) : System.Attribute { public string Text { get; } = text; }
+
+    public sealed class ProbeTools
+    {
+        [McpServerTool(Name = "fake_tool")]
+        [Description("{{description}}")]
+        public string Fake([Description("xy")] string workspace = "") => workspace;
+
+        public string NotATool(string ignored) => ignored;
+    }
+    """;
 }

@@ -97,6 +97,7 @@ public static class AdvertisedCost
                 var listed = await next(request, cancellationToken).ConfigureAwait(false);
 
                 Volatile.Write(ref unnarrowed, Measure(listed.Tools));
+            ToolSchemaEstimate.Publish(Installed, ToolExamples.DecorationLength);
 
                 return listed;
             };
@@ -109,6 +110,7 @@ public static class AdvertisedCost
     {
         Volatile.Write(ref unnarrowed, Measure(whole));
         Volatile.Write(ref last, Measure(advertised));
+        ToolSchemaEstimate.Publish(Installed, ToolExamples.DecorationLength);
     }
 
     private const int MaxCostliest = 10;

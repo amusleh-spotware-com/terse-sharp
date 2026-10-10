@@ -65,7 +65,7 @@ public static class EditGate
             return Compact(response, diffs, root);
 
         foreach (var diff in diffs)
-            response.Line(diff.Text).Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={diff.ChangedLines}"));
+            response.Line(diff.Text).Line(string.Create(CultureInfo.InvariantCulture, $"changedLines={diff.ChangedLines}{diff.Schema}"));
 
         return response.ToString();
     }
@@ -303,7 +303,7 @@ public static class EditGate
         {
             response.Line(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{PositionFormat.Relative(root, diff.Path)}  changedLines={diff.ChangedLines}"));
+                $"{PositionFormat.Relative(root, diff.Path)}  changedLines={diff.ChangedLines}{diff.Schema}"));
         }
 
         return response.ToString();

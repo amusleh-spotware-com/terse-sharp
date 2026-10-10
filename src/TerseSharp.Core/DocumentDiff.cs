@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.Core;
 
-public sealed record DocumentDiff(string Path, string Text, int ChangedLines)
+public sealed record DocumentDiff(string Path, string Text, int ChangedLines, string Schema = "")
 {
     public static async Task<DocumentDiff?> CreateAsync(
         Solution before,
@@ -25,7 +25,7 @@ public sealed record DocumentDiff(string Path, string Text, int ChangedLines)
         var path = updated.FilePath ?? updated.Name;
         var report = UnifiedDiff.Report(path, originalText, updatedText);
 
-        return new DocumentDiff(path, report.Text, report.ChangedLines);
+        return new DocumentDiff(path, report.Text, report.ChangedLines, await SchemaAsync(original, updated, updatedText, cancellationToken).ConfigureAwait(false));
     }
 
     private static async Task<string> Read(Document document, CancellationToken cancellationToken)
@@ -34,6 +34,11 @@ public sealed record DocumentDiff(string Path, string Text, int ChangedLines)
 
         return text.ToString();
     }
+
+    private static async Task<string> SchemaAsync(Document? original, Document updated, string updatedText, CancellationToken cancellationToken) =>
+            updatedText.Contains("McpServerTool", StringComparison.Ordinal)
+                ? await ToolSchemaEstimate.TrailerAsync(original, updated, cancellationToken).ConfigureAwait(false)
+                : string.Empty;
 }
 
 public sealed record EditOptions(string Tool, bool DryRun, bool AllowErrors, bool Verbose = false, System.Collections.Immutable.ImmutableArray<string> Usings = default, System.Collections.Immutable.ImmutableArray<string> Add = default, string? AddTo = null, bool Rename = false, bool AllowPolicy = false, MemberPlacement? Placement = null);

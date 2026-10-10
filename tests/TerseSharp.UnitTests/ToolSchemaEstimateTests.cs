@@ -121,4 +121,56 @@ public sealed class ToolSchemaEstimateTests
         Assert.Contains("1 differ from the running server", edited, StringComparison.Ordinal);
         Assert.Contains("\n  fake_tool ", edited, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Trailer_ForAToolWhoseDescriptionChanged_PricesItOnTheInstalledFrameAgainstTheCap_AndSkipsTheUnchangedOne()
+    {
+        var installed = new Dictionary<string, InstalledSchema>(StringComparer.Ordinal) { ["edit_text"] = new(4000, 420) };
+        DeclaredTool[] original = [new("edit_text", 3900, 17), new("read_text", 2000, 12)];
+        DeclaredTool[] edited = [new("edit_text", 4000, 17), new("read_text", 2000, 12)];
+
+        var trailer = ToolSchemaEstimate.Trailer(edited, original, installed, static name => name == "edit_text" ? 36 : 0);
+
+        Assert.Equal("  schema edit_text=1114 tokens (cap 1024, over=90)", trailer);
+    }
+
+    [Fact]
+    public void Trailer_WhenNoToolChanged_IsEmpty()
+    {
+        DeclaredTool[] tools = [new("find_files", 2000, 4)];
+
+        Assert.Equal(string.Empty, ToolSchemaEstimate.Trailer(tools, tools, new Dictionary<string, InstalledSchema>(StringComparer.Ordinal), static _ => 0));
+    }
+
+    [Fact]
+    public async Task TrailerAsync_ForAnEditedDescriptionOfAnUninstalledTool_PricesItOnTheFrameHeuristicUnderTheCap()
+    {
+        ToolSchemaEstimate.Publish(static () => new Dictionary<string, InstalledSchema>(StringComparer.Ordinal), static _ => 0);
+        using var workspace = new AdhocWorkspace();
+        var document = SolutionOf(workspace, Source("abc")).Projects.Single().Documents.Single();
+
+        var trailer = await ToolSchemaEstimate.TrailerAsync(document, document.WithText(SourceText.From(Source("abcd"))), TestContext.Current.CancellationToken);
+        var unchanged = await ToolSchemaEstimate.TrailerAsync(document, document, TestContext.Current.CancellationToken);
+
+        Assert.Equal("  schema fake_tool=26 tokens (cap 1024, left=998)", trailer);
+        Assert.Equal(string.Empty, unchanged);
+    }
+
+    [Fact]
+    public async Task Observe_PublishesTheInstalledFrameThatTheEditTrailerPricesAgainst()
+    {
+        var installed = new Tool
+        {
+            Name = "fake_tool",
+            Description = "abc",
+            InputSchema = JsonDocument.Parse("""{"type":"object","properties":{"workspace":{"description":"xy","type":"string"}}}""").RootElement,
+        };
+        AdvertisedCost.Observe([installed], [installed]);
+        using var workspace = new AdhocWorkspace();
+        var document = SolutionOf(workspace, Source("abc")).Projects.Single().Documents.Single();
+
+        var trailer = await ToolSchemaEstimate.TrailerAsync(document, document.WithText(SourceText.From(Source("abcd"))), TestContext.Current.CancellationToken);
+
+        Assert.Equal("  schema fake_tool=24 tokens (cap 1024, left=1000)", trailer);
+    }
 }
