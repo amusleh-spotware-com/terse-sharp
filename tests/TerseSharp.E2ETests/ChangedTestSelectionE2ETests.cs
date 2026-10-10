@@ -466,4 +466,30 @@ public sealed class ChangedTestSelectionE2ETests
             await server.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task Build_WithTimeoutSeconds_StopsAtThatBudgetAndSaysSo()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var text = await CallAsync(server, "build", new()
+            {
+                ["timeoutSeconds"] = 2,
+                ["properties"] = new[] { "TerseStallBuild=true" },
+            });
+            var start = text.IndexOf("timed out after ", StringComparison.Ordinal) + "timed out after ".Length;
+            var elapsed = long.Parse(text.AsSpan(start, text.IndexOf(" ms", start, StringComparison.Ordinal) - start), CultureInfo.InvariantCulture);
+
+            Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("build ok", text, StringComparison.Ordinal);
+            Assert.Contains("remedy: raise timeoutSeconds - it was 2, the maximum is 3600", text, StringComparison.Ordinal);
+            Assert.InRange(elapsed, 1_000, 60_000);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
 }

@@ -111,4 +111,18 @@ public sealed class ParameterAliasesTests
 
     private static Dictionary<string, JsonElement> Arguments(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
+
+    [Fact]
+    public void Apply_BindsReadsOffsetAndLimit_ToReadTextsStartLineAndMaxLines()
+    {
+        var arguments = Arguments("""{"path": "README.md", "offset": 40, "limit": 20}""");
+
+        ParameterAliases.Apply("read_text", arguments);
+
+        Assert.Equal(40, arguments["startLine"].GetInt32());
+        Assert.Equal(20, arguments["maxLines"].GetInt32());
+        Assert.False(arguments.ContainsKey("offset"));
+        Assert.False(arguments.ContainsKey("limit"));
+        Assert.Equal("README.md", arguments["path"].GetString());
+    }
 }

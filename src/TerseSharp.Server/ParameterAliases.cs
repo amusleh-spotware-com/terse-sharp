@@ -25,6 +25,8 @@ internal static class ParameterAliases
         new("replace_symbol", "code", "declaration"),
         new("replace_symbol", "content", "declaration"),
         new("list_projects", "contains", "filter"),
+        new("read_text", "offset", "startLine"),
+        new("read_text", "limit", "maxLines"),
         new("search_text", "-C", "context"),
         new("search_text", "-A", "context"),
         new("search_text", "-B", "context"),

@@ -673,4 +673,17 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.Contains("NOT_ENABLED ZZ9*", text, StringComparison.Ordinal);
         Assert.Contains("could not have found it", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadsOffsetAndLimit_BindToReadTextsStartLineAndMaxLines_InsteadOfAnsweringInvalidArgument()
+    {
+        var aliased = await server.CallAsync("read_text", new() { ["path"] = "FixtureSolution.slnx", ["offset"] = 2, ["limit"] = 1, ["verbose"] = true });
+        var canonical = await server.CallAsync("read_text", new() { ["path"] = "FixtureSolution.slnx", ["startLine"] = 2, ["maxLines"] = 1, ["verbose"] = true });
+
+        Assert.DoesNotContain("InvalidArgument", aliased, StringComparison.Ordinal);
+        Assert.Equal(canonical, aliased);
+        Assert.Contains("\n2: ", aliased, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n1: ", aliased, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n3: ", aliased, StringComparison.Ordinal);
+    }
 }

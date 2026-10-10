@@ -21,6 +21,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Return every diagnostic, warnings included, and the full report even when the build succeeds. Default false, which answers a successful build in one line and hides warnings on a failed one. The warnings= count reports what this build emitted, so a build that recompiled nothing reports 0.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Build even when this exact call already answered ok and nothing has been written since. Default false.")] bool force = false,
+        [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         CancellationToken cancellationToken = default) => Replayable(
         "build",
         BuildGreen,
@@ -37,7 +38,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
                 return scope.IsOk
                     ? Contained(target, project, resolved => BuildWithRecoveryAsync(
-                        target, resolved, scope.Value, verbose, cancellationToken))
+                        target, resolved, scope.Value, verbose, Seconds(timeoutSeconds), cancellationToken))
                     : Task.FromResult(scope.Error!.Render());
             }, cancellationToken);
         },
@@ -288,10 +289,11 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         string? project,
         BuildScope scope,
         bool verbose,
+        TimeSpan timeout,
         CancellationToken cancellationToken) =>
         RecoveredAsync(target, "build", async () =>
         {
-            var run = await DotnetRunner.BuildAsync(target, project, scope, verbose, cancellationToken).ConfigureAwait(false);
+            var run = await DotnetRunner.BuildAsync(target, project, scope, verbose, timeout, cancellationToken).ConfigureAwait(false);
 
             return new LockedRun(run.Response, run.Locked);
         }, cancellationToken);

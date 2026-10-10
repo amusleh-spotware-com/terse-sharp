@@ -7,7 +7,6 @@ namespace TerseSharp.Server;
 
 public static partial class DotnetRunner
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);
 
     private const int MaxFailures = 20;
 
@@ -26,13 +25,19 @@ public static partial class DotnetRunner
         string? project,
         BuildScope scope,
         bool verbose,
+        TimeSpan timeout,
         CancellationToken cancellationToken)
     {
         var target = project ?? workspace.SolutionPath;
-        var run = await BuiltAsync(workspace, target, scope, DefaultTimeout, cancellationToken).ConfigureAwait(false);
+        var run = await BuiltAsync(workspace, target, scope, timeout, cancellationToken).ConfigureAwait(false);
+        var rendered = RenderBuild(target, workspace.Root, run, verbose);
 
-        return new BuildRun(RenderBuild(target, workspace.Root, run, verbose), Locked(run));
+        return new BuildRun(run.TimedOut ? rendered + BuildDeadline(run, timeout) : rendered, Locked(run));
     }
+
+    internal static string BuildDeadline(ProcessRun run, TimeSpan timeout) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"\nWARNING the build timed out after {run.ElapsedMilliseconds} ms; remedy: raise timeoutSeconds - it was {(int)timeout.TotalSeconds}, the maximum is {MaxTimeoutSeconds}");
     private static bool Locked(ProcessRun run) => !run.Stopped && IsLockedOutput(run.ExitCode, run.Output);
 
     private static bool IsGreen(ProcessRun run, TestRunReport report) =>

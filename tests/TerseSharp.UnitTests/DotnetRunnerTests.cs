@@ -1151,4 +1151,12 @@ public sealed class DotnetRunnerTests
         Assert.DoesNotContain("did not build", text, StringComparison.Ordinal);
         Assert.DoesNotContain("the build reported", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void BuildDeadline_ForATimedOutBuild_NamesTheBudgetItRanUnderAndTheMaximum()
+    {
+        var text = DotnetRunner.BuildDeadline(new ProcessRun(-1, string.Empty, 2_013, TimedOut: true), TimeSpan.FromSeconds(2));
+
+        Assert.Equal("\nWARNING the build timed out after 2013 ms; remedy: raise timeoutSeconds - it was 2, the maximum is 3600", text);
+    }
 }
