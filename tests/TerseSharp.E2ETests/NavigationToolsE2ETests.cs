@@ -1194,4 +1194,31 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
         Assert.Contains("public bool Submit(Order order)", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task SearchSymbols_WithACapitalisedTypeKindAndNoSourceMatch_AnswersFromTheReferencedAssemblies()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["query"] = "StringBuilder", ["kind"] = "Class" });
+
+        Assert.Contains("T:System.Text.StringBuilder", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("cannot answer kind=", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithKindInterfaceAndOnlyAReferencedClassMatching_ListsNoClass()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["query"] = "StringBuilder", ["kind"] = "interface" });
+
+        Assert.Contains("0 symbols", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("T:System.Text.StringBuilder", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithKindInterfaceInAnyCase_StillListsAReferencedInterface()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["query"] = "IDisposable", ["kind"] = "Interface" });
+
+        Assert.Contains("T:System.IDisposable", text, StringComparison.Ordinal);
+        Assert.Contains("interface public IDisposable", text, StringComparison.Ordinal);
+    }
 }

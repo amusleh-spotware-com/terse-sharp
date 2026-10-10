@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -7,6 +8,8 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 {
+    private static readonly FrozenSet<string> TypeKinds = FrozenSet.Create(StringComparer.OrdinalIgnoreCase, "type", "namedtype", "class", "interface", "enum", "struct", "record", "delegate");
+
     [McpServerTool(Name = "search_symbols", ReadOnly = true)]
     [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none. Use instead of Grep for anything that is a type or member.")]
     public Task<string> SearchSymbols(
@@ -378,11 +381,12 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     private static async Task<string> ReferencedAsync(
         LoadedWorkspace workspace,
         string query,
+        string? kind,
         int maxResults,
         CancellationToken cancellationToken)
     {
         var cap = Cap(maxResults, 100);
-        var matches = await MetadataSearch.FindAsync(workspace, query, cap, cancellationToken, exhaustive: true).ConfigureAwait(false);
+        var matches = await MetadataSearch.FindOfKindAsync(workspace, query, kind, cap, cancellationToken).ConfigureAwait(false);
         var response = new ResponseBuilder("search_symbols", query);
 
         response.Summary(matches.Found.Count, matches.Total, "symbols", "a narrower query= or maxResults=");
@@ -424,11 +428,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         _ => null,
     };
 
-    private static bool NamesAType(string? kind) => kind switch
-    {
-        null or "" or "type" or "namedtype" or "class" or "interface" or "enum" or "struct" or "record" or "delegate" => true,
-        _ => false,
-    };
+    private static bool NamesAType(string? kind) => string.IsNullOrWhiteSpace(kind) || TypeKinds.Contains(kind);
 
     private static Result<string?> ScopedFile(LoadedWorkspace workspace, string? path) => path is { Length: > 0 }
             ? DocumentLookup.Find(workspace, path) is { } document
@@ -450,7 +450,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         if (Declined(query, kind, scope) is { } refusal)
             return refusal;
 
-        var referenced = await ReferencedAsync(workspace, query, maxResults, cancellationToken).ConfigureAwait(false);
+        var referenced = await ReferencedAsync(workspace, query, kind, maxResults, cancellationToken).ConfigureAwait(false);
 
         return unscoped ? referenced + "\n" + FellBack : referenced;
     }

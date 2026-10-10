@@ -14,15 +14,24 @@ public static class MetadataSearch
             ? string.Create(CultureInfo.InvariantCulture, $"{assembly.Identity.Name} {assembly.Identity.Version}")
             : "-";
 
-    public static async Task<MetadataMatches> FindAsync(
+    public static Task<MetadataMatches> FindAsync(
         LoadedWorkspace workspace,
         string name,
         int cap,
         CancellationToken cancellationToken,
-        bool exhaustive = false)
-    {
-        var hunt = new Hunt(name, cap, exhaustive);
+        bool exhaustive = false) =>
+        HuntAsync(workspace, new Hunt(name, cap, exhaustive, null), cancellationToken);
 
+    public static Task<MetadataMatches> FindOfKindAsync(
+        LoadedWorkspace workspace,
+        string name,
+        string? kind,
+        int cap,
+        CancellationToken cancellationToken) =>
+        HuntAsync(workspace, new Hunt(name, cap, true, kind), cancellationToken);
+
+    private static async Task<MetadataMatches> HuntAsync(LoadedWorkspace workspace, Hunt hunt, CancellationToken cancellationToken)
+    {
         foreach (var project in workspace.Solution.Projects)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -78,7 +87,7 @@ public static class MetadataSearch
         }
     }
 
-    private sealed class Hunt(string name, int cap, bool exhaustive)
+    private sealed class Hunt(string name, int cap, bool exhaustive, string? kind)
     {
         public string Name { get; } = name;
 
@@ -96,7 +105,7 @@ public static class MetadataSearch
 
         public void Add(INamedTypeSymbol type)
         {
-            if (type.DeclaredAccessibility is not Accessibility.Public || !Types.Add(type.ToDisplayString()))
+            if (type.DeclaredAccessibility is not Accessibility.Public || !SymbolKindFilter.Matches(type, kind) || !Types.Add(type.ToDisplayString()))
                 return;
 
             Total += 1;

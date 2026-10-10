@@ -30,6 +30,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `Clash_WithTwoDifferentValues_NamesBothSpellingsAndOffersEachAlone`,
   `Clash_WithOneValueOrTheSameValueTwice_AnswersNull` and
   `Clash_WithAThirdSpellingDifferingFromTheFirst_IsRefusedNamingThatPair`.
+- **`search_symbols` reads `kind=` the same way on both of its paths (I732).** A kind in any case (`kind=Class`)
+  now reaches the referenced-assembly fallback instead of being declined there after the source search accepted
+  it, and the fallback applies the kind, so `kind=interface` no longer lists a referenced class and its count is
+  taken after the filter. Covered by
+  `SearchSymbols_WithACapitalisedTypeKindAndNoSourceMatch_AnswersFromTheReferencedAssemblies`,
+  `SearchSymbols_WithKindInterfaceAndOnlyAReferencedClassMatching_ListsNoClass` and
+  `SearchSymbols_WithKindInterfaceInAnyCase_StillListsAReferencedInterface`.
 
 ## [0.75.1] - 2026-10-07
 
