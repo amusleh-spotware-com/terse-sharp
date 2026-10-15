@@ -22,6 +22,7 @@ public sealed class EditTools(ToolContext context)
             [Description("Alias for symbolId.")] string? symbol = null,
             [Description(UsingsHelp)] string[]? usings = null,
             [Description(RetryHelp)] string? retryWith = null,
+            [Description(PathHelp)] string? path = null,
             CancellationToken cancellationToken = default)
     {
         if ((RejectedUsings(usings) ?? Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol))) is { } rejected)
@@ -41,11 +42,12 @@ public sealed class EditTools(ToolContext context)
                 loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken),
                 cancellationToken,
                 new Carry("replace_symbol_body", [target ?? string.Empty], [text], Usings: imports),
-                held?.Root);
+                held?.Root,
+                path: path);
     }
 
     [McpServerTool(Name = "replace_symbol")]
-    [Description("Replace a whole member declaration - signature, attributes and doc comment - by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations in one call replace the target with all of them - how a member splits into overloads. A type's bodiless header re-heads it. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands with the callers it breaks. add= adds the private helpers the declaration calls, placed by addBefore=/addAfter=/addPosition=. A rollback names a retryWith token holding what was rejected.")]
+    [Description("Replace a whole member declaration - signature, attributes and doc comment - by symbol id; usings= adds the namespaces it needs in the same compile-gated edit. Several declarations split it into overloads. A type's bodiless header re-heads it. symbolIds= with declarations= edits members across SEVERAL files as ONE compile-gated edit. Replaces one call per member, and is how a signature change lands with the callers it breaks. add= lands the helpers it calls. A rollback names a retryWith token holding what was rejected.")]
     public Task<string> ReplaceSymbol(
                         [Description("Symbol id of the member.")] string? symbolId = null,
                         [Description("One complete member declaration, or several in sequence.")] string declaration = "",
@@ -60,18 +62,19 @@ public sealed class EditTools(ToolContext context)
                         [Description("Symbol ids to replace together, paired positionally with declarations. Beside retryWith= it corrects the held ids.")] string[]? symbolIds = null,
                         [Description("One complete declaration per symbolIds entry, in order, applied as ONE compile-gated edit across their files.")] string[]? declarations = null,
                         [Description(UsingsHelp)] string[]? usings = null,
-                        [Description("Apply a declaration whose name differs from its paired symbol. References are NOT rewritten; rename_symbol makes them follow.")] bool rename = false,
+                        [Description("Apply a declaration renaming its symbol; references do NOT follow - rename_symbol does that.")] bool rename = false,
                     [Description(FixHelp)] string[]? fix = null,
                     [Description("Beside retryWith=, ADD the pairs you pass to the held batch; an add_member token's members become add=. Refused without a token.")] bool append = false,
                     [Description(RetryHelp)] string? retryWith = null,
                 [Description("Member to land the add= helpers ABOVE, by short name or documentation id. Only with add=.")] string? addBefore = null,
                 [Description("Member to land them BELOW, addressed as addBefore= is.")] string? addAfter = null,
                 [Description("Coarse slot instead of an anchor: first, afterFields or last. Default last.")] string? addPosition = null,
+                [Description(BatchPathHelp)] string? path = null,
                         CancellationToken cancellationToken = default)
     {
         var placement = Placement(addBefore, addAfter, addPosition, PlacementNames.Added);
 
-        if ((Refused(usings, add, placement) ?? Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol))) is { } refusal)
+        if ((Refused(usings, add, placement) ?? Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) ?? Unpathed(path, symbolIds)) is { } refusal)
             return Task.FromResult(refusal);
 
         var held = Held(retryWith, "replace_symbol");
@@ -130,7 +133,8 @@ public sealed class EditTools(ToolContext context)
             loaded, resolved, text, options, cancellationToken),
             cancellationToken,
             new Carry("replace_symbol", [target ?? string.Empty], [text], helpers, container, imports, options.Rename, options.Placement),
-            held?.Root);
+            held?.Root,
+            path: path);
     }
     [McpServerTool(Name = "add_member")]
     [Description("Add one or more members to a type, addressed by the type's symbol id, with usings= adding the namespaces they need in the same compile-gated edit - or, with path=, add namespace-level types to an existing .cs file. typeSymbolIds= paired with declarations= adds a member to SEVERAL types as ONE compile-gated edit - an interface member and every implementation, with no uncompilable step. Replaces one call per implementation. before= and after= place the new members above or below a member the type declares, and position=first|afterFields|last picks a coarse slot; the default appends at the end, above a trailing #region the type closes. An enum symbol id takes enum members. Several declarations in one call land as one edit, so members that reference each other need no dependency ordering. A rollback names a retryWith token holding the rejected declarations, so the retry costs a token, not the payload; an unresolved typeSymbolId too. A successful edit answers in one line per changed file; pass verbose=true for the diff.")]
@@ -283,7 +287,8 @@ public sealed class EditTools(ToolContext context)
         CancellationToken cancellationToken,
         Carry carry = default,
         string? heldRoot = null,
-        bool typesOnly = false)
+        bool typesOnly = false,
+        string? path = null)
     {
         var rejection = context.RejectWrite();
 
@@ -294,6 +299,7 @@ public sealed class EditTools(ToolContext context)
                 symbolId,
                 async (loaded, resolved) => Carried(await action(loaded, resolved).ConfigureAwait(false), carry, loaded.Root),
                 cancellationToken,
+                path: path,
                 guard: loaded => Elsewhere(heldRoot, loaded.Root),
                 typesOnly: typesOnly,
                 unresolved: (loaded, error) => Rejected(error, carry, loaded.Root));
@@ -331,8 +337,9 @@ public sealed class EditTools(ToolContext context)
     CancellationToken cancellationToken,
     Carry carry = default,
     string? heldRoot = null,
-    bool typesOnly = false) => text is { Length: > 0 }
-    ? Guarded(workspace, symbolId, action, cancellationToken, carry, heldRoot, typesOnly)
+    bool typesOnly = false,
+    string? path = null) => text is { Length: > 0 }
+    ? Guarded(workspace, symbolId, action, cancellationToken, carry, heldRoot, typesOnly, path)
     : Task.FromResult(Errors.Blank(name).Render());
 
     private Task<string> Batched(
@@ -404,6 +411,9 @@ public sealed class EditTools(ToolContext context)
         index < targets.Count && targets[index] is { Length: > 0 } value ? value : null;
 
     private const string UsingsHelp = "Namespaces this declaration needs, added in the SAME compile-gated edit - the one-call answer to a CS0246 rollback. One already present is ignored, a non-namespace entry is refused by name, and usings=[] on a retryWith replay DROPS what the token holds.";
+    private const string PathHelp = "File a short name is resolved in first, as get_symbol_source path= does.";
+
+    private const string BatchPathHelp = PathHelp + " Not with symbolIds=.";
 
     private static string? RejectedUsings(string[]? usings)
     {
@@ -788,4 +798,8 @@ public sealed class EditTools(ToolContext context)
     private readonly record struct AdoptedEdit(string[] SymbolIds, string[] Declarations, string[]? Add, string? AddTo, string[]? Usings, MemberPlacement? Placement);
 
     private readonly record struct EditFlags(bool DryRun, bool AllowErrors, bool Verbose, bool Rename, bool AllowPolicy);
+
+    private static string? Unpathed(string? path, string[]? symbolIds) => path is { Length: > 0 } && symbolIds is { Length: > 0 }
+        ? Errors.Invalid("path= resolves the one symbolId it is passed beside; it is not taken beside symbolIds=", "drop path=, or address each symbolIds= entry by its documentation id or a qualified name").Render()
+        : null;
 }

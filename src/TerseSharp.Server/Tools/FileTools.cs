@@ -931,7 +931,9 @@ context.RejectWrite() is { } rejection
         {
             return Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"'files' entry {missing + 1} carries no {(files[missing].Path is { Length: > 0 } ? "content" : "path")}"),
-                "every entry needs both a path and its full new content");
+                files[missing].Path is { Length: > 0 } restored
+                ? string.Create(CultureInfo.InvariantCulture, $"every entry needs both a path and its full new content; files= takes no ref= or delete= - restore that file on its own with write_text path=\"{restored}\" ref=HEAD, or remove it with write_text path=\"{restored}\" delete=true")
+                : "every entry needs both a path and its full new content");
         }
 
         var empty = allowEmpty ? -1 : Array.FindIndex(files, file => file.Content.Length is 0);

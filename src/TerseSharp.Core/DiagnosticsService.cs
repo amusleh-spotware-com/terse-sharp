@@ -59,7 +59,7 @@ public static class DiagnosticsService
             response.Note(Occurrences(found));
 
         if (request.Touched is not null)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"{preExisting} pre-existing diagnostic(s) were not reported - they sit outside every line the working tree changed against {request.BaseRef}"));
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"{preExisting} pre-existing diagnostic(s) were not reported - they sit outside every line the working tree changed against {request.BaseRef} - drop baseRef= to list them"));
 
         foreach (var line in deduplicated.Capped(request.MaxResults))
             response.Line(line);

@@ -31,6 +31,77 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   `PostToolUse_ForATerseReadBelowNestedRules_InjectsEachFolderOnceOutermostFirst`,
   `GuardFolderRules_DeniesTheFirstTerseWriteBelowRulesTheSessionHasNotSeen` and
   `Install_WithTheGuard_RegistersTheFolderRulesHookForTerseCallsWritesAndCompaction`.
+- **`replace_symbol` and `replace_symbol_body` take `path=` (user report 2026-10-15).** It resolves a short name
+  inside that file first, exactly as `get_symbol_source path=` does, so `symbol="Submit" path="src/OrderService.cs"`
+  no longer answers `unrecognized path`. It is refused beside `symbolIds=` rather than ignored, and - like
+  `add_member path=` - a call carrying it is now checked by the folder-rules `PreToolUse` hook before it writes.
+  Covered by `ReplaceSymbol_WithAPathHint_ResolvesAnAmbiguousNameInsideThatFile`,
+  `ReplaceSymbol_WithAPathHintBesideSymbolIds_IsRefusedRatherThanIgnored` and
+  `Writers_AreTheEditToolsThatNameAPath_AndNoPathlessSymbolReadBuildOrFormatTool`.
+
+### Changed
+
+- **`delete_symbol` deletes a file it leaves declaring nothing (user report 2026-10-15).** Deleting the only
+  types of a file used to leave its `using` block and namespace behind. The answer now adds
+  `deleted  <path> - it declared nothing but what this call deleted, so the file went too` (`would delete` on a
+  `dryRun`), on both the single-id and `symbolIds=` paths, after the emptied text has gone through the compile
+  gate. A file that still carries a `global using`, `#if`-disabled code, an assembly attribute or an `extern` is
+  kept; one linked from outside its project's folder, compiled by a second project, or named explicitly instead of
+  by glob answers `kept  <path> - ...` because deleting it could break a build, and a delete the file system refuses keeps the emptied file and says why. A real delete clears
+  the undo history, because undo cannot restore a deleted file. Covered by
+  `DeleteSymbol_OfAFilesOnlyTypes_DeletesTheFileAndSaysSo`, `DeleteSymbol_OfOneOfAFilesTwoTypes_KeepsTheFile`,
+  `DeleteSymbol_OfAFilesOnlyVisibleType_KeepsAFileThatStillCarriesDisabledCodeOrAGlobalUsing` and
+  `DeleteSymbol_OfAFilesOnlyTypeAsADryRun_SaysItWouldDeleteTheFileAndLeavesIt`.
+- **`run_tests filter=` carrying an HTML entity is refused (user report 2026-10-15).** `&amp;` reached
+  `dotnet test` as text, so an `&` clause never acted as AND and the run selected the wrong tests. The refusal
+  names the decoded expression to send instead. Covered by
+  `Selection_WithAFilterCarryingAnHtmlEntity_RefusesNamingTheDecodedExpression`.
+- **`run_tests status=` with an id terse never issues says whose it is (user report 2026-10-15).** A client
+  task id such as `k13gn1gew` used to be blamed on a restarted server; it now answers that terse ids look like
+  `t1` and that a call the client backgrounded reports through the client. Covered by
+  `Status_ForAnIdNotShapedLikeATerseRunId_SaysItBelongsToTheClientInsteadOfBlamingARestart`.
+- **`write_text files=[{path}]` with no content names the single-file restore (user report 2026-10-15).** The
+  remedy now says `files=` takes no `ref=` or `delete=` and gives the `write_text path="..." ref=HEAD` call.
+  Covered by `WriteText_WithAFilesEntryCarryingOnlyAPath_NamesTheSingleFileRestoreItCannotTake`.
+- **The `baseRef=` pre-existing note names how to list what it folded.** `analyze` ends it with
+  `baseRef="" lists every finding in these files at once`, `get_diagnostics` with `drop baseRef= to list them`.
+
+### Fixed
+
+- **`edit_text` no longer lands an anchor that starts inside a line's indentation at the wrong depth (user
+  report 2026-10-15).** `oldText="    Foo();\n"` on a line indented 8 matched its last 4 spaces, so a second
+  `newText` line landed at column 4. The match now widens to the whole line and every `newText` line shallower
+  than the file is re-indented, with `NOTE oldText started inside the indentation of line N (the file indents it
+  8 column(s), oldText 4)`. Covered by `EditText_ForAnAnchorStartingInsideTheIndentation_ReindentsEveryInsertedLineToTheFileDepth`,
+  `EditText_ForAnAnchorStartingInsideTheIndentation_ReindentsTheInsertedLineToTheFileDepth` and
+  `Find_ForAnAnchorStartingInsideTheLinesIndentation_WidensToTheLineAndCarriesTheMissingIndent`.
+- **`add_member` and `replace_symbol` indent a declaration's continuation lines once (user report 2026-10-15).**
+  A multi-line field initializer or parameter list landed 4-8 columns too deep: the payload was shifted to the
+  member column and the formatter then shifted it again by the first line's move. The first line now carries
+  the member column, and a payload whose braces - or, without braces, whose continuation - already sit at the
+  file's depth is not shifted at all, so both column-0 and file-depth payloads land as sent. Covered by
+  `AddMember_WithAMultiLineDeclaration_IndentsItsContinuationLinesOnce`,
+  `ReplaceSymbol_WithAMultiLineConstructorInEitherFrame_LandsTheParametersOneLevelDeep`,
+  `Reindented_ForAContinuationSentAtTheFilesOwnDepth_LeavesItThereAndIndentsTheFirstLine` and
+  `Reindented_ForAConstructorWhoseBracesSitAtTheMemberColumn_ShiftsNothingButTheFirstLine`.
+- **The guard no longer denies shell text commands on files outside the solution (user reports 2026-10-15).**
+  Three causes: words were split on spaces inside quotes, so a fragment of an `awk`/`sed`/`grep` program
+  became a relative "path" judged inside the tree - and the replacement call named it (`read_text path="#/{print"`);
+  a literal `cd` stopped being followed as soon as the command held a `|` anywhere, `||` included; and a `for`
+  loop's words were joined into one path (`/tmp/r_5.10.13 5.10.12.json`). Words now split outside quotes only, a
+  `cd` is followed into every later statement whatever pipes they hold (a `cd` inside a pipeline or an `||` chain
+  still moves nothing), and a joined loop that is denied is re-judged one word at a time, up to 16, when the
+  command binds a single loop variable - nested loops keep the joined verdict, because judging the words pairwise
+  would skip the combinations the shell really runs. Covered by
+  `Guard_ForAPipelineAfterALiteralCdOutOfTheTree_JudgesItInThatDirectory`,
+  `Guard_ForACdOrALoopWordTheShellMayNotTake_KeepsJudgingInTheTree`,
+  `Guard_ForAQuotedProgramWithSpacesOrALoopWordInsideAnOutOfTreePath_AllowsIt`,
+  `Guard_ForAQuotedProgramWithSpacesInTheTree_NamesTheFileItReadsNotAFragmentOfTheProgram` and
+  `Guard_ForALoopWhoseWordsLandInsideTheTree_StillDenies`.
+- **`analyze`, `get_diagnostics` and `gate` with `baseRef=` no longer treat a pure deletion as touching the line
+  above it (user report 2026-10-15).** Deleting one dead member put its neighbour inside a "changed" range, so
+  pre-existing dead code surfaced one item per edit. A deletion hunk now covers no surviving line. Covered by
+  `Covers_ForAPureDeletion_TouchesNoSurvivingLine`.
 
 ## [0.76.0] - 2026-10-10
 

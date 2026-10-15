@@ -210,4 +210,15 @@ public sealed class SnippetSearchTests
         Assert.Equal(twice.LastIndexOf("    public int Value()", StringComparison.Ordinal), match.Start);
         Assert.Equal("    ", match.Indent);
     }
+
+    [Fact]
+    public void Find_ForAnAnchorStartingInsideTheLinesIndentation_WidensToTheLineAndCarriesTheMissingIndent()
+    {
+        const string Text = "class A\n{\n    void M()\n    {\n        Foo();\n    }\n}\n";
+        var match = SnippetSearch.Find(Text, "    Foo();\n", 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.Equal("    ", match.Indent);
+        Assert.Equal("        Foo();\n", Text[match.Start..(match.Start + match.Length)]);
+    }
 }

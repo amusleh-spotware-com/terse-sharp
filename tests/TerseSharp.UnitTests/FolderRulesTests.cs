@@ -242,10 +242,10 @@ public sealed class FolderRulesTests : IDisposable
     }
 
     [Fact]
-    public void Writers_AreTheEditToolsThatNameAPath_AndNoSymbolAddressedReadBuildOrFormatTool()
+    public void Writers_AreTheEditToolsThatNameAPath_AndNoPathlessSymbolReadBuildOrFormatTool()
     {
-        string[] writers = ["write_text", "edit_text", "add_member", "resx_set", "xaml_set_property", "razor_set_attribute"];
-        string[] others = ["read_text", "get_file_outline", "build", "run_tests", "replace_symbol_body", "rename_symbol", "format", "cleanup", "gate"];
+        string[] writers = ["write_text", "edit_text", "add_member", "replace_symbol", "replace_symbol_body", "resx_set", "xaml_set_property", "razor_set_attribute"];
+        string[] others = ["read_text", "get_file_outline", "build", "run_tests", "delete_symbol", "rename_symbol", "format", "cleanup", "gate"];
 
         Assert.All(writers, tool => Assert.Contains(tool, FolderRules.Writers));
         Assert.All(others, tool => Assert.DoesNotContain(tool, FolderRules.Writers));

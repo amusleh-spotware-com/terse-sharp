@@ -216,7 +216,7 @@ public static class AnalysisService
         {
             response.Note(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{narrowed.PreExisting + kept.Length - extra.Length} pre-existing finding(s) on these files were not reported - they sit outside every line the working tree changed against {narrowed.BaseRef}"));
+                $"{narrowed.PreExisting + kept.Length - extra.Length} pre-existing finding(s) on these files were not reported - they sit outside every line the working tree changed against {narrowed.BaseRef} - baseRef=\"\" lists every finding in these files at once"));
         }
 
         if (!sinceLast && occurrences.Length != shown.Count)

@@ -2349,6 +2349,86 @@ public sealed class ToolGuardTests
         }
     }
 
+    [Theory]
+    [InlineData("cd 'PLAIN' && ls -la *.log 2>/dev/null | head; head -c 300 37012063.log")]
+    [InlineData("cd 'PLAIN' && for f in *.log; do echo \"== $f\"; grep -m3 -iE \"version|cTrader [0-9]\" \"$f\" || true; done")]
+    [InlineData("cd 'PLAIN'; grep -c ERROR a.log | sort -rn")]
+    public void Guard_ForAPipelineAfterALiteralCdOutOfTheTree_JudgesItInThatDirectory(string template)
+    {
+        var plain = Directory.CreateTempSubdirectory("terse-guard-cd");
+
+        try
+        {
+            var command = template.Replace("PLAIN", plain.FullName, StringComparison.Ordinal);
+            var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+            Assert.False(verdict.Denied, NotHermetic(plain.FullName, verdict.Reason));
+        }
+        finally
+        {
+            plain.Delete(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("awk '/UnhandledException #/{print NR; exit}' OUT/a.log")]
+    [InlineData("grep -oE 'ca=.{0,40} [a-z]+|xy' OUT/cb.js | head -2")]
+    [InlineData("sed -i \"s/limit: 80/limit: 300/\" OUT/cb.mjs")]
+    [InlineData("for v in 5.10.13 5.10.12; do wc -c OUT/r_$v.json; done")]
+    public void Guard_ForAQuotedProgramWithSpacesOrALoopWordInsideAnOutOfTreePath_AllowsIt(string template)
+    {
+        var outside = Directory.CreateTempSubdirectory("terse-guard-out");
+
+        try
+        {
+            var command = template.Replace("OUT", outside.FullName.Replace('\\', '/'), StringComparison.Ordinal);
+            var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+            Assert.False(verdict.Denied, NotHermetic(outside.FullName, verdict.Reason));
+        }
+        finally
+        {
+            outside.Delete(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("awk '/UnhandledException #/{print NR; exit}' notes.log", "read_text path=\"notes.log\"")]
+    [InlineData("sed -n 's/a b/c d/p' notes.log", "read_text path=\"notes.log\"")]
+    [InlineData("grep -nE 'Foo [0-9]+' notes.log", "search_text query=\"<the literal>\" glob=\"notes.log\"")]
+    public void Guard_ForAQuotedProgramWithSpacesInTheTree_NamesTheFileItReadsNotAFragmentOfTheProgram(string command, string call)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(call, verdict.Routing);
+    }
+
+    [Theory]
+    [InlineData("for v in Order Book; do cat src/$v.cs; done")]
+    [InlineData("for v in a.txt b.txt; do wc -l src/$v; done")]
+    public void Guard_ForALoopWhoseWordsLandInsideTheTree_StillDenies(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+
+    [Theory]
+    [InlineData("cd src || cd 'OUT'; cat notes.md")]
+    [InlineData("for a in 'OUT/' ''; do for b in x.log /tmp/terse-guard-y.log; do cat $a$b; done; done")]
+    public void Guard_ForACdOrALoopWordTheShellMayNotTake_KeepsJudgingInTheTree(string template)
+    {
+        var outside = Directory.CreateTempSubdirectory("terse-guard-or");
+
+        try
+        {
+            var command = template.Replace("OUT", outside.FullName.Replace('\\', '/'), StringComparison.Ordinal);
+
+            Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+        }
+        finally
+        {
+            outside.Delete(true);
+        }
+    }
+
     [Fact]
     public void Inspect_ForAHeredocWriteToAVariableAssignedOutsideTheTree_AllowsIt()
     {

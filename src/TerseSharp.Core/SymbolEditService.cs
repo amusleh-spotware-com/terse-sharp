@@ -294,7 +294,7 @@ public static class SymbolEditService
             solution = trimmed.Value!;
         }
 
-        return await EditGate.ApplyAsync(workspace, solution, [.. groups.Select(group => group.Key)], options, cancellationToken).ConfigureAwait(false);
+        return await PrunedAsync(workspace, solution, [.. groups.Select(group => group.Key)], options, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<Solution>> TrimmedAsync(
@@ -400,7 +400,7 @@ public static class SymbolEditService
 
         var updated = workspace.Solution.WithDocumentSyntaxRoot(target.Document.Id, trimmed);
 
-        return await EditGate.ApplyAsync(workspace, updated, [target.Document.Id], options, cancellationToken).ConfigureAwait(false);
+        return await PrunedAsync(workspace, updated, [target.Document.Id], options, cancellationToken).ConfigureAwait(false);
     }
 
     private static SyntaxNode? ParseBody(SyntaxNode node, string body)
@@ -1903,6 +1903,94 @@ public static class SymbolEditService
 
         return match.Adjacent || respelled is null || tier is AnchorTier.Name ? match : Anchored(type, respelled, tier);
     }
+
+    private static async Task<Result<string>> PrunedAsync(
+        LoadedWorkspace workspace,
+        Solution solution,
+        DocumentId[] changed,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var emptied = await EmptiedAsync(solution, changed, cancellationToken).ConfigureAwait(false);
+        var applied = await EditGate.ApplyAsync(workspace, solution, changed, options, cancellationToken).ConfigureAwait(false);
+
+        return applied.IsOk && emptied.Count > 0
+            ? Result.Ok(applied.Value + Retired(workspace, emptied, options.DryRun))
+            : applied;
+    }
+
+    private static async Task<List<Document>> EmptiedAsync(Solution solution, DocumentId[] changed, CancellationToken cancellationToken)
+    {
+        var emptied = new List<Document>(changed.Length);
+
+        foreach (var id in changed)
+        {
+            if (solution.GetDocument(id) is { FilePath.Length: > 0 } document
+                && await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is CompilationUnitSyntax unit
+                && DeclaresNothing(unit))
+            {
+                emptied.Add(document);
+            }
+        }
+
+        return emptied;
+    }
+
+    private static bool DeclaresNothing(CompilationUnitSyntax unit) =>
+        unit.AttributeLists.Count is 0
+        && unit.Externs.Count is 0
+        && unit.Members.All(Hollow)
+        && !unit.Usings.Any(directive => directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword))
+        && !unit.DescendantTrivia().Any(trivia => trivia.IsKind(SyntaxKind.DisabledTextTrivia));
+
+    private static bool Hollow(MemberDeclarationSyntax member) =>
+        member is BaseNamespaceDeclarationSyntax { Externs.Count: 0 } namespaced && namespaced.Members.All(Hollow);
+
+    private static string Retired(LoadedWorkspace workspace, List<Document> emptied, bool dryRun)
+    {
+        var lines = new StringBuilder(emptied.Count * 128);
+        var deleted = false;
+
+        foreach (var document in emptied)
+        {
+            var (line, gone) = Discarded(PositionFormat.Relative(workspace.Root, document.FilePath!), document, dryRun);
+
+            lines.Append('\n').Append(line);
+            deleted |= gone;
+        }
+
+        if (deleted)
+            workspace.ForgetHistory("delete_symbol deleted a file it emptied, which undo cannot restore - restore it with write_text ref=HEAD");
+
+        return lines.ToString();
+    }
+
+    private static (string Line, bool Deleted) Discarded(string relative, Document document, bool dryRun)
+    {
+        if (!Globbed(document))
+            return (string.Create(CultureInfo.InvariantCulture, $"kept  {relative} - it declares nothing now, but it is not a file only its own project compiles by glob, so deleting it could break a build; remove the file and the item that names it together"), false);
+
+        if (dryRun)
+            return (string.Create(CultureInfo.InvariantCulture, $"would delete  {relative} - it declared nothing but what this call deleted, so the file would go too"), false);
+
+        try
+        {
+            File.Delete(document.FilePath!);
+
+            return (string.Create(CultureInfo.InvariantCulture, $"deleted  {relative} - it declared nothing but what this call deleted, so the file went too"), true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return (string.Create(CultureInfo.InvariantCulture, $"kept  {relative} emptied - deleting it failed: {exception.Message}"), false);
+        }
+    }
+
+    private static bool Globbed(Document document) =>
+        document.Project.FilePath is { } project
+        && Path.GetDirectoryName(project) is { Length: > 0 } directory
+        && PathBoundary.Contains(directory, document.FilePath!)
+        && document.Project.Solution.GetDocumentIdsWithFilePath(document.FilePath).Select(id => document.Project.Solution.GetProject(id.ProjectId)?.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() is 1
+        && ProjectGlobs.CompilesByGlob(project) is true;
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node, ISymbol Symbol);

@@ -1606,6 +1606,44 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task EditText_ForAnAnchorStartingInsideTheIndentation_ReindentsTheInsertedLineToTheFileDepth()
+    {
+        const string Probe = "terse-interior-probe.md";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\n    void A()\n    {\n        Foo();\n    }\n" });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "    Foo();\n", ["newText"] = "    Foo();\n    Bar();\n" });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("started inside the indentation of line 5 (the file indents it 8 column(s), oldText 4)", applied, StringComparison.Ordinal);
+
+            var read = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("        Foo();", read, StringComparison.Ordinal);
+            Assert.Contains("        Bar();", read, StringComparison.Ordinal);
+            Assert.DoesNotContain("     Bar();", read.Replace("        Bar();", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_WithAFilesEntryCarryingOnlyAPath_NamesTheSingleFileRestoreItCannotTake()
+    {
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["files"] = new[] { new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/OrderService.cs" } },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("'files' entry 1 carries no content", text, StringComparison.Ordinal);
+        Assert.Contains("files= takes no ref=", text, StringComparison.Ordinal);
+        Assert.Contains("write_text path=\"src/Fixture.Trading/OrderService.cs\" ref=HEAD", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EditText_ForAnAnchorMatchingTwiceIgnoringIndentation_IsRefusedNamingTheCount()
     {
         const string Probe = "terse-loose-twice-probe.md";

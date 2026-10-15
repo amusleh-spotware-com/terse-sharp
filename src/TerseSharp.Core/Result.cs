@@ -284,10 +284,15 @@ public static class Errors
 
     public static TerseError Incomplete(string message, string remedy) => new(TerseErrorCode.Incomplete, message, remedy);
 
-    public static TerseError RunNotFound(string id) => new(
-        TerseErrorCode.RunNotFound,
-        string.Create(CultureInfo.InvariantCulture, $"no detached run has id '{id}' in this server - ids live only as long as the process that answered them, so one a restarted server never issued cannot be found"),
-        "start the run again - run_tests with the same arguments, or detach=true for a fresh id; no status= value can recover a run this process did not start");
+    public static TerseError RunNotFound(string id) => IsRunId(id)
+        ? new(
+            TerseErrorCode.RunNotFound,
+            string.Create(CultureInfo.InvariantCulture, $"no detached run has id '{id}' in this server - ids live only as long as the process that answered them, so one a restarted server never issued cannot be found"),
+            "start the run again - run_tests with the same arguments, or detach=true for a fresh id; no status= value can recover a run this process did not start")
+        : new(
+            TerseErrorCode.RunNotFound,
+            string.Create(CultureInfo.InvariantCulture, $"'{id}' is not a terse-sharp run id - terse ids look like t1, and only run_tests detach=true issues one; a call your MCP client moved to the background reports through the client, not through status="),
+            "wait for the client's own completion notification for that call; to poll a run from terse instead, start it with detach=true and pass the t<n> id it answers");
 
     public static bool IsSharingViolation(IOException exception) =>
         exception.HResult is SharingViolationResult or LockViolationResult;
@@ -300,6 +305,8 @@ public static class Errors
     private static string UnloadedSolutions(IReadOnlyList<string> unloaded) => string.Create(
         CultureInfo.InvariantCulture,
         $"it is not loaded - {(unloaded.Count is 1 ? "load_workspace path=" + unloaded[0] : "load_workspace path= one of " + string.Join(", ", unloaded))} loads it; find_files, search_text, search_regex and changed_files answer it without a load with root={Path.GetDirectoryName(unloaded[0])}");
+
+    private static bool IsRunId(ReadOnlySpan<char> id) => id is ['t', _, ..] && !id[1..].ContainsAnyExceptInRange('0', '9');
 }
 
 public readonly record struct RollbackHints(

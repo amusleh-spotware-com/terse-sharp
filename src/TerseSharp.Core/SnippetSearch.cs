@@ -9,6 +9,8 @@ public readonly record struct SnippetMatch(int Start, int Length, int Occurrence
     public bool Loose { get; init; }
 
     public bool MidLine { get; init; }
+
+    public bool Interior { get; init; }
 }
 
 public static class SnippetSearch
@@ -25,12 +27,12 @@ public static class SnippetSearch
         var exact = Locate(haystack, needle, occurrence);
 
         if (exact.Occurrences > 0)
-            return exact;
+            return Interior(haystack, needle, exact);
 
         var relaxed = Relaxed(haystack, needle, occurrence);
 
         if (relaxed.Occurrences > 0)
-            return relaxed;
+            return Interior(haystack, needle, relaxed);
 
         var reindented = Reindented(haystack, needle, occurrence);
 
@@ -515,5 +517,18 @@ public static class SnippetSearch
         }
 
         return text.Length;
+    }
+
+    private static SnippetMatch Interior(string haystack, string needle, SnippetMatch found)
+    {
+        if (found.Start <= 0 || needle[0] is not (' ' or '\t') || needle.AsSpan().IsWhiteSpace())
+            return found;
+
+        var lineStart = haystack.AsSpan(0, found.Start).LastIndexOf('\n') + 1;
+        var prefix = haystack.AsSpan(lineStart, found.Start - lineStart);
+
+        return prefix.IsEmpty || prefix.ContainsAnyExcept(' ', '\t')
+            ? found
+            : found with { Start = lineStart, Length = found.Length + prefix.Length, Indent = prefix.ToString(), Interior = true };
     }
 }

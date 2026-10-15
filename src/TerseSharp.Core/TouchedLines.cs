@@ -87,7 +87,7 @@ public sealed class TouchedLines
 
         foreach (var hunk in bucket)
         {
-            if (line >= hunk.Start && line <= hunk.End)
+            if (hunk.Count > 0 && line >= hunk.Start && line <= hunk.End)
                 return true;
         }
 

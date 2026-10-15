@@ -72,6 +72,24 @@ public sealed class BuildToolsTests
         Assert.Contains("cannot be combined", selection.Error!.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("FullyQualifiedName~A&amp;FullyQualifiedName!~B")]
+    [InlineData("FullyQualifiedName~A&amp;amp;FullyQualifiedName!~B")]
+    public void Selection_WithAFilterCarryingAnHtmlEntity_RefusesNamingTheDecodedExpression(string filter)
+    {
+        var selection = BuildTools.Selection(null, null, filter);
+
+        Assert.False(selection.IsOk);
+        Assert.Contains("HTML entity", selection.Error!.Message, StringComparison.Ordinal);
+        Assert.Contains("filter=\"FullyQualifiedName~A&FullyQualifiedName!~B\"", selection.Error!.Remedy, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("FullyQualifiedName~A&FullyQualifiedName!~B")]
+    [InlineData("Category=Fast|Category=Slow")]
+    public void Selection_WithAFilterCarryingTheOperatorsThemselves_PassesItUnchanged(string filter) =>
+        Assert.Equal(filter, BuildTools.Selection(null, null, filter).Value);
+
     [Fact]
     public void Selection_WithABlankEntry_RefusesItByIndex()
     {

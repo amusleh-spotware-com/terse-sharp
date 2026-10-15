@@ -515,6 +515,54 @@ public static class ToolGuard
 
     private static string Bare(string token) => token.Trim(Wrappers);
 
+    private const int Joined = -1;
+    private const int MaxUnrolledWords = 16;
+
+    private static GuardVerdict? Iterating(string command, string? cwd, GuardVerdict allowed)
+    {
+        if (Pipelines(command).Count(pipeline => Tokenized(Unkeyworded(pipeline.Text)) is ["for", _, "in", ..]) > 1)
+            return null;
+
+        for (var pass = 0; pass < MaxUnrolledWords; pass++)
+        {
+            if (Unrolled(command, pass) is not { } unrolled)
+                return allowed;
+
+            if (Blocking(Stages(unrolled), unrolled, cwd) is { Denied: true } denied)
+                return denied;
+        }
+
+        return null;
+    }
+
+    private static string[] Words(string text) =>
+        text.AsSpan().IndexOfAny('"', '\'') >= 0 && Quoted(text) is { } words
+            ? words
+            : text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    private static string[]? Quoted(string text)
+    {
+        var words = new List<string>();
+        var quote = '\0';
+        var start = -1;
+
+        for (var index = 0; index < text.Length; index++)
+        {
+            quote = Quote(quote, text[index]);
+            var gap = text[index] is ' ' && quote is '\0';
+
+            if (gap && start >= 0)
+                words.Add(text[start..index]);
+
+            start = gap ? -1 : start < 0 ? index : start;
+        }
+
+        if (start >= 0 && quote is '\0')
+            words.Add(text[start..]);
+
+        return quote is '\0' ? [.. words] : null;
+    }
+
     private static bool IsAssignment(string token) =>
         !token.StartsWith('-') && token.IndexOf('=', StringComparison.Ordinal) > 0;
 
@@ -1221,7 +1269,7 @@ public static class ToolGuard
 
     private static string[] Tokenized(string text)
     {
-        var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var tokens = Words(text);
         var start = 0;
 
         while (start < tokens.Length)
@@ -2111,7 +2159,7 @@ public static class ToolGuard
 
     private readonly record struct Heredoc(int Delimited, int Lined, int Closed);
 
-    private static readonly SearchValues<char> Unfollowable = SearchValues.Create("|(){}`<\\");
+    private static readonly SearchValues<char> Unfollowable = SearchValues.Create("(){}`<\\");
     private static readonly SearchValues<char> QuotedUnliteral = SearchValues.Create("$`\\\"");
     private static readonly SearchValues<char> BareUnliteral = SearchValues.Create("$`\\\"'*?[ \t{}");
     private static readonly SearchValues<char> Unsealable = SearchValues.Create("<'\"\\;&|");
@@ -2193,14 +2241,19 @@ public static class ToolGuard
         if (!Followable(command))
             return null;
 
-        var directories = Walked(command, cwd);
+        var walked = Walked(command, cwd);
 
-        return directories.Count == count ? [.. directories] : null;
+        if (walked.Count == count)
+            return [.. walked.Select(step => step.Directory)];
+
+        var staged = walked.SelectMany(step => Enumerable.Repeat(step.Directory, step.Stages)).ToArray();
+
+        return staged.Length == count ? staged : null;
     }
 
-    private static List<StageDirectory> Walked(string command, string? cwd)
+    private static List<(StageDirectory Directory, int Stages)> Walked(string command, string? cwd)
     {
-        var directories = new List<StageDirectory>();
+        var directories = new List<(StageDirectory Directory, int Stages)>();
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var (here, conditional) = (new StageDirectory(cwd, false), false);
 
@@ -2208,9 +2261,11 @@ public static class ToolGuard
         {
             var anded = pipeline.Lead.AsSpan().Trim() is "&&";
             var current = !anded && conditional ? new StageDirectory(cwd, false) : here;
+            var piped = Stages(pipeline.Text).Length;
+            var entered = piped > 1 ? current : Entered(Remembered(pipeline, values), current, cwd);
 
-            directories.Add(current);
-            (here, conditional) = Walking(Entered(Remembered(pipeline, values), current, cwd), current, conditional && anded, anded);
+            directories.Add((current, piped));
+            (here, conditional) = Walking(entered, current, conditional && anded, anded);
         }
 
         return directories;
@@ -2380,39 +2435,44 @@ public static class ToolGuard
     {
         var verdict = Assigned(command, cwd);
 
-        if (verdict.Denied || Unrolled(command) is not { } unrolled)
+        if (verdict.Denied || Unrolled(command, Joined) is not { } unrolled)
             return verdict;
 
         var looped = Blocking(Stages(unrolled), unrolled, cwd);
 
-        return looped.Denied ? looped : verdict;
+        return looped.Denied ? Iterating(command, cwd, verdict) ?? looped : verdict;
     }
 
-    private static string? Unrolled(string command)
+    private static string? Unrolled(string command, int pass)
     {
         if (!command.Contains('$'))
             return null;
 
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var builder = new StringBuilder(command.Length);
+        var remaining = false;
 
         foreach (var pipeline in Pipelines(command))
         {
             var text = Filled(pipeline.Text, values);
 
             builder.Append(pipeline.Lead).Append(text);
-            Iterated(text, values);
+            remaining |= Iterated(text, values, pass);
         }
 
-        var unrolled = builder.ToString();
-
-        return values.Count is 0 || unrolled.Equals(command, StringComparison.Ordinal) ? null : unrolled;
+        return values.Count > 0 && remaining && builder.ToString() is var unrolled && !unrolled.Equals(command, StringComparison.Ordinal)
+            ? unrolled
+            : null;
     }
 
-    private static void Iterated(string statement, Dictionary<string, string> values)
+    private static bool Iterated(string statement, Dictionary<string, string> values, int pass)
     {
-        if (Tokenized(Unkeyworded(statement)) is ["for", var name, "in", .. var words] && words.Length > 0 && IsName(name))
-            values[name] = string.Join(' ', words);
+        if (Tokenized(Unkeyworded(statement)) is not ["for", var name, "in", .. var words] || words.Length is 0 || !IsName(name))
+            return false;
+
+        values[name] = pass < 0 ? string.Join(' ', words) : words[Math.Min(pass, words.Length - 1)];
+
+        return pass < words.Length;
     }
 
     private static string InTree(string target) => string.Create(

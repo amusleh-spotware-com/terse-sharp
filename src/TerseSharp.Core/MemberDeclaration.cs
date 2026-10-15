@@ -107,23 +107,29 @@ public static class MemberDeclaration
         "the declaration did not parse as enum members",
         "pass one or more enum member names, e.g. 'Internal' or 'Internal = 3, Retry'");
 
-    public static string Reindented(string declaration, int column) =>
-    column <= 0 || !Dedented(declaration) ? declaration : Shifted(declaration, column, Continued(declaration));
-
-    private static string Shifted(string declaration, int column, HashSet<int> continued)
+    public static string Reindented(string declaration, int column)
     {
+        if (column <= 0 || !Dedented(declaration))
+            return declaration;
+
+        var continued = Continued(declaration);
         var lines = declaration.Split('\n');
-        var builder = new System.Text.StringBuilder(declaration.Length + (column * lines.Length));
+
+        return new string(' ', column) + Shifted(lines, column - Frame(lines, continued, column), continued);
+    }
+
+    private static string Shifted(string[] lines, int shift, HashSet<int> continued)
+    {
+        var builder = new System.Text.StringBuilder(lines.Sum(line => line.Length + 1) + (Math.Max(shift, 0) * lines.Length));
 
         for (var line = 0; line < lines.Length; line++)
         {
             if (line > 0)
                 builder.Append('\n');
 
-            if (line > 0 && lines[line].Trim().Length > 0 && !continued.Contains(line))
-                builder.Append(' ', column);
+            var text = lines[line].AsSpan();
 
-            builder.Append(lines[line]);
+            builder.Append(line > 0 && !text.IsWhiteSpace() && !continued.Contains(line) ? Moved(text, shift, builder) : text);
         }
 
         return builder.ToString();
@@ -187,4 +193,43 @@ public static class MemberDeclaration
             + string.Join("; ", errors.Take(3).Select(diagnostic => diagnostic.GetMessage(CultureInfo.InvariantCulture)))
             + Where(body, errors[0].Location.SourceSpan.Start),
         "the offset above is where the parser stopped - on a truncated body that is the unbalanced brace; pass a block starting with '{', an expression body as '=> expr', or bare statements");
+
+    private const int MemberIndent = 4;
+
+    private static int Frame(string[] lines, HashSet<int> continued, int column)
+    {
+        var braces = int.MaxValue;
+        var shallowest = int.MaxValue;
+
+        for (var line = 1; line < lines.Length; line++)
+        {
+            var trimmed = lines[line].AsSpan().TrimStart();
+
+            if (continued.Contains(line) || trimmed.IsWhiteSpace())
+                continue;
+
+            var depth = lines[line].Length - trimmed.Length;
+
+            shallowest = Math.Min(shallowest, depth);
+            braces = trimmed[0] is '{' or '}' ? Math.Min(braces, depth) : braces;
+        }
+
+        return braces < int.MaxValue ? braces
+            : shallowest != int.MaxValue && shallowest >= column + MemberIndent ? column
+            : 0;
+    }
+
+    private static ReadOnlySpan<char> Moved(ReadOnlySpan<char> line, int shift, System.Text.StringBuilder builder)
+    {
+        if (shift >= 0)
+        {
+            builder.Append(' ', shift);
+
+            return line;
+        }
+
+        var lead = line.Length - line.TrimStart().Length;
+
+        return line[Math.Min(lead, -shift)..];
+    }
 }

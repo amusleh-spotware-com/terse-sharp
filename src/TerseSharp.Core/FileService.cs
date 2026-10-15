@@ -116,7 +116,7 @@ public static class FileService
 
         return Result.Ok(string.Concat(
             before.AsSpan(0, start),
-            LineEndings.Adopt(Reindented(newText, match, oldText, notes), ending),
+            LineEndings.Adopt(Reindented(before, newText, match, oldText, notes), ending),
             before.AsSpan(match.Start + match.Length)));
     }
 
@@ -1682,14 +1682,16 @@ public static class FileService
         _ => string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched after re-indenting by {columns} column(s) - it was pasted from a dedented payload such as get_symbol_source, and newText was re-indented to match the file"),
     };
 
-    private static string Reindented(string newText, SnippetMatch match, string oldText, List<string> notes)
+    private static string Reindented(string before, string newText, SnippetMatch match, string oldText, List<string> notes)
     {
         var indent = match.Indent ?? string.Empty;
         var head = HeadLength(newText, match.MidLine);
         var rest = newText.AsSpan(head);
         var shifted = indent.Length > 0 && !AtDepth(rest, indent.Length + SnippetSearch.Lead(oldText.AsSpan(HeadLength(oldText, match.MidLine))).Length);
 
-        if (match.Loose || shifted)
+        if (match.Interior)
+            notes.Add(Widened(before, match, oldText, shifted));
+        else if (match.Loose || shifted)
             notes.Add(Realigned(indent.Length, match.Loose, shifted));
 
         return !shifted ? newText
@@ -2208,7 +2210,7 @@ public static class FileService
             var match = SnippetSearch.Find(before, oldText, index);
             var head = Math.Max(at, SplitCarriageReturn(before, match.Start) ? match.Start - 1 : match.Start);
 
-            built.Append(before, at, head - at).Append(LineEndings.Adopt(Reindented(newText, match, oldText, seen), ending));
+            built.Append(before, at, head - at).Append(LineEndings.Adopt(Reindented(before, newText, match, oldText, seen), ending));
             at = match.Start + match.Length;
         }
 
@@ -2371,5 +2373,16 @@ public static class FileService
             response.Note(failure);
 
         return response.ToString();
+    }
+
+    private static string Widened(string before, SnippetMatch match, string oldText, bool shifted)
+    {
+        var line = before.AsSpan(0, match.Start).Count('\n') + 1;
+        var anchor = SnippetSearch.Lead(oldText).Length;
+        var columns = match.Indent?.Length ?? 0;
+
+        return shifted
+            ? string.Create(CultureInfo.InvariantCulture, $"NOTE oldText started inside the indentation of line {line} (the file indents it {anchor + columns} column(s), oldText {anchor}), so the match was widened to the whole line and newText re-indented by {columns} column(s)")
+            : string.Create(CultureInfo.InvariantCulture, $"NOTE oldText started inside the indentation of line {line} (the file indents it {anchor + columns} column(s), oldText {anchor}), so the match was widened to the whole line; newText already carried the file's depth and landed as sent");
     }
 }

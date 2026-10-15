@@ -646,4 +646,28 @@ public sealed class FileServiceTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task EditText_ForAnAnchorStartingInsideTheIndentation_ReindentsEveryInsertedLineToTheFileDepth()
+    {
+        using var registry = new WorkspaceRegistry();
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        using var lease = registry.Resolve(null, null).Value!;
+        var name = "terse-interior-" + Guid.NewGuid().ToString("N") + ".txt";
+        var path = Path.Combine(lease.Workspace.Root, name);
+        await File.WriteAllTextAsync(path, "class A\n{\n    void M()\n    {\n        Foo();\n    }\n}\n", TestContext.Current.CancellationToken);
+        try
+        {
+            var edited = await FileService.EditTextAsync(lease.Workspace, name, new FileService.EditRequest("    Foo();\n", "    Foo();\n    Bar();\n", null, false, false, false), TestContext.Current.CancellationToken);
+            var landed = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.True(edited.IsOk, edited.Error?.Message);
+            Assert.Equal("class A\n{\n    void M()\n    {\n        Foo();\n        Bar();\n    }\n}\n", landed);
+            Assert.Contains("started inside the indentation of line 5", edited.Value, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

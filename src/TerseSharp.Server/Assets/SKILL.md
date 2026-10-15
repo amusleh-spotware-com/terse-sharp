@@ -49,7 +49,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Navigate** | `Read` to learn a class's API | `get_type_outline(symbolId)` |
 | **Navigate** | — | `get_symbol(symbolId)` |
 | **Navigate** | one `get_symbol` call per symbol | `get_symbol(symbolIds: [...])` |
-| **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` — `get_symbol` and `get_type_outline` take `path=` too |
+| **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` — `get_symbol`, `get_type_outline`, `replace_symbol` and `replace_symbol_body` take `path=` too |
 | **Navigate** | `Grep` for a type or member name | `search_symbols(query)` — CamelHump works, `OSvc` finds `OrderService` |
 | **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` — an exact type name no source declares falls back to the referenced assemblies |
 | **Navigate** | a name the tests declare dozens of times | `search_symbols(query, scope: "src")` |
@@ -120,7 +120,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | adding an **enum member** | `add_member(typeSymbolId: "T:…MyEnum", declaration: "Retry")` |
 | **Edit code** | adding a **sibling type** to an existing file | `add_member(path: "Foo.cs", declaration: "public sealed record Bar(int X);")` |
 | **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"`; the anchor takes any spelling of the parameter list |
-| **Edit code** | removing several members | `delete_symbol(symbolIds: [...])` — one gated edit |
+| **Edit code** | removing several members | `delete_symbol(symbolIds: [...])` — one gated edit; a file left declaring nothing is deleted |
 | **Edit code** | an interface member and every implementation, or an enum value and its use | `add_member(typeSymbolIds: [...], declarations: [...])` — ONE gated edit |
 | **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
@@ -527,7 +527,7 @@ build, `analyze` and `get_diagnostics` cannot show you. Copy the attributes in, 
 `replace_symbol_body`. On a TYPE, a bodiless header of the same kind re-heads it and keeps its members (a primary constructor `Type.#ctor` is refused - re-head the type); a replace that loses members warns naming them, rollback included.
 
 **`add_member` formats only what it inserted** - no collateral hunks, and an anchored insert leaves the
-close brace alone.
+close brace alone. Send a declaration at column 0 or at the file's depth: continuation lines land once.
 
 **`add_member` refuses a duplicate member from syntax, before anything is compiled.** A declaration
 whose name and parameter list the type already declares answers `ERROR NameTaken` naming that member
@@ -849,14 +849,9 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
     offers `contains=` instead, because ten of a hundred members is a batch nobody asked for. Neither
     line appears when there is nothing to batch.
 
-13. **A line starting `UPDATE terse` is not part of the answer — it is a message for the user.** Once per
-    server process, at most once a day, the first tool response may carry one extra last line:
-    `UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp`. Everything
-    above it is the tool's real answer and is unaffected. Tell the user the newer version exists and
-    what to run; do **not** run the update yourself, do not retry the call, and do not treat the line as
-    an error. It appears once and never repeats in that session. After the user updates, the next
-    `terse serve` rewrites the installed `SKILL.md` and the `terse guard` hook to match the new binary,
-    so the skill you are reading always describes the binary you are talking to.
+13. **A last line `UPDATE terse 0.15.2 -> 0.16.0 is available - run: dotnet tool update -g TerseSharp`
+    is for the user**, at most once a day: tell them; never run the update, retry the call or treat it
+    as an error. The next `terse serve` rewrites the installed `SKILL.md` and guard to the new binary.
 
 14. **Independent calls go in one message** - several `tool_use` blocks in one message run
     concurrently (the hard gate above has the numbers); only a call that needs a value another returns
@@ -1104,7 +1099,7 @@ one. Without `project=` it runs the whole solution, and a `NOTE ... pass project
 projects it matched - pass that next time.
 
 `total=0` with a `WARNING` means **nothing ran** — a filter typo, not a green suite. A run that
-produced no results says so, and never `0 failures`.
+produced no results says so, and never `0 failures`. A `filter=` carrying `&amp;` is refused, naming the decoded one.
 
 **A run that produced no results, and a build that failed, echo the command line they ran** -
 `command: dotnet test ...` - because that is exactly the case where the arguments are the answer and

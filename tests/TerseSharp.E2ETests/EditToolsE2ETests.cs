@@ -1496,4 +1496,145 @@ public sealed class RegionTail
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Fact]
+    public async Task DeleteSymbol_OfAFilesOnlyTypes_DeletesTheFileAndSaysSo()
+    {
+        const string Probe = "src/Fixture.Trading/TerseLonelyProbe.cs";
+        var path = Path.Combine(Path.GetDirectoryName(OrderServicePath)!, "TerseLonelyProbe.cs");
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "using System;\n\nnamespace Fixture.Trading;\n\npublic sealed class TerseLonelyProbe\n{\n}\n\npublic sealed class TerseLonelyProbeTwin\n{\n}\n", ["force"] = true });
+        try
+        {
+            var text = await server.CallAsync("delete_symbol", new() { ["symbolIds"] = new[] { "T:Fixture.Trading.TerseLonelyProbe", "T:Fixture.Trading.TerseLonelyProbeTwin" } });
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("deleted  " + Probe.Replace('/', Path.DirectorySeparatorChar) + " - it declared nothing but what this call deleted", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("no change", text, StringComparison.Ordinal);
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            if (File.Exists(path))
+                await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_OfOneOfAFilesTwoTypes_KeepsTheFile()
+    {
+        const string Probe = "src/Fixture.Trading/TerseKeptProbe.cs";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseKeptProbe\n{\n}\n\npublic sealed class TerseKeptProbeTwin\n{\n}\n", ["force"] = true });
+        try
+        {
+            var text = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TerseKeptProbe", ["dryRun"] = true });
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("delete  ", text, StringComparison.Ordinal);
+            Assert.Contains("TerseKeptProbeTwin", await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true }), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Theory]
+    [InlineData("namespace Fixture.Trading;\n\npublic sealed class TerseGuardedProbe\n{\n}\n\n#if TERSE_NEVER_DEFINED\npublic sealed class TerseHiddenProbe\n{\n}\n#endif\n")]
+    [InlineData("global using System.Text;\n\nnamespace Fixture.Trading;\n\npublic sealed class TerseGuardedProbe\n{\n}\n")]
+    public async Task DeleteSymbol_OfAFilesOnlyVisibleType_KeepsAFileThatStillCarriesDisabledCodeOrAGlobalUsing(string content)
+    {
+        const string Probe = "src/Fixture.Trading/TerseGuardedProbe.cs";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = content, ["force"] = true });
+        try
+        {
+            var text = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TerseGuardedProbe", ["dryRun"] = true });
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("delete  ", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_OfAFilesOnlyTypeAsADryRun_SaysItWouldDeleteTheFileAndLeavesIt()
+    {
+        const string Probe = "src/Fixture.Trading/TerseDryLonelyProbe.cs";
+        var path = Path.Combine(Path.GetDirectoryName(OrderServicePath)!, "TerseDryLonelyProbe.cs");
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseDryLonelyProbe\n{\n}\n", ["force"] = true });
+        try
+        {
+            var text = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TerseDryLonelyProbe", ["dryRun"] = true });
+
+            Assert.Contains("would delete  " + Probe.Replace('/', Path.DirectorySeparatorChar), text, StringComparison.Ordinal);
+            Assert.True(File.Exists(path));
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Theory]
+    [InlineData("replace_symbol", "declaration", "public bool Submit(Order order) => repository.Submit(order) && order is not null;")]
+    [InlineData("replace_symbol_body", "body", "=> repository.Submit(order) && order is not null")]
+    public async Task ReplaceSymbol_WithAPathHint_ResolvesAnAmbiguousNameInsideThatFile(string tool, string payload, string text)
+    {
+        var unhinted = await server.CallAsync(tool, new() { ["symbol"] = "Submit", [payload] = text, ["dryRun"] = true });
+        var hinted = await server.CallAsync(tool, new() { ["symbol"] = "Submit", ["path"] = "src/Fixture.Trading/OrderService.cs", [payload] = text, ["dryRun"] = true });
+
+        Assert.Contains("AmbiguousSymbol", unhinted, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", hinted, StringComparison.Ordinal);
+        Assert.Contains("+    public bool Submit(Order order) => repository.Submit(order) && order is not null;", hinted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_WithAPathHintBesideSymbolIds_IsRefusedRatherThanIgnored()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "OrderService.Unused" },
+            ["declarations"] = new[] { "public int Unused() => 8;" },
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("path=", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("private const string RestartNotice =\n        \"x\";", "+        \"x\";")]
+    [InlineData("private const string RestartNotice =\n    \"x\";", "+        \"x\";")]
+    [InlineData("public static string Render() => string.Concat(\n    \"a\",\n    \"b\");", "+        \"a\",")]
+    public async Task AddMember_WithAMultiLineDeclaration_IndentsItsContinuationLinesOnce(string declaration, string continuation)
+    {
+        var preview = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.OrderService",
+            ["declaration"] = declaration,
+            ["position"] = "first",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains(continuation, preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("+            ", preview, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("public OrderService(\n        IOrderRepository orders)\n    {\n        repository = orders;\n    }")]
+    [InlineData("public OrderService(\n    IOrderRepository orders)\n{\n    repository = orders;\n}")]
+    public async Task ReplaceSymbol_WithAMultiLineConstructorInEitherFrame_LandsTheParametersOneLevelDeep(string declaration)
+    {
+        var preview = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.#ctor(Fixture.Trading.IOrderRepository)",
+            ["declaration"] = declaration,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public OrderService(\n+        IOrderRepository orders)\n+    {\n+        repository = orders;\n+    }", preview.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+    }
 }

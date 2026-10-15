@@ -29,6 +29,24 @@ public sealed class TouchedLinesTests
     }
 
     [Fact]
+    public void Covers_ForAPureDeletion_TouchesNoSurvivingLine()
+    {
+        const string Deleted = """
+        diff --git a/src/Trading/OrderService.cs b/src/Trading/OrderService.cs
+        --- a/src/Trading/OrderService.cs
+        +++ b/src/Trading/OrderService.cs
+        @@ -12,2 +11,0 @@
+        -    private const int NIF_TIP = 4;
+        -
+        """;
+        var touched = TouchedLines.From(Deleted, [], Root);
+
+        Assert.False(touched.Covers("src/Trading/OrderService.cs", 11));
+        Assert.False(touched.Covers("src/Trading/OrderService.cs", 12));
+        Assert.True(touched.Touches(Path.Combine(Root, "src/Trading/OrderService.cs")));
+    }
+
+    [Fact]
     public void Covers_ForAFileGitDoesNotTrack_IsTrueOnEveryLine()
     {
         var touched = TouchedLines.From(Diff, ["src/Trading/Fresh.cs"], Root);

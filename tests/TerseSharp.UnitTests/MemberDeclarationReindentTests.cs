@@ -10,7 +10,7 @@ public sealed class MemberDeclarationReindentTests
         const string Dedented = "public static string Render() => string.Create(\n    CultureInfo.InvariantCulture,\n    $\"a\");";
 
         Assert.Equal(
-            "public static string Render() => string.Create(\n        CultureInfo.InvariantCulture,\n        $\"a\");",
+            "    public static string Render() => string.Create(\n        CultureInfo.InvariantCulture,\n        $\"a\");",
             MemberDeclaration.Reindented(Dedented, 4));
     }
 
@@ -35,7 +35,7 @@ public sealed class MemberDeclarationReindentTests
     {
         const string Declaration = "public const string Json = \"\"\"\n{\n  \"a\": 1\n}\n\"\"\";";
 
-        Assert.Equal(Declaration, MemberDeclaration.Reindented(Declaration, 4));
+        Assert.Equal("    " + Declaration, MemberDeclaration.Reindented(Declaration, 4));
     }
 
     [Fact]
@@ -44,7 +44,7 @@ public sealed class MemberDeclarationReindentTests
         const string Declaration = "public string Text() =>\n    @\"first\nsecond\";";
 
         Assert.Equal(
-            "public string Text() =>\n        @\"first\nsecond\";",
+            "    public string Text() =>\n        @\"first\nsecond\";",
             MemberDeclaration.Reindented(Declaration, 4));
     }
 
@@ -53,7 +53,7 @@ public sealed class MemberDeclarationReindentTests
     {
         const string Declaration = "public int Value()\n{\n\n    return 1;\n}";
 
-        Assert.Equal("public int Value()\n    {\n\n        return 1;\n    }", MemberDeclaration.Reindented(Declaration, 4));
+        Assert.Equal("    public int Value()\n    {\n\n        return 1;\n    }", MemberDeclaration.Reindented(Declaration, 4));
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class MemberDeclarationReindentTests
     {
         const string Declaration = "public int Value()\r\n{\r\n    return 1;\r\n}";
 
-        Assert.Equal("public int Value()\r\n    {\r\n        return 1;\r\n    }", MemberDeclaration.Reindented(Declaration, 4));
+        Assert.Equal("    public int Value()\r\n    {\r\n        return 1;\r\n    }", MemberDeclaration.Reindented(Declaration, 4));
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public sealed class MemberDeclarationReindentTests
         const string Declaration = "public int Value() => 1;\n\npublic string Sql() => @\"SELECT\nFROM t\";";
 
         Assert.Equal(
-            "public int Value() => 1;\n\n    public string Sql() => @\"SELECT\nFROM t\";",
+            "    public int Value() => 1;\n\n    public string Sql() => @\"SELECT\nFROM t\";",
             MemberDeclaration.Reindented(Declaration, 4));
     }
 
@@ -84,7 +84,7 @@ public sealed class MemberDeclarationReindentTests
         const string Declaration = "public int Value() => 1;\n\npublic const string Json = \"\"\"\n{\n  \"a\": 1\n}\n\"\"\";";
 
         Assert.Equal(
-            "public int Value() => 1;\n\n    public const string Json = \"\"\"\n{\n  \"a\": 1\n}\n\"\"\";",
+            "    public int Value() => 1;\n\n    public const string Json = \"\"\"\n{\n  \"a\": 1\n}\n\"\"\";",
             MemberDeclaration.Reindented(Declaration, 4));
     }
 
@@ -94,7 +94,19 @@ public sealed class MemberDeclarationReindentTests
         const string Declaration = "public int First()\n{\n    return 1;\n}\n\npublic int Second()\n{\n    return 2;\n}";
 
         Assert.Equal(
-            "public int First()\n    {\n        return 1;\n    }\n\n    public int Second()\n    {\n        return 2;\n    }",
+            "    public int First()\n    {\n        return 1;\n    }\n\n    public int Second()\n    {\n        return 2;\n    }",
             MemberDeclaration.Reindented(Declaration, 4));
     }
+
+    [Fact]
+    public void Reindented_ForAContinuationSentAtTheFilesOwnDepth_LeavesItThereAndIndentsTheFirstLine() =>
+            Assert.Equal(
+                "    private const string Notice =\n        \"x\";",
+                MemberDeclaration.Reindented("private const string Notice =\n        \"x\";", 4));
+
+    [Fact]
+    public void Reindented_ForAConstructorWhoseBracesSitAtTheMemberColumn_ShiftsNothingButTheFirstLine() =>
+        Assert.Equal(
+            "    public Service(\n        IA a)\n    {\n        _a = a;\n    }",
+            MemberDeclaration.Reindented("public Service(\n        IA a)\n    {\n        _a = a;\n    }", 4));
 }

@@ -399,7 +399,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     internal static Result<string?> Selection(string? test, string?[]? tests, string? filter)
     {
-        if (Rejected(tests) is { } refusal)
+        if ((Rejected(tests) ?? Entitied(filter)) is { } refusal)
             return Result.Fail<string?>(refusal);
 
         var requested = Names(test, tests);
@@ -802,4 +802,23 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     private static int TestProjectCount(WorkspaceTarget target) =>
         target.TestProjects.IsDefault ? 0 : target.TestProjects.Length;
+
+    private static TerseError? Entitied(string? filter)
+    {
+        if (filter is not { Length: > 0 } || !filter.Contains('&', StringComparison.Ordinal))
+            return null;
+
+        var decoded = filter;
+
+        for (var pass = 0; pass < MaxEntityPasses && System.Net.WebUtility.HtmlDecode(decoded) is var next && !next.Equals(decoded, StringComparison.Ordinal); pass++)
+            decoded = next;
+
+        return decoded.Equals(filter, StringComparison.Ordinal)
+            ? null
+            : Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"filter carries an HTML entity - '{filter}' would reach dotnet test escaped, so its operators would not act as operators and the run would select the wrong tests"),
+                string.Create(CultureInfo.InvariantCulture, $"pass filter=\"{decoded}\" with the characters themselves, or tests=[...] for named tests"));
+    }
+
+    private const int MaxEntityPasses = 4;
 }

@@ -45,6 +45,21 @@ public sealed class DetachedRunsTests
         Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("k13gn1gew")]
+    [InlineData("t")]
+    [InlineData("tx1")]
+    public async Task Status_ForAnIdNotShapedLikeATerseRunId_SaysItBelongsToTheClientInsteadOfBlamingARestart(string id)
+    {
+        await using var runs = new DetachedRuns();
+        var text = await runs.StatusAsync(id, TimeSpan.Zero, TestContext.Current.CancellationToken);
+
+        Assert.StartsWith("ERROR RunNotFound", text, StringComparison.Ordinal);
+        Assert.Contains("'" + id + "' is not a terse-sharp run id - terse ids look like t1", text, StringComparison.Ordinal);
+        Assert.Contains("reports through the client", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("restarted server", text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Status_WithAWait_AnswersTheVerdictTheMomentTheRunFinishes()
     {
