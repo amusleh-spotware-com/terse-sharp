@@ -353,6 +353,8 @@ public sealed class ClientRegistrarTests : IDisposable
             {"matcher":"Read","hooks":[{"type":"command","command":"terse guard"},{"type":"command","command":"user-mixed"}]},
             {"matcher":"Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash","hooks":[{"type":"command","command":"terse guard"}]}],
           "PostToolBatch":[{"hooks":[{"type":"command","command":"terse guard --post-batch"}]}],
+          "PostToolUse":[{"matcher":"mcp__.*[Tt]erse.*","hooks":[{"type":"command","command":"terse guard --folder-rules"}]}],
+          "SessionStart":[{"matcher":"compact","hooks":[{"type":"command","command":"terse guard --folder-rules"}]}],
           "Stop":[{"hooks":[{"type":"command","command":"user-stop"}]}]}}
         """);
 
@@ -364,11 +366,47 @@ public sealed class ClientRegistrarTests : IDisposable
         Assert.Contains("removed guard from " + SettingsFile, message, StringComparison.Ordinal);
         Assert.DoesNotContain("terse guard", File.ReadAllText(SettingsFile), StringComparison.Ordinal);
         Assert.Null(hooks["PostToolBatch"]);
+        Assert.Null(hooks["PostToolUse"]);
+        Assert.Null(hooks["SessionStart"]);
         Assert.Equal(expected, pre.Select(entry => entry!["hooks"]![0]!["command"]!.GetValue<string>()));
         Assert.Single(pre[1]!["hooks"]!.AsArray());
         Assert.Equal("Read", Matcher(pre[1]));
         Assert.Equal("user-stop", hooks["Stop"]![0]!["hooks"]![0]!["command"]!.GetValue<string>());
     }
+
+    [Fact]
+    public async Task AssetsAsync_ForAGuardInstalledBeforeTheFolderRulesHook_ReportsItStale()
+    {
+        await WriteSettingsAsync("""{"hooks":{"PreToolUse":[{"matcher":"Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash","hooks":[{"type":"command","command":"terse guard"}]}],"PostToolBatch":[{"hooks":[{"type":"command","command":"terse guard --post-batch"}]}]}}""");
+
+        var state = await ClientRegistrar.AssetsAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(state.GuardInstalled);
+        Assert.False(state.GuardCurrent);
+    }
+
+    [Fact]
+    public async Task InstallGuard_RegistersTheFolderRulesHookForTerseCallsAndCompaction_AndKeepsEveryOtherHook()
+    {
+        await WriteSettingsAsync("""{"hooks":{"PostToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"user-post"}]}]}}""");
+
+        await ClientRegistrar.InstallGuard();
+        await ClientRegistrar.InstallGuard();
+
+        var hooks = LoadFrom(SettingsFile)["hooks"]!;
+        var post = hooks["PostToolUse"]!.AsArray();
+        var writes = Assert.Single(hooks["PreToolUse"]!.AsArray(), entry => Command(entry) is FolderRulesCommand);
+
+        Assert.Contains(post, entry => Command(entry) is "user-post");
+        Assert.Single(post, entry => Matcher(entry) is "mcp__.*[Tt]erse.*" && Command(entry) is FolderRulesCommand);
+        Assert.Single(hooks["SessionStart"]!.AsArray(), entry => Matcher(entry) is "compact" && Command(entry) is FolderRulesCommand);
+        Assert.Contains("write_text", Matcher(writes), StringComparison.Ordinal);
+        Assert.DoesNotContain("read_text", Matcher(writes), StringComparison.Ordinal);
+    }
+
+    private const string FolderRulesCommand = "terse guard --folder-rules";
+
+    private static string? Command(JsonNode? entry) => entry?["hooks"]?[0]?["command"]?.GetValue<string>();
 
     [Fact]
     public async Task Unregister_WhenNoGuardIsInstalled_LeavesTheSettingsFileUntouched()

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json.Nodes;
 using TerseSharp.Server;
 
 namespace TerseSharp.E2ETests;
@@ -25,6 +26,19 @@ public sealed class InstallCommandE2ETests : IDisposable
         await RunAsync("install", "--client", "claude-code", "--skill");
 
         Assert.True(File.Exists(Path.Combine(ConfigDirectory, "skills", "terse-sharp", "SKILL.md")));
+    }
+
+    [Fact]
+    public async Task Install_WithTheGuard_RegistersTheFolderRulesHookForTerseCallsWritesAndCompaction()
+    {
+        await RunAsync("install", "--client", "claude-code", "--guard");
+
+        var hooks = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(ConfigDirectory, "settings.json"), TestContext.Current.CancellationToken))!["hooks"]!;
+        string[] events = ["PreToolUse", "PostToolUse", "SessionStart"];
+
+        Assert.All(events, hookEvent => Assert.Contains("terse guard --folder-rules", hooks[hookEvent]!.ToJsonString(), StringComparison.Ordinal));
+        Assert.Contains("compact", hooks["SessionStart"]!.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains("mcp__.*[Tt]erse.*", hooks["PostToolUse"]!.ToJsonString(), StringComparison.Ordinal);
     }
 
     [Fact]

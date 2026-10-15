@@ -215,12 +215,11 @@ too and are covered by the same gate — including later in a compound command
 **In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md`, `S=<dir outside the tree>; wc -l "$S/f.log"` - is allowed; a `$VAR` assigned earlier in the command is expanded first, a Git-Bash `/tmp/...` or `/c/...` path is mapped on Windows, and `.git/` internals are never source. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs - a piped pattern - every `-e` included - is not an operand. A denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
 
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
-denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again. A
-denial is not a reason to try a different spelling of the same shell command — call the tool.
+denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again, in
+any spelling.
 **The denial also hands you the answer**: a system reminder beside the tool result reads
 `Call this instead: <the complete call, with the arguments already filled in from what you tried>`.
-Run that call verbatim; it is chosen from the file kind, so a `.xaml` read routes to `xaml_outline`
-and a `.resx` read to `resx_get`, not to `get_file_outline`. A `PostToolBatch` hook reminds you, after a lone read-only terse call, to batch independent calls.
+Run that call verbatim; it follows the file kind (`.xaml` to `xaml_outline`, `.resx` to `resx_get`). A `PostToolBatch` hook reminds you to batch after a lone read-only call. Nested `CLAUDE.md` rules arrive once per session; a path-addressed write below unseen ones is denied with them - comply, resend.
 
 `dotnet format` and `dotnet clean` are covered too, with the **exact** replacement per sub-command:
 `dotnet format analyzers` -> `cleanup fix=analyzers` (add `verify=true` for `--verify-no-changes`),

@@ -9,6 +9,10 @@ public static class ClientRegistrar
     private const string ServerName = "terse-sharp";
     private const string ClaudeCode = "claude-code";
 
+    private const string TerseCalls = "mcp__.*[Tt]erse.*";
+
+    private const string Compaction = "compact";
+
     private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
     public static IReadOnlyList<ClientTarget> Known() =>
@@ -81,13 +85,6 @@ public static class ClientRegistrar
         await SaveAsync(target, Guarded(Settings(target))).ConfigureAwait(false);
 
         return "installed guard -> " + target;
-    }
-
-    private static JsonArray GuardMatchers(JsonArray? existing)
-    {
-        var kept = existing?.Select(Without).OfType<JsonNode>() ?? [];
-
-        return [.. kept, GuardEntry()];
     }
 
     private static JsonNode? Without(JsonNode? entry)
@@ -327,17 +324,12 @@ public static class ClientRegistrar
         var updated = (JsonObject)root.DeepClone();
         var hooks = Hooks(updated);
 
-        hooks["PreToolUse"] = GuardMatchers(hooks["PreToolUse"] as JsonArray);
-        hooks["PostToolBatch"] = BatchMatchers(hooks["PostToolBatch"] as JsonArray);
+        hooks["PreToolUse"] = Appended(hooks["PreToolUse"] as JsonArray, GuardEntry(), FolderRulesEntry(TerseWriters()));
+        hooks["PostToolUse"] = Appended(hooks["PostToolUse"] as JsonArray, FolderRulesEntry(TerseCalls));
+        hooks["PostToolBatch"] = Appended(hooks["PostToolBatch"] as JsonArray, BatchEntry());
+        hooks["SessionStart"] = Appended(hooks["SessionStart"] as JsonArray, FolderRulesEntry(Compaction));
 
         return updated;
-    }
-
-    private static JsonArray BatchMatchers(JsonArray? existing)
-    {
-        var kept = existing?.Select(Without).OfType<JsonNode>() ?? [];
-
-        return [.. kept, BatchEntry()];
     }
 
     private static JsonObject BatchEntry() => new()
@@ -432,6 +424,21 @@ public static class ClientRegistrar
             return null;
         }
     }
+
+    private static JsonArray Appended(JsonArray? existing, params ReadOnlySpan<JsonObject> entries) =>
+        [.. existing?.Select(Without).OfType<JsonNode>() ?? [], .. entries];
+
+    private static JsonObject FolderRulesEntry(string matcher) => new()
+    {
+        ["matcher"] = matcher,
+        ["hooks"] = new JsonArray(new JsonObject
+        {
+            ["type"] = "command",
+            ["command"] = "terse guard --folder-rules",
+        }),
+    };
+
+    private static string TerseWriters() => TerseCalls + "__(" + string.Join('|', FolderRules.Writers.Order(StringComparer.Ordinal)) + ")";
 }
 
 public sealed record ClientTarget(string Name, string ConfigPath);

@@ -8,6 +8,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **Nested `CLAUDE.md` files now reach an agent that works through terse (I761).** Claude Code loads a
+  folder's `CLAUDE.md` only when its own `Read`, `Edit` or `Write` touches a file below it, and the guard
+  routes exactly those calls to terse - so a `UnitTests/CLAUDE.md` was never seen. `terse install --guard`
+  now also registers `terse guard --folder-rules` on `PostToolUse` (every terse-sharp call), on
+  `PreToolUse` (the writers that take `dryRun` and a path - `write_text`, `edit_text`, `add_member path=`
+  and the `.resx`, XAML and Razor writers; symbol-addressed edits are covered only after the fact) and on
+  `SessionStart` (`compact`). After a call, every `CLAUDE.md` between the session's directory - or, for a
+  file outside it, the file's repository root - and a path the call's arguments or response named is
+  injected as `additionalContext`, outermost first, once per session. Relative paths resolve against the
+  named workspace (a sibling worktree or `.claude/worktrees/<name>`), the session directory, then any
+  solution one folder below it; a path seen only in a response must fall under one of those. The session's
+  own and ancestor `CLAUDE.md` files are skipped, because Claude Code already loaded them. The first
+  path-addressed write below one the session has not seen is denied with its text, and the same call goes
+  through on retry. Rules past the 8 000-character budget are named with the `read_text ... verbose=true`
+  call that reads them. Each rule is claimed atomically in `~/.terse/folder-rules/<session>/`, so parallel
+  calls inject it once; a compaction forgets the session, a new session prunes ones idle 7 days, and a
+  ledger that cannot be written fails open - rules still injected, no write denied. Any failure exits 0
+  with no output. An installed guard is brought up to date by the next `terse serve`. Covered by
+  `PostToolUse_ForATerseReadBelowNestedRules_InjectsEachFolderOnceOutermostFirst`,
+  `GuardFolderRules_DeniesTheFirstTerseWriteBelowRulesTheSessionHasNotSeen` and
+  `Install_WithTheGuard_RegistersTheFolderRulesHookForTerseCallsWritesAndCompaction`.
+
 ## [0.76.0] - 2026-10-10
 
 > **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
