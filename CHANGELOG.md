@@ -8,6 +8,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.77.0] - 2026-10-15
+
+> **Response-format change (MAJOR under this project's rules; on 0.x the MINOR segment carries it).**
+> `delete_symbol` that empties a file now deletes it and adds a `deleted`, `would delete` or `kept` line;
+> `edit_text` adds `NOTE oldText started inside the indentation of line N ...`; `run_tests filter=` carrying an
+> HTML entity and `status=` with a non-terse id answer new errors; the `baseRef=` pre-existing note of `analyze`
+> and `get_diagnostics` gains a steer; `write_text files=` without content names the `ref=HEAD` restore; and
+> `replace_symbol` and `replace_symbol_body` take an optional `path=`.
+
 ### Added
 
 - **Nested `CLAUDE.md` files now reach an agent that works through terse (I761).** Claude Code loads a
@@ -25,12 +34,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
   path-addressed write below one the session has not seen is denied with its text, and the same call goes
   through on retry. Rules past the 8 000-character budget are named with the `read_text ... verbose=true`
   call that reads them. Each rule is claimed atomically in `~/.terse/folder-rules/<session>/`, so parallel
-  calls inject it once; a compaction forgets the session, a new session prunes ones idle 7 days, and a
+  calls inject it once - a call that loses the claim on a rule stops there, so no answer carries half of a
+  rule set, and a `PreToolUse` that loses one denies all the same, so every parallel write below unseen rules is
+  refused until the rules were shown; a compaction forgets the session, a new session prunes ones idle 7 days, and a
   ledger that cannot be written fails open - rules still injected, no write denied. Any failure exits 0
   with no output. An installed guard is brought up to date by the next `terse serve`. Covered by
   `PostToolUse_ForATerseReadBelowNestedRules_InjectsEachFolderOnceOutermostFirst`,
-  `GuardFolderRules_DeniesTheFirstTerseWriteBelowRulesTheSessionHasNotSeen` and
-  `Install_WithTheGuard_RegistersTheFolderRulesHookForTerseCallsWritesAndCompaction`.
+  `GuardFolderRules_DeniesTheFirstTerseWriteBelowRulesTheSessionHasNotSeen`,
+  `Install_WithTheGuard_RegistersTheFolderRulesHookForTerseCallsWritesAndCompaction`,
+  `Claim_AfterAParallelCallWonTheOutermostRule_ClaimsNothingSoNoAnswerCarriesHalfTheRules` and
+  `PreToolUse_ForParallelWritesBelowUnseenRules_DeniesEveryOneOfThem`.
 - **`replace_symbol` and `replace_symbol_body` take `path=` (user report 2026-10-15).** It resolves a short name
   inside that file first, exactly as `get_symbol_source path=` does, so `symbol="Submit" path="src/OrderService.cs"`
   no longer answers `unrecognized path`. It is refused beside `symbolIds=` rather than ignored, and - like
@@ -7675,7 +7688,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.76.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.77.0...HEAD
+[0.77.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.77.0
 [0.76.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.76.0
 [0.75.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.75.1
 [0.75.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.75.0

@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.Reflection;
 using System.Text.Json.Nodes;
 
 namespace TerseSharp.Server;
@@ -31,7 +30,7 @@ public static class FolderRules
         ["hookEventName"] = "PreToolUse",
         ["permissionDecision"] = "deny",
         ["permissionDecisionReason"] = rules,
-    });
+    }, ShowLost: true);
 
     internal static IReadOnlySet<string> Writers => WriterSet.Value;
 
@@ -47,7 +46,7 @@ public static class FolderRules
             if (FolderRuleHook.Parse(payload) is { } hook && await AnswerAsync(hook, home, cancellationToken).ConfigureAwait(false) is { } answer)
                 await output.WriteLineAsync(answer).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or ReflectionTypeLoadException)
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
         }
 
@@ -78,7 +77,7 @@ public static class FolderRules
             return null;
 
         var planned = Planned(reply.Preface.Length, await ContentsAsync(unseen, cancellationToken).ConfigureAwait(false));
-        var shown = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded);
+        var shown = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost);
         string[] text = [reply.Preface, .. planned.Where(section => shown.Contains(section.Rule)).Select(section => section.Text)];
 
         return shown.Count is 0 ? null : new JsonObject { ["hookSpecificOutput"] = reply.Output(string.Concat(text)) }.ToJsonString();
@@ -121,7 +120,7 @@ public static class FolderRules
             : string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- {body.Length} characters, over this hook's {Budget}-character budget - read it now: read_text path=\"{rule}\" verbose=true");
     }
 
-    private sealed record Reply(string Preface, bool ShowUnrecorded, Func<string, JsonObject> Output);
+    private sealed record Reply(string Preface, bool ShowUnrecorded, Func<string, JsonObject> Output, bool ShowLost = false);
 
     private readonly record struct RuleSection(string Rule, string Text);
 }

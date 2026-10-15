@@ -149,6 +149,30 @@ public sealed class FolderRulesTests : IDisposable
     }
 
     [Fact]
+    public void Claim_AfterAParallelCallWonTheOutermostRule_ClaimsNothingSoNoAnswerCarriesHalfTheRules()
+    {
+        var outer = Path.Combine(Repository, "UnitTests", "CLAUDE.md");
+        var inner = Path.Combine(Repository, "UnitTests", "Foo", "CLAUDE.md");
+
+        var won = new FolderRuleLedger(Home, "split").Claim([outer], showUnrecorded: true);
+        var lost = new FolderRuleLedger(Home, "split").Claim([outer, inner], showUnrecorded: true);
+        var later = new FolderRuleLedger(Home, "split").Claim([inner], showUnrecorded: true);
+
+        Assert.Equal([outer], won);
+        Assert.Empty(lost);
+        Assert.Equal([inner], later);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForParallelWritesBelowUnseenRules_DeniesEveryOneOfThem()
+    {
+        var answers = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => HookAsync(Write())));
+
+        Assert.All(answers, answer => Assert.Equal("deny", answer?["permissionDecision"]?.GetValue<string>()));
+        Assert.Null(await HookAsync(Write()));
+    }
+
+    [Fact]
     public async Task PostToolUse_ForASolutionInASubfolderOfTheSession_ResolvesPathsAgainstTheSolutionRoot()
     {
         Directory.CreateDirectory(Path.Combine(Repository, "src", "Tests", "Unit"));

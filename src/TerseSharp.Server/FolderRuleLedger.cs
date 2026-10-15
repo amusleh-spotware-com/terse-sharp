@@ -17,14 +17,19 @@ internal sealed class FolderRuleLedger(string home, string session)
 
     internal bool Seen(string rule) => File.Exists(Marker(rule));
 
-    internal IReadOnlySet<string> Claim(IReadOnlyList<string> rules, bool showUnrecorded)
+    internal IReadOnlySet<string> Claim(IReadOnlyList<string> rules, bool showUnrecorded, bool showLost = false)
     {
         var recordable = Prepared();
         var shown = new HashSet<string>(rules.Count, PathBoundary.Comparer);
 
         foreach (var rule in rules)
         {
-            if ((recordable ? Won(Marker(rule)) : null) ?? showUnrecorded)
+            var won = recordable ? Won(Marker(rule)) : null;
+
+            if (won is false && !showLost)
+                break;
+
+            if (won switch { true => true, false => showLost, null => showUnrecorded })
                 shown.Add(rule);
         }
 
