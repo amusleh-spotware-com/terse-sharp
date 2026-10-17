@@ -199,10 +199,14 @@ public sealed class WorkspaceRegistryTests
 
         await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
 
+        var workspace = registry.All()[0];
+        workspace.LastUsedUtc = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1);
+
         Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
         Assert.Equal(0, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
 
-        registry.All()[0].Touch();
+        workspace.Touch();
+        workspace.LastUsedUtc = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1);
 
         Assert.Equal(1, registry.DropIdleCompilations(TimeSpan.FromTicks(1), Unpressured));
     }
