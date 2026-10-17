@@ -2004,6 +2004,22 @@ public sealed class ToolGuardTests
     }
 
     [Theory]
+    [InlineData("TOKEN=$(cat ~/notes.txt 2>/dev/null); echo ok")]
+    [InlineData("TOKEN=$(cat ~/notes.txt 2>&1); echo ok")]
+    [InlineData("TOKEN=$(cat ~/notes.txt >/dev/null); echo ok")]
+    [InlineData("TOKEN=$(cat ~/notes.txt &>/dev/null); echo ok")]
+    [InlineData("TOKEN=$(cat ~/notes.txt); echo ok")]
+    [InlineData("cat ~/notes.txt 2>/dev/null")]
+    [InlineData("cat ~/notes.txt 2>nul")]
+    public void Inspect_ForAHomeRelativeOperandBesideAStreamRedirect_AllowsItLikeTheBareRead(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
     [InlineData("cat notes/hooks.md")]
     [InlineData("cat ~bob/notes/hooks.md")]
     [InlineData("cat $HOMEDIR/notes/hooks.md")]
@@ -2044,6 +2060,7 @@ public sealed class ToolGuardTests
     [InlineData("sed -i s/a/b/ notes/todo.md")]
     [InlineData("cat SCRATCH/notes.log >notes.md")]
     [InlineData("ls \"$(dirname SCRATCH/a.py)\" 2>/dev/null")]
+    [InlineData("TOKEN=$(cat README.md 2>/dev/null); echo ok")]
     [InlineData("grep -eTODO README.md SCRATCH/x.log")]
     [InlineData("sed --expression=s/a/b/ notes/todo.md SCRATCH/x.log")]
     [InlineData("sed -e s/a/b/ notes/todo.md")]

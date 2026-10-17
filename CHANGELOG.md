@@ -10,6 +10,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 ### Fixed
 
 - **Two preload unit tests no longer race the E2E assembly over the shared fixture (I758).** `ToolContextTests.ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould` and `ToolContextTests.ReadText_OfAnAbsoluteCsPathWhileThePreloadIsRunning_AnswersTheOutlineTheLoadedWorkspaceWould` now load a private committed copy (`TemporarySolution.CreateRepositoryAsync`) instead of `fixtures/FixtureSolution`, which the E2E assembly edits while `dotnet test TerseSharp.slnx` runs both assemblies in parallel.
+- **A home-relative read beside a stream redirect is locked as allowed (I756).** `TOKEN=$(cat ~/notes.txt 2>/dev/null)` and its `2>&1`, `>/dev/null`, `&>/dev/null` and top-level `2>nul` twins were denied by 0.75.1 and are allowed since I741 (0.76.0); `Inspect_ForAHomeRelativeOperandBesideAStreamRedirect_AllowsItLikeTheBareRead` keeps them allowed, and `Inspect_ForAnInTreeOperandBesideASinkRedirectOrAnEditScript_StillDeniesItAndNeverRoutesToTheRedirect` gains the in-tree `TOKEN=$(cat README.md 2>/dev/null)` case.
 
 ## [0.77.0] - 2026-10-15
 
