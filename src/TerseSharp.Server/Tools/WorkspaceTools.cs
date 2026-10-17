@@ -67,10 +67,10 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
     });
 
     [McpServerTool(Name = "unload_workspace", Destructive = true)]
-    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. Takes the solution path, not a worktree name - the absolute one list_workspaces prints, or the short one workspace_status and load_workspace print, which is resolved against every loaded root and refuses when two of them answer to it. Analyzer and source-generator assemblies are loaded from a shadow copy, so a project's own output is never mapped; any assembly that did end up mapped is still reported, because only restarting the server releases those.")]
+    [Description("Unload a workspace and release its MSBuild file locks so an external build can run. path= resolves the way workspace= does on every other tool - the absolute solution path list_workspaces prints, the short one workspace_status and load_workspace print, the solution file name or stem, or the worktree name - but never by a fragment of the path, and refuses when two loaded workspaces answer to it. A name no loaded workspace answers to says not loaded and lists the loaded solution paths. Analyzer and source-generator assemblies are loaded from a shadow copy, so a project's own output is never mapped; any assembly that did end up mapped is still reported, because only restarting the server releases those.")]
     public Task<string> UnloadWorkspace(
-[Description("Solution or project path to unload.")] string? path = null,
-[Description("Alias for path; the solution path, not a worktree name.")] string? workspace = null,
+[Description("Solution or project path to unload, or its file name, stem or worktree name.")] string? path = null,
+[Description("Alias for path.")] string? workspace = null,
 CancellationToken cancellationToken = default) =>
 Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("workspace", workspace)) is { } clash ? Task.FromResult(clash) : (path ?? workspace) is { Length: > 0 } target
     ? ToolBoundary.RunAsync(async () =>
@@ -87,7 +87,7 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
         var response = new ResponseBuilder("unload_workspace", target);
         var before = context.Served();
 
-        response.Note(context.Registry.Unload(solution) ? "unloaded" : "not loaded");
+        response.Note(context.Registry.Unload(solution) ? "unloaded" : NotLoaded());
 
         AppendMapped(response, mapped);
 
@@ -437,10 +437,8 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
         return matched switch
         {
             [var only] => Result.Ok(only),
-            [] => Result.Ok(target),
-            _ => Result.Fail<string>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"'{target}' names {matched.Count} loaded workspaces"),
-                "pass the absolute solution path; list_workspaces prints it in full for exactly this reason")),
+            [] => ByName(target),
+            _ => Result.Fail<string>(Ambiguous(target, matched.Count)),
         };
     }
 
@@ -565,5 +563,22 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
             : Result.Fail<string>(Errors.Invalid("no solution or project found", "pass an explicit path")),
         _ when Directory.Exists(path) => WorkspaceDiscovery.SolutionIn(path),
         _ => Result.Ok(path),
+    };
+
+    private Result<string> ByName(string target) => context.Registry.Named(target) switch
+    {
+        [var only] => Result.Ok(only.SolutionPath),
+        [] => Result.Ok(target),
+        var several => Result.Fail<string>(Ambiguous(target, several.Length)),
+    };
+
+    private static TerseError Ambiguous(string target, int count) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"'{target}' names {count} loaded workspaces"),
+        "pass the absolute solution path; list_workspaces prints it in full for exactly this reason");
+
+    private string NotLoaded() => context.Registry.All() switch
+    {
+        [] => "not loaded - nothing is loaded",
+        var loaded => "not loaded - loaded: " + string.Join(", ", loaded.Select(workspace => workspace.SolutionPath)),
     };
 }

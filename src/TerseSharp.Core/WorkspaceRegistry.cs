@@ -250,7 +250,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         _ when Same(Path.GetFileNameWithoutExtension(solutionPath), hint) => 2,
         _ when Same(worktreeName, hint) => 3,
         _ when Same(Path.GetFileName(root), hint) => 4,
-        _ when solutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase) => 5,
+        _ when solutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase) => Fragment,
         _ => int.MaxValue,
     };
 
@@ -472,4 +472,9 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         [.. Directory.EnumerateFiles(directory)
         .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
         .Order(StringComparer.Ordinal)];
+
+    private const int Fragment = 5;
+
+    public LoadedWorkspace[] Named(string hint) =>
+        Best([.. Snapshot().Where(workspace => Matched(workspace.SolutionPath, workspace.Root, workspace.Git.WorktreeName, hint) < Fragment)], hint);
 }

@@ -298,4 +298,35 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         for (var index = 1; index < costs.Count; index++)
             Assert.True(costs[index - 1] >= costs[index], text);
     }
+
+    [Fact]
+    public async Task UnloadWorkspace_ByTheSolutionStemOtherToolsResolve_UnloadsIt()
+    {
+        var solution = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+
+        var unloaded = await server.CallAsync("unload_workspace", new() { ["path"] = "FixtureSolution" });
+        var listed = await server.CallAsync("list_workspaces", []);
+
+        await server.CallAsync("load_workspace", new() { ["path"] = solution });
+
+        Assert.Contains("unloaded", unloaded, StringComparison.Ordinal);
+        Assert.DoesNotContain("not loaded", unloaded, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", unloaded, StringComparison.Ordinal);
+        Assert.DoesNotContain("FixtureSolution.slnx", listed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnloadWorkspace_ForAPathFragmentNoNameMatches_UnloadsNothingAndListsTheLoadedSolutions()
+    {
+        var solution = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+
+        var unloaded = await server.CallAsync("unload_workspace", new() { ["path"] = "Fixture" });
+        var listed = await server.CallAsync("list_workspaces", []);
+
+        await server.CallAsync("load_workspace", new() { ["path"] = solution });
+
+        Assert.Contains("not loaded - loaded: ", unloaded, StringComparison.Ordinal);
+        Assert.Contains("FixtureSolution.slnx", unloaded, StringComparison.Ordinal);
+        Assert.Contains("FixtureSolution.slnx", listed, StringComparison.Ordinal);
+    }
 }

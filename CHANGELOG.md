@@ -7,6 +7,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+### Fixed
+
+- **Response format: `unload_workspace` resolves `path=` the way `workspace=` resolves on every other tool, and a miss lists what is loaded (I773).** A solution file name, stem, worktree name or root directory name now unloads the one workspace it ranks first for, instead of answering `not loaded` while the workspace stays loaded; a fragment of the path is never matched, because the call is destructive, and two workspaces answering to the name still refuse with `InvalidArgument`. A name nothing loaded answers to now answers `not loaded - loaded: <absolute solution paths>` instead of a bare `not loaded`, still without an `ERROR`. Covered by `UnloadWorkspace_ByTheSolutionStemOtherToolsResolve_UnloadsIt` and `UnloadWorkspace_ForAPathFragmentNoNameMatches_UnloadsNothingAndListsTheLoadedSolutions`.
 
 ## [0.78.0] - 2026-10-17
 ### Added
