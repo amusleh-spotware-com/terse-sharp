@@ -138,6 +138,35 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
             await File.WriteAllBytesAsync(ConsumerPath, original, TestContext.Current.CancellationToken);
         }
     }
+
+    [Fact]
+    public async Task GetDiagnostics_OnAWarningAsErrorTheProjectsSuppressorSilences_ReportsNoErrorJustAsTheBuildDoes()
+    {
+        await ArmedAsync();
+
+        Assert.Contains("StartAsync", await CallAsync("get_symbol", new() { ["symbolId"] = "FireAndForget.StartAsync" }), StringComparison.Ordinal);
+
+        var diagnostics = await CallAsync("get_diagnostics", new() { ["minSeverity"] = "info" });
+
+        Assert.DoesNotContain("CS4014", diagnostics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditDryRun_OnAProjectWhoseSuppressorSilencesAWarningAsError_CountsNoErrorInScope()
+    {
+        await ArmedAsync();
+
+        var preview = await CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "FireAndForget.StartAsync",
+            ["body"] = "{\n    Pending();\n    await Task.Delay(1);\n}",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=0 (+0)", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("would be rolled back", preview, StringComparison.Ordinal);
+    }
+
     private async Task ArmedAsync()
     {
         await CallAsync("build", []);

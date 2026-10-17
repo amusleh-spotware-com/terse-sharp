@@ -144,7 +144,7 @@ public static class AnalysisService
         if (compilation is null)
             return;
 
-        foreach (var diagnostic in compilation.GetDiagnostics(cancellationToken))
+        foreach (var diagnostic in await SuppressedDiagnostics.CompilerAsync(project, compilation, cancellationToken).ConfigureAwait(false))
             found.Add(diagnostic);
 
         var analyzers = ProjectDiagnostics.Analyzers(project);

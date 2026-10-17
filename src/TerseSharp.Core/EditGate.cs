@@ -235,8 +235,8 @@ public static class EditGate
         {
             var compilation = await Compile(solution, projectId, cancellationToken).ConfigureAwait(false);
 
-            if (compilation is not null)
-                tally = Collect(tally, compilation.GetDiagnostics(cancellationToken), root);
+            if (compilation is not null && solution.GetProject(projectId) is { } project)
+                tally = Collect(tally, await SuppressedDiagnostics.CompilerAsync(project, compilation, cancellationToken).ConfigureAwait(false), root);
         }
 
         return tally;

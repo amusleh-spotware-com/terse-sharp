@@ -1,4 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <WarningsAsErrors>CS4014</WarningsAsErrors>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fixture.Generator\Fixture.Generator.csproj"
                       OutputItemType="Analyzer"

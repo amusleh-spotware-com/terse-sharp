@@ -89,7 +89,7 @@ public static class RazorEditGate
         if (compilation is null)
             return new Tally([], 0, 0);
 
-        var diagnostics = compilation.GetDiagnostics(cancellationToken);
+        var diagnostics = await SuppressedDiagnostics.CompilerAsync(project, compilation, cancellationToken).ConfigureAwait(false);
 
         return new Tally(
             [.. diagnostics.Where(diagnostic => diagnostic.Severity is DiagnosticSeverity.Error).Select(Describe)],

@@ -33,7 +33,9 @@ public static class DiagnosticsService
         if (compilation is null)
             return;
 
-        foreach (var diagnostic in compilation.GetDiagnostics(cancellationToken).Where(candidate => Keep(candidate, scope, minimum)))
+        var reported = await SuppressedDiagnostics.CompilerAsync(project, compilation, cancellationToken).ConfigureAwait(false);
+
+        foreach (var diagnostic in reported.Where(candidate => Keep(candidate, scope, minimum)))
             found.Add(diagnostic);
     }
 
