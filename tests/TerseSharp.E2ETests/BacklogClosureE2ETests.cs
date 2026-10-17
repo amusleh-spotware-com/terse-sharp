@@ -489,26 +489,27 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task EditText_WithMoreEntriesForOneFileThanOneWriteTakes_NamesTheFile()
+    public async Task EditText_WithElevenEntriesForOneFile_AppliesThemAsOneWriteInsteadOfRefusing()
     {
-        var many = Enumerable
-            .Range(0, 11)
-            .Select(index => new Dictionary<string, object?>
-            {
-                ["oldText"] = "1",
-                ["newText"] = index.ToString(CultureInfo.InvariantCulture),
-                ["path"] = "src/Fixture.Trading/multi-b.json",
-            })
-            .ToArray();
+        const string Probe = "terse-edit-cap-probe.md";
+        var lines = Enumerable.Range(1, 11).Select(index => string.Create(CultureInfo.InvariantCulture, $"line-{index:00}")).ToArray();
 
-        var text = await server.CallAsync("edit_text", new()
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = string.Join('\n', lines) + "\n" });
+        try
         {
-            ["path"] = "src/Fixture.Trading/multi-a.json",
-            ["edits"] = many,
-        });
+            var edits = lines.Select(line => new Dictionary<string, object?> { ["oldText"] = line, ["newText"] = line + "-edited" }).ToArray();
+            var text = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["edits"] = edits });
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
 
-        Assert.Contains("11 entries for src/Fixture.Trading/multi-b.json", text, StringComparison.Ordinal);
-        Assert.Contains("at most 10 per file", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("per file", text, StringComparison.Ordinal);
+            Assert.Contains("line-01-edited", after, StringComparison.Ordinal);
+            Assert.Contains("line-11-edited", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
     }
 
     [Fact]
@@ -2633,5 +2634,40 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         Assert.StartsWith("ERROR DocumentNotFound: directory '" + missing + "' does not exist - the nearest existing ancestor is '" + Path.TrimEndingDirectorySeparator(Path.GetTempPath()) + "'", text, StringComparison.Ordinal);
         Assert.DoesNotContain("is not a document in the loaded workspace", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_WithElevenFiles_WritesThemUnderOneGateAndRefusesTwentySix()
+    {
+        var preview = await server.CallAsync("write_text", new() { ["files"] = Batch(11), ["dryRun"] = true });
+        var refused = await server.CallAsync("write_text", new() { ["files"] = Batch(26), ["dryRun"] = true });
+
+        Assert.DoesNotContain("ERROR", preview, StringComparison.Ordinal);
+        Assert.Contains("terse-batch-probe-11.md", preview, StringComparison.Ordinal);
+        Assert.Contains("files carried 26 entries, at most 25 are written in one call", refused, StringComparison.Ordinal);
+    }
+
+    private static Dictionary<string, object?>[] Batch(int count) =>
+        [.. Enumerable.Range(1, count).Select(index => new Dictionary<string, object?>
+        {
+            ["path"] = string.Create(CultureInfo.InvariantCulture, $"terse-batch-probe-{index:00}.md"),
+            ["content"] = "probe\n",
+        })];
+
+    [Fact]
+    public async Task WorkspaceStatus_PricesRunTestsWriteTextAndEditText_WithHeadroomUnderTheSchemaCap()
+    {
+        var text = await server.CallAsync("workspace_status", new() { ["tools"] = true });
+
+        Assert.InRange(Priced(text, "run_tests"), 1, 930);
+        Assert.InRange(Priced(text, "write_text"), 1, 950);
+        Assert.InRange(Priced(text, "edit_text"), 1, 1000);
+    }
+
+    private static int Priced(string text, string tool)
+    {
+        var line = text.Split('\n').Select(row => row.Trim()).First(row => row.StartsWith(tool + " ", StringComparison.Ordinal));
+
+        return int.Parse(line.AsSpan(tool.Length + 1), CultureInfo.InvariantCulture);
     }
 }

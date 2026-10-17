@@ -99,12 +99,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     }
 
     [McpServerTool(Name = "run_tests")]
-    [Description("Replaces Bash dotnet test. A green run answers in one line - passed/skipped/total/durationMs; a test failure returns its message, expected and actual values and one source frame, and a build that failed under the run returns error-severity diagnostics only. A repeat of a GREEN call with nothing written since answers run_tests UNCHANGED instead of running; force=true runs it. A stopped run names the test still running. A SOLUTION, and a projects=[...] batch, run their test projects CONCURRENTLY. Replaces one call per project: built once, one merged verdict, a per-project timeout. tests=[...] runs several tests, classes or namespaces in ONE call. changed=true runs only the test projects your change can reach, naming what it ran and what it skipped. detach=true answers an id at once; NOTHING notifies when it finishes - status=<id> waitSeconds=N waits for the verdict.")]
+    [Description("Replaces Bash dotnet test. A green run answers in one line; a failure returns its message, expected and actual values and one source frame, a failed build its error diagnostics. A GREEN repeat with nothing written since answers UNCHANGED; force=true reruns. projects=[...] and tests=[...] batch a run. Replaces one call per project: built once, one merged verdict. changed=true runs what your change reaches. detach=true answers an id nothing notifies; status=<id> waitSeconds=N waits.")]
     public Task<string> RunTests(
         [Description("A fully-qualified test name, or a class or namespace prefix. Not with filter.")] string? test = null,
         [Description("VSTest filter expression; not with test. Microsoft.Testing.Platform takes FullyQualifiedName only; anything else is refused naming test=.")] string? filter = null,
         [Description("Project path; empty runs every test project.")] string? project = null,
-        [Description("Several test projects in one call, at most 10, each a name or a path to its .csproj, run concurrently under parallel. Not with project=.")] string?[]? projects = null,
+        [Description("Up to 10 test projects, each a name or .csproj path, run concurrently under parallel; not with project=.")] string?[]? projects = null,
         [Description("Run only the test projects that reference a project changed since the load; falls back to the whole solution, naming why. Ignored with project=.")] bool changed = false,
         [Description("How many projects of a batch run at once, 0-10. 0 is one per core, 1 is serial and stops at the first timeout.")] int parallel = 0,
         [Description("VSTest RunSettings overrides, each Name=Value, e.g. [\"xUnit.MaxParallelThreads=1\"] Refused under Microsoft.Testing.Platform.")] string[]? runSettings = null,
@@ -117,7 +117,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Return the full report even when every test passed, and the warnings of a build that failed under the run.")] bool verbose = false,
         [Description("Timeout seconds, 1-3600 (600). With projects= or a solution it is the budget for EACH project and its build; above 30s also a per-test ceiling 15s below it.")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter. A blank entry is refused by index; not with filter.")] string?[]? tests = null,
+        [Description("Up to 10 tests, classes or namespace prefixes, combined into one filter; not with filter.")] string?[]? tests = null,
         [Description("Run even when this exact call already answered green and nothing has been written since.")] bool force = false,
         [Description("Run in the background and answer an id at once; it still holds the solution.")] bool detach = false,
         [Description("Id detach=true answered: RUNNING with its age, or the verdict. \"cancel\" stops the build or test run in flight on this solution.")] string? status = null,

@@ -141,17 +141,17 @@ bool verbose) =>
         NavigationTools.Unwrap(await read.ConfigureAwait(false));
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 10 files under ONE compile gate. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token holding the content; one no project globs stays ungated. force=true also lets a single write or every files= entry land outside every workspace root, never inside another loaded workspace. delete=true removes a file or an EMPTY directory; recursive=true removes the tree - a shell rm -r - refused over a file this workspace compiles unless force=true. Replacing a file answers overwrote existing  <name>, and a write keeping under a quarter of its content lines is refused unless overwrite=true. Missing directories are created and line endings kept.")]
+    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 25 files under ONE compile gate. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token holding the content; one no project globs stays ungated. force=true also lands a write outside every workspace root, never in another loaded one. delete=true removes a file or an EMPTY directory, recursive=true the tree. A write keeping under a quarter of a file's content lines is refused unless overwrite=true.")]
     public Task<string> WriteText(
-        [Description("Path, absolute or workspace-relative. An absolute path outside every workspace root is written only with force=true.")] string? path = null,
+        [Description("Path, absolute or workspace-relative.")] string? path = null,
         [Description("Full new content. Omit only with delete=true, ref= or retryWith=; an empty write needs allowEmpty=true.")] string? content = null,
-        [Description("Up to 10 files, each {path, content, force}; the top-level force= covers every entry. Not with a top-level path, content, ref or delete=true.")] FileService.FileWrite[]? files = null,
+        [Description("Up to 25 files, each {path, content, force}; top-level force= covers every entry. Not with path, content, ref or delete=true.")] FileService.FileWrite[]? files = null,
         [Description("Delete the file instead of writing it. Refused on a path outside the workspace root, and on a .cs file without force=true.")] bool delete = false,
         [Description("With delete=true on a DIRECTORY, remove it and everything under it. Refused when the tree holds a file this workspace compiles unless force=true. Default false.")] bool recursive = false,
         [Description("Git ref to restore the file's content from, e.g. HEAD. Not with content, files or delete; the restored write is gated like any other.")] string? @ref = null,
         [Description("Permit writing empty content, which truncates the file. Default false.")] bool allowEmpty = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Allow writing or deleting a .cs file, every files= entry included, and a write outside every workspace root, single or files=. Still compile-gated when a project compiles it.")] bool force = false,
+        [Description("Allow writing or deleting a .cs file, and a write outside every workspace root. Still compile-gated when a project compiles it.")] bool force = false,
         [Description("Apply a .cs write even if it introduces compile errors.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -215,12 +215,12 @@ bool verbose) =>
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null, bool Overwrite = false);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. With toPath=, section= MOVES the section into another markdown file, row=\"I286\" moves ONE table row, and rows= moves up to 25. edits=[{oldText,newText}, ...] applies several edits in one call. Replaces one call per edit and, with rows=, one per row: an entry may carry its own path to edit ANOTHER file, and one whose anchor fails is reported on its own line while the rest land. Line endings are normalized first, so a CRLF file accepts an LF oldText. A non-unique match is refused naming the closest lines; occurrence=N picks one, replaceAll=true replaces every one (up to 500). force=true edits a .cs file as text - any snippet, attribute or using block - compile-gated like replace_symbol when a project compiles it, edits= across .cs files as ONE change.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. toPath= MOVES a section=, row= or rows= into another markdown file. edits=[{oldText,newText}, ...] applies up to 25 edits in one call. Replaces one call per edit: an entry may carry its own path, and one whose anchor fails is reported while the rest land. A non-unique match is refused naming the closest lines; occurrence=N picks one, replaceAll=true replaces every one (up to 500). force=true edits a .cs file as text, compile-gated like replace_symbol when a project compiles it, edits= across .cs files as ONE change.")]
     public Task<string> EditText(
     [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry carrying no path of its own.")] string? path = null,
     [Description("Replacement text. With section=, the whole new section including its heading, unless place= writes inside it. With row=, the row as it should read in the target.")] string? newText = null,
         [Description("Exact text to replace; must occur exactly once unless occurrence= picks one.")] string? oldText = null,
-        [Description("Markdown only: replace this whole section, e.g. '## Commands'. No oldText needed. With place=, written inside; with toPath=, moved there.")] string? section = null,
+        [Description("Markdown only: replace this whole section, e.g. '## Commands', no oldText needed.")] string? section = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Allow editing a .cs file as text; compile-gated when a project compiles it.")] bool force = false,
         [Description("With force=true, write the .cs edit raw even if it breaks the build. Default false.")] bool allowErrors = false,
@@ -230,9 +230,9 @@ bool verbose) =>
         [Description("Replace EVERY occurrence of oldText in one pass. Refused beside occurrence= or section=. Default false.")] bool replaceAll = false,
         [Description("With section=, lowercase: append writes after its last non-blank line, prepend under its heading. Empty replaces it.")] string? place = null,
         [Description("Markdown only, with section=, row= or rows=: an EXISTING file to MOVE them into.")] string? toPath = null,
-        [Description("Markdown only, with toPath=: the identifier of ONE table row to move, matched on its first cell - e.g. row=\"I286\".")] string? row = null,
-        [Description("Several edits in one call: each takes oldText, newText and optionally section, occurrence, replaceAll, place, path and force. Entries sharing a path apply in order. Max 10 per file, 25 total.")] FileService.TextEdit[]? edits = null,
-        [Description("Markdown only, with toPath=: several rows moved in ONE call, at most 25, each taking row and optionally newText.")] FileService.TextRow[]? rows = null,
+        [Description("With toPath=: ONE table row to move, matched on its first cell, e.g. I286.")] string? row = null,
+        [Description("Up to 25 edits, each {oldText, newText} plus optional section, occurrence, replaceAll, place, path, force; entries sharing a path apply in order.")] FileService.TextEdit[]? edits = null,
+        [Description("With toPath=: up to 25 rows, each {row, newText?}.")] FileService.TextRow[]? rows = null,
         [Description("Return the N lines around each change in POST-edit state, numbered. 1-10; 0 adds nothing.")] int context = 0,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
         CancellationToken cancellationToken = default)
@@ -622,7 +622,6 @@ context.RejectWrite() is { } rejection
             : known.Error!.Render();
     }
 
-    private const int MaxBatchedEdits = 10;
 
     private static async Task<string> EditedAsync(
         LoadedWorkspace loaded,
@@ -665,7 +664,7 @@ context.RejectWrite() is { } rejection
         {
             return Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"edits carried {batch.Length} entries, at most {MaxBatchedFiles} are applied in one call"),
-                string.Create(CultureInfo.InvariantCulture, $"split it into smaller calls - at most {MaxBatchedEdits} per file and {MaxBatchedFiles} in total")).Render();
+                string.Create(CultureInfo.InvariantCulture, $"split it into smaller calls of at most {MaxBatchedFiles} entries")).Render();
         }
 
         var grouped = Grouped(loaded.Root, path, batch);
@@ -816,15 +815,6 @@ context.RejectWrite() is { } rejection
         foreach (var edit in edits)
             Collect(byKey, order, root, edit.Path is { Length: > 0 } target ? target : path, edit);
 
-        var oversized = order.Find(group => group.Edits.Count > MaxBatchedEdits);
-
-        if (oversized.Path is { Length: > 0 })
-        {
-            return Result.Fail<List<FileService.TextEditGroup>>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"edits carried {oversized.Edits.Count} entries for {oversized.Path}, at most {MaxBatchedEdits} per file are applied as one write"),
-                "split it into smaller calls - batched-item accuracy falls off past about six edits per file"));
-        }
-
         return Result.Ok(order);
     }
 
@@ -850,7 +840,7 @@ context.RejectWrite() is { } rejection
     private static bool TouchesCSharp(string path, FileService.TextEdit[]? edits) =>
     SourceFile.IsCSharp(path) || (edits ?? []).Any(edit => edit.Path is { Length: > 0 } target && SourceFile.IsCSharp(target));
 
-    private const int MaxBatchedWrites = 10;
+    private const int MaxBatchedWrites = 25;
 
     private Task<string> WrittenOne(
         string? workspace,
@@ -1288,7 +1278,7 @@ context.RejectWrite() is { } rejection
         {
             return Result.Fail<List<FileService.TextEditGroup>>(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"edits carried {edits.Length} entries, at most {MaxBatchedFiles} are applied in one call"),
-                string.Create(CultureInfo.InvariantCulture, $"split it into smaller calls - at most {MaxBatchedEdits} per file and {MaxBatchedFiles} in total")));
+                string.Create(CultureInfo.InvariantCulture, $"split it into smaller calls of at most {MaxBatchedFiles} entries")));
         }
 
         var pathless = Array.FindIndex(edits, entry => entry.Path is not { Length: > 0 });
