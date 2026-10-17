@@ -1637,4 +1637,21 @@ public sealed class RegionTail
 
         Assert.Contains("+    public OrderService(\n+        IOrderRepository orders)\n+    {\n+        repository = orders;\n+    }", preview.ReplaceLineEndings("\n"), StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("[System.ComponentModel.Description(\"register\")]\n    public static ServiceBag Register(ServiceBag services) => new System.Func<ServiceBag, ServiceBag>(\n        bag =>\n        {\n            return bag.AddSingleton<IOrderRepository, InMemoryOrderRepository>();\n        })(services);")]
+    [InlineData("[System.ComponentModel.Description(\"register\")]\npublic static ServiceBag Register(ServiceBag services) => new System.Func<ServiceBag, ServiceBag>(\n    bag =>\n    {\n        return bag.AddSingleton<IOrderRepository, InMemoryOrderRepository>();\n    })(services);")]
+    [InlineData("public static ServiceBag Register(ServiceBag services) => new System.Func<ServiceBag, ServiceBag>(\n        bag =>\n        {\n            return bag.AddSingleton<IOrderRepository, InMemoryOrderRepository>();\n        })(services);")]
+    [InlineData("public static ServiceBag Register(ServiceBag services) => new System.Func<ServiceBag, ServiceBag>(\n    bag =>\n    {\n        return bag.AddSingleton<IOrderRepository, InMemoryOrderRepository>();\n    })(services);")]
+    public async Task ReplaceSymbol_WithAnExpressionBodiedMemberWhoseBodyIsALambdaBlock_KeepsTheLambdaOneLevelDeepInEitherFrame(string declaration)
+    {
+        var preview = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "Fixture.Trading.Composition.Register",
+            ["declaration"] = declaration,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public static ServiceBag Register(ServiceBag services) => new System.Func<ServiceBag, ServiceBag>(\n+        bag =>\n+        {\n+            return bag.AddSingleton<IOrderRepository, InMemoryOrderRepository>();\n+        })(services);", preview.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+    }
 }

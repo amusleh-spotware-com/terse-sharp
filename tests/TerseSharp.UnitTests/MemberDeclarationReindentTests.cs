@@ -109,4 +109,12 @@ public sealed class MemberDeclarationReindentTests
         Assert.Equal(
             "    public Service(\n        IA a)\n    {\n        _a = a;\n    }",
             MemberDeclaration.Reindented("public Service(\n        IA a)\n    {\n        _a = a;\n    }", 4));
+
+    [Theory]
+    [InlineData("[Description(\"register\")]\n    public static Bag Register(Bag services) => Apply(\n        bag =>\n        {\n            return bag;\n        });", "    [Description(\"register\")]\n    public static Bag Register(Bag services) => Apply(\n        bag =>\n        {\n            return bag;\n        });")]
+    [InlineData("[Description(\"register\")]\npublic static Bag Register(Bag services) => Apply(\n    bag =>\n    {\n        return bag;\n    });", "    [Description(\"register\")]\n    public static Bag Register(Bag services) => Apply(\n        bag =>\n        {\n            return bag;\n        });")]
+    [InlineData("public static Bag Register(Bag services) => Apply(\n        bag =>\n        {\n            return bag;\n        });", "    public static Bag Register(Bag services) => Apply(\n        bag =>\n        {\n            return bag;\n        });")]
+    [InlineData("public static Bag Register(Bag services) => Apply(\n    bag =>\n    {\n        return bag;\n    });", "    public static Bag Register(Bag services) => Apply(\n        bag =>\n        {\n            return bag;\n        });")]
+    public void Reindented_ForAnExpressionBodiedMemberWhoseBodyIsALambdaBlock_ReproducesTheFileTextInEitherFrame(string declaration, string expected) =>
+        Assert.Equal(expected, MemberDeclaration.Reindented(declaration, 4));
 }

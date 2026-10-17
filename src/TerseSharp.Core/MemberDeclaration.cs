@@ -115,7 +115,7 @@ public static class MemberDeclaration
         var continued = Continued(declaration);
         var lines = declaration.Split('\n');
 
-        return new string(' ', column) + Shifted(lines, column - Frame(lines, continued, column), continued);
+        return new string(' ', column) + Shifted(lines, column - Frame(declaration, lines, continued, column), continued);
     }
 
     private static string Shifted(string[] lines, int shift, HashSet<int> continued)
@@ -196,27 +196,102 @@ public static class MemberDeclaration
 
     private const int MemberIndent = 4;
 
-    private static int Frame(string[] lines, HashSet<int> continued, int column)
+    private static int Frame(string declaration, string[] lines, HashSet<int> continued, int column) => (Header(declaration), Braces(declaration)) switch
+    {
+        ( < int.MaxValue and var header, _) => header,
+        (_, < int.MaxValue and var braces) => braces,
+        _ => Shallowest(lines, continued) is var shallowest && shallowest != int.MaxValue && shallowest >= column + MemberIndent ? column : 0,
+    };
+
+    private static int Header(string declaration)
+    {
+        var header = int.MaxValue;
+
+        for (var offset = 0; offset < declaration.Length;)
+        {
+            var member = SyntaxFactory.ParseMemberDeclaration(declaration[offset..], consumeFullText: false);
+
+            if (member is null || member.FullSpan.End is 0)
+                return header;
+
+            header = HeaderColumn(declaration, offset, member, header);
+            offset += member.FullSpan.End;
+        }
+
+        return header;
+    }
+
+    private static int HeaderColumn(string declaration, int offset, MemberDeclarationSyntax member, int header)
+    {
+        foreach (var list in member.AttributeLists)
+            header = Math.Min(header, Opening(declaration, offset + list.SpanStart));
+
+        var head = member.AttributeLists.Count is 0 ? member.GetFirstToken() : member.AttributeLists.Last().GetLastToken().GetNextToken();
+
+        return Math.Min(header, Opening(declaration, offset + head.SpanStart));
+    }
+
+    private static int Braces(string declaration)
     {
         var braces = int.MaxValue;
+        var nesting = 0;
+        var framing = new Stack<bool>();
+        var previous = SyntaxKind.None;
+
+        foreach (var token in SyntaxFactory.ParseTokens(declaration))
+        {
+            nesting += Nesting(token.Kind());
+            braces = Framing(token.Kind(), previous, nesting, framing) ? Math.Min(braces, Opening(declaration, token.SpanStart)) : braces;
+            previous = token.Kind();
+        }
+
+        return braces;
+    }
+
+    private static int Nesting(SyntaxKind kind) => kind switch
+    {
+        SyntaxKind.OpenParenToken or SyntaxKind.OpenBracketToken => 1,
+        SyntaxKind.CloseParenToken or SyntaxKind.CloseBracketToken => -1,
+        _ => 0,
+    };
+
+    private static bool Framing(SyntaxKind kind, SyntaxKind previous, int nesting, Stack<bool> framing) => kind switch
+    {
+        SyntaxKind.CloseBraceToken => framing.Count is 0 || framing.Pop(),
+        SyntaxKind.OpenBraceToken => Pushed(framing, nesting is 0 && Opens(framing, previous)),
+        _ => false,
+    };
+
+    private static bool Opens(Stack<bool> framing, SyntaxKind previous) => (framing.Count is 0 || framing.Peek()) && previous is not SyntaxKind.EqualsGreaterThanToken;
+
+    private static bool Pushed(Stack<bool> framing, bool frames)
+    {
+        framing.Push(frames);
+
+        return frames;
+    }
+
+    private static int Opening(ReadOnlySpan<char> declaration, int position)
+    {
+        var before = declaration[..position];
+        var newline = before.LastIndexOf('\n');
+
+        return newline >= 0 && before[(newline + 1)..].IsWhiteSpace() ? position - newline - 1 : int.MaxValue;
+    }
+
+    private static int Shallowest(string[] lines, HashSet<int> continued)
+    {
         var shallowest = int.MaxValue;
 
         for (var line = 1; line < lines.Length; line++)
         {
             var trimmed = lines[line].AsSpan().TrimStart();
 
-            if (continued.Contains(line) || trimmed.IsWhiteSpace())
-                continue;
-
-            var depth = lines[line].Length - trimmed.Length;
-
-            shallowest = Math.Min(shallowest, depth);
-            braces = trimmed[0] is '{' or '}' ? Math.Min(braces, depth) : braces;
+            if (!continued.Contains(line) && !trimmed.IsWhiteSpace())
+                shallowest = Math.Min(shallowest, lines[line].Length - trimmed.Length);
         }
 
-        return braces < int.MaxValue ? braces
-            : shallowest != int.MaxValue && shallowest >= column + MemberIndent ? column
-            : 0;
+        return shallowest;
     }
 
     private static ReadOnlySpan<char> Moved(ReadOnlySpan<char> line, int shift, System.Text.StringBuilder builder)
