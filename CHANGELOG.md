@@ -7,6 +7,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+
+## [0.78.0] - 2026-10-17
 ### Added
 
 - **`TERSE_FOLDER_RULES=0` opts out of the folder-rules hook (I769).** `terse install --guard` and the asset refresh `terse serve` runs at startup no longer register `terse guard --folder-rules` when it is set, so a deleted entry is not written back (`Guarded_WithFolderRulesOff_DropsTheFolderRulesHooksKeepsTheGuardAndStaysCurrent`).
@@ -26,7 +28,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 - **`ExternalCreate_ThenSearchSymbols_FindsTheNewType` reports its own evidence when it fails (I760)** - the outline answer and `workspace_status verbose=true` - so the next `0 symbols` red names its cause instead of needing a rerun.
 - **The folder-rules hook closes the six NITs from the I761 review (I769).** A `dryRun=true` write is no longer denied below unseen rules (`PreToolUse_ForADryRunWriteBelowUnseenRules_AllowsItAndTheRealWriteIsStillDenied`, `GuardFolderRules_AllowsADryRunWriteBelowUnseenRules_AndStillDeniesTheRealOne`); one locked stale session folder no longer aborts the 7-day prune (`PostToolUse_WhenOneStaleSessionIsLocked_StillPrunesTheOtherStaleSessions`); a directory `path=` now injects that directory's own `CLAUDE.md` (`PostToolUse_ForADirectoryPath_InjectsThatDirectorysOwnRulesOnce`); an answer the hook's writer refuses with an exception releases the rules it claimed - .NET's console already swallows a broken pipe, and a hook killed on timeout runs no code, so neither of those releases (`RunAsync_WhenTheAnswerCannotBeWritten_ReleasesItsRulesSoTheNextCallCarriesThem`); a subagent is keyed on `session_id` plus `agent_id`, so it receives rules the main thread already saw (`PostToolUse_ForASubagentOfASessionThatSawTheRules_InjectsThemIntoTheSubagent`).
 - **`get_diagnostics`, `analyze` and every edit's `errors=` counter apply the project's `DiagnosticSuppressor` analyzers to compiler diagnostics, as csc does (I764).** A warning-as-error such as `CS4014` that a suppressor silences no longer shows as an error the build never reports (`GetDiagnostics_OnAWarningAsErrorTheProjectsSuppressorSilences_ReportsNoErrorJustAsTheBuildDoes`, `EditDryRun_OnAProjectWhoseSuppressorSilencesAWarningAsError_CountsNoErrorInScope`).
-- **`run_tests status="cancel"` stops a build or test run whose caller stopped waiting, and `RunInFlight` names it (I763).** A client that sends `notifications/cancelled` already stopped the run (`RunTests_WhoseClientCancelsTheCall_StopsTheRunAndFreesTheSolution`); one that stops waiting without sending it, like a harness TaskStop of a backgrounded call, left the run holding the solution until it drained. Every `build`, `run_tests`, `rerun_failed`, `list_tests` and `clean` run now registers a stop handle; `run_tests status="cancel"` cancels it, kills the process tree and answers `CANCELLED <tool> after <n>s - the solution is free`, or `nothing to cancel` (`RunTests_StatusCancel_KillsTheRunWhoseCallerStoppedWaitingAndFreesTheSolution`). Format change: `status=` gains the reserved value `cancel`; detached ids stay `t<n>`.
+- **`run_tests status="cancel"` stops a build or test run whose caller stopped waiting, and `RunInFlight` names it (I763).** A client that stopped waiting - a harness TaskStop of a backgrounded call, or a cancelled client token - left the run holding the solution until it drained (`RunTests_WhoseClientAbandonedTheCall_IsStoppedByStatusCancelAndFreesTheSolution`; why a client cancel does not reach the run is I775). Every `build`, `run_tests`, `rerun_failed`, `list_tests` and `clean` run now registers a stop handle; `run_tests status="cancel"` cancels it, kills the process tree and answers `CANCELLED <tool> after <n>s - the solution is free`, or `nothing to cancel` (`RunTests_StatusCancel_KillsTheRunWhoseCallerStoppedWaitingAndFreesTheSolution`). Format change: `status=` gains the reserved value `cancel`; detached ids stay `t<n>`.
 
 ## [0.77.0] - 2026-10-15
 
@@ -7708,7 +7710,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.77.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.78.0...HEAD
+[0.78.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.78.0
 [0.77.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.77.0
 [0.76.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.76.0
 [0.75.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.75.1

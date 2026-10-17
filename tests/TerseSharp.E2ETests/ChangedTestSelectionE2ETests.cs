@@ -494,21 +494,23 @@ public sealed class ChangedTestSelectionE2ETests
     }
 
     [Fact]
-    public async Task RunTests_WhoseClientCancelsTheCall_StopsTheRunAndFreesTheSolution()
+    public async Task RunTests_WhoseClientAbandonedTheCall_IsStoppedByStatusCancelAndFreesTheSolution()
     {
         var server = await StartAsync();
 
         try
         {
             using var abandon = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            var stalling = server.CallAsync("run_tests", Stalling(), abandon.Token);
-
-            Assert.Contains("RunInFlight", await ProbedUntilAsync(server, inFlight: true), StringComparison.Ordinal);
+            var stalling = await StalledAsync(server, () => server.CallAsync("run_tests", Stalling(), abandon.Token));
 
             await abandon.CancelAsync();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stalling);
 
-            Assert.DoesNotContain("RunInFlight", await ProbedUntilAsync(server, inFlight: false), StringComparison.Ordinal);
+            var cancelled = await CallAsync(server, "run_tests", new() { ["status"] = "cancel" });
+
+            Assert.Contains("run_tests", cancelled, StringComparison.Ordinal);
+            Assert.DoesNotContain("nothing to cancel", cancelled, StringComparison.Ordinal);
+            Assert.False(InFlight(await ProbedUntilAsync(server, inFlight: false)));
         }
         finally
         {
@@ -523,20 +525,19 @@ public sealed class ChangedTestSelectionE2ETests
 
         try
         {
-            var stalling = CallAsync(server, "run_tests", Stalling());
-
-            Assert.Contains("RunInFlight", await ProbedUntilAsync(server, inFlight: true), StringComparison.Ordinal);
+            var stalling = await StalledAsync(server, () => CallAsync(server, "run_tests", Stalling()));
 
             var cancelled = await CallAsync(server, "run_tests", new() { ["status"] = "cancel" });
 
             Assert.StartsWith("CANCELLED run_tests after ", cancelled, StringComparison.Ordinal);
             Assert.EndsWith("- the solution is free", cancelled, StringComparison.Ordinal);
+
             var stopped = await stalling.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 
             Assert.False(string.IsNullOrWhiteSpace(stopped));
             Assert.DoesNotContain("run_tests PASSED", stopped, StringComparison.Ordinal);
             Assert.DoesNotContain("ERROR Internal", stopped, StringComparison.Ordinal);
-            Assert.DoesNotContain("RunInFlight", await ProbeAsync(server), StringComparison.Ordinal);
+            Assert.False(InFlight(await ProbeAsync(server)));
             Assert.Contains("nothing to cancel", await CallAsync(server, "run_tests", new() { ["status"] = "cancel" }), StringComparison.Ordinal);
         }
         finally
@@ -558,7 +559,7 @@ public sealed class ChangedTestSelectionE2ETests
     {
         var text = await ProbeAsync(server);
 
-        for (var attempt = 0; attempt < 120 && text.Contains("RunInFlight", StringComparison.Ordinal) != inFlight; attempt++)
+        for (var attempt = 0; attempt < 120 && InFlight(text) != inFlight; attempt++)
         {
             await Task.Delay(250, TestContext.Current.CancellationToken);
             text = await ProbeAsync(server);
@@ -566,4 +567,30 @@ public sealed class ChangedTestSelectionE2ETests
 
         return text;
     }
+
+    private static async Task<Task<string>> StalledAsync(TerseServerProcess server, Func<Task<string>> start)
+    {
+        var answers = new List<string>(3);
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var stalling = start();
+
+            await Task.Delay(1000, TestContext.Current.CancellationToken);
+
+            for (var probe = 0; probe < 240 && !stalling.IsCompleted; probe++)
+            {
+                if (InFlight(await ProbeAsync(server)))
+                    return stalling;
+
+                await Task.Delay(250, TestContext.Current.CancellationToken);
+            }
+
+            answers.Add(stalling.IsCompleted ? await stalling : "still running, never seen in flight");
+        }
+
+        throw new InvalidOperationException("the stalled run never held the solution in three attempts: " + string.Join("\n---\n", answers));
+    }
+
+    private static bool InFlight(string probe) => probe.StartsWith("ERROR RunInFlight", StringComparison.Ordinal);
 }
