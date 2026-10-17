@@ -93,7 +93,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Files** | reading a whole `.md` whose content is one long table | `read_text(path, columns: "Finding,Tool")` |
 | **Files** | a projection whose first column is PROSE, when you only want the row ids | `read_text(path, columns: "Finding", cellChars: 60)` |
 | **Files** | `Bash: git checkout -- <path>` after a bad write | `write_text(path, ref: "HEAD")` |
-| **Files** | a scratch `.cs` probe outside every workspace root | `write_text(path, content, force: true)` |
+| **Files** | scratch probes outside every workspace root | `write_text(files: [...], force: true)` |
 | **Files** | `Bash: rm file` · `Bash: rmdir` | `write_text(path, delete: true)` — an EMPTY directory is removed too |
 | **Files** | `Bash: rm -r folder` | `write_text(path, delete: true, recursive: true)` — refused when the tree holds a file this workspace compiles, unless `force: true`; the workspace root and any `.git` are refused outright |
 | **Edit text** | `Edit` a `.md` section | `edit_text(path, section: "## Commands", newText: …)` — no `oldText` needed |

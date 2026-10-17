@@ -925,14 +925,14 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         const string Other = "src/Fixture.Trading/SecondForceProbe.cs";
         const string Notes = "terse-per-entry-force.md";
         const string Declaration = "namespace Fixture.Trading;\n\npublic sealed class PerEntryForceProbe;\n";
-        var refused = await server.CallAsync("write_text", new()
+        var refused = await server.WriteAsync(new()
         {
             ["files"] = new List<Dictionary<string, object?>>
-        {
-            new() { ["path"] = Code, ["content"] = Declaration },
-            new() { ["path"] = Other, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class SecondForceProbe;\n" },
-            new() { ["path"] = Notes, ["content"] = "probe\n" },
-        },
+            {
+                new() { ["path"] = Code, ["content"] = Declaration },
+                new() { ["path"] = Other, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class SecondForceProbe;\n" },
+                new() { ["path"] = Notes, ["content"] = "probe\n" },
+            },
         });
 
         Assert.Contains("PerEntryForceProbe.cs", refused, StringComparison.Ordinal);
@@ -941,13 +941,13 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
 
         try
         {
-            var applied = await server.CallAsync("write_text", new()
+            var applied = await server.WriteAsync(new()
             {
                 ["files"] = new List<Dictionary<string, object?>>
-            {
-                new() { ["path"] = Code, ["content"] = Declaration, ["force"] = true },
-                new() { ["path"] = Notes, ["content"] = "probe\n" },
-            },
+                {
+                    new() { ["path"] = Code, ["content"] = Declaration, ["force"] = true },
+                    new() { ["path"] = Notes, ["content"] = "probe\n" },
+                },
             });
 
             Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);

@@ -581,4 +581,30 @@ public sealed class FieldReportE2ETests(TerseServerFixture server)
         Assert.EndsWith("local=yes remote=no", rows[2].TrimEnd('\r'), StringComparison.Ordinal);
         Assert.EndsWith("local=yes remote=yes", rows[3].TrimEnd('\r'), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task WriteText_AFilesBatchWithForce_RefusesAnEntryInsideAnotherLoadedWorkspaceAndWritesNothing()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: false, Token, CommittedAsync);
+        var own = Path.Combine(solution.Root, "terse-i765-own.md");
+        var foreign = Path.Combine(TerseServerFixture.FixtureRoot, "terse-i765-foreign-" + Guid.NewGuid().ToString("N") + ".md");
+
+        await solution.CallAsync("load_workspace", new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx") });
+
+        try
+        {
+            var refused = await solution.CallAsync("write_text", new() { ["files"] = Entries(own, foreign), ["force"] = true });
+
+            Assert.StartsWith("ERROR", refused, StringComparison.Ordinal);
+            Assert.Contains("is inside the loaded workspace at", refused, StringComparison.Ordinal);
+            Assert.Contains(foreign, refused, StringComparison.Ordinal);
+            Assert.False(File.Exists(foreign));
+            Assert.False(File.Exists(own));
+        }
+        finally
+        {
+            File.Delete(foreign);
+            File.Delete(own);
+        }
+    }
 }

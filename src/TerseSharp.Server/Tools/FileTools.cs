@@ -141,7 +141,7 @@ bool verbose) =>
         NavigationTools.Unwrap(await read.ConfigureAwait(false));
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 10 files under ONE compile gate. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token holding the content; one no project globs stays ungated. force=true also lets a SINGLE write land outside every workspace root. delete=true removes a file or an EMPTY directory; recursive=true removes the tree - a shell rm -r - refused over a file this workspace compiles unless force=true. Replacing a file answers overwrote existing  <name>, and a write keeping under a quarter of its content lines is refused unless overwrite=true. Missing directories are created and line endings kept.")]
+    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 10 files under ONE compile gate. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token holding the content; one no project globs stays ungated. force=true also lets a single write or every files= entry land outside every workspace root, never inside another loaded workspace. delete=true removes a file or an EMPTY directory; recursive=true removes the tree - a shell rm -r - refused over a file this workspace compiles unless force=true. Replacing a file answers overwrote existing  <name>, and a write keeping under a quarter of its content lines is refused unless overwrite=true. Missing directories are created and line endings kept.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative. An absolute path outside every workspace root is written only with force=true.")] string? path = null,
         [Description("Full new content. Omit only with delete=true, ref= or retryWith=; an empty write needs allowEmpty=true.")] string? content = null,
@@ -151,7 +151,7 @@ bool verbose) =>
         [Description("Git ref to restore the file's content from, e.g. HEAD. Not with content, files or delete; the restored write is gated like any other.")] string? @ref = null,
         [Description("Permit writing empty content, which truncates the file. Default false.")] bool allowEmpty = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Allow writing or deleting a .cs file, every files= entry included, and a single write outside every workspace root. Still compile-gated when a project compiles it.")] bool force = false,
+        [Description("Allow writing or deleting a .cs file, every files= entry included, and a write outside every workspace root, single or files=. Still compile-gated when a project compiles it.")] bool force = false,
         [Description("Apply a .cs write even if it introduces compile errors.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -896,15 +896,17 @@ context.RejectWrite() is { } rejection
         return Guarded(
             workspace,
             files[Math.Max(0, Array.FindIndex(files, file => !context.OutsideEveryWorkspace(file.Path)))].Path,
-            async loaded => Raced(loaded, targets, options.IfUnchangedSince) is { } raced
-                ? await raced.ConfigureAwait(false)
-                : NavigationTools.Unwrap(await LandedWrites.GuardedAsync(
-                    loaded.Root,
-                    files,
-                    options.DryRun,
-                    () => FileService.WriteTextManyAsync(
-                        loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
-                    cancellationToken).ConfigureAwait(false)),
+            async loaded => ForeignEntry(loaded, files) is { } foreign
+                ? foreign.Render()
+                : Raced(loaded, targets, options.IfUnchangedSince) is { } raced
+                    ? await raced.ConfigureAwait(false)
+                    : NavigationTools.Unwrap(await LandedWrites.GuardedAsync(
+                        loaded.Root,
+                        files,
+                        options.DryRun,
+                        () => FileService.WriteTextManyAsync(
+                            loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
+                        cancellationToken).ConfigureAwait(false)),
             files.Any(file => SourceFile.IsCSharp(file.Path)),
             cancellationToken);
     }
@@ -1063,16 +1065,39 @@ context.RejectWrite() is { } rejection
         var full = Path.GetFullPath(path);
         var owner = context.Registry.All().FirstOrDefault(loaded => loaded.Contains(full));
 
-        if (owner is null)
-            return null;
+        return owner is null || ResolvesTo(workspace, path, full) ? null : ForeignWrite(full, owner.Root);
+    }
 
+    private bool ResolvesTo(string? workspace, string path, string full)
+    {
         var resolved = context.Registry.Resolve(workspace, path, semantic: false);
 
-        return resolved.IsOk && resolved.Value!.Workspace.Contains(full)
-            ? null
-            : Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"'{full}' is inside the loaded workspace at {owner.Root}, not the one this call resolved to"),
-                "send the write with workspace=<that solution's name>, so it goes through that workspace's own compile gate rather than around it");
+        if (!resolved.IsOk)
+            return false;
+
+        using var lease = resolved.Value!;
+
+        return lease.Workspace.Contains(full);
+    }
+
+    private static TerseError ForeignWrite(string full, string root) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"'{full}' is inside the loaded workspace at {root}, not the one this call resolved to"),
+        "send the write with workspace=<that solution's name>, so it goes through that workspace's own compile gate rather than around it");
+
+    private TerseError? ForeignEntry(LoadedWorkspace loaded, FileService.FileWrite[] files)
+    {
+        foreach (var file in files)
+        {
+            if (!Path.IsPathRooted(file.Path))
+                continue;
+
+            var full = Path.GetFullPath(file.Path);
+
+            if (!loaded.Contains(full) && context.Registry.All().FirstOrDefault(other => other.Contains(full)) is { } owner)
+                return ForeignWrite(full, owner.Root);
+        }
+
+        return null;
     }
 
     private static TerseError? Refusable(TextQuery request)

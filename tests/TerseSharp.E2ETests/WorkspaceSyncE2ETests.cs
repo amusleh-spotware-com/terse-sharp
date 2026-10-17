@@ -49,12 +49,15 @@ public sealed class WorkspaceSyncE2ETests
         var path = Path.Combine(solution.ProjectDirectory, "SyncedType.cs");
 
         await File.WriteAllTextAsync(path, AddedSource, TestContext.Current.CancellationToken);
-        await solution.CallAsync("get_file_outline", new() { ["path"] = AddedRelativePath });
+        var outline = await solution.CallAsync("get_file_outline", new() { ["path"] = AddedRelativePath });
 
         var found = await solution.CallAsync("search_symbols", new() { ["query"] = "SyncedType" });
+        var missed = !found.Contains("SyncedType", StringComparison.Ordinal) || found.Contains("0 symbols", StringComparison.Ordinal);
+        var evidence = missed
+            ? string.Concat(found, "\n--- outline\n", outline, "\n--- status\n", await solution.CallAsync("workspace_status", new() { ["verbose"] = true }))
+            : found;
 
-        Assert.Contains("SyncedType", found, StringComparison.Ordinal);
-        Assert.DoesNotContain("0 symbols", found, StringComparison.Ordinal);
+        Assert.False(missed, evidence);
     }
 
     [Fact]
