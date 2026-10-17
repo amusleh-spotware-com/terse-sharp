@@ -376,7 +376,8 @@ public sealed class EditTools(ToolContext context)
         string? AddTo = null,
         string[]? Usings = null,
         bool Rename = false,
-        MemberPlacement? Placement = null);
+        MemberPlacement? Placement = null,
+        FileService.TextEdit[]? Edits = null);
 
     internal static string Carried(Result<string> result, Carry carry, string root) =>
         result.IsOk ? result.Value! : Rejected(result.Error!, carry, root);
@@ -387,13 +388,11 @@ public sealed class EditTools(ToolContext context)
             "replay the token against the workspace it was rejected in, or re-send the declaration to edit this one").Render()
         : null;
 
-    internal static string Unknown(string token, string tool) => Errors.Invalid(
-        RejectedEdits.Recall(token) is { } issued
-            ? string.Create(CultureInfo.InvariantCulture, $"retryWith={token} was issued by {issued.Tool}, not by {tool}")
-            : string.Create(CultureInfo.InvariantCulture, $"retryWith={token} names no held rejection of {tool}"),
-        RejectedEdits.Recall(token) is { } held
-            ? string.Create(CultureInfo.InvariantCulture, $"replay it with {held.Tool}, which is the tool that can apply what it holds")
-            : "re-send the text; the server holds only the last 8 rejected edits of this process").Render();
+    internal static string Unknown(string token, string tool) => RejectedEdits.Recall(token) is { } held
+        ? Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"retryWith={token} was issued by {held.Tool}, not by {tool}"),
+            string.Create(CultureInfo.InvariantCulture, $"replay it with {held.Tool}, which is the tool that can apply what it holds")).Render()
+        : Errors.Invalid(Unheld(token, RejectedEdits.Origin(token)), Resend).Render();
 
     internal static RejectedEdit? Held(string? retryWith, string tool) =>
         retryWith is { Length: > 0 } token && RejectedEdits.Recall(token) is { } edit
@@ -454,19 +453,22 @@ public sealed class EditTools(ToolContext context)
         : held is { Count: > 0 } ? [.. held] : null;
 
     private static string Rejected(TerseError error, Carry carry, string root) =>
-            carry.Tool is { Length: > 0 } tool && Holdable(error.Code) && Worth(carry)
+            carry.Tool is { Length: > 0 } tool && Holdable(carry, error.Code) && Worth(carry)
                 ? error.Render() + "\n" + RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0) + "\nretryWith=" + RejectedEdits.Remember(
-                    root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement)
+                    root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement, carry.Edits)
                 : error.Render();
 
-    private static bool Holdable(TerseErrorCode code) =>
-            code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol or TerseErrorCode.InvalidArgument;
+    private static bool Holdable(Carry carry, TerseErrorCode code) => carry switch
+    {
+        { Tool: "edit_text" } or { Tool: "write_text", Targets.Length: > 1 } => code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation,
+        _ => code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol or TerseErrorCode.InvalidArgument,
+    };
 
     private static string[] Corrected(string[]? supplied, IReadOnlyList<string> held) =>
         supplied is { Length: > 0 } ? supplied : [.. held];
 
     private static bool Worth(Carry carry) =>
-        carry.Payloads is { } payloads && Array.Exists(payloads, text => text is { Length: > 0 });
+        carry.Edits is { Length: > 0 } || (carry.Payloads is { } payloads && Array.Exists(payloads, text => text is { Length: > 0 }));
 
     private const string PolicyHelp = "Apply an edit the project's .terse.json code policy would reject; the response then names every rule it bypassed. Default false.";
 
@@ -802,4 +804,14 @@ public sealed class EditTools(ToolContext context)
     private static string? Unpathed(string? path, string[]? symbolIds) => path is { Length: > 0 } && symbolIds is { Length: > 0 }
         ? Errors.Invalid("path= resolves the one symbolId it is passed beside; it is not taken beside symbolIds=", "drop path=, or address each symbolIds= entry by its documentation id or a qualified name").Render()
         : null;
+
+    private static string Unheld(string token, TokenOrigin origin) => origin switch
+    {
+        { Issued: false, Newest: 0 } => string.Create(CultureInfo.InvariantCulture, $"retryWith={token} was never issued by this server process, which has issued no token yet - it restarted since, or the token was mistyped"),
+        { Issued: false } => string.Create(CultureInfo.InvariantCulture, $"retryWith={token} was never issued by this server process, which has issued r1-r{origin.Newest} - it restarted since, or the token was mistyped"),
+        { Tool: { } issuer } => string.Create(CultureInfo.InvariantCulture, $"retryWith={token} was issued by {issuer} and has expired - only the last {RejectedEdits.Capacity} are held"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"retryWith={token} has expired - only the last {RejectedEdits.Capacity} are held"),
+    };
+
+    private const string Resend = "re-send the text; a token is lost once newer rejections push it out of the held window or the server restarts";
 }

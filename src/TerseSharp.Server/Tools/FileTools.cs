@@ -141,7 +141,7 @@ bool verbose) =>
         NavigationTools.Unwrap(await read.ConfigureAwait(false));
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 25 files under ONE compile gate. A .cs file needs force=true and is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED - and the rejection ends with a retryWith token holding the content; one no project globs stays ungated. force=true also lands a write outside every workspace root, never in another loaded one. delete=true removes a file or an EMPTY directory, recursive=true the tree. A write keeping under a quarter of a file's content lines is refused unless overwrite=true.")]
+    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 25 files under ONE compile gate. A .cs file is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED; a rollback, or a dryRun that would land, ends with a retryWith token holding the content. A new .cs file needs force=true; one no project globs stays ungated. force=true also lands a write outside every workspace root, never in another loaded one. delete=true removes a file or an EMPTY directory, recursive=true the tree. A write keeping under a quarter of a file's content lines is refused unless overwrite=true.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative.")] string? path = null,
         [Description("Full new content. Omit only with delete=true, ref= or retryWith=; an empty write needs allowEmpty=true.")] string? content = null,
@@ -151,14 +151,14 @@ bool verbose) =>
         [Description("Git ref to restore the file's content from, e.g. HEAD. Not with content, files or delete; the restored write is gated like any other.")] string? @ref = null,
         [Description("Permit writing empty content, which truncates the file. Default false.")] bool allowEmpty = false,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Allow writing or deleting a .cs file, and a write outside every workspace root. Still compile-gated when a project compiles it.")] bool force = false,
+        [Description("Allow creating or deleting a .cs file, writing one no project compiles, and a write outside every workspace root. Compile-gated when a project compiles it.")] bool force = false,
         [Description("Apply a .cs write even if it introduces compile errors.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Apply a write the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
-        [Description("Token from a previous rejected write, e.g. r3, printed alone on the LAST line of the rejection. It holds the content, so the retry names the token instead of re-sending the file - add usings= for a CS0246 rollback, or allowErrors=true. A path or content you pass outranks the held one; a .cs replay still needs force=true.")] string? retryWith = null,
-        [Description("Namespaces added to the content this retry replays, e.g. System.Collections.Immutable. Ignored without retryWith=.")] string[]? usings = null,
+        [Description("Token a rejected write, or a dryRun that would land, printed on its LAST line, e.g. r3. It holds every file's content, so the retry re-sends nothing - add usings= for a CS0246 rollback, or allowErrors=true. A path or content you pass outranks a one-file token's held one.")] string? retryWith = null,
+        [Description("Namespaces added to each .cs file this retry replays. Ignored without retryWith=.")] string[]? usings = null,
         [Description("Replace a file even when this write keeps under a quarter of its content lines; force=true does not lift that refusal.")] bool overwrite = false,
         CancellationToken cancellationToken = default)
     {
@@ -174,9 +174,13 @@ bool verbose) =>
         if (retryWith is { Length: > 0 } token)
             return Replayed(token, workspace, path, content, usings, options, cancellationToken);
 
-        return files is { Length: > 0 } batch
-            ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, options, cancellationToken)
-            : WrittenOne(workspace, path, content, delete, recursive, @ref, allowEmpty, usings, options, cancellationToken);
+        var unforced = UnforcedWrite(force || dryRun || delete, path, files);
+
+        return Noted(
+            files is { Length: > 0 } batch
+                ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, options, null, null, cancellationToken)
+                : WrittenOne(workspace, path, content, delete, recursive, @ref, allowEmpty, usings, options, cancellationToken),
+            unforced);
     }
 
     private Task<string> Written(
@@ -200,7 +204,8 @@ bool verbose) =>
 
         return Guarded(workspace, path, async loaded => Raced(loaded, [path], options.IfUnchangedSince) is { } raced
             ? await raced.ConfigureAwait(false)
-            : EditTools.Carried(
+            : Previewed(
+                options.DryRun,
                 await LandedWrites.GuardedAsync(
                     loaded.Root,
                     [new FileService.FileWrite(path, content)],
@@ -215,15 +220,15 @@ bool verbose) =>
     private readonly record struct WriteOptions(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy = false, string? IfUnchangedSince = null, bool Overwrite = false);
 
     [McpServerTool(Name = "edit_text")]
-    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. toPath= MOVES a section=, row= or rows= into another markdown file. edits=[{oldText,newText}, ...] applies up to 25 edits in one call. Replaces one call per edit: an entry may carry its own path, and one whose anchor fails is reported while the rest land. A non-unique match is refused naming the closest lines; occurrence=N picks one, replaceAll=true replaces every one (up to 500). force=true edits a .cs file as text, compile-gated like replace_symbol when a project compiles it, edits= across .cs files as ONE change.")]
+    [Description("Replace a unique snippet in a file, or a whole markdown section with section=\"## Commands\" - place=append or prepend writes INSIDE it instead. toPath= MOVES a section=, row= or rows= into another markdown file. edits=[{oldText,newText}, ...] applies up to 25 edits in one call. Replaces one call per edit: an entry may carry its own path, and one whose anchor fails is reported while the rest land. A non-unique match is refused naming the closest lines; occurrence=N picks one, replaceAll=true replaces every one (up to 500). A .cs file a project compiles is edited as text, compile-gated like replace_symbol, edits= across .cs files as ONE change, and a rollback ends with a retryWith token holding the edits; force=true is for one no project compiles.")]
     public Task<string> EditText(
     [Description("Path, absolute or workspace-relative. With edits=, the default target of every entry carrying no path of its own.")] string? path = null,
     [Description("Replacement text. With section=, the whole new section including its heading, unless place= writes inside it. With row=, the row as it should read in the target.")] string? newText = null,
         [Description("Exact text to replace; must occur exactly once unless occurrence= picks one.")] string? oldText = null,
         [Description("Markdown only: replace this whole section, e.g. '## Commands', no oldText needed.")] string? section = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
-        [Description("Allow editing a .cs file as text; compile-gated when a project compiles it.")] bool force = false,
-        [Description("With force=true, write the .cs edit raw even if it breaks the build. Default false.")] bool allowErrors = false,
+        [Description("Edit a .cs file no project compiles.")] bool force = false,
+        [Description("Write a .cs edit raw even if it breaks the build. Default false.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("1-based index of the match to replace when it repeats - the oldText match, or beside section= that heading. Default 0 requires one.")] int occurrence = 0,
@@ -235,8 +240,17 @@ bool verbose) =>
         [Description("With toPath=: up to 25 rows, each {row, newText?}.")] FileService.TextRow[]? rows = null,
         [Description("Return the N lines around each change in POST-edit state, numbered. 1-10; 0 adds nothing.")] int context = 0,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
+        [Description("Token a rolled-back .cs edit printed; replays its held edits.")] string? retryWith = null,
+        [Description("Namespaces added to each edited .cs file, as for a CS0246 rollback.")] string[]? usings = null,
         CancellationToken cancellationToken = default)
     {
+        if (retryWith is { Length: > 0 } token)
+        {
+            return Bounded(context) is { } bounded
+                ? Task.FromResult(bounded.Render())
+                : Reedited(token, workspace, usings, new FileService.EditRequest(string.Empty, string.Empty, null, dryRun, true, verbose, Context: context, AllowErrors: allowErrors), cancellationToken);
+        }
+
         var anchor = Anchor(path, edits);
 
         if (!anchor.IsOk)
@@ -249,19 +263,19 @@ bool verbose) =>
 
         var targets = Targets(path ?? target, edits, toPath);
 
-        return Guarded(
+        return Noted(Guarded(
             workspace,
             target,
             loaded => Raced(loaded, targets, ifUnchangedSince) ?? EditedAsync(
                 loaded,
                 path ?? target,
-                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context, replaceAll, allowErrors),
+                new FileService.EditRequest(oldText ?? string.Empty, newText ?? string.Empty, section, dryRun, force, verbose, occurrence, place, toPath, row, context, replaceAll, allowErrors, usings),
                 newText,
                 edits,
                 rows,
                 cancellationToken),
             TouchesCSharp(target, edits),
-            cancellationToken);
+            cancellationToken), UnforcedEdit(force || dryRun, target, edits));
     }
 
     private const int MaxEditContext = 10;
@@ -657,7 +671,7 @@ context.RejectWrite() is { } rejection
         {
             return newText is null
                 ? Errors.Blank("newText", "edits").Render()
-                : NavigationTools.Unwrap(await FileService.EditTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false));
+                : Retained(await FileService.EditTextAsync(loaded, path, request, cancellationToken).ConfigureAwait(false), loaded.Root, path, request, null);
         }
 
         if (newText is not null || request.OldText is { Length: > 0 } || request.Section is { Length: > 0 } || request.Place is { Length: > 0 })
@@ -681,7 +695,7 @@ context.RejectWrite() is { } rejection
 
         return FileService.Colliding(batch, path, loaded.Root) is { } collision
             ? collision.Render()
-            : NavigationTools.Unwrap(await FileService.EditTextGroupedAsync(loaded, grouped.Value!, request, cancellationToken).ConfigureAwait(false));
+            : Retained(await FileService.EditTextGroupedAsync(loaded, grouped.Value!, request, cancellationToken).ConfigureAwait(false), loaded.Root, path, request, batch);
     }
 
     private static async Task<string> MovedAsync(
@@ -883,6 +897,8 @@ context.RejectWrite() is { } rejection
     bool allowEmpty,
     FileService.FileWrite[] files,
     WriteOptions options,
+    string? heldRoot,
+    IReadOnlyList<string>? usings,
     CancellationToken cancellationToken)
     {
         if (Refused(path, content, delete, allowEmpty, files) is { } refusal)
@@ -893,17 +909,21 @@ context.RejectWrite() is { } rejection
         return Guarded(
             workspace,
             files[Math.Max(0, Array.FindIndex(files, file => !context.OutsideEveryWorkspace(file.Path)))].Path,
-            async loaded => ForeignEntry(loaded, files) is { } foreign
+            async loaded => EditTools.Elsewhere(heldRoot, loaded.Root) ?? (ForeignEntry(loaded, files) is { } foreign
                 ? foreign.Render()
                 : Raced(loaded, targets, options.IfUnchangedSince) is { } raced
                     ? await raced.ConfigureAwait(false)
-                    : NavigationTools.Unwrap(await LandedWrites.GuardedAsync(
-                        loaded.Root,
-                        files,
+                    : Previewed(
                         options.DryRun,
-                        () => FileService.WriteTextManyAsync(
-                            loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
-                        cancellationToken).ConfigureAwait(false)),
+                        await LandedWrites.GuardedAsync(
+                            loaded.Root,
+                            files,
+                            options.DryRun,
+                            () => FileService.WriteTextManyAsync(
+                                loaded, files, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
+                            cancellationToken).ConfigureAwait(false),
+                        new EditTools.Carry("write_text", Array.ConvertAll(files, file => file.Path), Array.ConvertAll(files, file => file.Content), Usings: usings is null ? null : [.. usings]),
+                        loaded.Root)),
             files.Any(file => SourceFile.IsCSharp(file.Path)),
             cancellationToken);
     }
@@ -1321,24 +1341,13 @@ context.RejectWrite() is { } rejection
     private static FileService.EditRequest WithoutMove(FileService.EditRequest request) =>
         request with { OldText = string.Empty, NewText = string.Empty, Row = null, ToPath = null };
 
-    private Task<string> Replayed(string token, string? workspace, string? path, string? supplied, string[]? usings, WriteOptions options, CancellationToken cancellationToken)
-    {
-        if (EditTools.Held(token, "write_text") is not { } held)
-            return Task.FromResult(EditTools.Unknown(token, "write_text"));
-
-        var target = path is { Length: > 0 } named ? named : Entry(held.Targets);
-        var content = WriteRetry.WithUsings(supplied is { Length: > 0 } ? supplied : Entry(held.Payloads), usings is { Length: > 0 } ? usings : [.. held.Usings]);
-
-        if (target.Length is 0)
-            return Task.FromResult(Errors.Blank("path").Render());
-
-        return Guarded(workspace, target, async loaded => EditTools.Elsewhere(held.Root, loaded.Root)
-            ?? EditTools.Carried(
-                await FileService.WriteTextAsync(loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false),
-                new EditTools.Carry("write_text", [target], [content], Usings: usings),
-                loaded.Root),
-            cancellationToken: cancellationToken);
-    }
+    private Task<string> Replayed(string token, string? workspace, string? path, string? supplied, string[]? usings, WriteOptions options, CancellationToken cancellationToken) =>
+        EditTools.Held(token, "write_text") switch
+        {
+            null => Task.FromResult(EditTools.Unknown(token, "write_text")),
+            { Targets.Count: > 1 } many => ReplayedMany(many, workspace, path, supplied, usings, options, cancellationToken),
+            var one => ReplayedOne(one, workspace, path, supplied, usings, options, cancellationToken),
+        };
 
     private static string Entry(IReadOnlyList<string> values) => values is [var only, ..] ? only : string.Empty;
 
@@ -1397,4 +1406,108 @@ context.RejectWrite() is { } rejection
                         : UnwrappedAsync(FileService.ReadTextAsync(loaded, path, request, cancellationToken)),
                     semantic: false,
                     cancellationToken));
+
+    private const string TextOnCSharp = "NOTE a .cs text edit is compile-gated without force=true; replace_symbol_body or add_member addresses one member with no anchor to re-send";
+
+    private static string Previewed(bool dryRun, Result<string> result, EditTools.Carry carry, string root) =>
+        dryRun && Landing(result) is { } preview && carry.Payloads is { Length: > 0 } payloads
+            ? preview + "\nretryWith=" + RejectedEdits.Remember(root, "write_text", carry.Targets ?? [], payloads, usings: carry.Usings) + " applies this preview"
+            : EditTools.Carried(result, carry, root);
+
+    private static string? Landing(Result<string> result) => result is { IsOk: true, Value: { } preview } && Lands(preview) ? preview : null;
+
+    private static bool UnforcedEdit(bool forced, string target, FileService.TextEdit[]? edits) =>
+        !forced && TouchesCSharp(target, edits) && Array.TrueForAll(edits ?? [], edit => !edit.Force);
+
+    private static bool UnforcedWrite(bool forced, string? path, FileService.FileWrite[]? files) =>
+        !forced && (SourceFile.IsCSharp(path.AsSpan()) || Array.Exists(files ?? [], file => !file.Force && SourceFile.IsCSharp(file.Path)));
+
+    private static bool Lands(string preview) =>
+        !preview.Contains("would be rolled back", StringComparison.Ordinal) && !preview.StartsWith("0 files changed", StringComparison.Ordinal);
+
+    private static FileService.FileWrite[] Replays(RejectedEdit held, IReadOnlyList<string> usings)
+    {
+        var files = new FileService.FileWrite[held.Targets.Count];
+
+        for (var index = 0; index < files.Length; index++)
+        {
+            var target = held.Targets[index];
+            files[index] = new FileService.FileWrite(target, SourceFile.IsCSharp(target) ? WriteRetry.WithUsings(held.Payloads[index], usings) : held.Payloads[index]);
+        }
+
+        return files;
+    }
+
+    private Task<string> ReplayedOne(RejectedEdit held, string? workspace, string? path, string? supplied, string[]? usings, WriteOptions options, CancellationToken cancellationToken)
+    {
+        var target = path is { Length: > 0 } named ? named : Entry(held.Targets);
+        var content = WriteRetry.WithUsings(supplied is { Length: > 0 } ? supplied : Entry(held.Payloads), usings is { Length: > 0 } ? usings : [.. held.Usings]);
+
+        if (target.Length is 0)
+            return Task.FromResult(Errors.Blank("path").Render());
+
+        return Guarded(workspace, target, async loaded => EditTools.Elsewhere(held.Root, loaded.Root)
+            ?? Previewed(
+                options.DryRun,
+                await FileService.WriteTextAsync(loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false),
+                new EditTools.Carry("write_text", [target], [content], Usings: usings),
+                loaded.Root),
+            cancellationToken: cancellationToken);
+    }
+
+    private static Task<string> Noted(Task<string> answer, bool unforced) => unforced ? NotedAsync(answer) : answer;
+
+    private static async Task<string> NotedAsync(Task<string> answer)
+    {
+        var text = await answer.ConfigureAwait(false);
+
+        return text.StartsWith("ERROR", StringComparison.Ordinal) ? text : text + "\n" + TextOnCSharp;
+    }
+
+    private static EditTools.Carry EditCarry(string path, FileService.EditRequest request, FileService.TextEdit[]? edits)
+    {
+        var held = edits is { Length: > 0 } batch
+            ? Array.ConvertAll(batch, edit => edit with { Path = edit.Path is { Length: > 0 } own ? own : path })
+            : [new FileService.TextEdit(request.OldText, request.NewText, request.Section, request.Occurrence, path, request.Place, request.Force, request.ReplaceAll)];
+
+        return new EditTools.Carry(
+            "edit_text",
+            Array.ConvertAll(held, edit => edit.Path ?? path),
+            Array.ConvertAll(held, edit => edit.NewText ?? string.Empty),
+            Usings: request.Usings is { Count: > 0 } usings ? [.. usings] : null,
+            Edits: held);
+    }
+
+    private static string Retained(Result<string> result, string root, string path, FileService.EditRequest request, FileService.TextEdit[]? edits) =>
+        result.IsOk ? result.Value! : EditTools.Carried(result, EditCarry(path, request, edits), root);
+
+    private Task<string> Reedited(string token, string? workspace, string[]? usings, FileService.EditRequest request, CancellationToken cancellationToken)
+    {
+        if (EditTools.Held(token, "edit_text") is not { Edits: { Count: > 0 } held } edit)
+            return Task.FromResult(EditTools.Unknown(token, "edit_text"));
+
+        var replay = request with { Force = true, Usings = usings is null ? edit.Usings : usings };
+
+        return Guarded(
+            workspace,
+            edit.Targets[0],
+            async loaded => EditTools.Elsewhere(edit.Root, loaded.Root)
+                ?? await EditedAsync(loaded, edit.Targets[0], replay, null, [.. held], null, cancellationToken).ConfigureAwait(false),
+            true,
+            cancellationToken);
+    }
+
+    private Task<string> ReplayedMany(RejectedEdit held, string? workspace, string? path, string? supplied, string[]? usings, WriteOptions options, CancellationToken cancellationToken)
+    {
+        if (path is { Length: > 0 } || supplied is { Length: > 0 })
+        {
+            return Task.FromResult(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"retryWith holds {held.Targets.Count} files, so a single path= or content= cannot say which one it corrects"),
+                "retry with the token alone - plus usings= or allowErrors=true - or send the corrected batch as files=").Render());
+        }
+
+        var imports = usings is { Length: > 0 } ? usings : held.Usings;
+
+        return WrittenMany(workspace, null, null, false, false, Replays(held, imports), options, held.Root, imports, cancellationToken);
+    }
 }

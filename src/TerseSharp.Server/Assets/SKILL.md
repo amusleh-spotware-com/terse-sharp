@@ -111,8 +111,8 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit text** | `Edit`/`Write` a non-`.cs` file | `edit_text` · `write_text` |
 | **Edit text** | re-reading a file because an anchor copied from `get_symbol_source` did not match | `edit_text` handles it — dedented or blank-stripped anchors match |
 | **Edit text** | `Write` a **new** `.cs` file | `write_text(path, content, force: true)` |
-| **Edit text** | re-sending a whole file after a `CS0246` rollback | `write_text(retryWith: "r3", usings: ["System.Collections.Immutable"], force: true)` — the content is held |
-| **Edit text** | rewriting a whole `.cs` file | `write_text(path, content, force: true)` — compile-gated when a project compiles it; replacing an unrelated file needs `overwrite: true` |
+| **Edit text** | re-sending a file, a batch or a snippet after a rollback or a landing `dryRun` | `write_text(retryWith: "r3")` · `edit_text(retryWith: "r3", usings: ["System.Collections.Immutable"])` — the payload is held |
+| **Edit text** | rewriting a whole `.cs` file | `write_text(path, content)` — compile-gated, no `force` once a project compiles it; replacing an unrelated file needs `overwrite: true` |
 | **Edit code** | `Edit` a `.cs` file | `replace_symbol_body` · `replace_symbol` · `add_member` · `delete_symbol` |
 | **Edit code** | a new body that calls a private helper you have not written yet | `replace_symbol(symbolId, declaration, add: [...])` |
 | **Edit code** | a signature change that breaks its callers | `replace_symbol(symbolIds: [...], declarations: [...])` — one compile-gated edit across files |
@@ -738,8 +738,8 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    `gate=semantic …`.
    An edit introducing a new compile error is rolled back and the error returned. **One exception:** a `CS0246`/`CS0234` a NEW file cannot resolve lands as `UNRESOLVED` (`would be applied` on a `dryRun`); any other error in a new file is rolled back. `allowErrors: true` opts out — use it only mid-refactor on purpose.
    **A rollback keeps your text**: the error ends `retryWith=r3`; `replace_symbol`,
-   `replace_symbol_body` and `add_member` take the token to replay what was rejected - after adding the
-   missing callee, or with `allowErrors: true` - and the last 8 are held. A corrected
+   `replace_symbol_body`, `add_member`, `write_text` and `edit_text` take the token to replay what was rejected - after adding the
+   missing callee, or with `allowErrors: true` - and the last 16 are held. A corrected
    `declaration=`/`body=`/`content=` beside it REPLACES the held text.
    **One wrong entry of a batch**: `fix=["2=<corrected>"]` replaces the held entry at that 0-based
    index and replays the rest (`fix=["add:1=..."]` for a held `add=` helper; refused beside a replacing
@@ -756,9 +756,8 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    names that `usings=` entry - `the ambiguity was introduced by usings=["ModelContextProtocol.Protocol"]
    which this edit added - retry with usings=[] and the retryWith token below to drop it` - rather than
    telling you to fix an edit whose text was fine.
-   **A remedy never names a parameter the rejecting tool does not declare**: `edit_text` takes no
-   `usings=` and no `retryWith=`, so its rollback says to put the directive in the content you send
-   instead. **The sentence above the token obeys it too** - written per tool, so `add_member` never
+   **A remedy never names a parameter the rejecting tool does not declare**, and **the sentence above
+   the token obeys it too** - written per tool, so `add_member` never
    advertises `fix=`, which only `replace_symbol` accepts.
    **When every new error is just a missing import, the remedy names the one-call fix**: a rollback
    whose errors are all `CS0246`/`CS0103` for names the project resolves in exactly one namespace each

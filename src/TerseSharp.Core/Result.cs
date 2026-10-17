@@ -88,6 +88,7 @@ public static class Errors
         { Implementers: { Count: > 0 } implementers } => Unimplemented(implementers, tool),
         { Fields: { Count: > 0 } fields } => Unassigned(fields, tool),
         _ when HoldsUsings(tool) => "fix the edit, send the members that broke with it as one replace_symbol symbolIds/declarations batch, or pass allowErrors=true to apply it anyway",
+        _ when tool is "write_text" or "edit_text" => "fix the edit in the content you send, or pass allowErrors=true beside the retryWith token below to apply the held text without re-sending it",
         _ => "fix the edit in the content you send, or pass allowErrors=true to apply it anyway",
     };
 
@@ -237,8 +238,8 @@ public static class Errors
 
     internal static string Missing(IReadOnlyList<string> imports, string? tool) => tool switch
     {
-        _ when HoldsUsings(tool) => "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway",
-        "write_text" => "retry with usings=[" + QuotedList(imports) + "], force=true and the retryWith token below, which adds the import to the content the token holds and lands it in the same compile-gated edit - a files= batch holds no token, so there put " + QuotedList(imports) + " in that file's own using directives - or pass allowErrors=true to apply it anyway",
+        _ when HoldsUsings(tool) || tool is "edit_text" => "retry with usings=[" + QuotedList(imports) + "] and the retryWith token below, which lands the import in the same compile-gated edit, or pass allowErrors=true to apply it anyway",
+        "write_text" => "retry with usings=[" + QuotedList(imports) + "], force=true and the retryWith token below, which adds the import to the content the token holds - to every held .cs file of a files= batch - and lands it in the same compile-gated edit, or pass allowErrors=true to apply it anyway",
         _ => tool + " declares no usings= and no retryWith=, so put " + QuotedList(imports) + " in the file's own using directives in the content you send, or pass allowErrors=true to apply it anyway",
     };
 

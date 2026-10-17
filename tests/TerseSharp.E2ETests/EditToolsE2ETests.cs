@@ -170,18 +170,28 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task EditText_OnACsFileWithoutForce_PointsAtTheSemanticTools()
+    public async Task EditText_OnACsFileAProjectCompiles_AppliesWithoutForceThroughTheCompileGate()
     {
-        var text = await server.CallAsync("edit_text", new()
+        var rolledBack = await server.CallAsync("edit_text", new()
         {
             ["path"] = "src/Fixture.Trading/OrderService.cs",
-            ["oldText"] = "Unused",
-            ["newText"] = "Spare",
+            ["oldText"] = "public int Unused() => 7;",
+            ["newText"] = "public int Unused() => MissingHelperNobodyDeclares();",
+            ["dryRun"] = true,
+        });
+        var previewed = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["oldText"] = "public int Unused() => 7;",
+            ["newText"] = "public int Unused() => 8;",
             ["dryRun"] = true,
         });
 
-        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("replace_symbol_body", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("is a C# file", rolledBack, StringComparison.Ordinal);
+        Assert.Contains("would be rolled back", rolledBack, StringComparison.Ordinal);
+        Assert.Contains("MissingHelperNobodyDeclares", rolledBack, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", previewed, StringComparison.Ordinal);
+        Assert.Contains("=> 8;", previewed, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1653,5 +1663,21 @@ public sealed class RegionTail
         });
 
         Assert.Contains("+    public static ServiceBag Register(ServiceBag services) => new System.Func<ServiceBag, ServiceBag>(\n+        bag =>\n+        {\n+            return bag.AddSingleton<IOrderRepository, InMemoryOrderRepository>();\n+        })(services);", preview.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_OnACsFileNoProjectCompiles_IsStillRefusedWithoutForce()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "tests/Fixture.Trading.Tests/DeliberateOutcomesTests.cs",
+            ["oldText"] = "namespace",
+            ["newText"] = "namespace",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("is a C# file", text, StringComparison.Ordinal);
+        Assert.Contains("replace_symbol_body", text, StringComparison.Ordinal);
     }
 }

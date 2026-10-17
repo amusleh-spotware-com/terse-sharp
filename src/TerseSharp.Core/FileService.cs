@@ -51,7 +51,7 @@ public static class FileService
 
         var full = resolved.Value!;
 
-        if (SourceFile.Reject(path, full, force) is { } refusal)
+        if (SourceFile.Reject(workspace, path, full, force) is { } refusal)
             return refusal;
 
         return workspace.Contains(full)
@@ -72,7 +72,7 @@ public static class FileService
 
         var full = resolved.Value!;
 
-        if (SourceFile.Reject(path, full, request.Force) is { } refusal)
+        if (SourceFile.Reject(workspace, path, full, request.Force) is { } refusal)
             return refusal;
 
         if (!File.Exists(full))
@@ -83,7 +83,7 @@ public static class FileService
         var rewritten = Rewrite(before, request, notes);
 
         return rewritten.IsOk
-            ? await ApplyAsync(workspace, full, path, before, rewritten.Value!, request, notes, cancellationToken).ConfigureAwait(false)
+            ? await ApplyAsync(workspace, full, path, before, Imported(path, rewritten.Value!, request), request, notes, cancellationToken).ConfigureAwait(false)
             : Result.Fail<string>(rewritten.Error!);
     }
 
@@ -434,7 +434,7 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0, int CellChars = 0, bool Stamp = false, long Ticks = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false, bool AllowErrors = false);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false, bool AllowErrors = false, IReadOnlyList<string>? Usings = null);
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters, IReadOnlyList<LineSpan>? Spans = null)
     {
@@ -708,7 +708,7 @@ public static class FileService
 
         var full = resolved.Value!;
 
-        if (SourceFile.Reject(path, full, force) is { } refusal)
+        if (SourceFile.Reject(workspace, path, full, force) is { } refusal)
             return Result.Fail<(string, string)>(refusal.Error!);
 
         if (!File.Exists(full))
@@ -785,7 +785,7 @@ public static class FileService
         List<string> notes = workspace.Contains(full) ? [] : ["outside-workspace  " + full];
         var (after, failed, applied) = Rewritten(before, edits, request, notes);
 
-        return Result.Ok(new BatchEdit(Pending(workspace, path, full, before, after), new BatchTally(failed, notes, applied, edits.Count), request));
+        return Result.Ok(new BatchEdit(Pending(workspace, path, full, before, applied > 0 ? Imported(path, after, request) : after), new BatchTally(failed, notes, applied, edits.Count), request));
     }
 
     private static int ReachableLines(LineSelection selection) =>
@@ -840,7 +840,7 @@ public static class FileService
 
         var full = resolved.Value!;
 
-        if (SourceFile.Reject(file.Path, full, force || file.Force) is { } refusal)
+        if (SourceFile.Reject(workspace, file.Path, full, force || file.Force) is { } refusal)
             return Result.Fail<PendingWrite>(refusal.Error!);
 
         var exists = File.Exists(full);
@@ -884,7 +884,7 @@ public static class FileService
             bool overwrite,
             CancellationToken cancellationToken)
     {
-        if (Unforced(files, force) is { } unforced)
+        if (Unforced(workspace, files, force) is { } unforced)
             return Result.Fail<string>(unforced);
 
         var pending = new List<PendingWrite>(files.Count);
@@ -2228,20 +2228,25 @@ public static class FileService
         }
     }
 
-    private static TerseError? Unforced(IReadOnlyList<FileWrite> files, bool force)
+    private static string Imported(string path, string after, EditRequest request) =>
+        request.Usings is { Count: > 0 } usings && SourceFile.IsCSharp(path) ? WriteRetry.WithUsings(after, usings) : after;
+
+    private static bool Uncompiled(LoadedWorkspace workspace, string path) => SourceFile.IsCSharp(path) && DocumentLookup.Find(workspace, path) is null;
+
+    private static TerseError? Unforced(LoadedWorkspace workspace, IReadOnlyList<FileWrite> files, bool force)
     {
         var guarded = new List<string>();
 
         foreach (var file in files)
         {
-            if (!force && !file.Force && SourceFile.IsCSharp(file.Path))
+            if (!force && !file.Force && Uncompiled(workspace, file.Path))
                 guarded.Add(file.Path);
         }
 
         return guarded.Count is 0
             ? null
             : Errors.Invalid(
-                "C# file(s) in this batch are written only with force: " + string.Join(", ", guarded),
+                "C# file(s) no project compiles yet are written only with force: " + string.Join(", ", guarded),
                 "pass force=true for the whole batch, or force on each C# entry - files=[{path, content, force: true}] - so the write stays compile-gated the way replace_symbol is");
     }
 

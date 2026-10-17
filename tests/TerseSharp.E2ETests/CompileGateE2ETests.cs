@@ -111,7 +111,7 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
         Assert.Contains("retryWith=", rejected, StringComparison.Ordinal);
         Assert.Contains("MissingHelperThatDoesNotExist", retried, StringComparison.Ordinal);
         Assert.Contains("ERROR", unknown, StringComparison.Ordinal);
-        Assert.Contains("names no held rejection", unknown, StringComparison.Ordinal);
+        Assert.Contains("was never issued by this server process", unknown, StringComparison.Ordinal);
     }
 
     private static string Token(string rejection)
@@ -632,6 +632,7 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
 
         Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
         Assert.Contains("fix the edit in the content you send", rejected, StringComparison.Ordinal);
+        Assert.Contains("pass allowErrors=true beside the retryWith token below", rejected, StringComparison.Ordinal);
         Assert.DoesNotContain("replace_symbol symbolIds/declarations batch", rejected, StringComparison.Ordinal);
     }
 
@@ -1071,9 +1072,10 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WriteTextBatch_RolledBackOnAMissingImport_MintsNoTokenAndSaysWhereTheDirectiveGoes()
+    public async Task WriteTextBatch_RolledBackOnAMissingImport_HoldsTheBatchSoTheRetryIsATokenAndAUsing()
     {
         const string Probe = "src/Fixture.Broken/CultureBatchProbe.cs";
+        const string Notes = "culture-batch-probe.md";
 
         try
         {
@@ -1086,17 +1088,30 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
                         ["path"] = Probe,
                         ["content"] = "namespace Fixture.Broken;\n\npublic sealed class CultureBatchProbe\n{\n    public string Text => 7.ToString(CultureInfo.InvariantCulture);\n}\n",
                     },
+                    new Dictionary<string, object?> { ["path"] = Notes, ["content"] = "probe\n" },
                 },
                 ["force"] = true,
             });
 
             Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
-            Assert.Contains("a files= batch holds no token, so there put \"System.Globalization\" in that file's own using directives", rejected, StringComparison.Ordinal);
-            Assert.DoesNotContain("\nretryWith=", rejected, StringComparison.Ordinal);
+            Assert.Contains("retry with usings=[\"System.Globalization\"], force=true and the retryWith token below", rejected, StringComparison.Ordinal);
+            Assert.DoesNotContain("a files= batch holds no token", rejected, StringComparison.Ordinal);
+
+            var retried = await CallAsync("write_text", new()
+            {
+                ["retryWith"] = Token(rejected),
+                ["usings"] = new[] { "System.Globalization" },
+                ["force"] = true,
+            });
+
+            Assert.DoesNotContain("ERROR", retried, StringComparison.Ordinal);
+            Assert.StartsWith("using System.Globalization;", await File.ReadAllTextAsync(Path.Combine(BrokenRoot, "src", "Fixture.Broken", "CultureBatchProbe.cs"), TestContext.Current.CancellationToken), StringComparison.Ordinal);
+            Assert.Contains("probe", await File.ReadAllTextAsync(Path.Combine(BrokenRoot, Notes), TestContext.Current.CancellationToken), StringComparison.Ordinal);
         }
         finally
         {
             await CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+            await CallAsync("write_text", new() { ["path"] = Notes, ["delete"] = true });
         }
     }
 

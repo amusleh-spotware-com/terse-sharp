@@ -2519,4 +2519,161 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("OrderService.cs", batched, StringComparison.Ordinal);
         Assert.DoesNotContain("OrderRouter.cs", batched, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task WriteText_ADryRunOfABatchThatWouldLand_HoldsItSoTheTokenAppliesThePreview()
+    {
+        const string First = "terse-preview-first.md";
+        const string Second = "terse-preview-second.md";
+
+        try
+        {
+            var preview = await server.CallAsync("write_text", new()
+            {
+                ["files"] = new List<Dictionary<string, object?>>
+                {
+                    new() { ["path"] = First, ["content"] = "first preview\n" },
+                    new() { ["path"] = Second, ["content"] = "second preview\n" },
+                },
+                ["dryRun"] = true,
+            });
+            var last = preview.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1].TrimEnd('\r');
+
+            Assert.StartsWith("retryWith=r", last, StringComparison.Ordinal);
+            Assert.EndsWith(" applies this preview", last, StringComparison.Ordinal);
+            Assert.Contains("ERROR", await server.CallAsync("read_text", new() { ["path"] = First }), StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("write_text", new() { ["retryWith"] = last["retryWith=".Length..last.IndexOf(' ', StringComparison.Ordinal)] });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("first preview", await server.CallAsync("read_text", new() { ["path"] = First }), StringComparison.Ordinal);
+            Assert.Contains("second preview", await server.CallAsync("read_text", new() { ["path"] = Second }), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = First, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Second, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_ADryRunOfOneFileThatWouldLand_HoldsItSoTheTokenAppliesThePreview()
+    {
+        const string Notes = "terse-preview-single.md";
+
+        try
+        {
+            var preview = await server.CallAsync("write_text", new() { ["path"] = Notes, ["content"] = "single preview\n", ["dryRun"] = true });
+            var last = preview.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1].TrimEnd('\r');
+
+            Assert.EndsWith(" applies this preview", last, StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("write_text", new() { ["retryWith"] = last["retryWith=".Length..last.IndexOf(' ', StringComparison.Ordinal)] });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("single preview", await server.CallAsync("read_text", new() { ["path"] = Notes }), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Notes, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_ADryRunThatWouldBeRolledBack_HoldsNoToken()
+    {
+        var preview = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/PreviewRollbackProbe.cs",
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class PreviewRollbackProbe\n{\n    public int Value => MissingHelperNobodyDeclares();\n}\n",
+            ["force"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("retryWith=", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_RolledBackOnAMissingImport_HoldsTheEditSoTheRetryIsATokenAndAUsing()
+    {
+        const string Probe = "src/Fixture.Trading/EditRetryProbe.cs";
+        const string Seed = "namespace Fixture.Trading;\n\npublic sealed class EditRetryProbe\n{\n    public int Values => 0;\n}\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = Seed, ["force"] = true });
+        try
+        {
+            var rejected = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "public int Values => 0;",
+                ["newText"] = "public ImmutableArray<int> Values => [];",
+                ["force"] = true,
+            });
+            var last = rejected.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1].TrimEnd('\r');
+
+            Assert.Contains("ERROR CompileRegression", rejected, StringComparison.Ordinal);
+            Assert.Contains("retry with usings=[\"System.Collections.Immutable\"] and the retryWith token below", rejected, StringComparison.Ordinal);
+            Assert.DoesNotContain("declares no usings=", rejected, StringComparison.Ordinal);
+            Assert.StartsWith("retryWith=r", last, StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["retryWith"] = last["retryWith=".Length..],
+                ["usings"] = new[] { "System.Collections.Immutable" },
+            });
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.False(applied.Contains("ERROR", StringComparison.Ordinal), applied);
+            Assert.Contains("using System.Collections.Immutable;", after, StringComparison.Ordinal);
+            Assert.Contains("public ImmutableArray<int> Values => [];", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_AnAnchorMiss_HoldsNoRetryToken()
+    {
+        var missed = await server.CallAsync("edit_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["oldText"] = "AnAnchorThisFixtureNeverHolds",
+            ["newText"] = "Anything",
+            ["force"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", missed, StringComparison.Ordinal);
+        Assert.DoesNotContain("retryWith=", missed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_WithoutForceOnACompiledFile_LandsAndNamesTheCheaperSymbolRoute()
+    {
+        const string Probe = "src/Fixture.Trading/UnforcedEditProbe.cs";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class UnforcedEditProbe\n{\n    public int Value => 0;\n}\n", ["force"] = true });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["oldText"] = "public int Value => 0;",
+                ["newText"] = "public int Value => 1;",
+            });
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("NOTE a .cs text edit is compile-gated without force=true", applied, StringComparison.Ordinal);
+            Assert.Contains("replace_symbol_body", applied, StringComparison.Ordinal);
+            Assert.Contains("public int Value => 1;", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

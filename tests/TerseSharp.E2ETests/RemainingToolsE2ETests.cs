@@ -87,17 +87,18 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task WriteText_OnACsFile_IsRefusedWithoutForce()
+    public async Task WriteText_ANewCsFile_IsStillRefusedWithoutForce()
     {
         var text = await server.CallAsync("write_text", new()
         {
-            ["path"] = "src/Fixture.Trading/Order.cs",
-            ["content"] = "// clobbered",
+            ["path"] = "src/Fixture.Trading/NeverForcedProbe.cs",
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class NeverForcedProbe;\n",
             ["dryRun"] = true,
         });
 
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("replace_symbol_body", text, StringComparison.Ordinal);
+        Assert.Contains("is a C# file", text, StringComparison.Ordinal);
+        Assert.Contains("write_text(path, content, force=true)", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -328,5 +329,23 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         Assert.Contains("not loaded - loaded: ", unloaded, StringComparison.Ordinal);
         Assert.Contains("FixtureSolution.slnx", unloaded, StringComparison.Ordinal);
         Assert.Contains("FixtureSolution.slnx", listed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_OnACsFileAProjectCompiles_IsCompileGatedWithoutForce()
+    {
+        var order = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "FixtureSolution", "src", "Fixture.Trading", "Order.cs");
+        var original = await File.ReadAllTextAsync(order, TestContext.Current.CancellationToken);
+        var broken = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/Order.cs",
+            ["content"] = original + "\nfile sealed class GateProbe\n{\n    public int Broken => MissingHelperNobodyDeclares();\n}\n",
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("is a C# file", broken, StringComparison.Ordinal);
+        Assert.Contains("would be rolled back", broken, StringComparison.Ordinal);
+        Assert.Contains("MissingHelperNobodyDeclares", broken, StringComparison.Ordinal);
+        Assert.Equal(original, await File.ReadAllTextAsync(order, TestContext.Current.CancellationToken));
     }
 }
