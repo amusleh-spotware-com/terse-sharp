@@ -172,4 +172,35 @@ public sealed class MarkupProfileE2ETests : IAsyncLifetime
         "unload_workspace",
         new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx") },
         TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task UnloadingTheWorkspaceThatHeldMarkup_NeverWithdrawsAToolTheSessionWasShown()
+    {
+        await OnlySelectionAsync();
+        await LoadFixtureAsync();
+
+        var shown = await AdvertisedAsync();
+        var announced = 0;
+
+        await using var subscription = server.Client.RegisterNotificationHandler(
+            NotificationMethods.ToolListChangedNotification,
+            (_, _) =>
+            {
+                Interlocked.Increment(ref announced);
+
+                return ValueTask.CompletedTask;
+            });
+
+        var unloaded = await server.CallAsync(
+            "unload_workspace",
+            new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx") },
+            TestContext.Current.CancellationToken);
+        var after = await AdvertisedAsync();
+
+        Assert.Contains("unloaded", unloaded, StringComparison.Ordinal);
+        Assert.Contains("xaml_outline", shown);
+        Assert.Contains("resx_get", shown);
+        Assert.Equal(shown, after);
+        Assert.Equal(0, announced);
+    }
 }

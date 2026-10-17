@@ -494,4 +494,61 @@ public sealed class ToolContextTests
             files.FindFiles(globs: ["*.json", "**/*.csproj"], cancellationToken: cancellationToken),
             files.FindFiles(globs: ["*.md", "**/OrderService.cs"], tracked: true, cancellationToken: cancellationToken));
     }
+
+    [Fact]
+    public async Task AnnounceAsync_AfterAListingThatAlreadyShowedEveryFamily_SaysNothing()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false, new ToolSurface(null, MarkupDerived: true));
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var announced = 0;
+
+        context.Preload(preload.Task, Task.FromResult(WorkspaceMarkup.Every), TestContext.Current.CancellationToken);
+
+        var shown = await context.ListedAsync(TestContext.Current.CancellationToken);
+
+        preload.SetResult();
+        await context.Announcement;
+
+        context.ToolsChanged = _ =>
+        {
+            announced++;
+
+            return Task.CompletedTask;
+        };
+
+        await context.AnnounceAsync(default, TestContext.Current.CancellationToken);
+
+        Assert.Equal(WorkspaceMarkup.Every, shown);
+        Assert.Equal(0, announced);
+    }
+
+    [Fact]
+    public async Task AnnounceAsync_WhenTheServedFamiliesGrowPastWhatWasListed_Announces()
+    {
+        using var registry = new WorkspaceRegistry();
+        using var context = new ToolContext(registry, readOnly: false, new ToolSurface(null, MarkupDerived: true));
+        var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var scanned = new WorkspaceMarkup(Xaml: true, Razor: false, Resx: false);
+        var announced = 0;
+
+        context.Preload(preload.Task, Task.FromResult(scanned), TestContext.Current.CancellationToken);
+
+        var shown = await context.ListedAsync(TestContext.Current.CancellationToken);
+
+        preload.SetResult();
+        await context.Announcement;
+
+        context.ToolsChanged = _ =>
+        {
+            announced++;
+
+            return Task.CompletedTask;
+        };
+
+        await context.AnnounceAsync(WorkspaceMarkup.Every, TestContext.Current.CancellationToken);
+
+        Assert.Equal(scanned, shown);
+        Assert.Equal(1, announced);
+    }
 }

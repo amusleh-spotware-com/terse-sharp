@@ -73,7 +73,7 @@ public static class ToolProfile
         {
             var listed = await next(request, cancellationToken).ConfigureAwait(false);
             var served = surface.MarkupDerived
-                ? await context.ServedAsync(cancellationToken).ConfigureAwait(false)
+                ? await context.ListedAsync(cancellationToken).ConfigureAwait(false)
                 : WorkspaceMarkup.Every;
 
             listed.Tools = [.. listed.Tools.Where(tool => Advertises(surface, served, tool.Name))];

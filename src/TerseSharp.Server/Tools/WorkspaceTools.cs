@@ -135,7 +135,7 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
         null,
         async loaded => guard is { Length: > 0 } command
             ? GuardAnswer(command, loaded.Root)
-            : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await ToolProfile.ServedAsync(context.Registry, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
+            : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await context.AdvertisedAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
         cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]

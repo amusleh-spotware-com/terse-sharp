@@ -414,7 +414,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         if (!Surface.MarkupDerived || ToolsChanged is not { } notify)
             return;
 
-        if (await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false) == before)
+        var served = await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false);
+        var baseline = Baseline(before);
+
+        if (served.Union(baseline) == baseline)
             return;
 
         await notify(cancellationToken).ConfigureAwait(false);
@@ -424,6 +427,34 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         ready.IsCompleted
             ? await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false)
             : await scanned.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+    public async Task<WorkspaceMarkup> ListedAsync(CancellationToken cancellationToken)
+    {
+        var served = await ServedAsync(cancellationToken).ConfigureAwait(false);
+
+        lock (listing)
+        {
+            var advertised = listed?.Union(served) ?? served;
+
+            listed = advertised;
+
+            return advertised;
+        }
+    }
+
+    public async Task<WorkspaceMarkup> AdvertisedAsync(CancellationToken cancellationToken)
+    {
+        var served = await ToolProfile.ServedAsync(Registry, cancellationToken).ConfigureAwait(false);
+
+        lock (listing)
+            return listed?.Union(served) ?? served;
+    }
+
+    private WorkspaceMarkup Baseline(WorkspaceMarkup before)
+    {
+        lock (listing)
+            return listed ?? before;
+    }
 
     private async Task AnnouncedAsync(Task<WorkspaceMarkup> advertised, CancellationToken cancellationToken)
     {
@@ -550,6 +581,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             (Stopwatch.GetElapsedTime(started), ActiveRuns.Holding(loaded.SolutionPath));
 
     private const string QueuedLine = "\nNOTE queued ";
+    private readonly Lock listing = new();
+    private WorkspaceMarkup? listed;
 
     internal static string Unqueued(string answer)
     {

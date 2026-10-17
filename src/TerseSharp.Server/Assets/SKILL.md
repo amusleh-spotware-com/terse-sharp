@@ -301,10 +301,9 @@ reloads it. The user can change the limit with `terse serve --max-workspaces N` 
 `TERSE_MAX_WORKSPACES` — worth telling them when a big solution is making the server heavy, because a
 loaded workspace costs roughly 3 GB on a 148-project tree.
 **The advertised surface is derived from what the solution holds** — no `.xaml`/`.axaml` hides the 13
-`xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*` — and so does one whose Razor generator did not
-run — no `.resx`/`.resw` the 8 `resx_*`: 55 tools instead of 86 on a plain C# solution. Loading a
-second solution that does hold them re-advertises those families through
-`notifications/tools/list_changed`; `--tools all` (or `TERSE_TOOLS=all`) advertises everything and
+`xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*`, no `.resx`/`.resw` the 8 `resx_*`: 55 tools instead of 86 on a plain C# solution. Loading a
+second solution that does hold them adds those families through
+`notifications/tools/list_changed`, and a listed family is never withdrawn; `--tools all` (or `TERSE_TOOLS=all`) advertises everything and
 `--tools core` narrows to about twenty. A hidden tool still answers when called by name — but an
 agent can only call what its client lists, so a narrowed surface narrows what you can reach, not
 merely what you can see. `workspace_status` prints `tools=core - N advertised` under a profile and
