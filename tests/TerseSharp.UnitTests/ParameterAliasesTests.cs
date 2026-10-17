@@ -125,4 +125,81 @@ public sealed class ParameterAliasesTests
         Assert.False(arguments.ContainsKey("limit"));
         Assert.Equal("README.md", arguments["path"].GetString());
     }
+
+    [Fact]
+    public void Apply_JoinsReadTextsRootOntoARelativePath()
+    {
+        var root = Path.GetFullPath(Path.GetTempPath());
+        var arguments = Arguments(JsonSerializer.Serialize(new Dictionary<string, string> { ["root"] = root, ["path"] = "notes/a.md" }));
+
+        ParameterAliases.Apply("read_text", arguments);
+
+        Assert.False(arguments.ContainsKey("root"));
+        Assert.Equal(Path.Join(root, "notes/a.md"), arguments["path"].GetString());
+    }
+
+    [Fact]
+    public void Apply_KeepsReadTextsRoot_WhenThePathIsAlreadyAbsoluteOrAbsent()
+    {
+        var root = Path.GetFullPath(Path.GetTempPath());
+        var absolute = Path.Join(root, "a.md");
+        var beside = Arguments(JsonSerializer.Serialize(new Dictionary<string, string> { ["root"] = root, ["path"] = absolute }));
+        var alone = Arguments(JsonSerializer.Serialize(new Dictionary<string, string> { ["root"] = root }));
+
+        ParameterAliases.Apply("read_text", beside);
+        ParameterAliases.Apply("read_text", alone);
+
+        Assert.True(beside.ContainsKey("root"));
+        Assert.Equal(absolute, beside["path"].GetString());
+        Assert.True(alone.ContainsKey("root"));
+        Assert.False(alone.ContainsKey("path"));
+    }
+
+    [Fact]
+    public void Apply_BindsChangedFilesTrackedToTheInverseOfUntracked()
+    {
+        var tracked = Arguments("""{"tracked": true}""");
+        var everything = Arguments("""{"tracked": false}""");
+        var contradicted = Arguments("""{"tracked": true, "untracked": true}""");
+
+        ParameterAliases.Apply("changed_files", tracked);
+        ParameterAliases.Apply("changed_files", everything);
+        ParameterAliases.Apply("changed_files", contradicted);
+
+        Assert.False(tracked["untracked"].GetBoolean());
+        Assert.False(tracked.ContainsKey("tracked"));
+        Assert.True(everything["untracked"].GetBoolean());
+        Assert.True(contradicted.ContainsKey("tracked"));
+    }
+
+    [Fact]
+    public void Apply_BindsAOneEntryChangedFilesPathsToPath_AndLeavesALongerListForTheRefusal()
+    {
+        var one = Arguments("""{"paths": ["src"]}""");
+        var two = Arguments("""{"paths": ["src", "tests"]}""");
+
+        ParameterAliases.Apply("changed_files", one);
+        ParameterAliases.Apply("changed_files", two);
+
+        Assert.Equal("src", one["path"].GetString());
+        Assert.False(one.ContainsKey("paths"));
+        Assert.Equal(2, two["paths"].GetArrayLength());
+        Assert.False(two.ContainsKey("path"));
+    }
+
+    [Fact]
+    public void Apply_OverAProbeJsonObject_JoinsRootAndInvertsTrackedExactlyAsOverTheServerArguments()
+    {
+        var root = Path.GetFullPath(Path.GetTempPath());
+        var read = new JsonObject { ["root"] = root, ["path"] = "a.md" };
+        var changed = (JsonObject)JsonNode.Parse("""{"tracked": true, "paths": ["src"]}""")!;
+
+        ParameterAliases.Apply("read_text", read);
+        ParameterAliases.Apply("changed_files", changed);
+
+        Assert.Equal(Path.Join(root, "a.md"), read["path"]!.GetValue<string>());
+        Assert.False(read.ContainsKey("root"));
+        Assert.False(changed["untracked"]!.GetValue<bool>());
+        Assert.Equal("src", changed["path"]!.GetValue<string>());
+    }
 }

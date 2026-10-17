@@ -686,4 +686,34 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("\n1: ", aliased, StringComparison.Ordinal);
         Assert.DoesNotContain("\n3: ", aliased, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithRootBesideARelativePath_ReadsTheJoinedFile()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-root-alias-");
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(directory.FullName, "probe.txt"), "rooted-alias-probe\n", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("read_text", new() { ["root"] = directory.FullName, ["path"] = "probe.txt" });
+
+            Assert.Contains("rooted-alias-probe", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("unrecognized", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ChangedFiles_WithTrackedTrueAndOnePaths_BindsInsteadOfRefusing()
+    {
+        var aliased = await server.CallAsync("changed_files", new() { ["tracked"] = true, ["paths"] = new[] { "src" } });
+        var two = await server.CallAsync("changed_files", new() { ["paths"] = new[] { "src", "tests" } });
+
+        Assert.DoesNotContain("ERROR", aliased, StringComparison.Ordinal);
+        Assert.Contains("files", aliased, StringComparison.Ordinal);
+        Assert.Contains("unrecognized paths", two, StringComparison.Ordinal);
+    }
 }

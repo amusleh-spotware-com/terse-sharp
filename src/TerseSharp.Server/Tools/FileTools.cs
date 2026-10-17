@@ -308,6 +308,7 @@ bool verbose) =>
             [Description("Fold every file below the Nth path segment into one directory row with its file count, so the answer is the shape of the tree. A directory with a single match stays that file. 0, the default, lists every file.")] int depth = 0,
             [Description("Absolute directory to list instead of the workspace, tagged outside-workspace; its paths= line carries full paths. Refused beside tracked=true. An absolute .zip or .nupkg FILE lists its entries instead.")] string? root = null,
             [Description("Several globs in ONE response, at most 10. Replaces one call per glob: each gets its own header line and count, so a glob that matched nothing is visible. Combines with glob, taken first, and with root=.")] string?[]? globs = null,
+            [Description("Glob of paths to drop after glob= or globs= selected them, e.g. tests/** or **/*.generated.cs.")] string? exclude = null,
             CancellationToken cancellationToken = default)
     {
         var chosen = Aliases.Chosen(Aliases.ScopeRemedy, new ParameterSpelling("glob", glob), new ParameterSpelling("pattern", pattern), new ParameterSpelling("query", query), new ParameterSpelling("path", path));
@@ -318,7 +319,11 @@ bool verbose) =>
         var matcher = chosen.Value;
 
         if (root is { Length: > 0 } archive && File.Exists(archive))
-            return Archived(archive, matcher, globs, maxResults, stamps, name, tracked, depth, cancellationToken);
+        {
+            return exclude is { Length: > 0 }
+                ? Task.FromResult(Errors.Invalid("'exclude' was passed with an archive root=", "pass one glob= to keep the entries you want, or drop exclude=").Render())
+                : Archived(archive, matcher, globs, maxResults, stamps, name, tracked, depth, cancellationToken);
+        }
 
         if ((matcher, name, globs, root, depth) is (null or "", null or "", null or [], null or "", 0))
         {
@@ -340,7 +345,7 @@ bool verbose) =>
                 ? Errors.Invalid(
                     "'tracked' was passed with 'root', and this tool loads no repository for that directory",
                     "drop tracked=true to list every file under root=, or drop root= to list the tracked files of the workspace").Render()
-                : ListedOutside(directory, matcher, globs, maxResults, stamps, name, depth));
+                : ListedOutside(directory, matcher, globs, maxResults, stamps, name, depth, exclude));
         }
 
         if (globs is not { Length: > 0 })
@@ -353,17 +358,17 @@ bool verbose) =>
 
         return combined.Value is [var single]
             ? One(single)
-            : ManyAsync(combined.Value, workspace, maxResults, stamps, tracked, name, depth, cancellationToken);
+            : ManyAsync(combined.Value, workspace, maxResults, stamps, tracked, name, depth, exclude, cancellationToken);
 
         Task<string> One(string chosenGlob) => context.WithRootAsync(
             workspace,
-            early => ListedUnderAsync(early, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+            early => ListedUnderAsync(early, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
             () => Waited(chosenGlob));
 
         Task<string> Waited(string chosenGlob) => context.WithWorkspaceAsync(
             workspace,
             null,
-            loaded => ListedAsync(loaded, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+            loaded => ListedAsync(loaded, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
             semantic: false,
             cancellationToken);
     }
@@ -589,15 +594,16 @@ context.RejectWrite() is { } rejection
         string? name,
         int depth,
         bool chosen,
+        string? exclude,
         CancellationToken cancellationToken)
     {
         if (!tracked)
-            return TextSearchService.FindFiles(loaded, glob, maxResults, stamps, null, name, depth, chosen);
+            return TextSearchService.FindFiles(loaded, glob, maxResults, stamps, null, name, depth, chosen, exclude);
 
         var known = await TrackedAsync(loaded.Root, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
-            ? TextSearchService.FindFiles(loaded, glob, maxResults, stamps, known.Value!, name, depth, chosen)
+            ? TextSearchService.FindFiles(loaded, glob, maxResults, stamps, known.Value!, name, depth, chosen, exclude)
             : known.Error!.Render();
     }
 
@@ -610,15 +616,16 @@ context.RejectWrite() is { } rejection
         string? name,
         int depth,
         bool chosen,
+        string? exclude,
         CancellationToken cancellationToken)
     {
         if (!tracked)
-            return TextSearchService.FindFilesUnder(root, glob, maxResults, stamps, name, depth, chosen);
+            return TextSearchService.FindFilesUnder(root, glob, maxResults, stamps, name, depth, chosen, null, exclude);
 
         var known = await TrackedAsync(root, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
-            ? TextSearchService.FindFilesUnder(root, glob, maxResults, stamps, name, depth, chosen, known.Value!)
+            ? TextSearchService.FindFilesUnder(root, glob, maxResults, stamps, name, depth, chosen, known.Value!, exclude)
             : known.Error!.Render();
     }
 
@@ -1143,14 +1150,15 @@ context.RejectWrite() is { } rejection
         bool tracked,
         string? name,
         int depth,
+        string? exclude,
         CancellationToken cancellationToken) =>
         context.WithRootAsync(
             workspace,
-            early => ListedManyUnderAsync(early, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+            early => ListedManyUnderAsync(early, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
             () => context.WithWorkspaceAsync(
                 workspace,
                 null,
-                loaded => ListedManyAsync(loaded, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, cancellationToken),
+                loaded => ListedManyAsync(loaded, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
                 semantic: false,
                 cancellationToken));
 
@@ -1163,15 +1171,16 @@ context.RejectWrite() is { } rejection
         string? name,
         int depth,
         bool chosen,
+        string? exclude,
         CancellationToken cancellationToken)
     {
         if (!tracked)
-            return TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, null, name, depth, chosen);
+            return TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, null, name, depth, chosen, exclude);
 
         var known = await TrackedAsync(loaded.Root, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
-            ? TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, known.Value!, name, depth, chosen)
+            ? TextSearchService.FindFilesMany(loaded, globs, maxResults, stamps, known.Value!, name, depth, chosen, exclude)
             : known.Error!.Render();
     }
 
@@ -1184,15 +1193,16 @@ context.RejectWrite() is { } rejection
         string? name,
         int depth,
         bool chosen,
+        string? exclude,
         CancellationToken cancellationToken)
     {
         if (!tracked)
-            return TextSearchService.FindFilesManyUnder(root, globs, maxResults, stamps, null, name, depth, chosen);
+            return TextSearchService.FindFilesManyUnder(root, globs, maxResults, stamps, null, name, depth, chosen, exclude);
 
         var known = await TrackedAsync(root, cancellationToken).ConfigureAwait(false);
 
         return known.IsOk
-            ? TextSearchService.FindFilesManyUnder(root, globs, maxResults, stamps, known.Value!, name, depth, chosen)
+            ? TextSearchService.FindFilesManyUnder(root, globs, maxResults, stamps, known.Value!, name, depth, chosen, exclude)
             : known.Error!.Render();
     }
 
@@ -1337,15 +1347,15 @@ context.RejectWrite() is { } rejection
             ? PluralPaths.Combine(request.Glob, globs, "paths")
             : Result.Ok(ImmutableArray<string>.Empty);
 
-    private static string ListedOutside(string directory, string? matcher, string?[]? globs, int maxResults, bool stamps, string? name, int depth)
+    private static string ListedOutside(string directory, string? matcher, string?[]? globs, int maxResults, bool stamps, string? name, int depth, string? exclude)
     {
         if (globs is not { Length: > 0 })
-            return NavigationTools.Unwrap(TextSearchService.FindFilesOutside(directory, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0));
+            return NavigationTools.Unwrap(TextSearchService.FindFilesOutside(directory, matcher ?? string.Empty, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0, exclude));
 
         var combined = PluralPaths.Combine(matcher, globs, "globs");
 
         return combined.IsOk
-            ? NavigationTools.Unwrap(TextSearchService.FindFilesManyOutside(directory, combined.Value, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0))
+            ? NavigationTools.Unwrap(TextSearchService.FindFilesManyOutside(directory, combined.Value, NavigationTools.Cap(maxResults, 100), stamps, name, depth, maxResults > 0, exclude))
             : combined.Error!.Render();
     }
 

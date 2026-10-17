@@ -50,7 +50,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Navigate** | — | `get_symbol(symbolId)` |
 | **Navigate** | one `get_symbol` call per symbol | `get_symbol(symbolIds: [...])` |
 | **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` — `get_symbol`, `get_type_outline`, `replace_symbol` and `replace_symbol_body` take `path=` too |
-| **Navigate** | `Grep` for a type or member name | `search_symbols(query)` — CamelHump works, `OSvc` finds `OrderService` |
+| **Navigate** | `Grep` for a type or member name | `search_symbols(query)` or `(queries: [...])` — CamelHump works, `OSvc` finds `OrderService` |
 | **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` — an exact type name no source declares falls back to the referenced assemblies |
 | **Navigate** | a name the tests declare dozens of times | `search_symbols(query, scope: "src")` |
 | **Navigate** | a common name that buries the one declaration you meant | `search_symbols(query, path: "src/Trading/OrderBook.cs")` |
@@ -63,7 +63,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **What grep cannot reach** | "what endpoints exist?" | `list_endpoints()` |
 | **Files** | "find the file called X" | `find_files(name: "orderrouter")` |
 | **Files** | `ls` a directory, or list an archive, outside the workspace | `find_files(root: "C:/logs")`; `read_text(path: "C:/p/x.nupkg!/a.xml")` |
-| **Files** | one `find_files` call per glob | `find_files(globs: [...])` |
+| **Files** | one `find_files` call per glob | `find_files(globs: [...], exclude: "tests/**")` |
 | **Files** | `Glob` / `ls` | `find_files(glob)` |
 | **Files** | globbing a whole tree to learn its shape | `find_files(glob, depth: 2)` |
 | **Files** | `ls -l` / `Get-Item` for a size or a timestamp | `find_files(glob, stamps: true)` |

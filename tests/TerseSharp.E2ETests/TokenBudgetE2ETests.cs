@@ -623,4 +623,14 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         Assert.Contains("AmbiguousSymbol", refusal, StringComparison.Ordinal);
         Assert.True(Tokens(overloads) < Tokens(refusal) + Tokens(batched), $"overloads={Tokens(overloads)} refusal={Tokens(refusal)} batched={Tokens(batched)}\n{overloads}");
     }
+
+    [Fact]
+    public async Task SearchSymbols_WithTwoQueries_CostsNoMoreThanTheTwoCallsItReplaces()
+    {
+        var first = await server.CallAsync("search_symbols", new() { ["query"] = "Order" });
+        var second = await server.CallAsync("search_symbols", new() { ["query"] = "Service" });
+        var batched = await server.CallAsync("search_symbols", new() { ["queries"] = new[] { "Order", "Service" } });
+
+        Assert.True(batched.Length <= first.Length + second.Length, string.Create(CultureInfo.InvariantCulture, $"batched {batched.Length} chars > {first.Length + second.Length}"));
+    }
 }

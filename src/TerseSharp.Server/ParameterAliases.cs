@@ -5,7 +5,15 @@ using System.Text.Json.Nodes;
 
 namespace TerseSharp.Server;
 
-internal sealed record ParameterAlias(string Tool, string Alias, string Canonical, FrozenDictionary<string, bool>? Values = null);
+internal enum AliasShape
+{
+    Renamed,
+    Inverted,
+    Single,
+    Rooted,
+}
+
+internal sealed record ParameterAlias(string Tool, string Alias, string Canonical, FrozenDictionary<string, bool>? Values = null, AliasShape Shape = AliasShape.Renamed);
 
 internal static class ParameterAliases
 {
@@ -27,6 +35,9 @@ internal static class ParameterAliases
         new("list_projects", "contains", "filter"),
         new("read_text", "offset", "startLine"),
         new("read_text", "limit", "maxLines"),
+        new("read_text", "root", "path", Shape: AliasShape.Rooted),
+        new("changed_files", "tracked", "untracked", Shape: AliasShape.Inverted),
+        new("changed_files", "paths", "path", Shape: AliasShape.Single),
         new("search_text", "-C", "context"),
         new("search_text", "-A", "context"),
         new("search_text", "-B", "context"),
@@ -48,7 +59,7 @@ internal static class ParameterAliases
 
         foreach (var alias in For(tool))
         {
-            if (!arguments.TryGetValue(alias.Alias, out var value) || arguments.ContainsKey(alias.Canonical) || Converted(alias, value) is not { } converted)
+            if (!arguments.TryGetValue(alias.Alias, out var value) || Bound(alias, value, arguments.TryGetValue(alias.Canonical, out var current) ? current : null) is not { } converted)
                 continue;
 
             arguments.Remove(alias.Alias);
@@ -60,7 +71,7 @@ internal static class ParameterAliases
     {
         foreach (var alias in For(tool))
         {
-            if (!arguments.TryGetPropertyValue(alias.Alias, out var value) || arguments.ContainsKey(alias.Canonical) || Converted(alias, value) is not { } converted)
+            if (!arguments.TryGetPropertyValue(alias.Alias, out var value) || Bound(alias, value, arguments.ContainsKey(alias.Canonical), arguments[alias.Canonical]) is not { } converted)
                 continue;
 
             arguments.Remove(alias.Alias);
@@ -71,18 +82,55 @@ internal static class ParameterAliases
     private static ReadOnlySpan<ParameterAlias> For(string? tool) =>
         tool is not null && ByTool.TryGetValue(tool, out var aliases) ? aliases : [];
 
-    private static JsonElement? Converted(ParameterAlias alias, JsonElement value) => alias.Values switch
+    private static JsonElement? Bound(ParameterAlias alias, JsonElement value, JsonElement? current) => (alias.Shape, current) switch
     {
-        null => value,
-        { } values when value.ValueKind is JsonValueKind.String && values.TryGetValue(value.GetString()!, out var flag) => JsonElement.Parse(flag ? "true" : "false"),
+        (AliasShape.Rooted, { } path) => Rooted(Text(value), Text(path)) is { } joined ? Quoted(joined) : null,
+        (AliasShape.Rooted, null) => null,
+        (_, null) => Converted(alias, value),
         _ => null,
     };
 
-    private static JsonNode? Converted(ParameterAlias alias, JsonNode? value) => (alias.Values, value) switch
+    private static JsonNode? Bound(ParameterAlias alias, JsonNode? value, bool present, JsonNode? current) => (alias.Shape, present) switch
     {
-        (_, null) => null,
-        (null, _) => value,
-        ({ } values, JsonValue text) when text.TryGetValue<string>(out var mode) && values.TryGetValue(mode, out var flag) => JsonValue.Create(flag),
+        (AliasShape.Rooted, true) => Rooted(Text(value), Text(current)) is { } joined ? JsonValue.Create(joined) : null,
+        (AliasShape.Rooted, false) => null,
+        (_, false) => Converted(alias, value),
         _ => null,
     };
+
+    private static string? Rooted(string? root, string? path) =>
+        Qualified(root) && path is { Length: > 0 } && !Path.IsPathFullyQualified(path) ? Path.Join(root, path) : null;
+
+    private static bool Qualified(string? root) => root is { Length: > 0 } && Path.IsPathFullyQualified(root);
+
+    private static JsonElement? Converted(ParameterAlias alias, JsonElement value) => (alias.Shape, alias.Values, value.ValueKind) switch
+    {
+        (AliasShape.Inverted, _, JsonValueKind.True or JsonValueKind.False) => Flag(value.ValueKind is JsonValueKind.False),
+        (AliasShape.Inverted, _, _) => null,
+        (AliasShape.Single, _, JsonValueKind.Array) when value.GetArrayLength() is 1 && Text(value[0]) is not null => value[0],
+        (AliasShape.Single, _, _) => null,
+        (_, null, _) => value,
+        (_, { } values, JsonValueKind.String) when values.TryGetValue(value.GetString()!, out var flag) => Flag(flag),
+        _ => null,
+    };
+
+    private static JsonNode? Converted(ParameterAlias alias, JsonNode? value) => (alias.Shape, alias.Values, value) switch
+    {
+        (_, _, null) => null,
+        (AliasShape.Inverted, _, JsonValue flag) when flag.TryGetValue<bool>(out var on) => JsonValue.Create(!on),
+        (AliasShape.Inverted, _, _) => null,
+        (AliasShape.Single, _, JsonArray { Count: 1 } list) when Text(list[0]) is { } only => JsonValue.Create(only),
+        (AliasShape.Single, _, _) => null,
+        (_, null, _) => value,
+        (_, { } values, JsonValue text) when text.TryGetValue<string>(out var mode) && values.TryGetValue(mode, out var flag) => JsonValue.Create(flag),
+        _ => null,
+    };
+
+    private static string? Text(JsonElement value) => value.ValueKind is JsonValueKind.String ? value.GetString() : null;
+
+    private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    private static JsonElement Flag(bool on) => JsonElement.Parse(on ? "true" : "false");
+
+    private static JsonElement Quoted(string text) => JsonElement.Parse(string.Concat("\"", JsonEncodedText.Encode(text).Value, "\""));
 }

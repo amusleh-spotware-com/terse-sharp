@@ -2505,4 +2505,18 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = FirstFile, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Fact]
+    public async Task FindFiles_WithExclude_DropsTheFilesTheGlobCannotLeaveOut()
+    {
+        var all = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs" });
+        var kept = await server.CallAsync("find_files", new() { ["glob"] = "**/*.cs", ["exclude"] = "**/OrderRouter.cs" });
+        var batched = await server.CallAsync("find_files", new() { ["globs"] = new[] { "**/*.cs", "*.slnx" }, ["exclude"] = "**/OrderRouter.cs" });
+
+        Assert.Contains("OrderRouter.cs", all, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", kept, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderRouter.cs", kept, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs", batched, StringComparison.Ordinal);
+        Assert.DoesNotContain("OrderRouter.cs", batched, StringComparison.Ordinal);
+    }
 }

@@ -11,28 +11,36 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     private static readonly FrozenSet<string> TypeKinds = FrozenSet.Create(StringComparer.OrdinalIgnoreCase, "type", "namedtype", "class", "interface", "enum", "struct", "record", "delegate");
 
     [McpServerTool(Name = "search_symbols", ReadOnly = true)]
-    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none. Use instead of Grep for anything that is a type or member.")]
+    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). queries= searches up to 10 names in ONE call. Replaces one call per name: every record is tagged q1..qN by position, and a symbol several match is ONE record. scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none. Use instead of Grep for anything that is a type or member.")]
     public Task<string> SearchSymbols(
-            [Description("Name or CamelHump pattern.")] string query,
+            [Description("Name or CamelHump pattern.")] string? query = null,
             [Description("Optional kind filter: type (any class, struct, record, interface, enum or delegate), class, record, struct, interface, enum, delegate, method, ctor, property, field, event, namespace. Any other kind is refused.")] string? kind = null,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Max results (50).")] int maxResults = 0,
             [Description("Keep only one half of the solution: src for the production projects, test for the ones that reference a test framework. Empty searches both.")] string? scope = null,
             [Description("File the declarations are expected in. Its matches are answered first and the solution is searched only when it declares none; a path naming no document answers DocumentNotFound.")] string? path = null,
+            [Description("Several names searched in one call, at most 10, every record tagged q1..qN by position. Combines with query, taken first; Razor components answer query= alone.")] string?[]? queries = null,
             CancellationToken cancellationToken = default)
     {
         var half = scope?.ToLowerInvariant();
+        var names = Names(query, queries);
 
-        return (half, SymbolKindFilter.Refusal(kind)) switch
+        return (half, SymbolKindFilter.Refusal(kind), names) switch
         {
-            (not (null or "" or "src" or "test"), _) => Task.FromResult(Errors.Invalid(
+            (not (null or "" or "src" or "test"), _, _) => Task.FromResult(Errors.Invalid(
                 string.Create(CultureInfo.InvariantCulture, $"scope='{scope}' is not a known half of the solution"),
                 "pass scope=src, scope=test, or leave it empty to search both").Render()),
-            (_, { } refusal) => Task.FromResult(refusal.Render()),
+            (_, { } refusal, _) => Task.FromResult(refusal.Render()),
+            (_, _, { IsOk: false } refused) => Task.FromResult(refused.Error!.Render()),
+            (_, _, { Value: [var single] }) => context.WithWorkspaceAsync(
+                workspace,
+                path,
+                loaded => SearchAsync(loaded, single, kind, half, Cap(maxResults, 50), path, cancellationToken),
+                cancellationToken: cancellationToken),
             _ => context.WithWorkspaceAsync(
                 workspace,
                 path,
-                loaded => SearchAsync(loaded, query, kind, half, Cap(maxResults, 50), path, cancellationToken),
+                loaded => SearchManyAsync(loaded, names.Value, new SymbolQuery(kind, half, Cap(maxResults, 50), path), cancellationToken),
                 cancellationToken: cancellationToken),
         };
     }
@@ -495,4 +503,73 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             loaded => SourceService.DescribeManyAsync(loaded, requested[..Math.Min(requested.Length, MaxBatchedSymbols)], verbose, path, cancellationToken),
             cancellationToken: cancellationToken),
     };
+
+    private readonly record struct SymbolQuery(string? Kind, string? Scope, int MaxResults, string? Path);
+
+    private static Result<ImmutableArray<string>> Names(string? query, string?[]? queries) =>
+            query is { Length: > 0 } || queries is { Length: > 0 }
+                ? PluralPaths.Combine(query, queries, "queries")
+                : Result.Fail<ImmutableArray<string>>(Errors.Blank("query", "queries"));
+
+    private static async Task<string> SearchManyAsync(LoadedWorkspace workspace, ImmutableArray<string> queries, SymbolQuery shape, CancellationToken cancellationToken)
+    {
+        var scoped = ScopedFile(workspace, shape.Path);
+
+        if (!scoped.IsOk)
+            return scoped.Error!.Render();
+
+        var found = await Task.WhenAll(queries.Select(query => SymbolSearch.FindAsync(workspace, query, shape.Kind, shape.Scope, shape.MaxResults, cancellationToken, foldTests: true, inFile: scoped.Value))).ConfigureAwait(false);
+
+        return RenderedMany(workspace, queries, found, shape.MaxResults);
+    }
+
+    private static string RenderedMany(LoadedWorkspace workspace, ImmutableArray<string> queries, SymbolMatches[] found, int maxResults)
+    {
+        var tagged = Tagged(found);
+        var shown = Math.Min(tagged.Count, ResultCap.Shown(tagged.Count, maxResults));
+        var response = new ResponseBuilder("search_symbols", string.Join(", ", queries));
+
+        response.Summary(shown, tagged.Count, "symbols", "queries=, kind=, scope=, path= or maxResults=");
+        Clipped(response, found);
+
+        foreach (var (symbol, tags) in tagged.Take(shown))
+            response.Line(string.Create(CultureInfo.InvariantCulture, $"{tags}  {Describe(workspace, symbol)}"));
+
+        return response.ToString();
+    }
+
+    private static void Clipped(ResponseBuilder response, SymbolMatches[] found)
+    {
+        for (var query = 0; query < found.Length; query++)
+        {
+            if (found[query].Total > found[query].Ranked.Count)
+                response.Note(string.Create(CultureInfo.InvariantCulture, $"q{query + 1} matched {found[query].Total}, listed {found[query].Ranked.Count} - narrow it, or search it alone"));
+        }
+    }
+
+    private static List<(ISymbol Symbol, string Tags)> Tagged(SymbolMatches[] found)
+    {
+        var tags = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
+        var order = new List<ISymbol>();
+
+        for (var query = 0; query < found.Length; query++)
+            Tag(tags, order, found[query].Ranked, query + 1);
+
+        return order.ConvertAll(symbol => (symbol, tags[symbol]));
+    }
+
+    private static void Tag(Dictionary<ISymbol, string> tags, List<ISymbol> order, IReadOnlyList<ISymbol> symbols, int query)
+    {
+        foreach (var symbol in symbols)
+        {
+            if (tags.TryGetValue(symbol, out var tag))
+            {
+                tags[symbol] = string.Create(CultureInfo.InvariantCulture, $"{tag},q{query}");
+                continue;
+            }
+
+            tags[symbol] = string.Create(CultureInfo.InvariantCulture, $"q{query}");
+            order.Add(symbol);
+        }
+    }
 }

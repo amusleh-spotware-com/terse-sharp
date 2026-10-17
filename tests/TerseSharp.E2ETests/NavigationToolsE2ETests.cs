@@ -1290,4 +1290,23 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("ERROR AmbiguousSymbol", edit, StringComparison.Ordinal);
         Assert.DoesNotContain("overload ", edit, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task SearchSymbols_WithQueries_TagsEveryRecordByTheQueryThatFoundIt()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["queries"] = new[] { "OrderService", "OrderRouter" }, ["kind"] = "class" });
+        var lines = text.Split('\n');
+
+        Assert.Contains(lines, line => line.StartsWith("q1  ", StringComparison.Ordinal) && line.Contains("OrderService.cs", StringComparison.Ordinal));
+        Assert.Contains(lines, line => line.StartsWith("q2  ", StringComparison.Ordinal) && line.Contains("OrderRouter.cs", StringComparison.Ordinal));
+        Assert.DoesNotContain(lines, line => line.StartsWith("q2  ", StringComparison.Ordinal) && line.Contains("OrderService.cs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithTwoQueriesMatchingOneType_AnswersOneRecordCarryingBothTags()
+    {
+        var text = await server.CallAsync("search_symbols", new() { ["queries"] = new[] { "OrderService", "OSvc" }, ["kind"] = "class" });
+
+        Assert.Single(text.Split('\n'), line => line.StartsWith("q1,q2  ", StringComparison.Ordinal) && line.Contains("OrderService.cs", StringComparison.Ordinal));
+    }
 }
