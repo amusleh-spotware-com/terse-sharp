@@ -1054,7 +1054,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             ["edits"] = new object?[]
             {
                 new Dictionary<string, object?> { ["path"] = "notes.md", ["oldText"] = "# Fixture notes", ["newText"] = "# Fixture notes edited" },
-                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Order.cs", ["oldText"] = "namespace Fixture.Trading;", ["newText"] = "namespace Fixture.Trading;" },
+                new Dictionary<string, object?> { ["path"] = "tests/Fixture.Trading.Tests/DeliberateOutcomesTests.cs", ["oldText"] = "namespace", ["newText"] = "namespace" },
             },
         });
 
@@ -2674,6 +2674,35 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         finally
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_RetryWithAOneFileTokenAndAStaleIfUnchangedSince_IsRefused()
+    {
+        const string Notes = "terse-stale-preview.md";
+        var full = Path.Combine(TerseServerFixture.FixtureRoot, Notes);
+
+        try
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Notes, ["content"] = "v1\n" });
+            var read = await server.CallAsync("read_text", new() { ["path"] = Notes, ["stamp"] = true });
+            var stamp = read[(read.LastIndexOf("stamp=", StringComparison.Ordinal) + "stamp=".Length)..].Trim();
+            var preview = await server.CallAsync("write_text", new() { ["path"] = Notes, ["content"] = "v2\n", ["dryRun"] = true, ["overwrite"] = true });
+            var last = preview.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1].TrimEnd('\r');
+            var token = last["retryWith=".Length..last.IndexOf(' ', StringComparison.Ordinal)];
+
+            await File.WriteAllTextAsync(full, "v3\n", TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(full, DateTime.UtcNow.AddMinutes(1));
+
+            var replayed = await server.CallAsync("write_text", new() { ["retryWith"] = token, ["ifUnchangedSince"] = stamp, ["overwrite"] = true });
+
+            Assert.Contains("ERROR", replayed, StringComparison.Ordinal);
+            Assert.Equal("v3\n", await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Notes, ["delete"] = true });
         }
     }
 }

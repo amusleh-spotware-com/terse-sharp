@@ -19,6 +19,7 @@ public static class RepeatSteer
         ["get_symbol_source"] = "symbolIds",
         ["replace_symbol"] = "symbolIds",
         ["add_member"] = "declarations",
+        ["search_symbols"] = "queries",
         ["search_text"] = "queries",
         ["search_regex"] = "queries",
         ["run_tests"] = "projects",

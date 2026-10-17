@@ -164,7 +164,7 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         try
         {
             var edits = Enumerable
-                .Range(0, 11)
+                .Range(0, 26)
                 .Select(index => (object)new Dictionary<string, object?>
                 {
                     ["oldText"] = "alpha" + index.ToString(CultureInfo.InvariantCulture),
@@ -176,7 +176,7 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             var after = await server.CallAsync("read_text", new() { ["path"] = Probe });
 
             Assert.Contains("ERROR", refused, StringComparison.Ordinal);
-            Assert.Contains("at most 10", refused, StringComparison.Ordinal);
+            Assert.Contains("at most 25", refused, StringComparison.Ordinal);
             Assert.Contains("remedy:", refused, StringComparison.Ordinal);
             Assert.Contains("alpha0", after, StringComparison.Ordinal);
             Assert.DoesNotContain("beta", after, StringComparison.Ordinal);

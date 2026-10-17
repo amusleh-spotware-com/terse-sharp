@@ -2575,4 +2575,15 @@ public sealed class ToolGuardTests
         Assert.Null(verdict.Rewrite);
         Assert.Contains("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("git add x && git diff --cached --output=staged.patch")]
+    [InlineData("git commit -m y && git log -1 --output=last.txt")]
+    public void Guard_ForAnAndChainEndingInAGitReadThatWritesAFile_IsNeverRewrittenAsATrailingRead(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.Null(verdict.Rewrite);
+        Assert.DoesNotContain("RAN without its trailing read", verdict.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
 }

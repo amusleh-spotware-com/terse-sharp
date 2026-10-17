@@ -2635,7 +2635,7 @@ public static class ToolGuard
 
     private static bool ReadOnly(string pipeline)
     {
-        if (pipeline.AsSpan().IndexOfAny('<', '>') >= 0)
+        if (pipeline.AsSpan().IndexOfAny('<', '>') >= 0 || pipeline.Contains("--output", StringComparison.Ordinal))
             return false;
 
         var first = Command(pipeline).FirstOrDefault() ?? string.Empty;

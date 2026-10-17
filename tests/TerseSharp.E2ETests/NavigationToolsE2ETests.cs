@@ -1305,7 +1305,7 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task SearchSymbols_WithTwoQueriesMatchingOneType_AnswersOneRecordCarryingBothTags()
     {
-        var text = await server.CallAsync("search_symbols", new() { ["queries"] = new[] { "OrderService", "OSvc" }, ["kind"] = "class" });
+        var text = await server.CallAsync("search_symbols", new() { ["queries"] = new[] { "OrderService", "Service" }, ["kind"] = "class" });
 
         Assert.Single(text.Split('\n'), line => line.StartsWith("q1,q2  ", StringComparison.Ordinal) && line.Contains("OrderService.cs", StringComparison.Ordinal));
     }

@@ -1411,7 +1411,7 @@ context.RejectWrite() is { } rejection
 
     private static string Previewed(bool dryRun, Result<string> result, EditTools.Carry carry, string root) =>
         dryRun && Landing(result) is { } preview && carry.Payloads is { Length: > 0 } payloads
-            ? preview + "\nretryWith=" + RejectedEdits.Remember(root, "write_text", carry.Targets ?? [], payloads, usings: carry.Usings) + " applies this preview"
+            ? preview + "\nretryWith=" + RejectedEdits.Remember(root, "write_text", carry.Targets ?? [], payloads) + " applies this preview"
             : EditTools.Carried(result, carry, root);
 
     private static string? Landing(Result<string> result) => result is { IsOk: true, Value: { } preview } && Lands(preview) ? preview : null;
@@ -1447,11 +1447,19 @@ context.RejectWrite() is { } rejection
             return Task.FromResult(Errors.Blank("path").Render());
 
         return Guarded(workspace, target, async loaded => EditTools.Elsewhere(held.Root, loaded.Root)
-            ?? Previewed(
-                options.DryRun,
-                await FileService.WriteTextAsync(loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken).ConfigureAwait(false),
-                new EditTools.Carry("write_text", [target], [content], Usings: usings),
-                loaded.Root),
+            ?? (Raced(loaded, [target], options.IfUnchangedSince) is { } raced
+                ? await raced.ConfigureAwait(false)
+                : Previewed(
+                    options.DryRun,
+                    await LandedWrites.GuardedAsync(
+                        loaded.Root,
+                        [new FileService.FileWrite(target, content)],
+                        options.DryRun,
+                        () => FileService.WriteTextAsync(
+                            loaded, target, content, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, options.Overwrite, cancellationToken),
+                        cancellationToken).ConfigureAwait(false),
+                    new EditTools.Carry("write_text", [target], [content], Usings: usings),
+                    loaded.Root)),
             cancellationToken: cancellationToken);
     }
 
