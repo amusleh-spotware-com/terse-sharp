@@ -531,7 +531,11 @@ public sealed class ChangedTestSelectionE2ETests
 
             Assert.StartsWith("CANCELLED run_tests after ", cancelled, StringComparison.Ordinal);
             Assert.EndsWith("- the solution is free", cancelled, StringComparison.Ordinal);
-            Assert.DoesNotContain("run_tests PASSED", await stalling.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken), StringComparison.Ordinal);
+            var stopped = await stalling.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+            Assert.False(string.IsNullOrWhiteSpace(stopped));
+            Assert.DoesNotContain("run_tests PASSED", stopped, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR Internal", stopped, StringComparison.Ordinal);
             Assert.DoesNotContain("RunInFlight", await ProbeAsync(server), StringComparison.Ordinal);
             Assert.Contains("nothing to cancel", await CallAsync(server, "run_tests", new() { ["status"] = "cancel" }), StringComparison.Ordinal);
         }

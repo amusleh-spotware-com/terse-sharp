@@ -148,6 +148,7 @@ public sealed class AnalyzerLockE2ETests : IAsyncLifetime
 
         var diagnostics = await CallAsync("get_diagnostics", new() { ["minSeverity"] = "info" });
 
+        Assert.DoesNotContain("ERROR", diagnostics, StringComparison.Ordinal);
         Assert.DoesNotContain("CS4014", diagnostics, StringComparison.Ordinal);
     }
 

@@ -79,4 +79,26 @@ public sealed class ActiveRunsTests
         Assert.Contains("nothing to cancel", answer, StringComparison.Ordinal);
         Assert.Contains("remedy:", answer, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task CancelAsync_ForARunWhoseStopIsAlreadyDisposed_SaysItFinishedInsteadOfClaimingACancel()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "terse-active-finished.slnx");
+        var stop = new CancellationTokenSource();
+
+        Assert.True(ActiveRuns.TryEnter(solution, "run_tests", string.Empty, out _, stop));
+        stop.Dispose();
+
+        try
+        {
+            var answer = await ActiveRuns.CancelAsync(solution, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("CANCELLED", answer, StringComparison.Ordinal);
+            Assert.Equal("run_tests finished before the cancel arrived - nothing was stopped", answer);
+        }
+        finally
+        {
+            ActiveRuns.Leave(solution);
+        }
+    }
 }

@@ -49,7 +49,8 @@ public static class ActiveRuns
         if (Held(solutionPath) is not { } held)
             return NothingToCancel();
 
-        await StopAsync(held.Stop).ConfigureAwait(false);
+        if (held.Released.Task.IsCompleted || !await StopAsync(held.Stop).ConfigureAwait(false))
+            return string.Create(CultureInfo.InvariantCulture, $"{held.Holder.Tool} finished before the cancel arrived - nothing was stopped");
 
         var seconds = Age(held.Holder).TotalSeconds;
         var freed = await FreedAsync(held.Released.Task, cancellationToken).ConfigureAwait(false);
@@ -67,14 +68,17 @@ public static class ActiveRuns
             return Running.TryGetValue(solutionPath, out var held) ? held : null;
     }
 
-    private static async Task StopAsync(CancellationTokenSource stop)
+    private static async Task<bool> StopAsync(CancellationTokenSource stop)
     {
         try
         {
             await stop.CancelAsync().ConfigureAwait(false);
+
+            return true;
         }
         catch (ObjectDisposedException)
         {
+            return false;
         }
     }
 
