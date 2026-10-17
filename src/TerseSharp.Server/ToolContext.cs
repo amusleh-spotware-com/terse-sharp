@@ -185,10 +185,16 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         ? new TerseError(TerseErrorCode.ReadOnly, "the server is running with --read-only", "restart without --read-only").Render()
         : null;
 
-    public async Task<string> WithTargetAsync(
+    public Task<string> WithTargetAsync(
         string? workspace,
         string? pathHint,
         Func<WorkspaceTarget, Task<string>> action,
+        CancellationToken cancellationToken = default) =>
+        WithTargetAsync(workspace, pathHint, (target, _) => action(target), cancellationToken: cancellationToken);
+    public async Task<string> WithTargetAsync(
+        string? workspace,
+        string? pathHint,
+        Func<WorkspaceTarget, CancellationToken, Task<string>> action,
         bool changed = false,
         bool tests = false,
         string spawns = "",
@@ -201,7 +207,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             var target = await TargetAsync(workspace, pathHint, changed, tests, cancellationToken).ConfigureAwait(false);
 
             return target.IsOk
-                ? await SpawnedAsync(target.Value!, spawns, pathHint, action).ConfigureAwait(false)
+                ? await SpawnedAsync(target.Value!, spawns, pathHint, action, cancellationToken).ConfigureAwait(false)
                 : target.Error!.Render();
         }).ConfigureAwait(false);
     }
@@ -437,17 +443,24 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         ? TestScope.TestProjectsOf(loaded.Solution, loaded.Load.TargetFramework is null or { Length: 0 })
         : default;
 
-    private static async Task<string> SpawnedAsync(WorkspaceTarget target, string spawns, string? detail, Func<WorkspaceTarget, Task<string>> action)
+    private static async Task<string> SpawnedAsync(
+        WorkspaceTarget target,
+        string spawns,
+        string? detail,
+        Func<WorkspaceTarget, CancellationToken, Task<string>> action,
+        CancellationToken cancellationToken)
     {
         if (spawns.Length is 0)
-            return await action(target).ConfigureAwait(false);
+            return await action(target, cancellationToken).ConfigureAwait(false);
 
-        if (!ActiveRuns.TryEnter(target.SolutionPath, spawns, detail ?? string.Empty, out var holder))
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        if (!ActiveRuns.TryEnter(target.SolutionPath, spawns, detail ?? string.Empty, out var holder, stop))
             return Errors.RunInFlight(spawns, holder).Render();
 
         try
         {
-            return await action(target).ConfigureAwait(false);
+            return await action(target, stop.Token).ConfigureAwait(false);
         }
         finally
         {

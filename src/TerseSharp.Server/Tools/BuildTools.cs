@@ -27,7 +27,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         BuildGreen,
         Key("build", [project, configuration, targetFramework, Joined(properties), Flag(verbose), workspace]),
         force,
-        WatchedRun.From(() => context.WithTargetAsync(workspace, project, target =>
+        WatchedRun.From(() => context.WithTargetAsync(workspace, project, (target, stopping) =>
         {
             if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
@@ -38,9 +38,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
                 return scope.IsOk
                     ? Contained(target, project, resolved => BuildWithRecoveryAsync(
-                        target, resolved, scope.Value, verbose, Seconds(timeoutSeconds), cancellationToken))
+                        target, resolved, scope.Value, verbose, Seconds(timeoutSeconds), stopping))
                     : Task.FromResult(scope.Error!.Render());
-            }, cancellationToken);
+            }, stopping);
         },
         cancellationToken: cancellationToken,
         spawns: "build"), Roots),
@@ -91,9 +91,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             : context.WithTargetAsync(
                 workspace,
                 project,
-                target => SelfBuilt(target, !dryRun && project is not { Length: > 0 }) is { } refused
+                (target, stopping) => SelfBuilt(target, !dryRun && project is not { Length: > 0 }) is { } refused
                     ? Task.FromResult(refused)
-                    : CleanWithRecoveryAsync(target, project, includeIntermediate, dryRun, verbose, cancellationToken),
+                    : CleanWithRecoveryAsync(target, project, includeIntermediate, dryRun, verbose, stopping),
                 cancellationToken: cancellationToken,
                 spawns: "clean");
     }
@@ -120,14 +120,17 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Several tests, classes or namespace prefixes in ONE call, at most 10, combined into one filter. A blank entry is refused by index; not with filter.")] string?[]? tests = null,
         [Description("Run even when this exact call already answered green and nothing has been written since.")] bool force = false,
         [Description("Run in the background and answer an id at once; it still holds the solution.")] bool detach = false,
-        [Description("Id detach=true answered: RUNNING with its age, or the verdict.")] string? status = null,
-        [Description("With status=: wait up to N seconds, max 3600, for the verdict; 0 answers at once.")] int waitSeconds = 0,
+        [Description("Id detach=true answered: RUNNING with its age, or the verdict. \"cancel\" stops the build or test run in flight on this solution.")] string? status = null,
+        [Description("With status=: wait up to N seconds, max 3600; 0 answers at once.")] int waitSeconds = 0,
         CancellationToken cancellationToken = default)
     {
-        return status is { Length: > 0 }
-            ? detached.StatusAsync(status, Waited(waitSeconds), cancellationToken)
-            : waitSeconds != 0 ? Task.FromResult(StatuslessWait())
-            : detach ? Task.FromResult(detached.Start(Run)) : Run(cancellationToken);
+        return status switch
+        {
+            "cancel" => CancelledAsync(workspace, project, cancellationToken),
+            { Length: > 0 } => detached.StatusAsync(status, Waited(waitSeconds), cancellationToken),
+            _ when waitSeconds != 0 => Task.FromResult(StatuslessWait()),
+            _ => detach ? Task.FromResult(detached.Start(Run)) : Run(cancellationToken),
+        };
 
         Task<string> Run(CancellationToken token) => Replayable(
             "run_tests",
@@ -139,7 +142,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             WatchedRun.From(() => context.WithTargetAsync(
                 workspace,
                 project,
-                target =>
+                (target, stopping) =>
                 {
                     if (SelfBuilt(target, !noBuild && projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
                         return Task.FromResult(refused);
@@ -180,9 +183,9 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                                     Parallel: degree.Value,
                                     RunSettings: settings.Value),
                                 changed,
-                                token)
+                                stopping)
                             : Task.FromResult(scope.Error!.Render());
-                    }, token);
+                    }, stopping);
                 },
                 changed && WholeSolution(project, projects),
                 WholeSolution(project, projects),
@@ -204,7 +207,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Keep only the remembered failures whose name contains one of these entries, case-insensitively, at most 10. Empty replays them all.")] string?[]? tests = null,
         [Description("Drop the remembered failures whose name contains one of these entries, case-insensitively, at most 10. Applied after tests=.")] string?[]? exclude = null,
         CancellationToken cancellationToken = default) =>
-        context.WithTargetAsync(workspace, null, target =>
+        context.WithTargetAsync(workspace, null, (target, stopping) =>
         {
             if (SelfBuilt(target, !noBuild && configuration is not { Length: > 0 }) is { } refused)
                 return Task.FromResult(refused);
@@ -238,7 +241,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                             Seconds(timeoutSeconds),
                             verbose,
                             Remembered(memory.Scope, scope.Value)),
-                        cancellationToken),
+                        stopping),
                     Partial(chosen.Value.Length, memory.FailedTests.Length))
                 : Task.FromResult(scope.Error!.Render());
         },
@@ -256,7 +259,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         CancellationToken cancellationToken = default) =>
-        context.WithTargetAsync(workspace, project, target =>
+        context.WithTargetAsync(workspace, project, (target, stopping) =>
         {
             if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
@@ -274,12 +277,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                             contains,
                             scope.Value,
                             Seconds(timeoutSeconds),
-                            cancellationToken).ConfigureAwait(false);
+                            stopping).ConfigureAwait(false);
 
                         return new LockedRun(run.Response, run.Locked);
-                    }, cancellationToken))
+                    }, stopping))
                     : Task.FromResult(scope.Error!.Render());
-            }, cancellationToken);
+            }, stopping);
         },
         cancellationToken: cancellationToken,
         spawns: "list_tests");
@@ -821,4 +824,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     }
 
     private const int MaxEntityPasses = 4;
+
+    private Task<string> CancelledAsync(string? workspace, string? project, CancellationToken cancellationToken) =>
+        context.WithTargetAsync(workspace, project, target => ActiveRuns.CancelAsync(target.SolutionPath, cancellationToken), cancellationToken: cancellationToken);
 }

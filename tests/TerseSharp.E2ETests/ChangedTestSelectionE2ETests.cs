@@ -492,4 +492,74 @@ public sealed class ChangedTestSelectionE2ETests
             await server.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task RunTests_WhoseClientCancelsTheCall_StopsTheRunAndFreesTheSolution()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            using var abandon = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            var stalling = server.CallAsync("run_tests", Stalling(), abandon.Token);
+
+            Assert.Contains("RunInFlight", await ProbedUntilAsync(server, inFlight: true), StringComparison.Ordinal);
+
+            await abandon.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => stalling);
+
+            Assert.DoesNotContain("RunInFlight", await ProbedUntilAsync(server, inFlight: false), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RunTests_StatusCancel_KillsTheRunWhoseCallerStoppedWaitingAndFreesTheSolution()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var stalling = CallAsync(server, "run_tests", Stalling());
+
+            Assert.Contains("RunInFlight", await ProbedUntilAsync(server, inFlight: true), StringComparison.Ordinal);
+
+            var cancelled = await CallAsync(server, "run_tests", new() { ["status"] = "cancel" });
+
+            Assert.StartsWith("CANCELLED run_tests after ", cancelled, StringComparison.Ordinal);
+            Assert.EndsWith("- the solution is free", cancelled, StringComparison.Ordinal);
+            Assert.DoesNotContain("run_tests PASSED", await stalling.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken), StringComparison.Ordinal);
+            Assert.DoesNotContain("RunInFlight", await ProbeAsync(server), StringComparison.Ordinal);
+            Assert.Contains("nothing to cancel", await CallAsync(server, "run_tests", new() { ["status"] = "cancel" }), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    private static Dictionary<string, object?> Stalling() => new()
+    {
+        ["projects"] = new[] { "Selection.Core.Tests" },
+        ["timeoutSeconds"] = 300,
+        ["properties"] = new[] { "TerseStallBuild=true" },
+    };
+
+    private static Task<string> ProbeAsync(TerseServerProcess server) => CallAsync(server, "clean", new() { ["dryRun"] = true });
+
+    private static async Task<string> ProbedUntilAsync(TerseServerProcess server, bool inFlight)
+    {
+        var text = await ProbeAsync(server);
+
+        for (var attempt = 0; attempt < 120 && text.Contains("RunInFlight", StringComparison.Ordinal) != inFlight; attempt++)
+        {
+            await Task.Delay(250, TestContext.Current.CancellationToken);
+            text = await ProbeAsync(server);
+        }
+
+        return text;
+    }
 }

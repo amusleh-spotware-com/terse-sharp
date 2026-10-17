@@ -1179,7 +1179,7 @@ and quotes the ~80 characters around the offending byte, so a 9 000-character `d
 located without re-sending it - and a declaration that reaches the parser and fails there is answered
 the same way, `at offset 27 of 28: public int Unused() => 7 + ;`, prefixed with `declarations[1]:`
 when the call was batched;
-`RunInFlight` means this process is ALREADY running a build or test call for that solution (a detached run included) - read that run's answer instead of starting a second one, which could only fail on its file locks; `ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
+`RunInFlight` means this process is ALREADY running a build or test call for that solution (a detached run included) - read that run's answer, or stop one whose caller stopped waiting with `run_tests status="cancel"`; a second run could only fail on its file locks; `ReadOnly` means the server runs with `--read-only`; `Transient` means MSBuild's out-of-process build
 host dropped the call - the project file was restored, a file the edit was adding may already be on
 disk, and the answer is to retry the same call rather than to report a defect - unless it says `landed=<paths>`: then call the `analyze` it names, and retry only a `not landed=` file.
 

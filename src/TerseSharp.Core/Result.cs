@@ -178,7 +178,7 @@ public static class Errors
         string.Create(
             CultureInfo.InvariantCulture,
             $"{holder.Tool} is already running for this solution in this process, started {ActiveRuns.Age(holder).TotalSeconds:F1}s ago{Detailed(holder.Detail)}, so {tool} would build into its file locks"),
-        "read that run's answer rather than starting a second one - this process started it, so the second can only fail on MSB3027 over the output the first is writing; a run over a DIFFERENT solution is unaffected");
+        "read that run's answer rather than starting a second one - this process started it, so the second can only fail on MSB3027 over the output the first is writing; a detach=true run answers run_tests status=\"<id>\", and run_tests status=\"cancel\" kills a run whose caller stopped waiting and frees the solution; a run over a DIFFERENT solution is unaffected");
 
     private static string Detailed(string detail) => detail.Length is 0 ? string.Empty : " with " + detail;
 
