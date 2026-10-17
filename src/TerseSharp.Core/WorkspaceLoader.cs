@@ -23,7 +23,8 @@ internal static class WorkspaceLoader
 
         stopwatch.Stop();
 
-        var result = Describe(full, solution, stopwatch.ElapsedMilliseconds, reported, seed.TargetFramework);
+        var mismatches = await ConfigurationMapping.MismatchesAsync(full, cancellationToken).ConfigureAwait(false);
+        var result = Describe(full, solution, stopwatch.ElapsedMilliseconds, reported, seed.TargetFramework) with { ConfigurationMismatches = mismatches };
 
         return new LoadedWorkspace(workspace, result, GitContext.Detect(full), seed);
     }

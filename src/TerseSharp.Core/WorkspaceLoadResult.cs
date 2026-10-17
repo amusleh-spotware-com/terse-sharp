@@ -8,7 +8,10 @@ public sealed record WorkspaceLoadResult(
     IReadOnlyList<string> Failures,
     IReadOnlyList<string> Warnings,
     string? TargetFramework = null,
-    UnresolvedAnalyzers? Analyzers = null)
+    UnresolvedAnalyzers? Analyzers = null,
+    IReadOnlyList<string>? ConfigurationMismatches = null)
 {
     public UnresolvedAnalyzers Unresolved => Analyzers ?? UnresolvedAnalyzers.None;
+
+    public IReadOnlyList<string> Mismatched => ConfigurationMismatches ?? [];
 }

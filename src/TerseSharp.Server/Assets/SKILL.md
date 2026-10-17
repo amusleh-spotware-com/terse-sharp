@@ -318,7 +318,7 @@ what it needs, then warms the rest in the background. While the startup load run
 text, file and git tools already answer. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
 be invisible to `find_usages` with every gate green; whatever was chosen is printed as
-`targetFramework=`.
+`targetFramework=`. A `WARNING config-mapping` line names a project the solution builds at another Configuration|Platform: its `get_diagnostics` severities follow the load, `build`'s the solution.
 Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory
 really does come back; it costs about a second, which is why it happens only when a workspace is
 genuinely dropped and why the unload-and-retry `build`/`run_tests` perform on a locked output skips it. It is skipped - `the workspace was NOT unloaded` - when every named holder is another live process, since unloading cannot release it.

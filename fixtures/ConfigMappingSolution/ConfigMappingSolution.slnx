@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="src/Mapped/Mapped.csproj">
+    <BuildType Project="Release" />
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="src/Plain/Plain.csproj" />
+</Solution>

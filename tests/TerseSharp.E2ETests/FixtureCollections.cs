@@ -11,3 +11,6 @@ public sealed class PolicySolutionCollection;
 
 [CollectionDefinition(nameof(MultiTargetSolutionCollection))]
 public sealed class MultiTargetSolutionCollection;
+
+[CollectionDefinition(nameof(ConfigMappingSolutionCollection))]
+public sealed class ConfigMappingSolutionCollection;

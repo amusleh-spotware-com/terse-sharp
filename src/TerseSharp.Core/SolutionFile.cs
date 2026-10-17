@@ -175,7 +175,7 @@ public static class SolutionFile
         _ => await ClassicProjectsAsync(solutionPath, cancellationToken).ConfigureAwait(false),
     };
 
-    private static async Task<XDocument> LoadAsync(string solutionPath, CancellationToken cancellationToken)
+    internal static async Task<XDocument> LoadAsync(string solutionPath, CancellationToken cancellationToken)
     {
         var stream = new FileStream(
             solutionPath,
@@ -274,6 +274,6 @@ public static class SolutionFile
         owner.Length is 0 ? Slashed(project.AsSpan()) : owner + "/" + Slashed(project.AsSpan());
 
 
-    private static string Slashed(ReadOnlySpan<char> path) =>
+    internal static string Slashed(ReadOnlySpan<char> path) =>
         path.Contains('\\') ? path.ToString().Replace('\\', '/') : path.ToString();
 }

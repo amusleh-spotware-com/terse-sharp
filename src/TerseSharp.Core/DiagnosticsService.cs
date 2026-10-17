@@ -18,7 +18,7 @@ public static class DiagnosticsService
         var kept = request.Touched is { } touched ? found.Where(touched.Covers).ToArray() : [.. found];
         var declaration = await DiagnosticDeclarations.ResolverAsync(kept, cancellationToken).ConfigureAwait(false);
 
-        return Render(workspace.Root, request, kept, declaration, found.Count - kept.Length);
+        return Render(workspace.Root, request, kept, declaration, found.Count - kept.Length, workspace.Load.Mismatched.Count);
     }
 
     private static async ValueTask CollectAsync(
@@ -45,11 +45,12 @@ public static class DiagnosticsService
         && scope.Includes(diagnostic);
 
     private static string Render(
-            string root,
-            DiagnosticsRequest request,
-            Diagnostic[] found,
-            Func<Location, string?> declaration,
-            int preExisting)
+        string root,
+        DiagnosticsRequest request,
+        Diagnostic[] found,
+        Func<Location, string?> declaration,
+        int preExisting,
+        int mismatched)
     {
         var deduplicated = DiagnosticFold.Lines(root, found, Head, declaration);
 
@@ -62,6 +63,9 @@ public static class DiagnosticsService
 
         if (request.Touched is not null)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"{preExisting} pre-existing diagnostic(s) were not reported - they sit outside every line the working tree changed against {request.BaseRef} - drop baseRef= to list them"));
+
+        if (mismatched > 0)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"config-mapping {mismatched} project(s) load at a different Configuration|Platform than the solution builds them - severities here follow the loaded one, build follows the solution; load_workspace names them"));
 
         foreach (var line in deduplicated.Capped(request.MaxResults))
             response.Line(line);

@@ -292,6 +292,9 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
         AppendFailures(response, result.Failures, root, verbose);
         AppendWarnings(response, result.Warnings, root, verbose);
         AppendUnresolvedAnalyzers(response, result.Unresolved, root);
+
+        foreach (var mismatch in result.Mismatched)
+            response.Note(mismatch);
     }
 
     private static void AppendFailures(ResponseBuilder response, IReadOnlyList<string> failures, string root, bool verbose)
