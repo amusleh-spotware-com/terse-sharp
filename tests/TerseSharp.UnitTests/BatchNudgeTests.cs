@@ -74,45 +74,46 @@ public sealed class BatchNudgeTests
         Assert.All(BatchNudge.Reads, tool => Assert.Contains(tool, readOnly));
     }
 
-    private const string HeldPayload = """{"tool_calls":[{"tool_name":"mcp__terse-sharp__get_file_outline","tool_use_id":"test"}]}""";
-    private const string NudgedPayload = """{"tool_calls":[{"tool_name":"mcp__terse-sharp__get_file_outline","tool_use_id":"abc"}]}""";
+    private const string OddHashPayload = """{"tool_calls":[{"tool_name":"mcp__terse-sharp__get_file_outline","tool_use_id":"test"}]}""";
+    private const string EvenHashPayload = """{"tool_calls":[{"tool_name":"mcp__terse-sharp__get_file_outline","tool_use_id":"abc"}]}""";
 
     [Theory]
-    [InlineData("test", true)]
-    [InlineData("abc", false)]
-    public void IsHeldOut_IsTheParityOfTheFirstSha256ByteTheScanRecomputes(string toolUseId, bool held) =>
-        Assert.Equal(held, NudgeHoldOut.IsHeldOut(toolUseId));
-
-    [Fact]
-    public void IsHeldOut_SplitsToolUseIdsIntoTwoHalves()
+    [InlineData(OddHashPayload, "test")]
+    [InlineData(EvenHashPayload, "abc")]
+    public void Classify_ForTheIdTheHoldOutUsedToHoldAndTheOneItNudged_NudgesBoth(string payload, string toolUseId)
     {
-        var held = Enumerable.Range(0, 200)
-            .Count(index => NudgeHoldOut.IsHeldOut("toolu_" + index.ToString("D3", CultureInfo.InvariantCulture)));
+        var classified = BatchNudge.Classify(payload);
 
-        Assert.InRange(held, 60, 140);
+        Assert.Equal(toolUseId, classified);
+        Assert.Equal(BatchNudge.Decide(BatchNudge.Classify(EvenHashPayload)), BatchNudge.Decide(classified));
     }
 
     [Fact]
-    public void Classify_ForAHeldOutToolUseId_DecidesHeldAndInjectsNothing()
+    public void Decide_ForEveryEligibleToolUseId_NudgesAllOfThem()
     {
-        var verdict = BatchNudge.Classify(HeldPayload);
+        var nudged = Enumerable.Range(0, 200)
+            .Select(index => "toolu_" + index.ToString("D3", CultureInfo.InvariantCulture))
+            .Count(id => BatchNudge.Decide(BatchNudge.Classify("""{"tool_calls":[{"tool_name":"mcp__terse-sharp__read_text","tool_use_id":""" + "\"" + id + "\"}]}")) is not null);
 
-        Assert.Equal(new BatchVerdict("test", NudgeArm.Held), verdict);
-        Assert.Null(BatchNudge.Decide(verdict));
-        Assert.NotNull(BatchNudge.Decide(BatchNudge.Classify(NudgedPayload)));
+        Assert.Equal(200, nudged);
     }
 
     [Theory]
     [InlineData("""{"tool_calls":[{"tool_name":"mcp__terse-sharp__get_file_outline"}]}""")]
     [InlineData("""{"tool_calls":[{"tool_name":"mcp__terse-sharp__get_file_outline","tool_use_id":"a b"}]}""")]
     [InlineData("""{"tool_calls":[{"tool_name":"mcp__terse-sharp__get_file_outline","tool_use_id":7}]}""")]
-    public void Classify_ForABatchWithNoUsableToolUseId_NudgesAndRecordsItUnidentified(string payload) =>
-        Assert.Equal(new BatchVerdict(NudgeHoldOut.Unidentified, NudgeArm.Nudged), BatchNudge.Classify(payload));
+    public void Classify_ForABatchWithNoUsableToolUseId_NudgesAndRecordsItUnidentified(string payload)
+    {
+        var classified = BatchNudge.Classify(payload);
+
+        Assert.Equal(NudgeLog.Unidentified, classified);
+        Assert.NotNull(BatchNudge.Decide(classified));
+    }
 
     [Theory]
-    [InlineData(HeldPayload, " test held", false)]
-    [InlineData(NudgedPayload, " abc nudged", true)]
-    public async Task RunAsync_ForAnEligibleBatch_LogsItsArmAndNudgesOnlyTheNudgedHalf(string payload, string logTail, bool nudged)
+    [InlineData(OddHashPayload, " test nudged")]
+    [InlineData(EvenHashPayload, " abc nudged")]
+    public async Task RunAsync_WithTheLogOptedIn_LogsEveryEligibleBatchAndNudgesIt(string payload, string logTail)
     {
         var home = Directory.CreateTempSubdirectory("terse-nudge-");
 
@@ -120,15 +121,57 @@ public sealed class BatchNudgeTests
         {
             using var output = new StringWriter();
 
-            await BatchNudge.RunAsync(new StringReader(payload), output, home.FullName, TestContext.Current.CancellationToken);
+            await BatchNudge.RunAsync(new StringReader(payload), output, home.FullName, log: true, TestContext.Current.CancellationToken);
 
-            var logged = await File.ReadAllLinesAsync(Path.Combine(home.FullName, ".terse", NudgeHoldOut.LogFileName), TestContext.Current.CancellationToken);
+            var logged = await File.ReadAllLinesAsync(Path.Combine(home.FullName, ".terse", NudgeLog.FileName), TestContext.Current.CancellationToken);
             Assert.EndsWith(logTail, Assert.Single(logged), StringComparison.Ordinal);
-            Assert.Equal(nudged ? BatchNudge.Decide(BatchNudge.Classify(payload)) + output.NewLine : string.Empty, output.ToString());
+            Assert.Equal(BatchNudge.Decide(BatchNudge.Classify(payload)) + output.NewLine, output.ToString());
         }
         finally
         {
             home.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(OddHashPayload)]
+    [InlineData(EvenHashPayload)]
+    public async Task RunAsync_WithoutTheLogOptIn_NudgesAndWritesNoLog(string payload)
+    {
+        var home = Directory.CreateTempSubdirectory("terse-nudge-");
+
+        try
+        {
+            using var output = new StringWriter();
+
+            await BatchNudge.RunAsync(new StringReader(payload), output, home.FullName, log: false, TestContext.Current.CancellationToken);
+
+            Assert.False(Directory.Exists(Path.Combine(home.FullName, ".terse")));
+            Assert.Equal(BatchNudge.Decide(BatchNudge.Classify(payload)) + output.NewLine, output.ToString());
+        }
+        finally
+        {
+            home.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("0", false)]
+    [InlineData("true", false)]
+    [InlineData(null, false)]
+    public void Enabled_IsOnOnlyWhenTheOptInVariableIsOne(string? value, bool enabled)
+    {
+        var previous = Environment.GetEnvironmentVariable(NudgeLog.Variable);
+        Environment.SetEnvironmentVariable(NudgeLog.Variable, value);
+
+        try
+        {
+            Assert.Equal(enabled, NudgeLog.Enabled());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(NudgeLog.Variable, previous);
         }
     }
 
@@ -141,10 +184,10 @@ public sealed class BatchNudgeTests
         {
             using var output = new StringWriter();
 
-            var exit = await BatchNudge.RunAsync(new StringReader(NudgedPayload), output, home, TestContext.Current.CancellationToken);
+            var exit = await BatchNudge.RunAsync(new StringReader(EvenHashPayload), output, home, log: true, TestContext.Current.CancellationToken);
 
             Assert.Equal(0, exit);
-            Assert.Equal(BatchNudge.Decide(BatchNudge.Classify(NudgedPayload)) + output.NewLine, output.ToString());
+            Assert.Equal(BatchNudge.Decide(BatchNudge.Classify(EvenHashPayload)) + output.NewLine, output.ToString());
         }
         finally
         {

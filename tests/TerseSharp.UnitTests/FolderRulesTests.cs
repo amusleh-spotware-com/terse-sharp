@@ -54,6 +54,7 @@ public sealed class FolderRulesTests : IDisposable
     public async Task PreToolUse_ForATerseWriteBelowUnseenRules_DeniesOnceWithTheRules()
     {
         var first = await HookAsync(Write());
+        await EndBatchAsync();
         var second = await HookAsync(Write());
 
         Assert.Equal("deny", first!["permissionDecision"]!.GetValue<string>());
@@ -167,11 +168,10 @@ public sealed class FolderRulesTests : IDisposable
     public async Task PreToolUse_ForParallelWritesBelowUnseenRules_DeniesWithTheRulesAndNeverWithoutThem()
     {
         var answers = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => HookAsync(Write())));
-        var denials = answers.OfType<JsonObject>().ToArray();
+        await EndBatchAsync();
 
-        Assert.NotEmpty(denials);
-        Assert.All(denials, denial => Assert.Equal("deny", denial["permissionDecision"]?.GetValue<string>()));
-        Assert.All(denials, denial => Assert.Contains("FOO RULES", denial["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal));
+        Assert.All(answers, answer => Assert.Equal("deny", answer?["permissionDecision"]?.GetValue<string>()));
+        Assert.All(answers, answer => Assert.Contains("FOO RULES", answer!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal));
         Assert.Null(await HookAsync(Write()));
     }
 
@@ -370,5 +370,56 @@ public sealed class FolderRulesTests : IDisposable
     private sealed class BrokenWriter : StringWriter
     {
         public override Task WriteLineAsync(string? value) => Task.FromException(new IOException("The pipe is being closed."));
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForASiblingWriteWhoseHookStartsAfterTheDenial_DeniesItWithTheRulesUntilTheBatchEnds()
+    {
+        var first = await HookAsync(Write());
+        var sibling = await HookAsync(Write());
+        await EndBatchAsync();
+        var retry = await HookAsync(Write());
+
+        Assert.Equal("deny", first!["permissionDecision"]!.GetValue<string>());
+        Assert.Equal("deny", sibling!["permissionDecision"]!.GetValue<string>());
+        Assert.Contains("FOO RULES", sibling["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Null(retry);
+    }
+
+    [Fact]
+    public async Task PostToolBatch_OfAnotherSession_KeepsThisSessionsSiblingWritesDenied()
+    {
+        await HookAsync(Write());
+        await EndBatchAsync("s2");
+
+        Assert.Equal("deny", (await HookAsync(Write()))!["permissionDecision"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task PreToolUse_WhenTheBatchEndNeverArrives_StopsHoldingTheRulesAfterTheUnsettledLimit()
+    {
+        var first = await HookAsync(Write());
+        var held = Directory.GetFiles(Path.Combine(Home, ".terse", FolderRuleLedger.DirectoryName, "s1"), FolderRuleLedger.PendingPattern);
+
+        foreach (var pending in held)
+            File.SetLastWriteTimeUtc(pending, DateTime.UtcNow - TimeSpan.FromMinutes(10));
+
+        Assert.Equal("deny", first!["permissionDecision"]!.GetValue<string>());
+        Assert.NotEmpty(held);
+        Assert.Null(await HookAsync(Write()));
+    }
+
+    private async Task EndBatchAsync(string session = "s1")
+    {
+        var payload = new JsonObject
+        {
+            ["hook_event_name"] = "PostToolBatch",
+            ["session_id"] = session,
+            ["cwd"] = Repository,
+            ["tool_calls"] = new JsonArray(),
+        };
+        using var output = new StringWriter();
+
+        Assert.Equal(0, await BatchNudge.RunAsync(new StringReader(payload.ToJsonString()), output, Home, log: false, TestContext.Current.CancellationToken));
     }
 }

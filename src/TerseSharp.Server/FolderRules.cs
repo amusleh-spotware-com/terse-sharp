@@ -30,7 +30,7 @@ public static class FolderRules
         ["hookEventName"] = "PreToolUse",
         ["permissionDecision"] = "deny",
         ["permissionDecisionReason"] = rules,
-    }, ShowLost: true);
+    }, ShowLost: true, Hold: true);
 
     internal static IReadOnlySet<string> Writers => WriterSet.Value;
 
@@ -71,13 +71,13 @@ public static class FolderRules
     private static async Task<Answer?> AnsweredAsync(FolderRuleHook hook, string home, Reply reply, CancellationToken cancellationToken)
     {
         var ledger = new FolderRuleLedger(home, hook.Session);
-        var unseen = FolderRulePaths.Rules(hook.Targets(), hook.Mentioned(), hook.Bases(), hook.Cwd).Where(rule => !ledger.Seen(rule)).ToList();
+        var unseen = FolderRulePaths.Rules(hook.Targets(), hook.Mentioned(), hook.Bases(), hook.Cwd).Where(rule => reply.Hold ? !ledger.Settled(rule) : !ledger.Seen(rule)).ToList();
 
         if (unseen is [])
             return null;
 
         var planned = Planned(reply.Preface.Length, await ContentsAsync(unseen, cancellationToken).ConfigureAwait(false));
-        var shown = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost);
+        var shown = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost, reply.Hold);
         string[] text = [reply.Preface, .. planned.Where(section => shown.Contains(section.Rule)).Select(section => section.Text)];
 
         return shown.Count is 0 ? null : new Answer(new JsonObject { ["hookSpecificOutput"] = reply.Output(string.Concat(text)) }.ToJsonString(), ledger);
@@ -120,7 +120,7 @@ public static class FolderRules
             : string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- {body.Length} characters, over this hook's {Budget}-character budget - read it now: read_text path=\"{rule}\" verbose=true");
     }
 
-    private sealed record Reply(string Preface, bool ShowUnrecorded, Func<string, JsonObject> Output, bool ShowLost = false);
+    private sealed record Reply(string Preface, bool ShowUnrecorded, Func<string, JsonObject> Output, bool ShowLost = false, bool Hold = false);
 
     private readonly record struct RuleSection(string Rule, string Text);
 
@@ -141,4 +141,16 @@ public static class FolderRules
     }
 
     private sealed record Answer(string Text, FolderRuleLedger Ledger);
+
+    internal static void Settle(string payload, string home)
+    {
+        try
+        {
+            if (FolderRuleHook.Parse(payload) is { Event: "PostToolBatch" } hook)
+                new FolderRuleLedger(home, hook.Session).Settle();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 }

@@ -25,31 +25,33 @@ public static class BatchNudge
     internal static IReadOnlyCollection<string> Reads => ReadTools;
 
     public static Task<int> RunAsync(TextReader input, TextWriter output, CancellationToken cancellationToken) =>
-        RunAsync(input, output, ClientRegistrar.Home(), cancellationToken);
+        RunAsync(input, output, ClientRegistrar.Home(), NudgeLog.Enabled(), cancellationToken);
 
-    internal static async Task<int> RunAsync(TextReader input, TextWriter output, string home, CancellationToken cancellationToken)
+    internal static async Task<int> RunAsync(TextReader input, TextWriter output, string home, bool log, CancellationToken cancellationToken)
     {
         var payload = await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
 
-        if (Classify(payload) is not { } verdict)
+        FolderRules.Settle(payload, home);
+
+        if (Classify(payload) is not { } toolUseId)
             return 0;
 
-        await NudgeHoldOut.RecordAsync(home, verdict, cancellationToken).ConfigureAwait(false);
+        if (log)
+            await NudgeLog.RecordAsync(home, toolUseId, cancellationToken).ConfigureAwait(false);
 
-        if (Decide(verdict) is { } context)
-            await output.WriteLineAsync(context).ConfigureAwait(false);
+        await output.WriteLineAsync(Decide(toolUseId)).ConfigureAwait(false);
 
         return 0;
     }
 
-    internal static string? Decide(BatchVerdict? verdict) => verdict is { Arm: NudgeArm.Nudged } ? Rendered() : null;
+    internal static string? Decide(string? toolUseId) => toolUseId is null ? null : Rendered();
 
-    internal static BatchVerdict? Classify(string payload)
+    internal static string? Classify(string payload)
     {
         try
         {
             return JsonNode.Parse(payload) is JsonObject root && Eligible(root) is { } call
-                ? NudgeHoldOut.Assign(Identified(call))
+                ? NudgeLog.Usable(Identified(call))
                 : null;
         }
         catch (JsonException)

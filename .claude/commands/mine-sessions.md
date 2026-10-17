@@ -413,6 +413,19 @@ def harvest(node, out):
             harvest(item, out)
 
 
+def edit_entries(arguments):
+    edits = arguments.get('edits')
+    return [arguments] + [entry for entry in edits if isinstance(entry, dict)] if isinstance(edits, list) else [arguments]
+
+
+def removed_texts(arguments):
+    return [entry['oldText'] for entry in edit_entries(arguments) if isinstance(entry.get('oldText'), str)]
+
+
+def replaced_everywhere(arguments):
+    return any(entry.get('replaceAll') is True for entry in edit_entries(arguments))
+
+
 roots, seen = [], set()
 for candidate in (os.path.expanduser('~/.claude/projects'),
                   os.path.join(os.environ.get('CLAUDE_CONFIG_DIR', ''), 'projects')):
@@ -773,7 +786,7 @@ for path, project, spilled in walk():
                                 if needle in text:
                                     traps[label] += 1
                                     trap_input[label] += len(json.dumps(arguments, sort_keys=True))
-                    elif CHANGED.search(text) and (tool in INSERTS or tool in REPLACERS) and not arguments.get('retryWith'):
+                    elif CHANGED.search(text) and (tool in INSERTS or tool in REPLACERS) and not arguments.get('retryWith') and not replaced_everywhere(arguments):
                         chunks = []
                         harvest(arguments, chunks)
                         asked = sum(chunk.count('\n') + 1 for chunk in chunks)
@@ -783,10 +796,12 @@ for path, project, spilled in walk():
                         asked_usings = [asked_usings] if isinstance(asked_usings, str) else asked_usings
                         asked += sum(str(helper).count('\n') + 2 for helper in asked_helpers)
                         asked += len(asked_usings) + 1 if asked_usings else 0
+                        asked += sum(old.count('\n') + 1 for old in removed_texts(arguments))
                         if asked:
                             files = len(CHANGED.findall(text))
                             reported = sum(int(value) for value in CHANGED.findall(text))
-                            allowed = asked + files if tool in INSERTS else asked * 2 + 2 * files
+                            separators = len(arguments['declarations']) if isinstance(arguments.get('declarations'), list) else 0
+                            allowed = asked + separators + files if tool in INSERTS else asked * 2 + 2 * files
                             bounded[tool] += 1
                             excess[min(max(reported - allowed, -1), 9)] += 1
                             if reported > allowed:
@@ -1145,7 +1160,7 @@ for label, count in traps.most_common():
     print(f'  {label:<40}{count:>5}x re-paid input {trap_input[label]:>9,} ch ~{trap_input[label] // 4:>7,} tok')
 
 print('\n== COLLATERAL: a SUCCESSFUL edit that changed more lines than the call asked for')
-print(f'  bound: an insert may change asked+1 lines, a replace asked*2+2 (removed+added+2); '
+print(f'  bound: an insert may change asked+declarations+files lines, a replace asked*2+2 per file with every oldText in asked, replaceAll skipped; '
       f'whole-file and cross-file tools are excluded, so this UNDER-reports')
 for tool, count in collateral.most_common():
     n = max(bounded[tool], 1)
@@ -1294,14 +1309,14 @@ and the next run must be comparable.
    inside the existing pass, all deliberately under-reporting:
    - **collateral** — a successful edit whose `changedLines=N` exceeds what its own payload can
      account for. The bound is per shape: an **insert** (`add_member`, `xaml_add_element`,
-     `razor_add_element`) may change `asked + 1` lines, one for the separator the tool adds; a
+     `razor_add_element`) may change `asked + declarations + files` lines, one separator per file and one per `declarations=` entry (`I778`); a
      **replace** (`replace_symbol`, `replace_symbol_body`, `edit_text`, `xaml_set_property`,
      `resx_set`, `razor_set_attribute`, `project_set_property`) may change `asked * 2 + 2`, because a
      diff counts the removed lines too. Whole-file (`write_text`) and deliberately cross-file
      (`rename_symbol`, `change_signature`, `move_type_to_*`) tools are **excluded**, since their
      change is not bounded by their payload. `asked` comes from the same `harvest()` the emitted-code
      regexes already use, plus every `add=` helper (its lines and one separator) and every
-     `usings=` line (one each, plus one separator), because the call asked for those too - so this
+     `usings=` line (one each, plus one separator), and every `oldText` an `edit_text` removes, top-level or in an `edits=` entry - a `replaceAll=true` call is skipped, since its occurrence count is not in the payload (`I778`) - because the call asked for those too - so this
      costs one comparison. A verify gate counts red on `FAILED`, `ERROR ` or `errors=[1-9]`, never
      on the substring `error`, which `errors=0` satisfies. The histogram is printed beside the counts
      because **the mode is `+1`** — the benign separator line — and a reader who does not see that
@@ -1523,21 +1538,21 @@ Gate 9's three counters convert in this order, because that is their cost order:
    by stating it once in the system prompt. So a row here whose only mechanism is "add a line to
    `CLAUDE.md`" is weak; a row that puts the reminder **at the moment of the call** — a `PostToolUse`
    or `PostToolBatch` hook, a `remedy:` line, a deny message from `ToolGuard` — is the strong form.
-   **The `PostToolBatch` nudge is a controlled experiment, not a fixture (I697).** `terse guard
-   --post-batch` holds out the half of eligible batches (one call, a read-only terse tool) whose
-   `tool_use` id hashes odd: `held = hashlib.sha256(tool_use_id.encode('utf-8')).digest()[0] & 1 == 1`
-   gets no `additionalContext`, even is nudged. Pinned vectors: `test` -> held, `abc` -> nudged -
-   check them before trusting the split. Each eligible batch is appended to
-   `~/.terse/batch-nudge.log` (or `$TERSE_HOME/.terse/`) as `<utc> <tool_use_id> nudged|held`
-   (`-` when the payload carried no id). Join the log to the transcripts by `tool_use.id`, take the
-   NEXT assistant message after each logged call, and print
-   `nudge arm: nudged a/n = x%  held b/m = y%  gap = x-y points`. Count only ids present in the log -
-   the log is what proves the hold-out build answered. If the log is absent, or every line is `-`, say
-   the experiment did not run and compute no gap. **Drop rule:** with at least 300 next-messages per
-   arm, a gap under 3 points is a row to delete the `PostToolBatch` hook (`BatchNudge`,
-   `ClientRegistrar.BatchEntry`) and its ~58 tokens per firing; a gap of 3 points or more is logged as
-   the measured lift and keeps the nudge, and the hold-out is turned off only after a second week
-   repeats the lift.
+   **The `PostToolBatch` nudge fires on every eligible batch (I697, hold-out closed by I779).** The
+   odd-hash hold-out lifted the multi-call share of the next message two weeks running (+6.8, then
+   +6.7 points at n>=300 per arm), so `terse guard --post-batch` now nudges every batch of one
+   read-only terse call and assigns no arm. Read its effect against the prior-week baseline, not an
+   arm: take every assistant message that carried exactly one read-only terse call (the hook's own
+   eligibility, computable from the transcripts alone), take the NEXT assistant message after it, and
+   print `nudge lift: multi-call next message x%  baseline 28.0%  lift = x-28.0 points  last nudged
+   arm 34.7%` - 28.0% is the held arm and 34.7% the nudged arm of the last hold-out week (2026-10-17
+   scan). The per-id log is opt-in: only with `TERSE_NUDGE_LOG=1` is each eligible batch appended to
+   `~/.terse/batch-nudge.log` (or `$TERSE_HOME/.terse/`) as `<utc> <tool_use_id> nudged` (`-` when
+   the payload carried no id); when it is present, join it by `tool_use.id` as the exact eligible set,
+   and when it is absent say so and use the transcript-derived set. **Drop rule:** with at least 300
+   next-messages, a lift under 3 points two weeks running is a row to re-run the hold-out, and only a
+   re-run hold-out gap under 3 points is a row to delete the `PostToolBatch` hook (`BatchNudge`,
+   `ClientRegistrar.BatchEntry`) and its ~58 tokens per firing.
 3. **redundant share** — identical arguments, one session. Lever `(d)`: the server can *prove* the
    answer did not change (no write in between) and say so instead of recomputing.
 

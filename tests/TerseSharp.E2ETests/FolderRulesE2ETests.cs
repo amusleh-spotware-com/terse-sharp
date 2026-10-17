@@ -53,9 +53,9 @@ public sealed class FolderRulesE2ETests : IDisposable
         ["tool_input"] = new JsonObject { ["path"] = path },
     };
 
-    private async Task<string> GuardAsync(JsonObject payload)
+    private async Task<string> GuardAsync(JsonObject payload, string flag = "--folder-rules")
     {
-        using var process = Process.Start(Start()) ?? throw new InvalidOperationException("dotnet did not start");
+        using var process = Process.Start(Start(flag)) ?? throw new InvalidOperationException("dotnet did not start");
 
         await process.StandardInput.WriteAsync(payload.ToJsonString());
         process.StandardInput.Close();
@@ -69,7 +69,7 @@ public sealed class FolderRulesE2ETests : IDisposable
         return await output;
     }
 
-    private ProcessStartInfo Start()
+    private ProcessStartInfo Start(string flag)
     {
         var start = new ProcessStartInfo("dotnet")
         {
@@ -81,7 +81,7 @@ public sealed class FolderRulesE2ETests : IDisposable
 
         start.ArgumentList.Add(TerseServerFixture.ServerAssemblyPath());
         start.ArgumentList.Add("guard");
-        start.ArgumentList.Add("--folder-rules");
+        start.ArgumentList.Add(flag);
         start.Environment["TERSE_HOME"] = Home;
         start.Environment["TERSE_UPDATE"] = "0";
 
@@ -99,5 +99,19 @@ public sealed class FolderRulesE2ETests : IDisposable
 
         Assert.Empty(allowed.Trim());
         Assert.Equal("deny", denied["permissionDecision"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task GuardPostBatch_EndsTheResponseSoASiblingWriteIsDeniedAndTheNextResponsesRetryIsNot()
+    {
+        var write = Payload("PreToolUse", "mcp__terse-sharp__write_text", "tests/Unit/NewTests.cs");
+        var first = await GuardAsync(write);
+        var sibling = await GuardAsync(write);
+        await GuardAsync(new JsonObject { ["hook_event_name"] = "PostToolBatch", ["session_id"] = "e2e-session", ["cwd"] = Repository, ["tool_calls"] = new JsonArray() }, "--post-batch");
+        var retry = await GuardAsync(write);
+
+        Assert.Equal("deny", JsonNode.Parse(first)!["hookSpecificOutput"]!["permissionDecision"]!.GetValue<string>());
+        Assert.Contains("Use NUnit classic asserts only.", JsonNode.Parse(sibling)!["hookSpecificOutput"]!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Empty(retry.Trim());
     }
 }

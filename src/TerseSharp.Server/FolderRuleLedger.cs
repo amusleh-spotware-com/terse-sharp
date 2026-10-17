@@ -17,14 +17,14 @@ internal sealed class FolderRuleLedger(string home, string session)
 
     internal bool Seen(string rule) => File.Exists(Marker(rule));
 
-    internal IReadOnlySet<string> Claim(IReadOnlyList<string> rules, bool showUnrecorded, bool showLost = false)
+    internal IReadOnlySet<string> Claim(IReadOnlyList<string> rules, bool showUnrecorded, bool showLost = false, bool hold = false)
     {
         var recordable = Prepared();
         var shown = new HashSet<string>(rules.Count, PathBoundary.Comparer);
 
         foreach (var rule in rules)
         {
-            var won = recordable ? Won(Marker(rule)) : null;
+            var won = recordable ? Won(Marker(rule), hold) : null;
 
             if (won is false && !showLost)
                 break;
@@ -42,8 +42,11 @@ internal sealed class FolderRuleLedger(string home, string session)
             Directory.Delete(SessionFolder, recursive: true);
     }
 
-    private bool? Won(string marker)
+    private bool? Won(string marker, bool hold)
     {
+        if (hold)
+            Hold(marker);
+
         try
         {
             File.OpenHandle(marker, FileMode.CreateNew, FileAccess.Write).Dispose();
@@ -113,7 +116,10 @@ internal sealed class FolderRuleLedger(string home, string session)
     internal void Release()
     {
         foreach (var marker in created)
+        {
             File.Delete(marker);
+            File.Delete(marker + PendingSuffix);
+        }
     }
 
     private static string FileName(string session) => string.Create(session.Length, session, static (name, source) =>
@@ -123,4 +129,32 @@ internal sealed class FolderRuleLedger(string home, string session)
     });
 
     private readonly List<string> created = [];
+    internal const string PendingPattern = "*" + PendingSuffix;
+    private const string PendingSuffix = ".pending";
+    private static readonly TimeSpan Unsettled = TimeSpan.FromSeconds(30);
+
+    internal bool Settled(string rule) => Seen(rule) && !Pending(Marker(rule));
+
+    internal void Settle()
+    {
+        if (!Directory.Exists(SessionFolder))
+            return;
+
+        foreach (var pending in Directory.EnumerateFiles(SessionFolder, PendingPattern))
+            File.Delete(pending);
+    }
+
+    private static bool Pending(string marker) => DateTime.UtcNow - File.GetLastWriteTimeUtc(marker + PendingSuffix) <= Unsettled;
+
+    private static void Hold(string marker)
+    {
+        try
+        {
+            if (!File.Exists(marker))
+                File.OpenHandle(marker + PendingSuffix, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 }
