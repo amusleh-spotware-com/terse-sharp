@@ -1,4 +1,8 @@
 
+using System.Text.Json;
+using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
+
 namespace TerseSharp.E2ETests;
 
 public sealed class ChangedTestSelectionE2ETests
@@ -593,4 +597,42 @@ public sealed class ChangedTestSelectionE2ETests
     }
 
     private static bool InFlight(string probe) => probe.StartsWith("ERROR RunInFlight", StringComparison.Ordinal);
+
+    [Fact]
+    public async Task RunTests_CancelledByANotificationsCancelledForItsRequestId_FreesTheSolutionWithoutStatusCancel()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var id = default(RequestId);
+
+            _ = await StalledAsync(server, () => RequestedAsync(server, id = new RequestId("i775-" + Guid.NewGuid().ToString("N"))));
+
+            await server.Client.SendNotificationAsync(
+                NotificationMethods.CancelledNotification,
+                new CancelledNotificationParams { RequestId = id, Reason = "I775" },
+                McpJsonUtilities.DefaultOptions,
+                TestContext.Current.CancellationToken);
+
+            Assert.False(InFlight(await ProbedUntilAsync(server, inFlight: false)));
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    private static async Task<string> RequestedAsync(TerseServerProcess server, RequestId id)
+    {
+        var arguments = Stalling().ToDictionary(pair => pair.Key, pair => JsonSerializer.SerializeToElement(pair.Value));
+        var result = await server.Client.SendRequestAsync<CallToolRequestParams, CallToolResult>(
+            RequestMethods.ToolsCall,
+            new CallToolRequestParams { Name = "run_tests", Arguments = arguments },
+            McpJsonUtilities.DefaultOptions,
+            id,
+            CancellationToken.None);
+
+        return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
+    }
 }
