@@ -7,6 +7,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+### Fixed
+
+- **Two preload unit tests no longer race the E2E assembly over the shared fixture (I758).** `ToolContextTests.ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould` and `ToolContextTests.ReadText_OfAnAbsoluteCsPathWhileThePreloadIsRunning_AnswersTheOutlineTheLoadedWorkspaceWould` now load a private committed copy (`TemporarySolution.CreateRepositoryAsync`) instead of `fixtures/FixtureSolution`, which the E2E assembly edits while `dotnet test TerseSharp.slnx` runs both assemblies in parallel.
 
 ## [0.77.0] - 2026-10-15
 

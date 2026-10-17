@@ -442,15 +442,16 @@ public sealed class ToolContextTests
     public async Task ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
+        using var solution = await TemporarySolution.CreateRepositoryAsync(cancellationToken);
         using var registry = new WorkspaceRegistry();
         using var context = new ToolContext(registry, readOnly: false);
         var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        context.Preload(preload.Task, Fixtures.SolutionPath);
+        context.Preload(preload.Task, solution.SolutionPath);
 
         var early = await ReadAndListAnswersAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
 
-        await registry.LoadAsync(Fixtures.SolutionPath, cancellationToken);
+        await registry.LoadAsync(solution.SolutionPath, cancellationToken);
         preload.SetResult();
 
         Assert.Equal(await ReadAndListAnswersAsync(context, cancellationToken), early);
@@ -463,15 +464,16 @@ public sealed class ToolContextTests
     public async Task ReadText_OfAnAbsoluteCsPathWhileThePreloadIsRunning_AnswersTheOutlineTheLoadedWorkspaceWould()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
+        using var solution = await TemporarySolution.CreateRepositoryAsync(cancellationToken);
         using var registry = new WorkspaceRegistry();
         using var context = new ToolContext(registry, readOnly: false);
         var preload = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        context.Preload(preload.Task, Fixtures.SolutionPath);
+        context.Preload(preload.Task, solution.SolutionPath);
 
-        var pending = new FileTools(context).ReadText(Fixtures.OrderServicePath, cancellationToken: cancellationToken);
+        var pending = new FileTools(context).ReadText(solution.OrderServicePath, cancellationToken: cancellationToken);
 
-        await registry.LoadAsync(Fixtures.SolutionPath, cancellationToken);
+        await registry.LoadAsync(solution.SolutionPath, cancellationToken);
         preload.SetResult();
 
         var answer = await pending.WaitAsync(TimeSpan.FromSeconds(60), cancellationToken);
