@@ -57,7 +57,13 @@ internal sealed record FolderRuleHook(string Event, string Session, string Cwd, 
             ? new(hookEvent, SessionOf(root), cwd, TerseTool(Text(root["tool_name"])), root)
             : null;
 
-    private static string SessionOf(JsonObject root) => Text(root["session_id"]) is { Length: > 0 } session ? session : DefaultSession;
+    private static string SessionOf(JsonObject root) =>
+    (Text(root["session_id"]), Text(root["agent_id"])) switch
+    {
+        ({ Length: > 0 } session, { Length: > 0 } agent) => string.Concat(session, "-", agent),
+        ({ Length: > 0 } session, _) => session,
+        _ => DefaultSession,
+    };
 
     private static string? TerseTool(string? name)
     {
@@ -78,4 +84,6 @@ internal sealed record FolderRuleHook(string Event, string Session, string Cwd, 
     }
 
     private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue(out string? text) ? text : null;
+
+    internal bool DryRun => Input["dryRun"] is JsonValue value && value.TryGetValue(out bool dryRun) && dryRun;
 }

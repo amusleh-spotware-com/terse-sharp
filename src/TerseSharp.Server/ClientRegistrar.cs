@@ -82,7 +82,7 @@ public static class ClientRegistrar
     {
         var target = SettingsPath();
 
-        await SaveAsync(target, Guarded(Settings(target))).ConfigureAwait(false);
+        await SaveAsync(target, Guarded(Settings(target), FolderRules.Enabled())).ConfigureAwait(false);
 
         return "installed guard -> " + target;
     }
@@ -319,15 +319,15 @@ public static class ClientRegistrar
     private static string SettingsPath() =>
         Path.Combine(ClaudeConfigDirectory() ?? Path.Combine(Home(), ".claude"), "settings.json");
 
-    private static JsonObject Guarded(JsonObject root)
+    internal static JsonObject Guarded(JsonObject root, bool folderRules)
     {
         var updated = (JsonObject)root.DeepClone();
         var hooks = Hooks(updated);
 
-        hooks["PreToolUse"] = Appended(hooks["PreToolUse"] as JsonArray, GuardEntry(), FolderRulesEntry(TerseWriters()));
-        hooks["PostToolUse"] = Appended(hooks["PostToolUse"] as JsonArray, FolderRulesEntry(TerseCalls));
+        hooks["PreToolUse"] = Appended(hooks["PreToolUse"] as JsonArray, [GuardEntry(), .. FolderRulesEntries(TerseWriters(), folderRules)]);
+        hooks["PostToolUse"] = Appended(hooks["PostToolUse"] as JsonArray, FolderRulesEntries(TerseCalls, folderRules));
         hooks["PostToolBatch"] = Appended(hooks["PostToolBatch"] as JsonArray, BatchEntry());
-        hooks["SessionStart"] = Appended(hooks["SessionStart"] as JsonArray, FolderRulesEntry(Compaction));
+        hooks["SessionStart"] = Appended(hooks["SessionStart"] as JsonArray, FolderRulesEntries(Compaction, folderRules));
 
         return updated;
     }
@@ -362,7 +362,7 @@ public static class ClientRegistrar
 
     private static bool GuardIsCurrent(JsonObject? root) =>
         root is not null
-        && string.Equals(root.ToJsonString(Indented), Guarded(root).ToJsonString(Indented), StringComparison.Ordinal);
+        && string.Equals(root.ToJsonString(Indented), Guarded(root, FolderRules.Enabled()).ToJsonString(Indented), StringComparison.Ordinal);
 
     private static async Task<bool> SkillIsCurrentAsync(string path, CancellationToken cancellationToken) =>
         string.Equals(await ReadAsync(path, cancellationToken).ConfigureAwait(false), SkillAsset.Read(), StringComparison.Ordinal);
@@ -439,6 +439,8 @@ public static class ClientRegistrar
     };
 
     private static string TerseWriters() => TerseCalls + "__(" + string.Join('|', FolderRules.Writers.Order(StringComparer.Ordinal)) + ")";
+
+    private static JsonObject[] FolderRulesEntries(string matcher, bool enabled) => enabled ? [FolderRulesEntry(matcher)] : [];
 }
 
 public sealed record ClientTarget(string Name, string ConfigPath);

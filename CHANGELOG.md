@@ -7,6 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+### Added
+
+- **`TERSE_FOLDER_RULES=0` opts out of the folder-rules hook (I769).** `terse install --guard` and the asset refresh `terse serve` runs at startup no longer register `terse guard --folder-rules` when it is set, so a deleted entry is not written back (`Guarded_WithFolderRulesOff_DropsTheFolderRulesHooksKeepsTheGuardAndStaysCurrent`).
+
 ### Changed
 
 - **Response format: `get_symbol_source` on an overloaded name answers every overload instead of `AmbiguousSymbol` (I766).** When every candidate is an overload of one name in one containing type and there are at most 5, a single-id read answers `N overloads` followed by an `overload <id>` line, the location and the source for each, and a `symbolIds=` entry answers them the same way instead of `NOT_RESOLVED`. A name spanning several types, a documentation id found in several projects, more than 5 overloads and every edit tool still refuse. Covered by `GetSymbolSource_ForAnOverloadedNameWithNoParameterList_AnswersEveryOverloadInOneCall`, `GetSymbolSource_ForTwoEmptySlotsMatchingTwoOverloads_AnswersBothUnderTheirOwnIds`, `GetSymbolSource_WithAnOverloadedNameInABatch_AnswersItsOverloadsInsteadOfNotResolved`, `GetSymbolSource_ForANameDeclaredByDifferentTypes_StillRefuses` and `ReplaceSymbolBody_ForAnOverloadedName_StillRefusesWhereTheReadAnswers`.
@@ -19,6 +23,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 - **`write_text files=[...]` with `force=true` no longer writes an entry into another loaded workspace (I765).** The single write already refused a path a different loaded workspace owns; the batch anchored on its first entry and let a second workspace's path through ungated. It now answers the same refusal before anything is written (`WriteText_AFilesBatchWithForce_RefusesAnEntryInsideAnotherLoadedWorkspaceAndWritesNothing`), and the single-write check releases the workspace lease it takes. The `write_text` and `force` descriptions now say what has held since the batch learned it: `force=true` lands every `files=` entry outside every root, not only a single write.
 - **`WriteText_WithAPerEntryForce_LandsACSharpEntryBesideAMarkdownOneAndNamesEveryUnforcedPath` retries a `Transient` build-host answer (I767)**, like its unresolved-name sibling.
 - **`ExternalCreate_ThenSearchSymbols_FindsTheNewType` reports its own evidence when it fails (I760)** - the outline answer and `workspace_status verbose=true` - so the next `0 symbols` red names its cause instead of needing a rerun.
+- **The folder-rules hook closes the six NITs from the I761 review (I769).** A `dryRun=true` write is no longer denied below unseen rules (`PreToolUse_ForADryRunWriteBelowUnseenRules_AllowsItAndTheRealWriteIsStillDenied`, `GuardFolderRules_AllowsADryRunWriteBelowUnseenRules_AndStillDeniesTheRealOne`); one locked stale session folder no longer aborts the 7-day prune (`PostToolUse_WhenOneStaleSessionIsLocked_StillPrunesTheOtherStaleSessions`); a directory `path=` now injects that directory's own `CLAUDE.md` (`PostToolUse_ForADirectoryPath_InjectsThatDirectorysOwnRulesOnce`); an answer that cannot be written releases the rules it claimed (`RunAsync_WhenTheAnswerCannotBeWritten_ReleasesItsRulesSoTheNextCallCarriesThem`); a subagent is keyed on `session_id` plus `agent_id`, so it receives rules the main thread already saw (`PostToolUse_ForASubagentOfASessionThatSawTheRules_InjectsThemIntoTheSubagent`).
 
 ## [0.77.0] - 2026-10-15
 

@@ -44,7 +44,7 @@ public static class FolderRules
             var payload = await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
 
             if (FolderRuleHook.Parse(payload) is { } hook && await AnswerAsync(hook, home, cancellationToken).ConfigureAwait(false) is { } answer)
-                await output.WriteLineAsync(answer).ConfigureAwait(false);
+                await DeliverAsync(output, answer).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -53,22 +53,22 @@ public static class FolderRules
         return 0;
     }
 
-    private static Task<string?> AnswerAsync(FolderRuleHook hook, string home, CancellationToken cancellationToken) => hook switch
+    private static Task<Answer?> AnswerAsync(FolderRuleHook hook, string home, CancellationToken cancellationToken) => hook switch
     {
         { Event: "SessionStart" } => Forgotten(hook, home),
-        { Event: "PreToolUse", Tool: { } tool } when Writers.Contains(tool) => AnsweredAsync(hook, home, Denial, cancellationToken),
+        { Event: "PreToolUse", Tool: { } tool, DryRun: false } when Writers.Contains(tool) => AnsweredAsync(hook, home, Denial, cancellationToken),
         { Event: "PostToolUse", Tool: not null } => AnsweredAsync(hook, home, Injection, cancellationToken),
-        _ => Task.FromResult<string?>(null),
+        _ => Task.FromResult<Answer?>(null),
     };
 
-    private static Task<string?> Forgotten(FolderRuleHook hook, string home)
+    private static Task<Answer?> Forgotten(FolderRuleHook hook, string home)
     {
         new FolderRuleLedger(home, hook.Session).Forget();
 
-        return Task.FromResult<string?>(null);
+        return Task.FromResult<Answer?>(null);
     }
 
-    private static async Task<string?> AnsweredAsync(FolderRuleHook hook, string home, Reply reply, CancellationToken cancellationToken)
+    private static async Task<Answer?> AnsweredAsync(FolderRuleHook hook, string home, Reply reply, CancellationToken cancellationToken)
     {
         var ledger = new FolderRuleLedger(home, hook.Session);
         var unseen = FolderRulePaths.Rules(hook.Targets(), hook.Mentioned(), hook.Bases(), hook.Cwd).Where(rule => !ledger.Seen(rule)).ToList();
@@ -80,7 +80,7 @@ public static class FolderRules
         var shown = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost);
         string[] text = [reply.Preface, .. planned.Where(section => shown.Contains(section.Rule)).Select(section => section.Text)];
 
-        return shown.Count is 0 ? null : new JsonObject { ["hookSpecificOutput"] = reply.Output(string.Concat(text)) }.ToJsonString();
+        return shown.Count is 0 ? null : new Answer(new JsonObject { ["hookSpecificOutput"] = reply.Output(string.Concat(text)) }.ToJsonString(), ledger);
     }
 
     private static async Task<List<(string Rule, string Content)>> ContentsAsync(List<string> rules, CancellationToken cancellationToken)
@@ -123,4 +123,22 @@ public static class FolderRules
     private sealed record Reply(string Preface, bool ShowUnrecorded, Func<string, JsonObject> Output, bool ShowLost = false);
 
     private readonly record struct RuleSection(string Rule, string Text);
+
+    internal const string Variable = "TERSE_FOLDER_RULES";
+
+    internal static bool Enabled() => !string.Equals(Environment.GetEnvironmentVariable(Variable), "0", StringComparison.Ordinal);
+
+    private static async Task DeliverAsync(TextWriter output, Answer answer)
+    {
+        try
+        {
+            await output.WriteLineAsync(answer.Text).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException)
+        {
+            answer.Ledger.Release();
+        }
+    }
+
+    private sealed record Answer(string Text, FolderRuleLedger Ledger);
 }

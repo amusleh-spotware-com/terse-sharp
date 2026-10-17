@@ -454,4 +454,16 @@ public sealed class ClientRegistrarTests : IDisposable
         Assert.Null(hooks["PreToolUse"]);
         Assert.Equal(5, hooks["Stop"]![0]!["hooks"]![0]!["command"]!.GetValue<int>());
     }
+
+    [Fact]
+    public void Guarded_WithFolderRulesOff_DropsTheFolderRulesHooksKeepsTheGuardAndStaysCurrent()
+    {
+        var installed = ClientRegistrar.Guarded([], folderRules: true);
+        var off = ClientRegistrar.Guarded(installed, folderRules: false).ToJsonString();
+
+        Assert.Contains("--folder-rules", installed.ToJsonString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("--folder-rules", off, StringComparison.Ordinal);
+        Assert.Contains("terse guard --post-batch", off, StringComparison.Ordinal);
+        Assert.Equal(off, ClientRegistrar.Guarded(JsonNode.Parse(off)!.AsObject(), folderRules: false).ToJsonString());
+    }
 }

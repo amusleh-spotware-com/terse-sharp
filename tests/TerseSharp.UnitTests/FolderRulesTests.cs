@@ -303,4 +303,69 @@ public sealed class FolderRulesTests : IDisposable
 
         return text.Length is 0 ? null : JsonNode.Parse(text)!["hookSpecificOutput"]!.AsObject();
     }
+
+    [Fact]
+    public async Task PreToolUse_ForADryRunWriteBelowUnseenRules_AllowsItAndTheRealWriteIsStillDenied()
+    {
+        var dryRun = Write();
+        dryRun["tool_input"]!["dryRun"] = true;
+
+        Assert.Null(await HookAsync(dryRun));
+        Assert.Equal("deny", (await HookAsync(Write()))!["permissionDecision"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task PostToolUse_WhenOneStaleSessionIsLocked_StillPrunesTheOtherStaleSessions()
+    {
+        var root = Path.Combine(Home, ".terse", "folder-rules");
+        var locked = Directory.CreateDirectory(Path.Combine(root, "a-locked-session"));
+        var unlocked = Directory.CreateDirectory(Path.Combine(root, "z-stale-session"));
+        await using var held = new FileStream(Path.Combine(locked.FullName, "held"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        locked.LastWriteTimeUtc = DateTime.UtcNow.AddDays(-30);
+        unlocked.LastWriteTimeUtc = DateTime.UtcNow.AddDays(-30);
+
+        await HookAsync(Read());
+
+        Assert.False(Directory.Exists(unlocked.FullName));
+    }
+
+    [Theory]
+    [InlineData("UnitTests/Foo")]
+    [InlineData("UnitTests/Foo/")]
+    public async Task PostToolUse_ForADirectoryPath_InjectsThatDirectorysOwnRulesOnce(string path)
+    {
+        var context = Context(await HookAsync(Call("PostToolUse", "mcp__terse-sharp__analyze", new() { ["path"] = path })));
+
+        Assert.Contains("UNIT RULES", context, StringComparison.Ordinal);
+        Assert.Contains("FOO RULES", context, StringComparison.Ordinal);
+        Assert.Equal(context.IndexOf("FOO RULES", StringComparison.Ordinal), context.LastIndexOf("FOO RULES", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenTheAnswerCannotBeWritten_ReleasesItsRulesSoTheNextCallCarriesThem()
+    {
+        var read = Read();
+        read["session_id"] = "s1";
+        read["cwd"] = Repository;
+        using var broken = new BrokenWriter();
+
+        Assert.Equal(0, await FolderRules.RunAsync(new StringReader(read.ToJsonString()), broken, Home, TestContext.Current.CancellationToken));
+        Assert.Contains("FOO RULES", Context(await HookAsync(Read())), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForASubagentOfASessionThatSawTheRules_InjectsThemIntoTheSubagent()
+    {
+        await HookAsync(Read());
+        var subagent = Read();
+        subagent["agent_id"] = "agent-1";
+
+        Assert.Contains("FOO RULES", Context(await HookAsync(subagent)), StringComparison.Ordinal);
+        Assert.Null(await HookAsync(Read()));
+    }
+
+    private sealed class BrokenWriter : StringWriter
+    {
+        public override Task WriteLineAsync(string? value) => Task.FromException(new IOException("The pipe is being closed."));
+    }
 }

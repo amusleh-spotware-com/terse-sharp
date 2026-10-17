@@ -42,11 +42,12 @@ internal sealed class FolderRuleLedger(string home, string session)
             Directory.Delete(SessionFolder, recursive: true);
     }
 
-    private static bool? Won(string marker)
+    private bool? Won(string marker)
     {
         try
         {
             File.OpenHandle(marker, FileMode.CreateNew, FileAccess.Write).Dispose();
+            created.Add(marker);
 
             return true;
         }
@@ -82,7 +83,15 @@ internal sealed class FolderRuleLedger(string home, string session)
         try
         {
             foreach (var stale in new DirectoryInfo(Root).EnumerateDirectories().Where(folder => DateTime.UtcNow - folder.LastWriteTimeUtc > Retention))
-                stale.Delete(recursive: true);
+            {
+                try
+                {
+                    stale.Delete(recursive: true);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -94,21 +103,17 @@ internal sealed class FolderRuleLedger(string home, string session)
     private static string Digest(string rule)
     {
         var folded = rule.Length <= MaxStackChars ? stackalloc char[MaxStackChars] : new char[rule.Length];
-        var length = Folded(rule, folded);
+        var length = PathBoundary.Comparison is StringComparison.OrdinalIgnoreCase ? rule.AsSpan().ToUpperInvariant(folded) : rule.AsSpan().TryCopyTo(folded) ? rule.Length : 0;
         Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
         SHA256.HashData(MemoryMarshal.AsBytes(folded[..length]), hash);
 
         return Convert.ToHexString(hash);
     }
 
-    private static int Folded(ReadOnlySpan<char> rule, Span<char> destination)
+    internal void Release()
     {
-        if (PathBoundary.Comparison is StringComparison.OrdinalIgnoreCase)
-            return rule.ToUpperInvariant(destination);
-
-        rule.CopyTo(destination);
-
-        return rule.Length;
+        foreach (var marker in created)
+            File.Delete(marker);
     }
 
     private static string FileName(string session) => string.Create(session.Length, session, static (name, source) =>
@@ -116,4 +121,6 @@ internal sealed class FolderRuleLedger(string home, string session)
         for (var index = 0; index < source.Length; index++)
             name[index] = char.IsAsciiLetterOrDigit(source[index]) || source[index] is '-' or '_' ? source[index] : '_';
     });
+
+    private readonly List<string> created = [];
 }

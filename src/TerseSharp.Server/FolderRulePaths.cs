@@ -24,7 +24,12 @@ internal static class FolderRulePaths
     {
         var trimmed = mentioned.AsSpan().Trim().Trim("\"'");
 
-        return trimmed.IsEmpty || trimmed.ContainsAny(Wildcards) ? null : Path.GetDirectoryName(Resolved(Hosted(trimmed), bases));
+        if (trimmed.IsEmpty || trimmed.ContainsAny(Wildcards))
+            return null;
+
+        var resolved = Path.TrimEndingDirectorySeparator(Resolved(Hosted(trimmed), bases));
+
+        return Directory.Exists(resolved) ? resolved : Path.GetDirectoryName(resolved);
     }
 
     private static string Hosted(ReadOnlySpan<char> path)

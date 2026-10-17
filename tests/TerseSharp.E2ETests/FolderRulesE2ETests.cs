@@ -87,4 +87,17 @@ public sealed class FolderRulesE2ETests : IDisposable
 
         return start;
     }
+
+    [Fact]
+    public async Task GuardFolderRules_AllowsADryRunWriteBelowUnseenRules_AndStillDeniesTheRealOne()
+    {
+        var dryRun = Payload("PreToolUse", "mcp__terse-sharp__write_text", "tests/Unit/NewTests.cs");
+        dryRun["tool_input"]!["dryRun"] = true;
+
+        var allowed = await GuardAsync(dryRun);
+        var denied = JsonNode.Parse(await GuardAsync(Payload("PreToolUse", "mcp__terse-sharp__write_text", "tests/Unit/NewTests.cs")))!["hookSpecificOutput"]!;
+
+        Assert.Empty(allowed.Trim());
+        Assert.Equal("deny", denied["permissionDecision"]!.GetValue<string>());
+    }
 }
