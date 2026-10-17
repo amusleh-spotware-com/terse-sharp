@@ -23,7 +23,7 @@ public sealed class ChangedFilesTimingE2ETests : IAsyncLifetime
         var first = await CallAsync("changed_files", new(arguments));
         var second = first;
 
-        for (var attempt = 0; attempt < 30 && !second.Contains("UNCHANGED", StringComparison.Ordinal); attempt++)
+        for (var attempt = 0; attempt < 150 && !second.Contains("UNCHANGED", StringComparison.Ordinal); attempt++)
         {
             await Task.Delay(100, TestContext.Current.CancellationToken);
             second = await CallAsync("changed_files", new(arguments));

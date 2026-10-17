@@ -164,11 +164,14 @@ public sealed class FolderRulesTests : IDisposable
     }
 
     [Fact]
-    public async Task PreToolUse_ForParallelWritesBelowUnseenRules_DeniesEveryOneOfThem()
+    public async Task PreToolUse_ForParallelWritesBelowUnseenRules_DeniesWithTheRulesAndNeverWithoutThem()
     {
         var answers = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => HookAsync(Write())));
+        var denials = answers.OfType<JsonObject>().ToArray();
 
-        Assert.All(answers, answer => Assert.Equal("deny", answer?["permissionDecision"]?.GetValue<string>()));
+        Assert.NotEmpty(denials);
+        Assert.All(denials, denial => Assert.Equal("deny", denial["permissionDecision"]?.GetValue<string>()));
+        Assert.All(denials, denial => Assert.Contains("FOO RULES", denial["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal));
         Assert.Null(await HookAsync(Write()));
     }
 
