@@ -7,6 +7,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+
+## [0.79.0] - 2026-10-18
 ### Added
 
 - **`find_files exclude=` and `search_symbols queries=` (I777).** `exclude=` drops what `glob=` or `globs=` selected, as on `search_text`, and is refused beside an archive `root=`. `queries=` searches up to 10 names in one call, every record tagged `q1..qN`, and a symbol several match is one record; `search_symbols query=` is no longer required. Covered by `FindFiles_WithExclude_DropsTheFilesTheGlobCannotLeaveOut`, `SearchSymbols_WithQueries_TagsEveryRecordByTheQueryThatFoundIt`, `SearchSymbols_WithTwoQueriesMatchingOneType_AnswersOneRecordCarryingBothTags` and `SearchSymbols_WithTwoQueries_CostsNoMoreThanTheTwoCallsItReplaces`.
@@ -7733,7 +7735,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.78.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.79.0...HEAD
+[0.79.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.79.0
 [0.78.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.78.0
 [0.77.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.77.0
 [0.76.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.76.0
