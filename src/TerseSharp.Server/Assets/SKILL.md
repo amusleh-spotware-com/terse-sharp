@@ -712,7 +712,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
 4. **A successful edit answers in one line per changed file, not a diff.**
    `<workspace-relative path>  changedLines=N` - the lines that actually changed, summed over each
    change, not the span between the first and the last; a changed tool schema adds
-   `  schema <tool>=N tokens (cap 1024, left=M)`. `edit_text` and `write_text` print the **file name alone**, because you
+   `  schema <tool>=N tokens HEURISTIC`, plus `(cap 1024, left=M)` in terse's own project. `edit_text` and `write_text` print the **file name alone**, because you
    passed the path in; a `write_text` over a file that already had content opens with `overwrote existing  `, so an overwrite you took for a create is visible without the diff. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
    there is a non-zero count or delta to report. Pass `verbose=true` on any edit, refactor,
    `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*`

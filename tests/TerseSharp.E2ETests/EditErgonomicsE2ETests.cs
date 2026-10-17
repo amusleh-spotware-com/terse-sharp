@@ -1758,10 +1758,10 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task EditText_ForcedOnAToolDescription_EndsItsSuccessLineWithThatToolsSchemaEstimateAndTheCap()
+    public async Task EditText_ForcedOnAToolDescriptionOutsideTheRunningServer_EndsItsSuccessLineWithAHeuristicEstimateAndNoCap()
     {
         const string Probe = "src/Fixture.Trading/TerseSchemaProbe.cs";
-        const string Trailer = "  schema fake_tool=26 tokens (cap 1024, left=998)";
+        const string Trailer = "  schema fake_tool=26 tokens HEURISTIC";
         await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = SchemaProbe("abc"), ["force"] = true });
         try
         {

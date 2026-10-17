@@ -35,9 +35,9 @@ public sealed class ToolSchemaEstimateTests
         }
         """;
 
-    private static Solution SolutionOf(AdhocWorkspace workspace, string source)
+    private static Solution SolutionOf(AdhocWorkspace workspace, string source, string assembly = "fake")
     {
-        var project = workspace.AddProject("fake", LanguageNames.CSharp)
+        var project = workspace.AddProject(assembly, LanguageNames.CSharp)
             .AddMetadataReference(MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
 
         return project.AddDocument("FakeTools.cs", SourceText.From(source)).Project.Solution;
@@ -129,9 +129,9 @@ public sealed class ToolSchemaEstimateTests
         DeclaredTool[] original = [new("edit_text", 3900, 17), new("read_text", 2000, 12)];
         DeclaredTool[] edited = [new("edit_text", 4000, 17), new("read_text", 2000, 12)];
 
-        var trailer = ToolSchemaEstimate.Trailer(edited, original, installed, static name => name == "edit_text" ? 36 : 0);
+        var trailer = ToolSchemaEstimate.Trailer(edited, original, installed, static name => name == "edit_text" ? 36 : 0, capped: true);
 
-        Assert.Equal("  schema edit_text=1114 tokens (cap 1024, over=90)", trailer);
+        Assert.Equal("  schema edit_text=1114 tokens HEURISTIC (cap 1024, over=90)", trailer);
     }
 
     [Fact]
@@ -139,20 +139,20 @@ public sealed class ToolSchemaEstimateTests
     {
         DeclaredTool[] tools = [new("find_files", 2000, 4)];
 
-        Assert.Equal(string.Empty, ToolSchemaEstimate.Trailer(tools, tools, new Dictionary<string, InstalledSchema>(StringComparer.Ordinal), static _ => 0));
+        Assert.Equal(string.Empty, ToolSchemaEstimate.Trailer(tools, tools, new Dictionary<string, InstalledSchema>(StringComparer.Ordinal), static _ => 0, capped: true));
     }
 
     [Fact]
     public async Task TrailerAsync_ForAnEditedDescriptionOfAnUninstalledTool_PricesItOnTheFrameHeuristicUnderTheCap()
     {
-        ToolSchemaEstimate.Publish(static () => new Dictionary<string, InstalledSchema>(StringComparer.Ordinal), static _ => 0);
+        ToolSchemaEstimate.Publish(static () => new Dictionary<string, InstalledSchema>(StringComparer.Ordinal), static _ => 0, "fake");
         using var workspace = new AdhocWorkspace();
         var document = SolutionOf(workspace, Source("abc")).Projects.Single().Documents.Single();
 
         var trailer = await ToolSchemaEstimate.TrailerAsync(document, document.WithText(SourceText.From(Source("abcd"))), TestContext.Current.CancellationToken);
         var unchanged = await ToolSchemaEstimate.TrailerAsync(document, document, TestContext.Current.CancellationToken);
 
-        Assert.Equal("  schema fake_tool=26 tokens (cap 1024, left=998)", trailer);
+        Assert.Equal("  schema fake_tool=26 tokens HEURISTIC (cap 1024, left=998)", trailer);
         Assert.Equal(string.Empty, unchanged);
     }
 
@@ -167,10 +167,26 @@ public sealed class ToolSchemaEstimateTests
         };
         AdvertisedCost.Observe([installed], [installed]);
         using var workspace = new AdhocWorkspace();
-        var document = SolutionOf(workspace, Source("abc")).Projects.Single().Documents.Single();
+        var document = SolutionOf(workspace, Source("abc"), "terse").Projects.Single().Documents.Single();
 
         var trailer = await ToolSchemaEstimate.TrailerAsync(document, document.WithText(SourceText.From(Source("abcd"))), TestContext.Current.CancellationToken);
 
-        Assert.Equal("  schema fake_tool=24 tokens (cap 1024, left=1000)", trailer);
+        Assert.Equal("  schema fake_tool=24 tokens HEURISTIC (cap 1024, left=1000)", trailer);
+    }
+
+    [Fact]
+    public async Task TrailerAsync_ForAToolOutsideTheRunningServersProject_IgnoresItsSameNamedFrameAndExampleAndDropsTheCap()
+    {
+        ToolSchemaEstimate.Publish(static () => new Dictionary<string, InstalledSchema>(StringComparer.Ordinal) { ["fake_tool"] = new(10, 4000) }, static _ => 400, "terse");
+        using var foreign = new AdhocWorkspace();
+        using var own = new AdhocWorkspace();
+        var elsewhere = SolutionOf(foreign, Source("abc")).Projects.Single().Documents.Single();
+        var server = SolutionOf(own, Source("abc"), "terse").Projects.Single().Documents.Single();
+
+        var foreignTrailer = await ToolSchemaEstimate.TrailerAsync(elsewhere, elsewhere.WithText(SourceText.From(Source("abcd"))), TestContext.Current.CancellationToken);
+        var ownTrailer = await ToolSchemaEstimate.TrailerAsync(server, server.WithText(SourceText.From(Source("abcd"))), TestContext.Current.CancellationToken);
+
+        Assert.Equal("  schema fake_tool=26 tokens HEURISTIC", foreignTrailer);
+        Assert.Equal("  schema fake_tool=1106 tokens HEURISTIC (cap 1024, over=82)", ownTrailer);
     }
 }

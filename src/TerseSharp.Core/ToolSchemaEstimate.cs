@@ -19,9 +19,12 @@ public static class ToolSchemaEstimate
 
     private static Func<string, int> decorated = static _ => 0;
 
-    public static void Publish(Func<IReadOnlyDictionary<string, InstalledSchema>> installed, Func<string, int> decoration)
+    private static string? serverAssembly;
+
+    public static void Publish(Func<IReadOnlyDictionary<string, InstalledSchema>> installed, Func<string, int> decoration, string server)
     {
         Volatile.Write(ref decorated, decoration);
+        Volatile.Write(ref serverAssembly, server);
         Volatile.Write(ref published, installed);
     }
 
@@ -52,10 +55,12 @@ public static class ToolSchemaEstimate
 
         var original = before is null ? (IReadOnlyList<DeclaredTool>)[] : await ToolSchemaSource.DeclaredAsync(before, cancellationToken).ConfigureAwait(false);
 
-        return Trailer(edited, original, Volatile.Read(ref published)?.Invoke() ?? Unpublished, Volatile.Read(ref decorated));
+        return string.Equals(after.Project.AssemblyName, Volatile.Read(ref serverAssembly), StringComparison.Ordinal)
+            ? Trailer(edited, original, Volatile.Read(ref published)?.Invoke() ?? Unpublished, Volatile.Read(ref decorated), capped: true)
+            : Trailer(edited, original, Unpublished, static _ => 0, capped: false);
     }
 
-    public static string Trailer(IReadOnlyList<DeclaredTool> edited, IReadOnlyList<DeclaredTool> original, IReadOnlyDictionary<string, InstalledSchema> installed, Func<string, int> decoration)
+    public static string Trailer(IReadOnlyList<DeclaredTool> edited, IReadOnlyList<DeclaredTool> original, IReadOnlyDictionary<string, InstalledSchema> installed, Func<string, int> decoration, bool capped)
     {
         StringBuilder? builder = null;
 
@@ -64,9 +69,8 @@ public static class ToolSchemaEstimate
             if (Unchanged(tool, original))
                 continue;
 
-            var tokens = Tokens(tool, installed, decoration(tool.Name));
             builder ??= new StringBuilder(64);
-            builder.Append(CultureInfo.InvariantCulture, $"  schema {tool.Name}={tokens} tokens (cap {TokenCap}, {(tokens > TokenCap ? "over" : "left")}={Math.Abs(tokens - TokenCap)})");
+            Priced(builder, tool.Name, Tokens(tool, installed, decoration(tool.Name)), capped);
         }
 
         return builder?.ToString() ?? string.Empty;
@@ -81,6 +85,14 @@ public static class ToolSchemaEstimate
         }
 
         return false;
+    }
+
+    private static void Priced(StringBuilder builder, string name, int tokens, bool capped)
+    {
+        builder.Append(CultureInfo.InvariantCulture, $"  schema {name}={tokens} tokens HEURISTIC");
+
+        if (capped)
+            builder.Append(CultureInfo.InvariantCulture, $" (cap {TokenCap}, {(tokens > TokenCap ? "over" : "left")}={Math.Abs(tokens - TokenCap)})");
     }
 
     private static Flag? Flagged(DeclaredTool tool, IReadOnlyDictionary<string, InstalledSchema> installed, int decoration)
