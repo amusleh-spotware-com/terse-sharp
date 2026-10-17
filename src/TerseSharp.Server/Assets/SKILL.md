@@ -235,11 +235,10 @@ check, so never shell out for them - and **`cleanup verify=true fix=ci` is both 
 
 **One replaced command no longer kills a batch.** The guard strips those commands, rewrites the
 rest and lets them RUN, naming what it removed — call the tools for those, do NOT re-run the batch. It
-rewrites only sound shapes: uniform `;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with its pipeline; `$NAME`, `${NAME}` and a quoted, terminated heredoc not fed to a shell are opaque words; other heredocs, a target-less redirect and `>&-` fence. `&&` (each link is gated on the last), `||`, a background `&`, a subshell, a substitution, a comment, an unquoted backslash escape or a shell keyword is **denied
-whole** — `NO part of the command ran`, and `Call this instead:` names each denied segment's tool call
-**and** every segment nothing replaces — chained with `&&` when re-issuing them together is sound,
-listed one by one when it is not. A whole-command
-refusal also names the construct that forced it and its offset. A remainder of bare `echo`/`printf` framing is denied whole too.
+rewrites only sound shapes: uniform `;`/newline separators, a whole pipeline at a time, and a plain redirect (`>`, `>>`, `2>`, `<`) rides with its pipeline; `$NAME`, `${NAME}` and a quoted, terminated heredoc not fed to a shell are opaque words; other heredocs, a target-less redirect and `>&-` fence. `&&` (each link gated on the last), `||`, a background `&`, a subshell, a substitution, a comment, an unquoted backslash escape or a shell keyword is **denied
+whole** — `NO part of the command ran`; `Call this instead:` names each denied segment's call
+**and** every unreplaced one, `&&`-chained when sound, else one by one, plus the construct and its offset.
+Except an `&&` chain whose replaced links are only a trailing read: it runs without them — make those calls only if it succeeded. A remainder of bare `echo`/`printf` framing is denied whole too.
 
 **A `maxResults=` you pass is taken as your bound.** `search_text`, `search_regex`, `find_files`,
 `changed_files` and `history` still say the cap bit - `2/38 matches truncated` - but never advise

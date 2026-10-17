@@ -1227,6 +1227,10 @@ public sealed class ToolGuardTests
     [InlineData("git commit -q -F - <<'EOF'\r\nsubject\r\nEOF\r\ngit log --oneline -3")]
     [InlineData("cat src/Foo.cs; cp $_ /tmp/x")]
     [InlineData("git log --oneline -3\necho $LINENO")]
+    [InlineData("git add x && cat README.md 2>/dev/null")]
+    [InlineData("git add x && git log -1 | head -1")]
+    [InlineData("git add x && sed -n 1,5p README.md")]
+    [InlineData("cd src && cat appsettings.json")]
     public void Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
@@ -1309,9 +1313,9 @@ public sealed class ToolGuardTests
     }
 
     [Theory]
-    [InlineData("git stash push -u -m \"msg\" -- src/a.cs && git status --short")]
+    [InlineData("git status --short && git stash push -u -m \"msg\" -- src/a.cs")]
     [InlineData("dotnet test && git push")]
-    [InlineData("git fetch && git status --short && git log --oneline -3")]
+    [InlineData("git fetch && git status --short && git pull")]
     public void Guard_ForAnAndChainCarryingAReplacedLink_DeniesItWholeInsteadOfUngatingTheRest(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
@@ -2527,5 +2531,48 @@ public sealed class ToolGuardTests
         var command = template.Replace("ROOT", Fixtures.RepositoryRoot.Replace('\\', '/'), StringComparison.Ordinal);
 
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+    }
+
+    [Theory]
+    [InlineData("git add x && git commit -m y && git log -1", "git add x && git commit -m y")]
+    [InlineData("git stash push -u -m \"msg\" -- src/a.cs && git status --short", "git stash push -u -m \"msg\" -- src/a.cs")]
+    [InlineData("git fetch && git status --short && git log --oneline -3", "git fetch")]
+    [InlineData("git commit -m y && cat README.md", "git commit -m y")]
+    public void Guard_ForAnAndChainWhoseReplacedLinksAreOnlyATrailingRead_RunsTheChainWithoutThem(string command, string rewrite)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal(rewrite, verdict.Rewrite);
+        Assert.Contains("RAN without its trailing read", verdict.Reason, StringComparison.Ordinal);
+        Assert.Contains("only if the command succeeded", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForAnAndChainWithATrailingRead_EmitsTheChainWithoutItAndNamesTheCall()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git add x && git commit -m y && git log -1" }, Fixtures.RepositoryRoot);
+
+        var hook = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!.AsObject();
+
+        Assert.Equal("git add x && git commit -m y", hook["updatedInput"]!["command"]!.GetValue<string>());
+        Assert.False(hook.ContainsKey("permissionDecision"));
+        Assert.Contains("history maxResults=1", hook["additionalContext"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git status && git add x")]
+    [InlineData("git add x && git status --short && git commit -m y")]
+    [InlineData("git add x && dotnet build")]
+    [InlineData("git add x && sleep 5 && git log -1")]
+    [InlineData("echo hi && git log --oneline -3")]
+    public void Guard_ForAnAndChainWhoseReplacedLinkIsNotOnlyATrailingRead_StillDeniesItWhole(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+        Assert.Contains("NO part of the command ran", verdict.Reason, StringComparison.Ordinal);
     }
 }

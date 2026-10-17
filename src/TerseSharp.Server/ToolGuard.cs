@@ -902,9 +902,17 @@ public static class ToolGuard
     {
         var stages = Stages(command);
 
-        return stages.Length > 1 && Fenced(command) && Splitting(command, cwd) is { } stripped
-            ? stripped
-            : Blocking(stages, command, cwd);
+        if (stages.Length <= 1)
+            return Blocking(stages, command, cwd);
+
+        var stripped = Unfenceable(command) switch
+        {
+            { Length: 0 } => Splitting(command, cwd),
+            AndChain => Trailing(command, cwd),
+            _ => null,
+        };
+
+        return stripped ?? Blocking(stages, command, cwd);
     }
 
     private static bool IsSleepCall(string segment) =>
@@ -923,8 +931,6 @@ public static class ToolGuard
             "for", "foreach", "while", "until", "do", "done", "if", "then",
         "elif", "else", "fi", "case", "esac", "select", "function",
     ];
-
-    private static bool Fenced(string command) => Unfenceable(command).Length is 0;
 
     private static bool Backgrounded(ReadOnlySpan<char> masked)
     {
@@ -1164,9 +1170,7 @@ public static class ToolGuard
         if (Keyworded(masked))
             return "a shell keyword";
 
-        return masked.Contains("&&", StringComparison.Ordinal)
-            ? "an '&&' chain, which gates every link on the one before it, so stripping one link would change what runs and what the exit code means"
-            : string.Empty;
+        return masked.Contains("&&", StringComparison.Ordinal) ? AndChain : string.Empty;
     }
 
     private static string Because(string unfenceable) => unfenceable.Length is 0
@@ -2593,6 +2597,79 @@ public static class ToolGuard
     private readonly record struct StageDirectory(string? Here, bool Adrift);
 
     private static readonly SearchValues<char> Expansions = SearchValues.Create("$`");
+    private const string AndChain = "an '&&' chain, which gates every link on the one before it, so stripping one link would change what runs and what the exit code means";
+    private static readonly string[] ReadCommands =
+    [
+        "git", "cat", "head", "tail", "grep", "rg", "ls", "dir", "tree", "wc", "nl", "type", "findstr",
+        "get-content", "gc", "select-string", "sls", "get-childitem", "gci",
+    ];
+
+    private static GuardVerdict? Trailing(string command, string? cwd)
+    {
+        if (!OnlyAnded(command))
+            return null;
+
+        var judged = Judging(Pipelines(command).FindAll(pipeline => pipeline.Text.Trim().Length > 0), command, cwd);
+        var first = judged.FindIndex(entry => entry.Verdict.Denied);
+
+        if (first <= 0)
+            return null;
+
+        var kept = judged.GetRange(0, first);
+        var dropped = judged.GetRange(first, judged.Count - first);
+
+        return Settled(kept, dropped)
+            ? dropped[0].Verdict with { Reason = Suffixed(dropped, judged.Count), Routing = Routes(dropped), Rewrite = Rejoined(kept.ConvertAll(entry => entry.Pipeline)) }
+            : null;
+    }
+
+    private static bool Settled(List<Judgement> kept, List<Judgement> dropped) =>
+        dropped.TrueForAll(Strippable) && Working(kept) && !Unsplittable(kept, dropped);
+
+    private static bool Strippable(Judgement entry) => entry.Verdict.Denied && ReadOnly(entry.Pipeline.Text);
+
+    private static bool Working(List<Judgement> kept) =>
+        kept.Exists(entry => !Idle(entry.Pipeline.Text)) && !kept.Exists(entry => IsSleepCall(entry.Pipeline.Text));
+
+    private static bool Idle(string pipeline) => Framing(pipeline) || Moving(pipeline);
+
+    private static bool ReadOnly(string pipeline)
+    {
+        if (pipeline.AsSpan().IndexOfAny('<', '>') >= 0)
+            return false;
+
+        var first = Command(pipeline).FirstOrDefault() ?? string.Empty;
+
+        return Reads(Path.GetFileNameWithoutExtension(first.AsSpan()));
+    }
+
+    private static bool Reads(ReadOnlySpan<char> driver)
+    {
+        foreach (var name in ReadCommands)
+        {
+            if (driver.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool Moving(string pipeline)
+    {
+        var text = pipeline.AsSpan().TrimStart();
+        var end = text.IndexOfAny(' ', '\t');
+
+        return (end < 0 ? text : text[..end]) is "cd" or "pushd";
+    }
+
+    private static string Suffixed(List<Judgement> dropped, int total)
+    {
+        var names = string.Join(" and ", dropped.ConvertAll(entry => "'" + entry.Pipeline.Text.Trim() + "'"));
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"TerseSharp guard: this '&&' chain RAN without its trailing read - {dropped.Count} of its {total} links were stripped off its end, {names}, because the terse-sharp MCP answers them. Nothing followed them, so every link that ran is still gated as you wrote it; the '&&' would have run the stripped reads only if every link before them succeeded, so make the calls below only if the command succeeded. Do not re-issue the quoted commands in Bash.");
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);
