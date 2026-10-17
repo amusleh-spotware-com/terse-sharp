@@ -608,4 +608,19 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     private static string Listed(string text) => string.Join(
             '\n',
             text.Split('\n').Where(line => !line.StartsWith("next:", StringComparison.Ordinal) && !ToolCensus.IsFraming(line)));
+
+    [Fact]
+    public async Task GetSymbolSource_ForAnOverloadedName_CostsLessThanTheRefusalPlusTheBatchItReplaced()
+    {
+        var overloads = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Reconciler.Reconcile" });
+        var refusal = await server.CallAsync("get_symbol", new() { ["symbolId"] = "Reconciler.Reconcile" });
+        var batched = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "Reconciler.Reconcile(Order)", "Reconciler.Reconcile(Order, decimal)", "Reconciler.Reconcile(Dictionary<string, int>, Order)" },
+        });
+
+        Assert.Contains("3 overloads", overloads, StringComparison.Ordinal);
+        Assert.Contains("AmbiguousSymbol", refusal, StringComparison.Ordinal);
+        Assert.True(Tokens(overloads) < Tokens(refusal) + Tokens(batched), $"overloads={Tokens(overloads)} refusal={Tokens(refusal)} batched={Tokens(batched)}\n{overloads}");
+    }
 }

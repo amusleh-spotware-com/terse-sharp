@@ -8,6 +8,8 @@ namespace TerseSharp.Core;
 
 public static class SourceService
 {
+    public readonly record struct AmbiguousRead(string SymbolId, TerseError Error, string? Path);
+
     public static async Task<Result<string>> OfSymbolAsync(
         string root,
         ISymbol symbol,
@@ -119,10 +121,7 @@ public static class SourceService
         var noted = await SymbolLookup.ResolveNotedAsync(workspace, symbolId, path, cancellationToken, referenced: true).ConfigureAwait(false);
 
         if (noted.Symbol is not { IsOk: true, Value: { } symbol })
-        {
-            response.Note("NOT_RESOLVED " + symbolId + "  " + Unresolved(symbolId, noted.Symbol.Error!));
-            return false;
-        }
+            return await AppendOverloadsOrUnresolvedAsync(workspace, response, new(symbolId, noted.Symbol.Error!, path), format, cancellationToken).ConfigureAwait(false);
 
         await AppendSymbolAsync(workspace, response, symbol, format, cancellationToken).ConfigureAwait(false);
 
@@ -152,6 +151,58 @@ public static class SourceService
         }
 
         await AppendAsync(workspace.Root, response, symbol, format, cancellationToken).ConfigureAwait(false);
+    }
+
+    public static async Task<string> OverloadsOrRefusalAsync(LoadedWorkspace workspace, AmbiguousRead read, SourceFormat format, CancellationToken cancellationToken)
+    {
+        var overloads = await CandidateOverloadsAsync(workspace, read, cancellationToken).ConfigureAwait(false);
+
+        if (overloads.Count is 0)
+            return read.Error.Render();
+
+        var response = new ResponseBuilder("get_symbol_source", read.SymbolId).Verbose(format.Verbose);
+
+        await AppendOverloadsAsync(workspace, response, overloads, format, cancellationToken).ConfigureAwait(false);
+
+        return response.Answered(overloads.Count, overloads.Count, "overloads").ToString();
+    }
+
+    private static Task<IReadOnlyList<ISymbol>> CandidateOverloadsAsync(LoadedWorkspace workspace, AmbiguousRead read, CancellationToken cancellationToken) =>
+        read.Error.Code is TerseErrorCode.AmbiguousSymbol
+            ? SymbolLookup.OverloadsAsync(workspace, read.SymbolId, read.Path, cancellationToken)
+            : Task.FromResult<IReadOnlyList<ISymbol>>([]);
+
+    private static async Task AppendOverloadsAsync(
+        LoadedWorkspace workspace,
+        ResponseBuilder response,
+        IReadOnlyList<ISymbol> overloads,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        foreach (var overload in overloads)
+        {
+            response.Note("overload " + SymbolLookup.Addressable(overload));
+            await AppendSymbolAsync(workspace, response, overload, format, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<bool> AppendOverloadsOrUnresolvedAsync(
+        LoadedWorkspace workspace,
+        ResponseBuilder response,
+        AmbiguousRead read,
+        SourceFormat format,
+        CancellationToken cancellationToken)
+    {
+        var overloads = await CandidateOverloadsAsync(workspace, read, cancellationToken).ConfigureAwait(false);
+
+        if (overloads.Count is 0)
+        {
+            response.Note("NOT_RESOLVED " + read.SymbolId + "  " + Unresolved(read.SymbolId, read.Error));
+            return false;
+        }
+
+        await AppendOverloadsAsync(workspace, response, overloads, format, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     private static async Task<string?> OutlinedAsync(

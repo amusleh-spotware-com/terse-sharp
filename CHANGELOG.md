@@ -7,6 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+### Changed
+
+- **Response format: `get_symbol_source` on an overloaded name answers every overload instead of `AmbiguousSymbol` (I766).** When every candidate is an overload of one name in one containing type and there are at most 5, a single-id read answers `N overloads` followed by an `overload <id>` line, the location and the source for each, and a `symbolIds=` entry answers them the same way instead of `NOT_RESOLVED`. A name spanning several types, a documentation id found in several projects, more than 5 overloads and every edit tool still refuse. Covered by `GetSymbolSource_ForAnOverloadedNameWithNoParameterList_AnswersEveryOverloadInOneCall`, `GetSymbolSource_ForTwoEmptySlotsMatchingTwoOverloads_AnswersBothUnderTheirOwnIds`, `GetSymbolSource_WithAnOverloadedNameInABatch_AnswersItsOverloadsInsteadOfNotResolved`, `GetSymbolSource_ForANameDeclaredByDifferentTypes_StillRefuses` and `ReplaceSymbolBody_ForAnOverloadedName_StillRefusesWhereTheReadAnswers`.
+
 ### Fixed
 
 - **Two preload unit tests no longer race the E2E assembly over the shared fixture (I758).** `ToolContextTests.ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould` and `ToolContextTests.ReadText_OfAnAbsoluteCsPathWhileThePreloadIsRunning_AnswersTheOutlineTheLoadedWorkspaceWould` now load a private committed copy (`TemporarySolution.CreateRepositoryAsync`) instead of `fixtures/FixtureSolution`, which the E2E assembly edits while `dotnet test TerseSharp.slnx` runs both assemblies in parallel.

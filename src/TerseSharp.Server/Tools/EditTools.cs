@@ -302,7 +302,7 @@ public sealed class EditTools(ToolContext context)
                 path: path,
                 guard: loaded => Elsewhere(heldRoot, loaded.Root),
                 typesOnly: typesOnly,
-                unresolved: (loaded, error) => Rejected(error, carry, loaded.Root));
+                unresolved: (loaded, error) => Task.FromResult(Rejected(error, carry, loaded.Root)));
     }
 
     private Task<string> DeletedMany(

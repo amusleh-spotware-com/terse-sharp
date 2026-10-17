@@ -117,7 +117,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             : Described(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, verbose, path, cancellationToken);
 
     [McpServerTool(Name = "get_symbol_source", ReadOnly = true)]
-    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. ref= returns the member as it was at a git ref; it takes one id and requires path=, so a pre-change body needs no line range that can clip it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
+    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. A name matching 2-5 overloads of one member answers every one under its own overload line instead of AmbiguousSymbol. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. ref= returns the member as it was at a git ref; it takes one id and requires path=, so a pre-change body needs no line range that can clip it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
     public Task<string> GetSymbolSource(
         [Description("Symbol id of the member.")] string? symbolId = null,
         [Description("Several symbol ids returned in one response. Replaces one call per member; an entry that does not resolve answers NOT_RESOLVED inline rather than failing the call.")] string[]? symbolIds = null,
@@ -155,8 +155,14 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     private Task<string> SourceOf(string[] requested, bool batched, string? workspace, SourceFormat format, string? path, CancellationToken cancellationToken) => requested switch
     {
         [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
-        [var only] when !batched => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
-            Unwrap(await SourceService.OfSymbolAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)), cancellationToken, path, referenced: true),
+        [var only] when !batched => context.WithSymbolAsync(
+            workspace,
+            only,
+            async (loaded, resolved) => Unwrap(await SourceService.OfSymbolAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)),
+            cancellationToken,
+            path,
+            referenced: true,
+            unresolved: (loaded, error) => SourceService.OverloadsOrRefusalAsync(loaded, new(only, error, path), format, cancellationToken)),
         _ => context.WithWorkspaceAsync(
             workspace,
             path,

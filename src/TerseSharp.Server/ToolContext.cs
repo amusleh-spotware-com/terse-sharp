@@ -55,7 +55,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         Func<LoadedWorkspace, string?>? guard = null,
         bool typesOnly = false,
         bool referenced = false,
-        Func<LoadedWorkspace, TerseError, string>? unresolved = null)
+        Func<LoadedWorkspace, TerseError, Task<string>>? unresolved = null)
     {
         if (symbolId is not { Length: > 0 } requested)
             return Errors.Blank("symbolId", "symbol").Render();
@@ -84,7 +84,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
                 if (resolution.Symbol is { IsOk: true, Value: { } symbol })
                     return NotedFromName(await action(lease.Workspace, symbol).ConfigureAwait(false), resolution.FromName, symbol);
 
-                return unresolved is null ? resolution.Symbol.Error!.Render() : unresolved(lease.Workspace, resolution.Symbol.Error!);
+                return unresolved is null ? resolution.Symbol.Error!.Render() : await unresolved(lease.Workspace, resolution.Symbol.Error!).ConfigureAwait(false);
             }).ConfigureAwait(false);
 
             return Queued(answer, wait.Waited, wait.Holder);

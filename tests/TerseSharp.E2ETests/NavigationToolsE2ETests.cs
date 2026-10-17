@@ -639,12 +639,17 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task GetSymbolSource_ForTwoEmptySlotsMatchingTwoOverloads_ListsThemInsteadOfPickingOne()
+    public async Task GetSymbolSource_ForTwoEmptySlotsMatchingTwoOverloads_AnswersBothUnderTheirOwnIds()
     {
         var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Reconciler.Reconcile(,)" });
 
-        Assert.StartsWith("ERROR AmbiguousSymbol", source, StringComparison.Ordinal);
-        Assert.Contains("Reconcile", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", source, StringComparison.Ordinal);
+        Assert.Contains("2 overloads", source, StringComparison.Ordinal);
+        Assert.Contains("overload Reconciler.Reconcile(Order, decimal)", source, StringComparison.Ordinal);
+        Assert.Contains("overload Reconciler.Reconcile(Dictionary<string, int>, Order)", source, StringComparison.Ordinal);
+        Assert.Contains("order.Volume > tolerance", source, StringComparison.Ordinal);
+        Assert.Contains("pending.Count + Reconcile(order)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("order.Volume > 0 ? 1 : 0", source, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -1220,5 +1225,69 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("T:System.IDisposable", text, StringComparison.Ordinal);
         Assert.Contains("interface public IDisposable", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForAnOverloadedNameWithNoParameterList_AnswersEveryOverloadInOneCall()
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Reconciler.Reconcile" });
+
+        Assert.DoesNotContain("AmbiguousSymbol", source, StringComparison.Ordinal);
+        Assert.Contains("3 overloads", source, StringComparison.Ordinal);
+        Assert.Equal(3, source.Split('\n').Count(line => line.StartsWith("overload Reconciler.Reconcile(", StringComparison.Ordinal)));
+        Assert.Contains("order.Volume > 0 ? 1 : 0", source, StringComparison.Ordinal);
+        Assert.Contains("order.Volume > tolerance", source, StringComparison.Ordinal);
+        Assert.Contains("pending.Count + Reconcile(order)", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForABareOverloadedNameWithItsPath_AnswersEveryOverloadThatFileDeclares()
+    {
+        var source = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbol"] = "Reconcile",
+            ["path"] = "src/Fixture.Trading/Reconciler.cs",
+        });
+
+        Assert.DoesNotContain("ERROR", source, StringComparison.Ordinal);
+        Assert.Contains("3 overloads", source, StringComparison.Ordinal);
+        Assert.Contains("overload Reconciler.Reconcile(Order)", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithAnOverloadedNameInABatch_AnswersItsOverloadsInsteadOfNotResolved()
+    {
+        var source = await server.CallAsync("get_symbol_source", new()
+        {
+            ["symbolIds"] = new[] { "Reconciler.Reconcile", "Reconciler.Butted" },
+        });
+
+        Assert.DoesNotContain("NOT_RESOLVED", source, StringComparison.Ordinal);
+        Assert.Contains("2 symbols", source, StringComparison.Ordinal);
+        Assert.Contains("overload Reconciler.Reconcile(Order, decimal)", source, StringComparison.Ordinal);
+        Assert.Contains("order.Volume * negated", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForANameDeclaredByDifferentTypes_StillRefuses()
+    {
+        var source = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Submit" });
+
+        Assert.StartsWith("ERROR AmbiguousSymbol", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("overload ", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_ForAnOverloadedName_StillRefusesWhereTheReadAnswers()
+    {
+        var edit = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "Reconciler.Reconcile",
+            ["body"] = "=> 0",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR AmbiguousSymbol", edit, StringComparison.Ordinal);
+        Assert.DoesNotContain("overload ", edit, StringComparison.Ordinal);
     }
 }

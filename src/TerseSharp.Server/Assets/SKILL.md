@@ -690,7 +690,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    every tool taking a `symbolId` accepts that, the full documentation id
    (`M:Trading.OrderService.Submit(Trading.Order)`; one typed with `(string)`, or with no parameter list for a lone overload, resolves by name and says `resolved from name:`), a bare `Submit`, or any qualifier in between.
    A name matching several symbols returns `AmbiguousSymbol` listing their ids — **pick one, never
-   guess**. Constructors, operators, indexers, generics and explicit interface implementations keep
+   guess**; a read answers ≤5 overloads of one member whole. Constructors, operators, indexers, generics and explicit interface implementations keep
    their documentation id in outlines, because a name cannot address them. `Type.#ctor` and `Type..ctor` address constructors; a primary one answers its type header. Every one of those tools
    also accepts `symbol:` as an alias for `symbolId:`, and none of them declares the parameter
    required — a call with neither answers `ERROR InvalidArgument` naming `symbolId`.
@@ -700,7 +700,6 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    **Need several members?** `get_symbol_source(symbolIds: [...])` returns them in one response, and
    an id that does not resolve is reported inline as `NOT_RESOLVED <id>` plus its nearest ids, instead of
     failing the call.
-   Use it instead of one call per member.
    **When a name an outline just printed still answers `AmbiguousSymbol` or `SaturatedName`, pass the
    file it came from**: `get_symbol_source`, `get_symbol` and `get_type_outline` take `path=`, resolve
    the name inside that document first, and fall back to the solution only when the file holds no

@@ -333,6 +333,45 @@ public static class SymbolLookup
             false);
     }
 
+    private const int MaxOverloadsRead = 5;
+
+    public static async Task<IReadOnlyList<ISymbol>> OverloadsAsync(
+        LoadedWorkspace workspace,
+        string symbolId,
+        string? path,
+        CancellationToken cancellationToken)
+    {
+        var requested = SymbolReference.Unescaped(symbolId);
+
+        if (SymbolReference.IsDocumentationId(requested) || SymbolReference.Parse(requested) is not { } query)
+            return [];
+
+        var found = (await SymbolSearch.FindAsync(workspace, query.Member, null, null, SearchCap, cancellationToken).ConfigureAwait(false)).Ranked;
+        var named = Exactly(found, query.Member);
+
+        if (Saturated(found, named))
+            return [];
+
+        var scoped = InDocument(workspace, [.. named.Where(symbol => SymbolReference.Matches(symbol, query)).DistinctBy(Describe, StringComparer.Ordinal)], path);
+
+        return OverloadsOfOneName(scoped) ? scoped : [];
+    }
+
+    private static ISymbol[] InDocument(LoadedWorkspace workspace, ISymbol[] matches, string? path)
+    {
+        if (path is not { Length: > 0 } || DocumentLookup.Find(workspace, path) is not { } document)
+            return matches;
+
+        ISymbol[] declared = [.. matches.Where(symbol => DeclaredIn(symbol, document.FilePath))];
+
+        return declared.Length is 0 ? matches : declared;
+    }
+
+    private static bool OverloadsOfOneName(ISymbol[] matches) =>
+        matches.Length is >= 2 and <= MaxOverloadsRead
+        && matches[0].ContainingType is { } owner
+        && Array.TrueForAll(matches, symbol => IsOverloadOf(symbol, matches[0], owner));
+
     private static async Task<ISymbol?> FromNameAsync(LoadedWorkspace workspace, string requested, CancellationToken cancellationToken) =>
             await NamedAsync(workspace, requested, SymbolReference.AsName(requested), cancellationToken).ConfigureAwait(false)
                 ?? await NamedAsync(workspace, requested, SymbolReference.AsOverloadFreeName(requested), cancellationToken).ConfigureAwait(false);
@@ -415,4 +454,9 @@ public static class SymbolLookup
             container.StartsWith(space, StringComparison.Ordinal) && (container.Length == space.Length || container[space.Length] is '.')
                 ? space.Length
                 : 0;
+
+    private static bool IsOverloadOf(ISymbol symbol, ISymbol first, INamedTypeSymbol owner) =>
+        symbol.Kind == first.Kind
+        && string.Equals(symbol.Name, first.Name, StringComparison.Ordinal)
+        && SymbolEqualityComparer.Default.Equals(symbol.ContainingType, owner);
 }
