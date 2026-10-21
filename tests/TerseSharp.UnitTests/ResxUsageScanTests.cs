@@ -4,6 +4,8 @@ namespace TerseSharp.UnitTests;
 
 public sealed class ResxUsageScanTests : IDisposable
 {
+    private static readonly HashSet<string> ResourceClasses = new(StringComparer.Ordinal) { "Strings" };
+
     private readonly DirectoryInfo directory = Directory.CreateTempSubdirectory("terse-resx-usage-");
 
     public void Dispose() => directory.Delete(recursive: true);
@@ -13,11 +15,21 @@ public sealed class ResxUsageScanTests : IDisposable
     {
         Write("Caller.cs", "var caption = Strings.Caption_Submit;\nvar other = Manager.GetString(\"Caption_Submit\");");
 
-        var usages = ResxUsageService.Textual(directory.FullName, "Caption_Submit");
+        var usages = ResxUsageService.Textual(directory.FullName, "Caption_Submit", ResourceClasses);
 
         Assert.Equal(2, usages.Count);
         Assert.Contains(usages, usage => usage.Form is "member");
         Assert.Contains(usages, usage => usage.Form is "GetString");
+    }
+
+    [Fact]
+    public void Textual_IgnoresANamespaceSegmentAndAMemberOfATypeThatIsNoResourceClass()
+    {
+        Write("Caller.cs", "namespace App.Connection.Caption_Submit;\nusing App.Connection.Caption_Submit;\nvar label = Labels.Caption_Submit;\nvar caption = Strings.Caption_Submit;");
+
+        var usages = ResxUsageService.Textual(directory.FullName, "Caption_Submit", ResourceClasses);
+
+        Assert.Equal(4, Assert.Single(usages).Line);
     }
 
     [Fact]
@@ -26,7 +38,7 @@ public sealed class ResxUsageScanTests : IDisposable
         Write("View.xaml", "<TextBlock x:Uid=\"Caption_Submit\" />");
         Write("Index.cshtml", "<h1>@Localizer[\"Caption_Submit\"]</h1>");
 
-        var usages = ResxUsageService.Textual(directory.FullName, "Caption_Submit");
+        var usages = ResxUsageService.Textual(directory.FullName, "Caption_Submit", ResourceClasses);
 
         Assert.Contains(usages, usage => usage.Form is "x:Uid");
         Assert.Contains(usages, usage => usage.Form is "localizer[]");
@@ -37,7 +49,7 @@ public sealed class ResxUsageScanTests : IDisposable
     {
         Write("Strings.Designer.cs", "public static string Caption_Submit => Manager.GetString(\"Caption_Submit\");");
 
-        Assert.Empty(ResxUsageService.Textual(directory.FullName, "Caption_Submit"));
+        Assert.Empty(ResxUsageService.Textual(directory.FullName, "Caption_Submit", ResourceClasses));
     }
 
     [Fact]
@@ -45,7 +57,7 @@ public sealed class ResxUsageScanTests : IDisposable
     {
         Write("Caller.cs", "var caption = Strings.Caption_Submit;");
 
-        Assert.All(ResxUsageService.Textual(directory.FullName, "Caption_Submit"), usage => Assert.Equal(Confidence.Heuristic, usage.Confidence));
+        Assert.All(ResxUsageService.Textual(directory.FullName, "Caption_Submit", ResourceClasses), usage => Assert.Equal(Confidence.Heuristic, usage.Confidence));
     }
 
     [Fact]

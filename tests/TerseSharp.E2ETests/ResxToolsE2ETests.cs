@@ -727,4 +727,39 @@ public sealed class ResxToolsE2ETests(TerseServerFixture server)
         Assert.Contains("<value>Alpha\t</value>", text, StringComparison.Ordinal);
         Assert.Contains("<comment>shared note</comment>", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ResxRemove_ForAKeyOnlyANamespaceAndAnUnrelatedPropertyShare_IsNotRefusedAndReportsNoStaleDesigner()
+    {
+        const string Probe = "src/Fixture.Trading/ResxKeyNameProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["content"] = "namespace Fixture.Trading.Unused_Key;\n\npublic static class Labels\n{\n    public static string Unused_Key => \"x\";\n\n    public static string Read() => Labels.Unused_Key;\n}\n",
+            ["force"] = true,
+        });
+
+        try
+        {
+            var text = await server.CallAsync("resx_remove", new() { ["path"] = Strings, ["key"] = "Unused_Key", ["dryRun"] = true });
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.Contains("-  <data name=\"Unused_Key\"", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("designerStale", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task ResxRemove_OfAKeyTheDesignerStillDeclares_ReportsTheDesignerStale()
+    {
+        var text = await server.CallAsync("resx_remove", new() { ["path"] = Strings, ["key"] = "Caption_Count", ["force"] = true, ["dryRun"] = true });
+
+        Assert.Contains("designerStale=true", text, StringComparison.Ordinal);
+        Assert.Contains("Strings.Designer.cs", text, StringComparison.Ordinal);
+    }
 }

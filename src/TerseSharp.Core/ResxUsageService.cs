@@ -33,12 +33,13 @@ public static class ResxUsageService
         return Result.Ok(Render(key, all, ComposedLookups(workspace.Root), maxResults));
     }
 
-    public static IReadOnlyList<ResxUsage> Textual(string root, string key) =>
-    [
-        .. WorkspaceFiles
-            .Enumerate(root, IsScannable)
-            .SelectMany(file => Scan(root, file, key)),
-    ];
+    public static IReadOnlyList<ResxUsage> Textual(string root, string key, IReadOnlySet<string> resourceClasses)
+    {
+        var quoted = string.Create(CultureInfo.InvariantCulture, $"\"{key}\"");
+        var member = MemberPattern(key, resourceClasses);
+
+        return [.. WorkspaceFiles.Enumerate(root, IsScannable).SelectMany(file => Scan(root, file, quoted, member))];
+    }
 
     public static int ComposedLookups(string root) => WorkspaceFiles
         .Enumerate(root, IsScannable)
@@ -48,10 +49,8 @@ public static class ResxUsageService
         Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)
         && !path.EndsWith(".Designer.cs", StringComparison.OrdinalIgnoreCase);
 
-    private static IEnumerable<ResxUsage> Scan(string root, string file, string key)
+    private static IEnumerable<ResxUsage> Scan(string root, string file, string quoted, Regex? member)
     {
-        var quoted = string.Create(CultureInfo.InvariantCulture, $"\"{key}\"");
-        var member = MemberPattern(key);
         var relative = PositionFormat.Relative(root, file);
         var line = 0;
 
@@ -59,15 +58,20 @@ public static class ResxUsageService
         {
             line++;
 
-            if (text.Contains(quoted, StringComparison.Ordinal) || member.IsMatch(text))
+            if (text.Contains(quoted, StringComparison.Ordinal) || member?.IsMatch(text) is true)
                 yield return new ResxUsage(relative, line, Form(text, quoted), Confidence.Heuristic);
         }
     }
 
-    private static Regex MemberPattern(string key) => new(
-        @"\b[A-Za-z_]\w*\s*\.\s*" + Regex.Escape(key) + @"\b",
-        RegexOptions.None,
-        TimeSpan.FromSeconds(2));
+    private static Regex? MemberPattern(string key, IReadOnlySet<string> resourceClasses) => resourceClasses.Count is 0
+        ? null
+        : new(
+            @"\b(?:" + string.Join('|', resourceClasses.Select(Regex.Escape)) + @")\s*\.\s*" + Regex.Escape(key) + @"\b",
+            RegexOptions.None,
+            TimeSpan.FromSeconds(2));
+
+    private static HashSet<string> ResourceClasses(LoadedWorkspace workspace) =>
+        workspace.Indexes.Resx().Families.Select(family => family.Name).ToHashSet(StringComparer.Ordinal);
 
     private static string Form(string line, string quoted) => line switch
     {
@@ -98,11 +102,12 @@ public static class ResxUsageService
     private static async Task<IReadOnlyList<ResxUsage>> ExactAsync(
         LoadedWorkspace workspace,
         string key,
+        IReadOnlySet<string> resourceClasses,
         CancellationToken cancellationToken)
     {
         var usages = new List<ResxUsage>();
 
-        foreach (var symbol in await MembersAsync(workspace, key, cancellationToken).ConfigureAwait(false))
+        foreach (var symbol in await MembersAsync(workspace, key, resourceClasses, cancellationToken).ConfigureAwait(false))
             usages.AddRange(await ReferencesAsync(workspace, symbol, cancellationToken).ConfigureAwait(false));
 
         return usages;
@@ -111,6 +116,7 @@ public static class ResxUsageService
     private static async Task<IReadOnlyList<ISymbol>> MembersAsync(
         LoadedWorkspace workspace,
         string key,
+        IReadOnlySet<string> resourceClasses,
         CancellationToken cancellationToken)
     {
         var found = new List<ISymbol>();
@@ -119,7 +125,7 @@ public static class ResxUsageService
         {
             var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
 
-            found.AddRange(Members(compilation, key, cancellationToken));
+            found.AddRange(Members(compilation, key, cancellationToken).Where(symbol => resourceClasses.Contains(symbol.ContainingType?.Name ?? string.Empty)));
         }
 
         return found;
@@ -227,8 +233,9 @@ public static class ResxUsageService
         string key,
         CancellationToken cancellationToken)
     {
-        var exact = await ExactAsync(workspace, key, cancellationToken).ConfigureAwait(false);
-        var textual = Textual(workspace.Root, key).Where(usage => !exact.Any(hit => Same(hit, usage)));
+        var resourceClasses = ResourceClasses(workspace);
+        var exact = await ExactAsync(workspace, key, resourceClasses, cancellationToken).ConfigureAwait(false);
+        var textual = Textual(workspace.Root, key, resourceClasses).Where(usage => !exact.Any(hit => Same(hit, usage)));
 
         return Ordered(exact.Concat(textual));
     }

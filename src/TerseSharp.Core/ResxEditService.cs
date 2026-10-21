@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace TerseSharp.Core;
 
@@ -43,14 +45,10 @@ public static class ResxEditService
         var located = ResxTarget.Locate(workspace, path);
 
         if (!located.IsOk)
-        {
             return Result.Fail<string>(located.Error!);
-        }
 
         if (key is not { Length: > 0 })
-        {
             return Result.Fail<string>(Errors.Blank("key"));
-        }
 
         var blocking = force
             ? []
@@ -58,7 +56,7 @@ public static class ResxEditService
 
         return blocking.Count > 0
             ? Result.Fail<string>(StillUsed(key, blocking))
-            : Settled(workspace, await Delete(located.Value!, key, culture, dryRun, verbose).ConfigureAwait(false), dryRun);
+            : Settled(workspace, await RemovedAsync(workspace.Root, located.Value!, new Removal(key, culture, dryRun, verbose), cancellationToken).ConfigureAwait(false), dryRun);
     }
     public static async Task<Result<string>> Rename(
         LoadedWorkspace workspace,
@@ -187,17 +185,12 @@ public static class ResxEditService
             : new Pending(file, PositionFormat.Relative(root, file), before, after);
     }
 
-    private static async Task<Result<string>> Delete(ResxTarget target, string key, string? culture, bool dryRun, bool verbose)
-    {
-        var writes = Targets(target, culture)
+    private static Pending[] Deleted(ResxTarget target, string key, string? culture) =>
+    [
+        .. Targets(target, culture)
             .Select(file => DeleteIn(target.Index, file, key))
-            .OfType<Pending>()
-            .ToArray();
-
-        return writes.Length is 0
-            ? Result.Fail<string>(Missing(key, target.Family))
-            : await Apply(target.Index, "resx_remove", writes, Notes(target.Family, 0), dryRun, verbose).ConfigureAwait(false);
-    }
+            .OfType<Pending>(),
+    ];
 
     private static Pending? DeleteIn(ResxIndex index, ResxFile file, string key)
     {
@@ -811,6 +804,53 @@ public static class ResxEditService
                 string.Create(CultureInfo.InvariantCulture, $"files[{index}] carries no path, and no top-level path was given to default to"),
                 "give every entry its own path, or pass path= as the default target for the entries that carry none");
     }
+
+    private static async Task<IReadOnlyList<string>> RemovalNotesAsync(string root, ResxFamily family, string key, CancellationToken cancellationToken) =>
+        family.Designer is { } designer && await DesignerDeclaresAsync(Path.Combine(root, designer), key, cancellationToken).ConfigureAwait(false)
+            ? [Designer(family)]
+            : [];
+
+    private static async Task<bool> DesignerDeclaresAsync(string designer, string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var text = await File.ReadAllTextAsync(designer, cancellationToken).ConfigureAwait(false);
+            var tree = await CSharpSyntaxTree.ParseText(text, cancellationToken: cancellationToken).GetRootAsync(cancellationToken).ConfigureAwait(false);
+            var accessor = DesignerAccessorName(key);
+
+            return tree.DescendantNodes().Any(node => node switch
+            {
+                PropertyDeclarationSyntax property => property.Identifier.ValueText == accessor,
+                VariableDeclaratorSyntax variable => variable.Identifier.ValueText == accessor,
+                _ => false,
+            });
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
+    private static string DesignerAccessorName(string key) => string.Create(key.Length, key, static (span, source) =>
+    {
+        for (var index = 0; index < source.Length; index++)
+            span[index] = char.IsLetterOrDigit(source[index]) ? source[index] : '_';
+    });
+
+    private static async Task<Result<string>> RemovedAsync(string root, ResxTarget target, Removal removal, CancellationToken cancellationToken)
+    {
+        var writes = Deleted(target, removal.Key, removal.Culture);
+
+        return writes.Length is 0
+            ? Result.Fail<string>(Missing(removal.Key, target.Family))
+            : await Apply(target.Index, "resx_remove", writes, await RemovalNotesAsync(root, target.Family, removal.Key, cancellationToken).ConfigureAwait(false), removal.DryRun, removal.Verbose).ConfigureAwait(false);
+    }
+
+    private readonly record struct Removal(string Key, string? Culture, bool DryRun, bool Verbose);
 }
 
 public readonly record struct ResxWrite(string? Path = null, string? Entries = null);
