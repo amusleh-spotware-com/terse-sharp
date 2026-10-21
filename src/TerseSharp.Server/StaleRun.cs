@@ -9,7 +9,7 @@ public static class StaleRun
 
     public static string? Note(int before, int after, IReadOnlyList<string>? roots = null)
     {
-        var written = EditPulse.Written(before);
+        var written = EditPulse.Written(before, after);
         var stale = after - before - Foreign(written, roots);
 
         return stale > 0

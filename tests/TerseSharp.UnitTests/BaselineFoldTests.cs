@@ -51,11 +51,13 @@ public sealed class BaselineFoldTests
     [Fact]
     public void Split_ForADiagnosticWithNoSourcePosition_CountsItApartAndNamesItsId()
     {
-        var fold = BaselineFold.Split([Fileless("CS1705"), Fileless("CS1705"), Fileless("CS1701")], Touched);
+        var fold = BaselineFold.Split([Fileless("CS1705"), Fileless("CS1705"), Fileless("CS1701", DiagnosticSeverity.Warning)], Touched);
 
         Assert.Empty(fold.Kept);
-        Assert.Equal(3, fold.Fileless);
-        Assert.Equal("CS1705 x2, CS1701 x1", fold.FilelessIds);
+        Assert.Equal(3, fold.Fileless.Count);
+        Assert.Equal("CS1705 x2, CS1701 x1", fold.Fileless.Ids);
+        Assert.Equal(["CS1705", "CS1705"], fold.Fileless.Errors.Select(diagnostic => diagnostic.Id));
+        Assert.Contains("2 of them error(s)", BaselineFold.FilelessNote(fold, "HEAD"), StringComparison.Ordinal);
     }
 
     private static Diagnostic Located(DiagnosticSeverity severity, int line)
@@ -65,9 +67,27 @@ public sealed class BaselineFoldTests
         return Diagnostic.Create(Descriptor("CS0001", severity), Location.Create(Tree, span));
     }
 
-    private static Diagnostic Fileless(string id) =>
-        Diagnostic.Create(Descriptor(id, DiagnosticSeverity.Error), Location.None);
+    private static Diagnostic Fileless(string id, DiagnosticSeverity severity = DiagnosticSeverity.Error) =>
+        Diagnostic.Create(Descriptor(id, severity), Location.None);
 
     private static DiagnosticDescriptor Descriptor(string id, DiagnosticSeverity severity) =>
         new(id, id, id, "Compiler", severity, isEnabledByDefault: true);
+
+    [Fact]
+    public void Split_ForAnAdditionalFileDiagnosticOnAChangedLine_KeepsIt()
+    {
+        var fold = BaselineFold.Split([External(DiagnosticSeverity.Warning, line: 3), External(DiagnosticSeverity.Warning, line: 10)], Touched);
+
+        Assert.Single(fold.Kept);
+        Assert.Equal(1, fold.PreExisting);
+        Assert.Equal(0, fold.Fileless.Count);
+    }
+
+    private static Diagnostic External(DiagnosticSeverity severity, int line)
+    {
+        var text = Tree.GetText();
+        var span = text.Lines[line - 1].Span;
+
+        return Diagnostic.Create(Descriptor("RS0016", severity), Location.Create(Changed, span, text.Lines.GetLinePositionSpan(span)));
+    }
 }

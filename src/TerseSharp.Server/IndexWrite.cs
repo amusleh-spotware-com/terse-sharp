@@ -2,26 +2,30 @@ using System.Text;
 
 namespace TerseSharp.Server;
 
+internal readonly record struct StageRequest(string Root, string Path, string Content, bool DryRun, bool Verbose);
+
 internal static class IndexWrite
 {
     private const string RegularFile = "100644";
 
-    public static async Task<string> StageAsync(string root, string path, string content, bool dryRun, bool verbose, CancellationToken cancellationToken)
-    {
-        if (Relative(root, path) is not { } relative)
-            return Errors.OutOfWorkspace(path).Render();
+    private const string LiteralPathspecs = "--literal-pathspecs";
 
-        var indexed = await GitRunner.ShowAsync(root, string.Empty, relative, cancellationToken).ConfigureAwait(false);
+    public static async Task<string> StageAsync(StageRequest request, CancellationToken cancellationToken)
+    {
+        if (Relative(request.Root, request.Path) is not { } relative)
+            return Errors.OutOfWorkspace(request.Path).Render();
+
+        var indexed = await GitRunner.ShowAsync(request.Root, string.Empty, relative, cancellationToken).ConfigureAwait(false);
         var before = indexed.IsOk ? indexed.Value! : string.Empty;
 
-        if (dryRun)
-            return "dryRun stage  " + relative + "  changedLines=" + Changed(before, content) + "\n" + UnifiedDiff.Between(relative, before, content);
+        if (request.DryRun)
+            return "dryRun stage  " + relative + "  changedLines=" + Changed(before, request.Content) + "\n" + UnifiedDiff.Between(relative, before, request.Content);
 
-        var staged = await ApplyAsync(root, relative, content, cancellationToken).ConfigureAwait(false);
+        var staged = await ApplyAsync(request.Root, relative, request.Content, cancellationToken).ConfigureAwait(false);
 
         return !staged.IsOk
             ? staged.Error!.Render()
-            : "staged  " + relative + "  changedLines=" + Changed(before, content) + "  working tree untouched" + (verbose ? "\n" + UnifiedDiff.Between(relative, before, content) : string.Empty);
+            : "staged  " + relative + "  changedLines=" + Changed(before, request.Content) + "  working tree untouched" + (request.Verbose ? "\n" + UnifiedDiff.Between(relative, before, request.Content) : string.Empty);
     }
 
     public static async Task<string> UnstageAsync(string root, string path, string reference, CancellationToken cancellationToken)
@@ -29,7 +33,7 @@ internal static class IndexWrite
         if (Relative(root, path) is not { } relative)
             return Errors.OutOfWorkspace(path).Render();
 
-        var reset = await GitRunner.ReadAsync(root, ["reset", "-q", reference, "--", relative], cancellationToken).ConfigureAwait(false);
+        var reset = await GitRunner.ReadAsync(root, [LiteralPathspecs, "reset", "-q", reference, "--", relative], cancellationToken).ConfigureAwait(false);
 
         return reset.IsOk
             ? "unstaged  " + relative + "  index entry is " + reference + "'s again, working tree untouched"
@@ -38,15 +42,20 @@ internal static class IndexWrite
 
     private static async Task<Result<string>> ApplyAsync(string root, string relative, string content, CancellationToken cancellationToken)
     {
+        var prefix = await GitRunner.ReadAsync(root, ["rev-parse", "--show-prefix"], cancellationToken).ConfigureAwait(false);
+
+        if (!prefix.IsOk)
+            return prefix;
+
         var blob = await BlobAsync(root, relative, content, cancellationToken).ConfigureAwait(false);
 
         if (!blob.IsOk)
             return blob;
 
         var mode = await ModeAsync(root, relative, cancellationToken).ConfigureAwait(false);
-        var sha = blob.Value!.Trim();
+        var entry = string.Create(CultureInfo.InvariantCulture, $"{mode},{blob.Value!.AsSpan().Trim()},{prefix.Value!.AsSpan().Trim()}{relative}");
 
-        return await GitRunner.ReadAsync(root, ["update-index", "--add", "--cacheinfo", mode + "," + sha + "," + relative], cancellationToken).ConfigureAwait(false);
+        return await GitRunner.ReadAsync(root, ["update-index", "--add", "--cacheinfo", entry], cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<string>> BlobAsync(string root, string relative, string content, CancellationToken cancellationToken)
@@ -67,7 +76,7 @@ internal static class IndexWrite
 
     private static async Task<string> ModeAsync(string root, string relative, CancellationToken cancellationToken)
     {
-        var listed = await GitRunner.ReadAsync(root, ["ls-files", "--stage", "--", relative], cancellationToken).ConfigureAwait(false);
+        var listed = await GitRunner.ReadAsync(root, [LiteralPathspecs, "ls-files", "--stage", "--", relative], cancellationToken).ConfigureAwait(false);
         var line = listed.IsOk ? listed.Value!.AsSpan().Trim() : default;
         var space = line.IndexOf(' ');
 

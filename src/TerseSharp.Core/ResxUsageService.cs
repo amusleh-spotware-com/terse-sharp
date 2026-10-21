@@ -71,7 +71,7 @@ public static class ResxUsageService
             TimeSpan.FromSeconds(2));
 
     private static HashSet<string> ResourceClasses(LoadedWorkspace workspace) =>
-        workspace.Indexes.Resx().Families.Select(family => family.Name).ToHashSet(StringComparer.Ordinal);
+        ResourceClassNames(workspace.Indexes.Resx().Families.Select(family => family.Name));
 
     private static string Form(string line, string quoted) => line switch
     {
@@ -250,4 +250,17 @@ public static class ResxUsageService
     }
     private static string Owner(SyntaxNode member) =>
         member.Ancestors().OfType<TypeDeclarationSyntax>().FirstOrDefault()?.Identifier.ValueText ?? "?";
+
+    public static HashSet<string> ResourceClassNames(IEnumerable<string> families)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var family in families)
+        {
+            names.Add(family);
+            names.Add(ResxIdentifier.From(family));
+        }
+
+        return names;
+    }
 }

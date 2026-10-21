@@ -835,11 +835,7 @@ public static class ResxEditService
         }
     }
 
-    private static string DesignerAccessorName(string key) => string.Create(key.Length, key, static (span, source) =>
-    {
-        for (var index = 0; index < source.Length; index++)
-            span[index] = char.IsLetterOrDigit(source[index]) ? source[index] : '_';
-    });
+    private static string DesignerAccessorName(string key) => ResxIdentifier.From(key);
 
     private static async Task<Result<string>> RemovedAsync(string root, ResxTarget target, Removal removal, CancellationToken cancellationToken)
     {

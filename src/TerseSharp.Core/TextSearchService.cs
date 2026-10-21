@@ -1281,7 +1281,7 @@ public static class TextSearchService
     }
 
     private static readonly FrozenSet<string> FileExtensions = FrozenSet.Create(
-        StringComparer.OrdinalIgnoreCase,
+        StringComparer.Ordinal,
         "cs", "csproj", "props", "targets", "sln", "slnx", "slnf", "json", "xml", "xaml", "axaml", "resx", "resw", "razor", "cshtml", "md", "txt", "yml", "yaml", "config", "ps1", "sh", "js", "ts", "py", "editorconfig", "log");
 
     private static ReadOnlySpan<char> TagField(string record)

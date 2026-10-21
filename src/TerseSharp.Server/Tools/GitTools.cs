@@ -144,7 +144,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             ? Result.Ok(string.Empty)
             : await GitRunner.ReadAsync(
                 root,
-                ["--no-optional-locks", "ls-files", "--others", "--exclude-standard", "--", path is { Length: > 0 } pathspec ? pathspec : "."],
+                ["--no-optional-locks", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "--", path is { Length: > 0 } pathspec ? pathspec : "."],
                 cancellationToken).ConfigureAwait(false);
 
     private readonly record struct Listing(string Text, GitTiming Timing);
@@ -516,7 +516,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             int maxResults)
     {
         if (commit is { Length: > 0 } one)
-            return Arguments(["show", "--stat=200", "--oneline", "--no-color", "--relative", one], null, path);
+            return ["--no-optional-locks", "show", "--stat=200", "--oneline", "--no-color", "--relative", "--no-renames", "--no-ext-diff", one, "--", path is { Length: > 0 } pathspec ? pathspec : "."];
 
         var command = new List<string>(10)
             {
@@ -1193,11 +1193,33 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             return string.Empty;
 
         var listed = await GitRunner.ReadAsync(root, ["--no-optional-locks", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "--", .. paths], cancellationToken).ConfigureAwait(false);
+
+        return await BudgetedAsync(root, Kept(listed.IsOk ? listed.Value! : string.Empty, null), cancellationToken).ConfigureAwait(false);
+    }
+
+    private const int UntrackedDiffFiles = 100;
+    private const int UntrackedDiffChars = 4 * 1024 * 1024;
+
+    private static async Task<string> BudgetedAsync(string root, IEnumerable<string> files, CancellationToken cancellationToken)
+    {
         var diffs = new StringBuilder();
+        var shown = 0;
+        var skipped = 0;
 
-        foreach (var file in Kept(listed.IsOk ? listed.Value! : string.Empty, null))
+        foreach (var file in files)
+        {
+            if (shown >= UntrackedDiffFiles || diffs.Length >= UntrackedDiffChars)
+            {
+                skipped++;
+                continue;
+            }
+
             diffs.Append(await UntrackedFile.DiffAsync(root, file, cancellationToken).ConfigureAwait(false));
+            shown++;
+        }
 
-        return diffs.ToString();
+        return skipped is 0
+            ? diffs.ToString()
+            : diffs.Append(CultureInfo.InvariantCulture, $"{skipped} more untracked file(s) not shown - narrow path= to read them\n").ToString();
     }
 }

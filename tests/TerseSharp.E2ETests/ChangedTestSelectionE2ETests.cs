@@ -173,6 +173,36 @@ public sealed class ChangedTestSelectionE2ETests
     }
 
     [Fact]
+    public async Task RunTests_WithNoBuildAfterABuildThatOnlyRecompiledAReferencedLibrary_WarnsOnlyOnceThatLibraryIsUnbuilt()
+    {
+        var adder = Path.Combine(SelectionRoot, "src", "Selection.Core", "Adder.cs");
+        var original = await File.ReadAllTextAsync(adder, TestContext.Current.CancellationToken);
+        var written = File.GetLastWriteTimeUtc(adder);
+        var server = await StartAsync();
+
+        try
+        {
+            await CallAsync(server, "run_tests", new() { ["project"] = "Selection.Core.Tests", ["timeoutSeconds"] = 600 });
+            await File.WriteAllTextAsync(adder, original + "\n// body-only change\n", TestContext.Current.CancellationToken);
+            await CallAsync(server, "run_tests", new() { ["project"] = "Selection.Core.Tests", ["timeoutSeconds"] = 600, ["force"] = true });
+            var rebuilt = await CallAsync(server, "run_tests", new() { ["project"] = "Selection.Core.Tests", ["noBuild"] = true, ["force"] = true });
+            File.SetLastWriteTimeUtc(adder, DateTime.UtcNow.AddMinutes(10));
+            var unbuilt = await CallAsync(server, "run_tests", new() { ["project"] = "Selection.Core.Tests", ["noBuild"] = true, ["force"] = true });
+
+            Assert.StartsWith("run_tests PASSED", rebuilt, StringComparison.Ordinal);
+            Assert.DoesNotContain("older than its sources", rebuilt, StringComparison.Ordinal);
+            Assert.Contains("WARNING noBuild=true ran a binary older than its sources: Selection.Core.Tests", unbuilt, StringComparison.Ordinal);
+            Assert.Contains("Adder.cs", unbuilt, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+            await File.WriteAllTextAsync(adder, original, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(adder, written);
+        }
+    }
+
+    [Fact]
     public async Task RunTests_WhenABatchsOwnBuildCannotFinish_NamesTheProjectAndNeverOffersNoBuild()
     {
         var server = await StartAsync();

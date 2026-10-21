@@ -160,7 +160,7 @@ bool verbose) =>
         [Description("Token a rejected write, or a dryRun that would land, printed on its LAST line, e.g. r3. It holds every file's content, so the retry re-sends nothing. A path or content you pass outranks a one-file token's held one.")] string? retryWith = null,
         [Description("Namespaces added to each .cs file this retry replays. Ignored without retryWith=.")] string[]? usings = null,
         [Description("Replace a file even when this write keeps under a quarter of its content lines; force=true does not lift that refusal.")] bool overwrite = false,
-        [Description("Write content= to the git INDEX only, byte for byte, working tree untouched; with ref= reset that path's index entry to the ref. Default false.")] bool stage = false,
+        [Description("Write content= to the git INDEX only, as git add would stage it, working tree untouched; with ref= reset that path's index entry to the ref. Default false.")] bool stage = false,
         CancellationToken cancellationToken = default)
     {
         if (@ref is { Length: > 0 } && (delete || content is not null || files is { Length: > 0 }))
@@ -173,7 +173,7 @@ bool verbose) =>
         var options = new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince, overwrite);
 
         if (stage)
-            return Staging(workspace, path, content, @ref, files is { Length: > 0 } || delete || retryWith is { Length: > 0 }, options, cancellationToken);
+            return Staging(workspace, new StageArguments(path, content, @ref, files is { Length: > 0 } || delete || retryWith is { Length: > 0 }), options, cancellationToken);
 
         if (retryWith is { Length: > 0 } token)
             return Replayed(token, workspace, path, content, usings, options, cancellationToken);
@@ -1523,9 +1523,11 @@ context.RejectWrite() is { } rejection
         return WrittenMany(workspace, null, null, false, false, Replays(held, imports), options, held.Root, imports, cancellationToken);
     }
 
-    private Task<string> Staging(string? workspace, string? path, string? content, string? reference, bool unstageable, WriteOptions options, CancellationToken cancellationToken) => (path, content, reference, unstageable) switch
+    private readonly record struct StageArguments(string? Path, string? Content, string? Reference, bool Unstageable);
+
+    private Task<string> Staging(string? workspace, StageArguments arguments, WriteOptions options, CancellationToken cancellationToken) => (arguments.Path, arguments.Content, arguments.Reference, arguments.Unstageable) switch
     {
-        ({ Length: > 0 } target, { } text, null or "", false) => Guarded(workspace, target, loaded => IndexWrite.StageAsync(loaded.Root, target, text, options.DryRun, options.Verbose, cancellationToken), false, cancellationToken),
+        ({ Length: > 0 } target, { } text, null or "", false) => Guarded(workspace, target, loaded => IndexWrite.StageAsync(new StageRequest(loaded.Root, target, text, options.DryRun, options.Verbose), cancellationToken), false, cancellationToken),
         ({ Length: > 0 } target, null, { Length: > 0 } from, false) => Guarded(workspace, target, loaded => IndexWrite.UnstageAsync(loaded.Root, target, from, cancellationToken), false, cancellationToken),
         _ => Task.FromResult(Errors.Invalid(
             "stage=true writes ONE path's content= to the index, or with ref= resets its index entry - not both, and not beside files=, delete= or retryWith=",

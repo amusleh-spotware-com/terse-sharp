@@ -77,4 +77,27 @@ public sealed class ResxUsageScanTests : IDisposable
 
     private void Write(string name, string content) =>
         File.WriteAllText(Path.Combine(directory.FullName, name), content);
+
+    [Fact]
+    public void ResourceClassNames_ForADottedFamily_AddsTheClassNameTheGeneratorEmits() =>
+        Assert.Equal(["Errors.Messages", "Errors_Messages"], ResxUsageService.ResourceClassNames(["Errors.Messages"]).Order(StringComparer.Ordinal));
+
+    [Fact]
+    public void Textual_FindsAMemberAccessThroughTheGeneratedClassOfADottedFamily()
+    {
+        Write("Caller.cs", "var text = Errors_Messages.Caption_Submit;");
+
+        var usages = ResxUsageService.Textual(directory.FullName, "Caption_Submit", ResxUsageService.ResourceClassNames(["Errors.Messages"]));
+
+        Assert.Single(usages);
+    }
+
+    [Theory]
+    [InlineData("Strings", "Strings")]
+    [InlineData("Errors.Messages", "Errors_Messages")]
+    [InlineData("my-key name", "my_key_name")]
+    [InlineData("class", "_class")]
+    [InlineData("1st", "_1st")]
+    public void ResxIdentifier_From_SanitizesANameTheWayTheResourceGeneratorDoes(string name, string expected) =>
+        Assert.Equal(expected, ResxIdentifier.From(name));
 }

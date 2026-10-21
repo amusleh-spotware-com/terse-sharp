@@ -9,37 +9,42 @@ public static class StaleBinaries
 {
     public static ImmutableArray<StaleBinary> Detect(Solution solution)
     {
-        var newest = new Dictionary<ProjectId, (string Path, DateTime Written)>(solution.ProjectIds.Count);
+        var own = new Dictionary<ProjectId, StaleBinary?>(solution.ProjectIds.Count);
 
         foreach (var project in solution.Projects)
-            newest[project.Id] = NewestInput(project);
+            own[project.Id] = Behind(project, NewestInput(project));
 
         var graph = solution.GetProjectDependencyGraph();
         var stale = ImmutableArray.CreateBuilder<StaleBinary>();
 
         foreach (var project in solution.Projects)
         {
-            if (Behind(project, Closure(project.Id, graph, newest)) is { } binary)
+            if (Staleness(solution, project, graph, own) is { } binary)
                 stale.Add(binary);
         }
 
         return stale.ToImmutable();
     }
 
-    private static (string Path, DateTime Written) Closure(
-        ProjectId project,
+    private static StaleBinary? Staleness(
+        Solution solution,
+        Project project,
         ProjectDependencyGraph graph,
-        Dictionary<ProjectId, (string Path, DateTime Written)> newest)
+        Dictionary<ProjectId, StaleBinary?> own)
     {
-        var latest = newest[project];
+        if (own[project.Id] is { } self)
+            return self;
 
-        foreach (var dependency in graph.GetProjectsThatThisProjectTransitivelyDependsOn(project))
+        foreach (var dependency in graph.GetProjectsThatThisProjectTransitivelyDependsOn(project.Id))
         {
-            if (newest.TryGetValue(dependency, out var candidate) && candidate.Written > latest.Written)
-                latest = candidate;
+            if (own.GetValueOrDefault(dependency) is { } unbuilt && project.FilePath is { Length: > 0 } projectPath)
+                return unbuilt with { ProjectPath = projectPath };
+
+            if (solution.GetProject(dependency) is { } library && Uncopied(project, library) is { } uncopied)
+                return uncopied;
         }
 
-        return latest;
+        return null;
     }
 
     private static StaleBinary? Behind(Project project, (string Path, DateTime Written) input)
@@ -74,4 +79,20 @@ public static class StaleBinaries
 
     private static (string Path, DateTime Written) Written(string? path) =>
         path is { Length: > 0 } && File.Exists(path) ? (path, File.GetLastWriteTimeUtc(path)) : (string.Empty, DateTime.MinValue);
+
+    private static StaleBinary? Uncopied(Project project, Project library)
+    {
+        if (project is not { FilePath: { Length: > 0 } projectPath, OutputFilePath: { Length: > 0 } output } || library.OutputFilePath is not { Length: > 0 } built || !File.Exists(built))
+            return null;
+
+        var copy = Path.Join(Path.GetDirectoryName(output), Path.GetFileName(built));
+
+        if (!File.Exists(copy))
+            return null;
+
+        var copied = File.GetLastWriteTimeUtc(copy);
+        var fresh = File.GetLastWriteTimeUtc(built);
+
+        return fresh > copied ? new StaleBinary(projectPath, copy, built, fresh - copied) : null;
+    }
 }

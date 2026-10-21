@@ -15,7 +15,7 @@ public static class DiagnosticsService
             ParallelWork.Options(cancellationToken),
             (project, token) => CollectAsync(project, scope, request.Minimum, found, token)).ConfigureAwait(false);
 
-        var split = request.Touched is { } touched ? BaselineFold.Split(found, touched) : new BaselineSplit([.. found], 0, 0, 0, string.Empty);
+        var split = request.Touched is { } touched ? BaselineFold.Split(found, touched) : new BaselineSplit([.. found], 0, 0, new FilelessFold(0, string.Empty, []));
         var declaration = await DiagnosticDeclarations.ResolverAsync(split.Kept, cancellationToken).ConfigureAwait(false);
 
         return Render(workspace.Root, request, split, declaration, workspace.Load);

@@ -162,12 +162,13 @@ public static class FolderRules
     {
         var digest = new StringBuilder(Math.Clamp(room, 0, Budget));
         var kept = 0;
+        var fenced = false;
 
         foreach (var line in body.EnumerateLines())
         {
             var trimmed = line.TrimEnd();
 
-            if (!Binding(trimmed) || digest.Length + trimmed.Length + 1 > room)
+            if (Fenced(trimmed, ref fenced) || !Binding(trimmed) || digest.Length + trimmed.Length + 1 > room)
                 continue;
 
             digest.Append('\n').Append(trimmed);
@@ -189,5 +190,15 @@ public static class FolderRules
         }
 
         return false;
+    }
+
+    private static bool Fenced(ReadOnlySpan<char> line, ref bool fenced)
+    {
+        if (!line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            return fenced;
+
+        fenced = !fenced;
+
+        return true;
     }
 }

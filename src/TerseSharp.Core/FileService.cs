@@ -2137,7 +2137,7 @@ public static class FileService
 
     private static int Ordinal(TextEdit edit) => edit.Occurrence > 0 ? edit.Occurrence : 1;
 
-    private static string WithoutByteOrderMark(string text) => text.StartsWith('﻿') ? text[1..] : text;
+    private static string WithoutByteOrderMark(string text) => text.StartsWith((char)0xFEFF) ? text[1..] : text;
 
     private static Result<string> RemovedTree(LoadedWorkspace workspace, string path, string full, bool dryRun, bool force)
     {

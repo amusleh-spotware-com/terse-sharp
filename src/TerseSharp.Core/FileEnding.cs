@@ -4,16 +4,18 @@ namespace TerseSharp.Core;
 
 public static class FileEnding
 {
-    private const char ByteOrderMark = '﻿';
+    private const char ByteOrderMark = (char)0xFEFF;
     private const string EditorConfig = ".editorconfig";
     private const string InsertFinalNewline = "insert_final_newline";
 
     public static async Task<(string Text, string? Note)> KeptAsync(string full, bool existed, string before, string content, CancellationToken cancellationToken)
     {
-        var overwrites = existed && before.Length > 0;
-        var (marked, bomNote) = Marked(full, overwrites, content);
+        if (!existed || before.Length is 0)
+            return (content, null);
+
+        var (marked, bomNote) = Marked(full, content);
         var insert = await InsertFinalNewlineAsync(full, cancellationToken).ConfigureAwait(false);
-        var (ended, newlineNote) = Ended(marked, Wanted(insert, overwrites, before, marked), insert);
+        var (ended, newlineNote) = Ended(marked, insert ?? Terminated(before), insert, Ending(before));
 
         return (ended, (bomNote, newlineNote) switch
         {
@@ -24,25 +26,19 @@ public static class FileEnding
         });
     }
 
-    private static (string Text, string? Note) Marked(string full, bool overwrites, string content)
+    private static (string Text, string? Note) Marked(string full, string content)
     {
         if (content is not [ByteOrderMark, ..])
             return (content, null);
 
-        if (overwrites && AtomicWrite.EncodingOf(full).Preamble.Length > 0)
-            return (content[1..], null);
-
-        return (content, overwrites ? "NOTE byte order mark added - the file had none; send the content without a leading U+FEFF to keep it that way" : null);
+        return AtomicWrite.EncodingOf(full).Preamble.Length > 0
+            ? (content[1..], null)
+            : (content, "NOTE byte order mark added - the file had none; send the content without a leading U+FEFF to keep it that way");
     }
 
-    private static bool Wanted(bool? insert, bool overwrites, string before, string content) => insert switch
-    {
-        { } configured => configured,
-        null when overwrites => Terminated(before),
-        null => Terminated(content),
-    };
+    private static string Ending(string before) => before.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
 
-    private static (string Text, string? Note) Ended(string content, bool wanted, bool? insert)
+    private static (string Text, string? Note) Ended(string content, bool wanted, bool? insert, string ending)
     {
         if (content.Length is 0 || Terminated(content) == wanted)
             return (content, null);
@@ -52,8 +48,8 @@ public static class FileEnding
             : "because .editorconfig sets " + InsertFinalNewline + "=" + (wanted ? "true" : "false");
 
         return wanted
-            ? (content + (content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n"), "NOTE final newline added " + reason)
-            : (content.TrimEnd('\r', '\n'), "NOTE final newline removed " + reason);
+            ? (content + ending, "NOTE final newline added " + reason)
+            : (content[..^(content.EndsWith("\r\n", StringComparison.Ordinal) ? 2 : 1)], "NOTE final newline removed " + reason);
     }
 
     private static bool Terminated(string text) => text is [.., '\n'];

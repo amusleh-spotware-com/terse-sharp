@@ -49,7 +49,7 @@ public static class EditPulse
         }
     }
 
-    public static IReadOnlyList<string> Written(int watermark)
+    public static IReadOnlyList<string> Written(int watermark, int ceiling)
     {
         lock (Gate)
         {
@@ -57,7 +57,7 @@ public static class EditPulse
 
             foreach (var entry in Recent)
             {
-                if (entry.At > watermark)
+                if (entry.At > watermark && entry.At <= ceiling)
                     written.Add(entry.Path);
             }
 

@@ -67,5 +67,7 @@ public static class SeverityRemaps
     ];
 
     private static string[] Listed(string option, string ids) =>
-        ids.AsSpan().Trim().IsEmpty ? [] : [option + ids.Replace(';', ',')];
+        ids.Split([';', ',', '\n', '\r', ' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) is { Length: > 0 } listed
+            ? [option + string.Join(',', listed)]
+            : [];
 }

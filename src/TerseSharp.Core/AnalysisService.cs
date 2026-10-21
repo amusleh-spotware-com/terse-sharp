@@ -42,7 +42,7 @@ public static class AnalysisService
             ids,
             includeDeadCode,
             changed,
-            new Narrowed(touched, baseRef, all.Length - found.Length - split.Fileless, split));
+            new Narrowed(touched, baseRef, all.Length - found.Length - split.Fileless.Count, split));
     }
 
     public static async Task<Result<GateFindings>> FindingsAsync(
@@ -301,7 +301,9 @@ public static class AnalysisService
     private readonly record struct Narrowed(TouchedLines? Touched, string BaseRef, int PreExisting, BaselineSplit Split = default);
 
     private static Diagnostic[] Introduced(Diagnostic[] found, TouchedLines? touched) =>
-        touched is null ? found : BaselineFold.Split(found, touched).Kept;
+        touched is null ? found : Introduced(BaselineFold.Split(found, touched));
+
+    private static Diagnostic[] Introduced(BaselineSplit split) => [.. split.Kept, .. split.Fileless.Errors];
 
     private static string[] Introduced(string[] extra, TouchedLines? touched) =>
         touched is null ? extra : [.. extra.Where(touched.CoversRecord)];

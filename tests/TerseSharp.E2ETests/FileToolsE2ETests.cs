@@ -2712,6 +2712,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     [InlineData("insert_final_newline = true\n", "one", "two", "two\n", "insert_final_newline=true")]
     [InlineData("insert_final_newline = false\n", "one\n", "two\n", "two", "insert_final_newline=false")]
     [InlineData("", "one\n", "two\n", "two\n", null)]
+    [InlineData("", "one\r\n", "two", "two\r\n", "NOTE final newline added")]
     public async Task WriteText_OverAnExistingFile_KeepsItsFinalNewlineUnlessTheEditorconfigSaysOtherwiseAndSaysWhenItChangedTheContent(
         string editorconfig,
         string existing,

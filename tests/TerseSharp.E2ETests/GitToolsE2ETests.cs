@@ -546,6 +546,58 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task ChangedFilesAndDiffText_ForAnUntrackedFileAnotherProcessHoldsOpenForWriting_StillCountAndShowIt()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-untracked-held");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, "free.txt"), "a\n", TestContext.Current.CancellationToken);
+
+            await using var held = new FileStream(Path.Combine(scratch, "held.txt"), FileMode.Create, FileAccess.ReadWrite, FileShare.Read);
+
+            await held.WriteAsync("x\ny\n"u8.ToArray(), TestContext.Current.CancellationToken);
+            await held.FlushAsync(TestContext.Current.CancellationToken);
+
+            var listed = await server.CallAsync("changed_files", new() { ["path"] = "scratch-untracked-held" });
+            var diffed = await server.CallAsync("diff_text", new() { ["path"] = "scratch-untracked-held/held.txt" });
+
+            Assert.Contains("scratch-untracked-held/held.txt  +2 -0  ?", listed, StringComparison.Ordinal);
+            Assert.Contains("scratch-untracked-held/free.txt  +1 -0  ?", listed, StringComparison.Ordinal);
+            Assert.Contains("+y", diffed, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DiffText_OverMoreUntrackedFilesThanItsBudget_ShowsTheBudgetAndCountsTheRest()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-untracked-budget");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            for (var index = 0; index < 105; index++)
+                await File.WriteAllTextAsync(Path.Combine(scratch, string.Create(CultureInfo.InvariantCulture, $"f{index:D3}.txt")), "line\n", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("diff_text", new() { ["path"] = "scratch-untracked-budget", ["maxLines"] = 5000 });
+
+            Assert.Contains("5 more untracked file(s) not shown", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("f104.txt", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task DiffText_ForAnUntrackedFileItNames_AnswersItAsAllAddedLines()
     {
         var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-untracked-diff");
