@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace TerseSharp.Server;
@@ -117,7 +118,7 @@ public static class FolderRules
 
         return used + SectionFrame + rule.Length + body.Length <= Budget
             ? string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} ---\n{body}")
-            : string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- {body.Length} characters, over this hook's {Budget}-character budget - read it now: read_text path=\"{rule}\" verbose=true");
+            : Digested(rule, body, Budget - used - SectionFrame - rule.Length - PointerReserve);
     }
 
     private sealed record Reply(string Preface, bool ShowUnrecorded, Func<string, JsonObject> Output, bool ShowLost = false, bool Hold = false);
@@ -152,5 +153,41 @@ public static class FolderRules
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
         }
+    }
+
+    private const int PointerReserve = 240;
+    private static readonly string[] BindingMarkers = ["MUST", "NEVER", "Never", "never", "Do not", "do not", "Don't", "don't", "BANNED", "Banned", "banned", "HARD GATE", "🚫", "ALWAYS", "Always", "always", "FORBIDDEN", "Forbidden", "forbidden", "MANDATORY", "Mandatory", "mandatory", "REQUIRED", "required"];
+
+    private static string Digested(string rule, ReadOnlySpan<char> body, int room)
+    {
+        var digest = new StringBuilder(Math.Clamp(room, 0, Budget));
+        var kept = 0;
+
+        foreach (var line in body.EnumerateLines())
+        {
+            var trimmed = line.TrimEnd();
+
+            if (!Binding(trimmed) || digest.Length + trimmed.Length + 1 > room)
+                continue;
+
+            digest.Append('\n').Append(trimmed);
+            kept++;
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- {body.Length} characters, over this hook's {Budget}-character budget, so only its {kept} heading and rule line(s) follow - read it now: read_text path=\"{rule}\" verbose=true{digest}");
+    }
+
+    private static bool Binding(ReadOnlySpan<char> line)
+    {
+        if (line.TrimStart().StartsWith('#'))
+            return true;
+
+        foreach (var marker in BindingMarkers)
+        {
+            if (line.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 }

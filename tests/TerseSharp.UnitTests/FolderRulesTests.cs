@@ -125,6 +125,24 @@ public sealed class FolderRulesTests : IDisposable
     }
 
     [Fact]
+    public async Task PostToolUse_ForRulesOverTheHookBudget_InlinesTheirHeadingsAndBindingLinesBesideThePointer()
+    {
+        var filler = string.Concat(Enumerable.Repeat("Background prose that states no rule at all.\n", FolderRules.Budget / 40));
+        var rules = "# Unit tests\n\n" + filler + "## Asserts\n- Never use FluentAssertions in new tests.\n- Tests MUST assert values.\n" + filler;
+        await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
+
+        var context = Context(await HookAsync(Read()));
+
+        Assert.Contains("# Unit tests", context, StringComparison.Ordinal);
+        Assert.Contains("## Asserts", context, StringComparison.Ordinal);
+        Assert.Contains("- Never use FluentAssertions in new tests.", context, StringComparison.Ordinal);
+        Assert.Contains("- Tests MUST assert values.", context, StringComparison.Ordinal);
+        Assert.DoesNotContain("Background prose", context, StringComparison.Ordinal);
+        Assert.Contains("read_text path=\"" + FooRules + "\" verbose=true", context, StringComparison.Ordinal);
+        Assert.InRange(context.Length, 1, FolderRules.ContextLimit);
+    }
+
+    [Fact]
     public async Task RunAsync_WhenTheLedgerCannotBeWritten_StillInjectsTheRules()
     {
         await File.WriteAllTextAsync(Path.Combine(Home, ".terse"), "a file where the ledger directory belongs", TestContext.Current.CancellationToken);
