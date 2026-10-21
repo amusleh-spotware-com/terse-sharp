@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 
@@ -227,7 +228,7 @@ public static class SymbolLookup
     private static ISymbol[] Declared(IReadOnlyList<INamedTypeSymbol> types, SymbolQuery query) =>
         [
             .. types
-            .SelectMany(type => type.GetMembers(query.Member))
+            .SelectMany(type => Spelled(type, query.Member))
             .Where(symbol => SymbolReference.Matches(symbol, query))
             .DistinctBy(Describe, StringComparer.Ordinal),
         ];
@@ -243,12 +244,12 @@ public static class SymbolLookup
     private static string[] Nearest(INamedTypeSymbol type, string member) =>
     [
         .. type.GetMembers()
-        .Where(symbol => symbol.CanBeReferencedByName || symbol is IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor, IsImplicitlyDeclared: false })
+        .Where(Listable)
+        .OrderBy(symbol => Overlaps(SimpleName(symbol), member) ? 0 : 1)
+        .ThenByDescending(symbol => SimpleName(symbol).AsSpan().CommonPrefixLength(member.AsSpan()))
+        .ThenBy(SimpleName, StringComparer.Ordinal)
         .Select(Addressable)
-        .Distinct(StringComparer.Ordinal)
-        .OrderBy(name => name.Contains(member, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-        .ThenBy(name => name, StringComparer.Ordinal)
-        .Take(MaxNearestMembers),
+        .Distinct(StringComparer.Ordinal),
     ];
 
     private static Result<ISymbol>? Unmatched(string text, INamedTypeSymbol[] types, SymbolQuery query) => types is [var only]
@@ -459,4 +460,74 @@ public static class SymbolLookup
         symbol.Kind == first.Kind
         && string.Equals(symbol.Name, first.Name, StringComparison.Ordinal)
         && SymbolEqualityComparer.Default.Equals(symbol.ContainingType, owner);
+
+    private static IEnumerable<ISymbol> Spelled(INamedTypeSymbol type, string member)
+    {
+        var declared = MetadataNames(type, member).SelectMany(name => type.GetMembers(name)).ToArray();
+
+        return declared.Length > 0
+            ? declared
+            : type.GetMembers().Where(symbol => IsExplicitImplementation(symbol) && string.Equals(SimpleName(symbol), member, StringComparison.Ordinal));
+    }
+
+    private static string[] MetadataNames(INamedTypeSymbol type, string member) => member switch
+    {
+        _ when string.Equals(member, type.Name, StringComparison.Ordinal) => [WellKnownMemberNames.InstanceConstructorName],
+        ['~', .. var rest] when string.Equals(rest, type.Name, StringComparison.Ordinal) => [WellKnownMemberNames.DestructorName],
+        _ when member.StartsWith(OperatorKeyword, StringComparison.Ordinal) && OperatorNames.TryGetValue(member[OperatorKeyword.Length..].Trim(), out var names) => names,
+        _ => [member],
+    };
+
+    private const string OperatorKeyword = "operator ";
+    private static readonly FrozenDictionary<string, string[]> OperatorNames = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["+"] = [WellKnownMemberNames.AdditionOperatorName, WellKnownMemberNames.UnaryPlusOperatorName],
+        ["-"] = [WellKnownMemberNames.SubtractionOperatorName, WellKnownMemberNames.UnaryNegationOperatorName],
+        ["*"] = [WellKnownMemberNames.MultiplyOperatorName],
+        ["/"] = [WellKnownMemberNames.DivisionOperatorName],
+        ["%"] = [WellKnownMemberNames.ModulusOperatorName],
+        ["&"] = [WellKnownMemberNames.BitwiseAndOperatorName],
+        ["|"] = [WellKnownMemberNames.BitwiseOrOperatorName],
+        ["^"] = [WellKnownMemberNames.ExclusiveOrOperatorName],
+        ["<<"] = [WellKnownMemberNames.LeftShiftOperatorName],
+        [">>"] = [WellKnownMemberNames.RightShiftOperatorName],
+        [">>>"] = [WellKnownMemberNames.UnsignedRightShiftOperatorName],
+        ["=="] = [WellKnownMemberNames.EqualityOperatorName],
+        ["!="] = [WellKnownMemberNames.InequalityOperatorName],
+        ["<"] = [WellKnownMemberNames.LessThanOperatorName],
+        [">"] = [WellKnownMemberNames.GreaterThanOperatorName],
+        ["<="] = [WellKnownMemberNames.LessThanOrEqualOperatorName],
+        [">="] = [WellKnownMemberNames.GreaterThanOrEqualOperatorName],
+        ["!"] = [WellKnownMemberNames.LogicalNotOperatorName],
+        ["~"] = [WellKnownMemberNames.OnesComplementOperatorName],
+        ["++"] = [WellKnownMemberNames.IncrementOperatorName],
+        ["--"] = [WellKnownMemberNames.DecrementOperatorName],
+        ["true"] = [WellKnownMemberNames.TrueOperatorName],
+        ["false"] = [WellKnownMemberNames.FalseOperatorName],
+    }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    private static bool IsExplicitImplementation(ISymbol symbol) => symbol switch
+    {
+        IMethodSymbol method => method.ExplicitInterfaceImplementations.Length > 0,
+        IPropertySymbol property => property.ExplicitInterfaceImplementations.Length > 0,
+        IEventSymbol @event => @event.ExplicitInterfaceImplementations.Length > 0,
+        _ => false,
+    };
+
+    private static bool Listable(ISymbol symbol) => symbol.CanBeReferencedByName || IsWrittenConstructor(symbol) || IsExplicitMember(symbol);
+
+    private static string SimpleName(ISymbol symbol) => symbol switch
+    {
+        IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor } => symbol.ContainingType.Name,
+        _ when IsExplicitImplementation(symbol) => symbol.Name[(symbol.Name.LastIndexOf('.') + 1)..],
+        _ => symbol.Name,
+    };
+
+    private static bool Overlaps(string name, string member) =>
+        name.Contains(member, StringComparison.OrdinalIgnoreCase) || member.Contains(name, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsWrittenConstructor(ISymbol symbol) =>
+        symbol is IMethodSymbol { MethodKind: MethodKind.Constructor or MethodKind.StaticConstructor, IsImplicitlyDeclared: false };
+
+    private static bool IsExplicitMember(ISymbol symbol) => symbol is not IMethodSymbol { AssociatedSymbol: not null } && IsExplicitImplementation(symbol);
 }

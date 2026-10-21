@@ -1309,4 +1309,31 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
 
         Assert.Single(text.Split('\n'), line => line.StartsWith("q1,q2  ", StringComparison.Ordinal) && line.Contains("OrderService.cs", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task GetSymbolSource_ForAMemberTheTypeDoesNotDeclare_ListsTheNearestMembersFirstAndSaysHowManyItShows()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Awkward.Weighs" });
+
+        Assert.Matches(@"remedy: members of 'Awkward' \(5 of [6-9], nearest first\): Awkward\.Weigh\(", text);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForEveryContainerASearchHitNames_ResolvesThatDeclaration()
+    {
+        var hits = await server.CallAsync("search_text", new()
+        {
+            ["queries"] = new[] { "seed - value", "operator +", "public Awkward(int seed)" },
+            ["glob"] = "src/Fixture.Trading/Awkward.cs",
+            ["containers"] = true,
+        });
+        var containers = hits.Split('\n').Where(line => line.Contains("Awkward.cs:", StringComparison.Ordinal)).Select(line => line.Split("  ")[2]).ToArray();
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolIds"] = containers });
+
+        Assert.Equal(3, containers.Length);
+        Assert.DoesNotContain("NOT_RESOLVED", text, StringComparison.Ordinal);
+        Assert.Contains("seed - value", text, StringComparison.Ordinal);
+        Assert.Contains("operator +(Awkward left, Awkward right)", text, StringComparison.Ordinal);
+        Assert.Contains("this.seed = seed", text, StringComparison.Ordinal);
+    }
 }

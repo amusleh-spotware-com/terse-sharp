@@ -146,13 +146,13 @@ public static class Errors
             string.Join(", ", names.Select(name => "\"" + name + "\""));
 
     public static TerseError NoSuchMember(string symbolId, string type, IReadOnlyList<string> members) => new(
-            TerseErrorCode.SymbolNotFound,
-            string.Create(CultureInfo.InvariantCulture, $"'{symbolId}' did not resolve: type '{type}' declares no such member"),
-            members.Count is 0
-                ? string.Create(CultureInfo.InvariantCulture, $"'{type}' declares no member addressable by name; use get_type_outline symbolId={type} ids=full")
-                : string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"members of '{type}': {string.Join(", ", members.Take(MaxListedCandidates))}"));
+        TerseErrorCode.SymbolNotFound,
+        string.Create(CultureInfo.InvariantCulture, $"'{symbolId}' did not resolve: type '{type}' declares no such member"),
+        members.Count is 0
+            ? string.Create(CultureInfo.InvariantCulture, $"'{type}' declares no member addressable by name; use get_type_outline symbolId={type} ids=full")
+            : string.Create(
+                CultureInfo.InvariantCulture,
+                $"members of '{type}' ({Math.Min(members.Count, MaxListedCandidates)} of {members.Count}, nearest first): {string.Join(", ", members.Take(MaxListedCandidates))}"));
 
     public static TerseError Transient(Exception exception) => new(
         TerseErrorCode.Transient,
