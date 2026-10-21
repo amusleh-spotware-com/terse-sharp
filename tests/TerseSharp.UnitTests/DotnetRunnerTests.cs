@@ -406,6 +406,25 @@ public sealed class DotnetRunnerTests
             DotnetRunner.Stopped(["B.Tests"], 3, serial: false, timedOut: true));
 
     [Fact]
+    public void BatchRetry_ForOneProjectThatTimedOutInsideAConcurrentBatch_NamesTheCallThatRunsItAlone() =>
+        Assert.Equal(
+            "remedy: a project that times out only inside a concurrent batch is usually starved by its neighbours rather than hung - re-run it alone: run_tests project=\"B.Tests\"",
+            DotnetRunner.BatchRetry(["B.Tests"], 3, serial: false, timedOut: true));
+
+    [Fact]
+    public void BatchRetry_ForSeveralProjectsThatTimedOutInsideAConcurrentBatch_NamesTheSerialBatchOfThem() =>
+        Assert.Equal(
+            "remedy: a project that times out only inside a concurrent batch is usually starved by its neighbours rather than hung - re-run them serially: run_tests projects=[\"B.Tests\", \"C.Tests\"] parallel=1",
+            DotnetRunner.BatchRetry(["B.Tests", "C.Tests"], 3, serial: false, timedOut: true));
+
+    [Theory]
+    [InlineData(1, false, true)]
+    [InlineData(3, true, true)]
+    [InlineData(3, false, false)]
+    public void BatchRetry_ForASingleProjectASerialBatchOrNoTimeout_OffersNoBatchRetry(int invocations, bool serial, bool timedOut) =>
+        Assert.Null(DotnetRunner.BatchRetry(["B.Tests"], invocations, serial, timedOut));
+
+    [Fact]
     public void Stopped_ForASerialBatch_SaysItStoppedAtTheFirstTimeout() =>
         Assert.Equal(
             "the batch stopped at the first project that timed out; 3 of 3 project(s) produced no results",

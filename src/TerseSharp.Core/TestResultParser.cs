@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -10,17 +11,17 @@ public static partial class TestResultParser
 {
     private static readonly XNamespace Trx = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010";
 
-    public static TestRunReport Parse(IEnumerable<string> reportFiles, string workspaceRoot)
+    public static TestRunReport Parse(IEnumerable<string> reportFiles, string workspaceRoot, ImmutableArray<string> entries = default)
     {
         var report = TestRunReport.Empty;
 
         foreach (var file in reportFiles)
-            report = report.Merge(ParseFile(file, workspaceRoot));
+            report = report.Merge(ParseFile(file, workspaceRoot, entries));
 
         return report.Sorted();
     }
 
-    private static TestRunReport ParseFile(string path, string workspaceRoot)
+    private static TestRunReport ParseFile(string path, string workspaceRoot, ImmutableArray<string> entries)
     {
         if (Load(path)?.Root is not { } run)
             return TestRunReport.Empty;
@@ -34,6 +35,7 @@ public static partial class TestResultParser
             Projects = results.Length is 0
                 ? []
                 : [new TestProjectSummary(ProjectName(run, results, path), passed, failed, skipped, results.Length, duration)],
+            EntryRuns = EntryRuns(run, results, entries),
         };
     }
 
@@ -138,5 +140,38 @@ public static partial class TestResultParser
         var dot = name.LastIndexOf('.');
 
         return dot > 0 ? name[..dot].ToString() : name.ToString();
+    }
+
+    private static ImmutableArray<int> EntryRuns(XElement run, XElement[] results, ImmutableArray<string> entries)
+    {
+        if (entries.IsDefaultOrEmpty)
+            return [];
+
+        var qualified = QualifiedNames(run);
+        var runs = new int[entries.Length];
+
+        foreach (var result in results)
+        {
+            var name = qualified.GetValueOrDefault(Value(result, "testId")) ?? Value(result, "testName");
+
+            for (var index = 0; index < runs.Length; index++)
+                runs[index] += Selects(entries[index], name) ? 1 : 0;
+        }
+
+        return ImmutableCollectionsMarshal.AsImmutableArray(runs);
+    }
+
+    private static Dictionary<string, string> QualifiedNames(XElement run) => run
+        .Descendants(Trx + "UnitTest")
+        .SelectMany(test => test.Elements(Trx + "TestMethod").Select(method => (Id: Value(test, "id"), Name: Value(method, "className") + "." + Value(method, "name"))))
+        .Where(test => test.Id.Length > 0)
+        .DistinctBy(test => test.Id, StringComparer.Ordinal)
+        .ToDictionary(test => test.Id, test => test.Name, StringComparer.Ordinal);
+
+    private static bool Selects(string entry, string name)
+    {
+        var arguments = entry.IndexOf('(', StringComparison.Ordinal);
+
+        return name.Contains(arguments < 0 ? entry.AsSpan() : entry.AsSpan(0, arguments), StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace TerseSharp.Server;
@@ -30,7 +31,8 @@ public static partial class DotnetRunner
     {
         var target = project ?? workspace.SolutionPath;
         var run = await BuiltAsync(workspace, target, scope, timeout, cancellationToken).ConfigureAwait(false);
-        var rendered = RenderBuild(target, workspace.Root, run, verbose);
+        var split = await ChangedSplitAsync(workspace.Root, Diagnostics(run.Output).Warnings, cancellationToken).ConfigureAwait(false);
+        var rendered = RenderBuild(target, workspace.Root, run, verbose, split);
 
         return new BuildRun(run.TimedOut ? rendered + BuildDeadline(run, timeout) : rendered, Locked(run));
     }
@@ -84,7 +86,7 @@ public static partial class DotnetRunner
         ? response
         : string.Create(
             CultureInfo.InvariantCulture,
-            $"{response}\nWARNING {Stopped(missing, invocations, serial, timedOut)}: {string.Join(", ", missing)}");
+            $"{response}\nWARNING {Stopped(missing, invocations, serial, timedOut)}: {string.Join(", ", missing)}{(BatchRetry(missing, invocations, serial, timedOut) is { } retry ? "\n" + retry : string.Empty)}");
 
     internal static string Stopped(List<string> missing, int invocations, bool serial, bool timedOut)
     {
@@ -97,6 +99,18 @@ public static partial class DotnetRunner
             (_, _, true) => string.Create(CultureInfo.InvariantCulture, $"every project of the batch {cause}; all {invocations} produced no results"),
             _ => string.Create(CultureInfo.InvariantCulture, $"{missing.Count} of {invocations} project(s) {cause}; the rest of the batch still ran"),
         };
+    }
+
+    internal static string? BatchRetry(List<string> missing, int invocations, bool serial, bool timedOut)
+    {
+        if ((timedOut, serial, invocations, missing.Count) is not (true, false, > 1, > 0))
+            return null;
+
+        const string Cause = "remedy: a project that times out only inside a concurrent batch is usually starved by its neighbours rather than hung - ";
+
+        return missing is [var only]
+            ? string.Create(CultureInfo.InvariantCulture, $"{Cause}re-run it alone: run_tests project=\"{only}\"")
+            : string.Create(CultureInfo.InvariantCulture, $"{Cause}re-run them serially: run_tests projects=[{string.Join(", ", missing.Select(name => '"' + name + '"'))}] parallel=1");
     }
 
     private static Task<(ProcessRun Run, List<string> Missing)> InvokeAsync(
@@ -133,8 +147,8 @@ public static partial class DotnetRunner
         }
     }
 
-    private static TestRunReport Report(DirectoryInfo results, string workspaceRoot) =>
-            TestResultParser.Parse(Directory.EnumerateFiles(results.FullName, "*.trx", RecursiveAndTolerant), workspaceRoot);
+    private static TestRunReport Report(DirectoryInfo results, string workspaceRoot, ImmutableArray<string> entries = default) =>
+            TestResultParser.Parse(Directory.EnumerateFiles(results.FullName, "*.trx", RecursiveAndTolerant), workspaceRoot, entries);
 
     internal static string[] Arguments(TestRunRequest request, string resultsDirectory) => request.Target switch
     {
@@ -171,12 +185,12 @@ public static partial class DotnetRunner
         return request.RunSettings.IsDefaultOrEmpty ? scoped : [.. scoped, "--", .. request.RunSettings];
     }
 
-    internal static string RenderBuild(string target, string root, ProcessRun run, bool verbose)
+    internal static string RenderBuild(string target, string root, ProcessRun run, bool verbose, string split = "")
     {
         var diagnostics = Diagnostics(run.Output);
 
         if (!verbose && run.ExitCode is 0 && run.Drained && diagnostics.Errors.Length is 0)
-            return QuietBuild(run, diagnostics.Warnings.Length);
+            return QuietBuild(run, diagnostics.Warnings.Length, split);
 
         var shown = Shown(diagnostics, verbose);
         var response = new ResponseBuilder("build", target).Verbose(verbose);
@@ -221,7 +235,7 @@ public static partial class DotnetRunner
             return RenderNoResults(request.Target, run, request.Verbose, root, request.Timeout, request.NoBuild);
 
         if (IsGreen(run, report) && !request.WantsDetail)
-            return QuietTest(report, run, request.Target) + ScopeNote(report, request);
+            return QuietTest(report, run, request.Target) + EntryNote(report, request) + ScopeNote(report, request);
 
         var shown = Math.Min(report.Failures.Length, MaxFailures);
         var response = new ResponseBuilder("run_tests", request.Target).Verbose(request.Verbose);
@@ -238,7 +252,7 @@ public static partial class DotnetRunner
         AppendTimings(response, report, request);
         AppendRerun(response, report);
 
-        return response.ToString() + ScopeNote(report, request);
+        return response.ToString() + EntryNote(report, request) + ScopeNote(report, request);
     }
 
     internal static string ScopeNote(TestRunReport report, TestRunRequest request)
@@ -417,9 +431,9 @@ public static partial class DotnetRunner
         return new BuildRun(RenderTestNames(target, run, contains, workspace.Root), Locked(run));
     }
 
-    private static string QuietBuild(ProcessRun run, int warnings) => string.Create(
+    private static string QuietBuild(ProcessRun run, int warnings, string split) => string.Create(
         CultureInfo.InvariantCulture,
-        $"build ok  errors=0 warnings={warnings} emitted  elapsedMs={run.ElapsedMilliseconds}");
+        $"build ok  errors=0 warnings={warnings}{split} emitted  elapsedMs={run.ElapsedMilliseconds}");
 
     internal static BuildDiagnostics Diagnostics(string output)
     {
@@ -841,7 +855,7 @@ public static partial class DotnetRunner
             return new PreparedBuild(0, null);
 
         var elapsed = 0L;
-        var warnings = 0;
+        var warnings = new List<string>();
 
         foreach (var target in request.Builds)
         {
@@ -849,13 +863,13 @@ public static partial class DotnetRunner
             var diagnostics = Diagnostics(run.Output);
 
             elapsed += run.ElapsedMilliseconds;
-            warnings += diagnostics.Warnings.Length;
+            warnings.AddRange(diagnostics.Warnings);
 
             if (run.ExitCode is not 0 || diagnostics.Errors.Length is not 0)
                 return new PreparedBuild(elapsed, BatchBuildFailure(workspace, request, target, run));
         }
 
-        return new PreparedBuild(elapsed, null, BuildVerdict(warnings));
+        return new PreparedBuild(elapsed, null, BuildVerdict(warnings.Count), [.. warnings]);
     }
 
     private static string Outcome(ProcessRun run) => run.TimedOut ? "timed out" : "failed";
@@ -878,14 +892,15 @@ public static partial class DotnetRunner
         CancellationToken cancellationToken)
     {
         var (run, missing) = await InvokeAsync(workspace, request, results.FullName, prepared.ElapsedMilliseconds, cancellationToken).ConfigureAwait(false);
-        var report = Report(results, workspace.Root);
+        var report = Report(results, workspace.Root, request.Entries);
         var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
         var hung = await HangSequence.ActiveAsync(results, cancellationToken).ConfigureAwait(false);
-        var response = Noted(RenderTest(run, report, request, workspace.Root), notes);
+        var response = Noted(RenderTest(run, report, request, workspace.Root), notes) + StaleNote(workspace, request);
         var stopped = run.TimedOut || hung.Length is not 0;
+        var verdict = await VerdictAsync(workspace.Root, Building(request, prepared, run, report), cancellationToken).ConfigureAwait(false);
 
         return new TestRunResult(
-            Verdicted(prepared.Verdict ?? Built(request, run, report), Hung(Interrupted(response, missing, request.Invocations.Length, request.IsSerial, stopped), hung)),
+            Verdicted(verdict, Hung(Interrupted(response, missing, request.Invocations.Length, request.IsSerial, stopped), hung)),
             report,
             Locked(run));
     }
@@ -1239,6 +1254,33 @@ public static partial class DotnetRunner
         CultureInfo.InvariantCulture,
         $"  build=ok errors=0 warnings={warnings}");
 
+    internal static async Task<string> ChangedSplitAsync(string root, IReadOnlyList<string> warnings, CancellationToken cancellationToken)
+    {
+        if (warnings.Count is 0)
+            return string.Empty;
+
+        var tracked = GitRunner.ReadAsync(root, ["diff", "--name-only", "--relative", "HEAD"], cancellationToken);
+        var untracked = GitRunner.ReadAsync(root, ["ls-files", "--others", "--exclude-standard"], cancellationToken);
+        var answers = await Task.WhenAll(tracked, untracked).ConfigureAwait(false);
+
+        return answers is [{ IsOk: true, Value: { } changed }, { IsOk: true, Value: { } added }]
+            ? string.Create(CultureInfo.InvariantCulture, $" ({ChangedWarnings.Count(warnings, ChangedWarnings.Paths(root, changed, added))} in changed files)")
+            : string.Empty;
+    }
+
+    private static string[] BuiltWarnings(TestRunRequest request, ProcessRun run, TestRunReport report) =>
+        Built(request, run, report) is null ? [] : Diagnostics(run.Output).Warnings;
+
+    private static async Task<string?> VerdictAsync(string root, (string? Verdict, string[] Warnings) building, CancellationToken cancellationToken) =>
+        building.Verdict is null
+            ? null
+            : building.Verdict + await ChangedSplitAsync(root, building.Warnings, cancellationToken).ConfigureAwait(false);
+
+    private static (string? Verdict, string[] Warnings) Building(TestRunRequest request, PreparedBuild prepared, ProcessRun run, TestRunReport report) =>
+        prepared.Verdict is { } verdict
+            ? (verdict, prepared.Warnings ?? [])
+            : (Built(request, run, report), BuiltWarnings(request, run, report));
+
     private static string Verdicted(string? verdict, string response)
     {
         if (verdict is null)
@@ -1309,6 +1351,58 @@ public static partial class DotnetRunner
 
     private static bool Unindented(string output, string line) =>
         output.StartsWith(line, StringComparison.Ordinal) || output.Contains(string.Concat("\n", line), StringComparison.Ordinal);
+
+    internal static string EntryNote(TestRunReport report, TestRunRequest request)
+    {
+        if (report.Total is 0 || request.Entries.IsDefaultOrEmpty || report.EntryRuns.Length != request.Entries.Length)
+            return string.Empty;
+
+        var note = new StringBuilder();
+
+        for (var index = 0; index < report.EntryRuns.Length; index++)
+        {
+            if (report.EntryRuns[index] is 0)
+                note.Append(CultureInfo.InvariantCulture, $"\nWARNING tests= entry {index + 1} '{request.Entries[index]}' ran 0 tests - check the name; an [Explicit] or ignored test runs only when it is selected alone: test=\"{request.Entries[index]}\"");
+        }
+
+        return note.ToString();
+    }
+
+    private const int MaxStaleShown = 3;
+
+    internal static string StaleNote(WorkspaceTarget workspace, TestRunRequest request)
+    {
+        if (!request.NoBuild || workspace.Stale.IsDefaultOrEmpty)
+            return string.Empty;
+
+        var stale = workspace.Stale.Where(binary => Ran(binary, request.Invocations, workspace)).DistinctBy(binary => binary.ProjectPath, StringComparer.OrdinalIgnoreCase).ToArray();
+        var note = new StringBuilder();
+
+        foreach (var binary in stale.Take(MaxStaleShown))
+            note.Append(CultureInfo.InvariantCulture, $"\nWARNING noBuild=true ran a binary older than its sources: {Path.GetFileNameWithoutExtension(binary.ProjectPath)} - {Relative(binary.NewestInput, workspace.Root)} changed {Behind(binary.Behind)} after {Relative(binary.OutputPath, workspace.Root)} was built; drop noBuild=true to rebuild");
+
+        if (stale.Length > MaxStaleShown)
+            note.Append(CultureInfo.InvariantCulture, $"\nWARNING {stale.Length - MaxStaleShown} more stale binary(ies) ran");
+
+        return note.ToString();
+    }
+
+    private static bool Ran(StaleBinary binary, ImmutableArray<string> invocations, WorkspaceTarget workspace) =>
+        invocations.Any(invocation => Names(binary, invocation) || (IsSolution(invocation, workspace) && IsTestOf(binary, workspace)));
+
+    private static bool IsSolution(string invocation, WorkspaceTarget workspace) =>
+        string.Equals(invocation, workspace.SolutionPath, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTestOf(StaleBinary binary, WorkspaceTarget workspace) =>
+        workspace.TestProjects.IsDefaultOrEmpty || workspace.TestProjects.Any(test => Names(binary, test));
+
+    private static bool Names(StaleBinary binary, string path) =>
+        string.Equals(binary.ProjectPath, path, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(binary.OutputPath, path, StringComparison.OrdinalIgnoreCase);
+
+    private static string Behind(TimeSpan behind) => behind.TotalMinutes >= 1
+        ? string.Create(CultureInfo.InvariantCulture, $"{(int)behind.TotalMinutes}m")
+        : string.Create(CultureInfo.InvariantCulture, $"{Math.Max(1, (int)behind.TotalSeconds)}s");
 }
 
 internal sealed record ProcessRun(
@@ -1331,4 +1425,4 @@ internal readonly record struct BuildDiagnostics(string[] Errors, string[] Warni
 
 internal readonly record struct DotnetInstallation(string Selected, string[] Sdks, string[] Runtimes);
 
-internal readonly record struct PreparedBuild(long ElapsedMilliseconds, BuildRun? Failure, string? Verdict = null);
+internal readonly record struct PreparedBuild(long ElapsedMilliseconds, BuildRun? Failure, string? Verdict = null, string[]? Warnings = null);

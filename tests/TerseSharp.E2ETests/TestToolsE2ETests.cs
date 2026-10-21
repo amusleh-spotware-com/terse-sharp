@@ -431,6 +431,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("passed=1", text, StringComparison.Ordinal);
         Assert.Contains("skipped=1", text, StringComparison.Ordinal);
         Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ran 0 tests", text, StringComparison.Ordinal);
     }
 
     private static bool IsFraming(string line) => ToolCensus.IsFraming(line);
@@ -690,4 +691,23 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
 
     [GeneratedRegex(@"gen=(\S+)")]
     private static partial Regex MyRegex();
+
+    [Fact]
+    public async Task RunTests_WithSeveralTestsOneOfWhichRanNothing_NamesTheEntryThatRanNothing()
+    {
+        var text = await server.CallAsync("run_tests", new()
+        {
+            ["project"] = TestProject,
+            ["tests"] = new[]
+            {
+                "Fixture.Trading.Tests.DeliberateOutcomesTests.Succeeds",
+                "Fixture.Trading.Tests.DeliberateOutcomesTests.NoSuchTestAnywhere",
+            },
+            ["timeoutSeconds"] = 300,
+        });
+
+        Assert.Contains("total=1", text, StringComparison.Ordinal);
+        Assert.Contains("tests= entry 2 'Fixture.Trading.Tests.DeliberateOutcomesTests.NoSuchTestAnywhere' ran 0 tests", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("entry 1", text, StringComparison.Ordinal);
+    }
 }

@@ -181,7 +181,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                                     verbose,
                                     scope.Value,
                                     Parallel: degree.Value,
-                                    RunSettings: settings.Value),
+                                    RunSettings: settings.Value,
+                                    Entries: Entries(test, tests)),
                                 changed,
                                 stopping)
                             : Task.FromResult(scope.Error!.Render());
@@ -190,6 +191,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 changed && WholeSolution(project, projects),
                 WholeSolution(project, projects),
                 "run_tests",
+                noBuild,
                 token), Roots),
             token);
     }
@@ -246,7 +248,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 : Task.FromResult(scope.Error!.Render());
         },
         cancellationToken: cancellationToken,
-        spawns: "rerun_failed");
+        spawns: "rerun_failed",
+        binaries: noBuild);
 
     [McpServerTool(Name = "list_tests")]
     [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build.")]
@@ -827,4 +830,6 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
 
     private Task<string> CancelledAsync(string? workspace, string? project, CancellationToken cancellationToken) =>
         context.WithTargetAsync(workspace, project, target => ActiveRuns.CancelAsync(target.SolutionPath, cancellationToken), cancellationToken: cancellationToken);
+
+    internal static ImmutableArray<string> Entries(string? test, string?[]? tests) => Names(test, tests) is { Length: > 1 } names ? [.. names] : [];
 }

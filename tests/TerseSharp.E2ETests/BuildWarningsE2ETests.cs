@@ -51,6 +51,28 @@ public sealed class BuildWarningsE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BuildAndRunTests_WithAWarningInAFileTheTreeChanged_CountItApartFromTheUnchangedOnes()
+    {
+        var fresh = Path.Combine(WarningRoot, "src", "Fixture.Warning", "FreshlyAdded.cs");
+        var before = await RebuiltAsync(new() { ["project"] = SourceProject });
+
+        try
+        {
+            await File.WriteAllTextAsync(fresh, "namespace Fixture.Warning;\n\npublic static class FreshlyAdded\n{\n    public static int Value()\n    {\n        var unread = 2;\n\n        return 1;\n    }\n}\n", TestContext.Current.CancellationToken);
+            var after = await RebuiltAsync(new() { ["project"] = SourceProject });
+            var run = await RebuiltAsync("run_tests", new() { ["timeoutSeconds"] = 600 });
+
+            Assert.StartsWith("build ok  errors=0 warnings=3 (0 in changed files) ", before, StringComparison.Ordinal);
+            Assert.StartsWith("build ok  errors=0 warnings=4 (1 in changed files) ", after, StringComparison.Ordinal);
+            Assert.Contains("build=ok errors=0 warnings=4 (1 in changed files)", run, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(fresh);
+        }
+    }
+
+    [Fact]
     public async Task TheBuildAndTestFamily_IsDiscoveredFromTheAdvertisedSurface()
     {
         var family = await FamilyAsync();

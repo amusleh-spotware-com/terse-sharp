@@ -198,6 +198,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         bool changed = false,
         bool tests = false,
         string spawns = "",
+        bool binaries = false,
         CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
@@ -205,6 +206,9 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         return await ToolBoundary.RunAsync(async () =>
         {
             var target = await TargetAsync(workspace, pathHint, changed, tests, cancellationToken).ConfigureAwait(false);
+
+            if (binaries && target.IsOk)
+                target = Result.Ok(target.Value with { Stale = Stale(workspace, pathHint) });
 
             return target.IsOk
                 ? await SpawnedAsync(target.Value!, spawns, pathHint, action, cancellationToken).ConfigureAwait(false)
@@ -247,6 +251,18 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         using var lease = resolved.Value!;
 
         return Result.Ok(Described(lease.Workspace, changed, tests));
+    }
+
+    private ImmutableArray<StaleBinary> Stale(string? workspace, string? pathHint)
+    {
+        var resolved = Registry.Resolve(workspace, pathHint);
+
+        if (!resolved.IsOk)
+            return [];
+
+        using var lease = resolved.Value!;
+
+        return StaleBinaries.Detect(lease.Workspace.Solution);
     }
 
     private static WorkspaceTarget Described(LoadedWorkspace loaded, bool changed, bool tests = false) => new(

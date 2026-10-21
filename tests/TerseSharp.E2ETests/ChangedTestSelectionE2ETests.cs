@@ -147,6 +147,32 @@ public sealed class ChangedTestSelectionE2ETests
             : response[..marker];
 
     [Fact]
+    public async Task RunTests_WithNoBuildAfterASourceChangedSinceTheBuild_WarnsThatTheBinaryIsStaleAndNamesTheFile()
+    {
+        var standalone = Path.Combine(SelectionRoot, "tests", "Selection.Other.Tests", "StandaloneTests.cs");
+        var written = File.GetLastWriteTimeUtc(standalone);
+        var server = await StartAsync();
+
+        try
+        {
+            await CallAsync(server, "run_tests", new() { ["project"] = "Selection.Other.Tests", ["timeoutSeconds"] = 600 });
+            var fresh = await CallAsync(server, "run_tests", new() { ["project"] = "Selection.Other.Tests", ["noBuild"] = true, ["force"] = true });
+            File.SetLastWriteTimeUtc(standalone, DateTime.UtcNow.AddMinutes(10));
+            var stale = await CallAsync(server, "run_tests", new() { ["project"] = "Selection.Other.Tests", ["noBuild"] = true, ["force"] = true });
+
+            Assert.StartsWith("run_tests PASSED", fresh, StringComparison.Ordinal);
+            Assert.DoesNotContain("older than its sources", fresh, StringComparison.Ordinal);
+            Assert.Contains("WARNING noBuild=true ran a binary older than its sources: Selection.Other.Tests", stale, StringComparison.Ordinal);
+            Assert.Contains("StandaloneTests.cs", stale, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+            File.SetLastWriteTimeUtc(standalone, written);
+        }
+    }
+
+    [Fact]
     public async Task RunTests_WhenABatchsOwnBuildCannotFinish_NamesTheProjectAndNeverOffersNoBuild()
     {
         var server = await StartAsync();

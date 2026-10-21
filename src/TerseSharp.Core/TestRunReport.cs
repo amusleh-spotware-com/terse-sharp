@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Runtime.InteropServices;
 
 namespace TerseSharp.Core;
 
@@ -31,6 +32,7 @@ public readonly record struct TestRunReport(
         PassedTests.AddRange(other.PassedTests))
     {
         Projects = Listed(Projects).AddRange(Listed(other.Projects)),
+        EntryRuns = Summed(EntryRuns, other.EntryRuns),
     };
 
     public TestRunReport Sorted() => this with
@@ -48,4 +50,22 @@ public readonly record struct TestRunReport(
 
     private static ImmutableArray<TestProjectSummary> Listed(ImmutableArray<TestProjectSummary> projects) =>
         projects.IsDefault ? [] : projects;
+
+    public ImmutableArray<int> EntryRuns { get; init; } = [];
+
+    private static ImmutableArray<int> Summed(ImmutableArray<int> left, ImmutableArray<int> right)
+    {
+        if (left.IsDefaultOrEmpty)
+            return right.IsDefault ? [] : right;
+
+        if (right.IsDefaultOrEmpty || right.Length != left.Length)
+            return left;
+
+        var sums = new int[left.Length];
+
+        for (var index = 0; index < sums.Length; index++)
+            sums[index] = left[index] + right[index];
+
+        return ImmutableCollectionsMarshal.AsImmutableArray(sums);
+    }
 }
