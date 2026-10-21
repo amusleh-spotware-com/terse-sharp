@@ -106,6 +106,19 @@ public sealed class StageE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GitBackedTools_GivenARefThatLooksLikeAnOption_WriteNoFileItNames()
+    {
+        var targets = Enumerable.Range(1, 4).Select(index => Path.Combine(root, string.Create(CultureInfo.InvariantCulture, $"pwn{index}.txt"))).ToArray();
+
+        await CallAsync("history", new() { ["commit"] = "--output=" + targets[0] });
+        await CallAsync("read_text", new() { ["path"] = "notes.txt", ["ref"] = "--output=" + targets[1] });
+        await CallAsync("diff_text", new() { ["baseRef"] = "--output=" + targets[2] });
+        await CallAsync("changed_files", new() { ["baseRef"] = "--output=" + targets[3] });
+
+        Assert.All(targets, target => Assert.False(File.Exists(target), target));
+    }
+
+    [Fact]
     public async Task WriteText_WithStageBesideDelete_IsRefusedNamingWhatStageTakes()
     {
         var text = await CallAsync("write_text", new() { ["path"] = "notes.txt", ["delete"] = true, ["stage"] = true });

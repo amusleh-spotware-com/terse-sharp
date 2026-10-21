@@ -193,6 +193,7 @@ public sealed class ChangedTestSelectionE2ETests
             Assert.DoesNotContain("older than its sources", rebuilt, StringComparison.Ordinal);
             Assert.Contains("WARNING noBuild=true ran a binary older than its sources: Selection.Core.Tests", unbuilt, StringComparison.Ordinal);
             Assert.Contains("Adder.cs", unbuilt, StringComparison.Ordinal);
+            Assert.Equal(2, unbuilt.Split("older than its sources", StringSplitOptions.None).Length);
         }
         finally
         {

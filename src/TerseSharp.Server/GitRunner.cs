@@ -39,7 +39,7 @@ internal static class GitRunner
             string reference,
             string relativePath,
             CancellationToken cancellationToken) =>
-            ReadAsync(workingDirectory, ["show", reference + ":./" + relativePath.Replace('\\', '/')], cancellationToken);
+            ReadAsync(workingDirectory, ["show", "--end-of-options", reference + ":./" + relativePath.Replace('\\', '/')], cancellationToken);
 
     private static readonly KeyValuePair<string, string>[] Unattended = [new("GIT_TERMINAL_PROMPT", "0"), new("GIT_ASKPASS", string.Empty), new("GCM_INTERACTIVE", "never")];
 }

@@ -337,7 +337,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
         if (baseRef is not { Length: > 0 } reference)
             return (null, null);
 
-        var diff = await GitRunner.ReadAsync(root, ["diff", "--unified=0", "--no-color", "--relative", reference], cancellationToken).ConfigureAwait(false);
+        var diff = await GitRunner.ReadAsync(root, ["diff", "--unified=0", "--no-color", "--relative", "--end-of-options", reference], cancellationToken).ConfigureAwait(false);
 
         if (!diff.IsOk)
             return (null, diff.Error!);

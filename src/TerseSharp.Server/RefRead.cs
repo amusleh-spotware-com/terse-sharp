@@ -96,7 +96,7 @@ internal static class RefRead
     {
         var read = await GitRunner.ReadAsync(
             root,
-            ["cat-file", "-s", reference + ":./" + relative.Replace('\\', '/')],
+            ["cat-file", "-s", "--end-of-options", reference + ":./" + relative.Replace('\\', '/')],
             cancellationToken).ConfigureAwait(false);
 
         return read.IsOk && long.TryParse(read.Value!.AsSpan().Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var size)

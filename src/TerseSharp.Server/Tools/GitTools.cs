@@ -9,6 +9,7 @@ namespace TerseSharp.Server.Tools;
 [McpServerToolType]
 public sealed class GitTools(ToolContext context, ListingMemo listings)
 {
+    private const string EndOfOptions = "--end-of-options";
     private const int MaxDiffLines = 3000;
     private const string UntrackedOnDisk = "D (untracked on disk)";
 
@@ -309,7 +310,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         var arguments = new List<string>(command.Count + 7 + paths.Count) { "--no-optional-locks" };
 
         arguments.AddRange(command);
-        arguments.AddRange(["--no-renames", "--no-ext-diff", "--relative"]);
+        arguments.AddRange(["--no-renames", "--no-ext-diff", "--relative", EndOfOptions]);
         arguments.Add(baseRef is { Length: > 0 } reference ? reference : "HEAD");
         arguments.Add("--");
 
@@ -516,7 +517,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             int maxResults)
     {
         if (commit is { Length: > 0 } one)
-            return ["--no-optional-locks", "show", "--stat=200", "--oneline", "--no-color", "--relative", "--no-renames", "--no-ext-diff", one, "--", path is { Length: > 0 } pathspec ? pathspec : "."];
+            return ["--no-optional-locks", "show", "--stat=200", "--oneline", "--no-color", "--relative", "--no-renames", "--no-ext-diff", EndOfOptions, one, "--", path is { Length: > 0 } pathspec ? pathspec : "."];
 
         var command = new List<string>(10)
             {

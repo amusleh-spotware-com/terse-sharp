@@ -33,7 +33,7 @@ internal static class IndexWrite
         if (Relative(root, path) is not { } relative)
             return Errors.OutOfWorkspace(path).Render();
 
-        var reset = await GitRunner.ReadAsync(root, [LiteralPathspecs, "reset", "-q", reference, "--", relative], cancellationToken).ConfigureAwait(false);
+        var reset = await GitRunner.ReadAsync(root, [LiteralPathspecs, "reset", "-q", "--end-of-options", reference, "--", relative], cancellationToken).ConfigureAwait(false);
 
         return reset.IsOk
             ? "unstaged  " + relative + "  index entry is " + reference + "'s again, working tree untouched"
