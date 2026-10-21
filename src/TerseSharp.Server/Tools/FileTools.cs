@@ -141,7 +141,7 @@ bool verbose) =>
         NavigationTools.Unwrap(await read.ConfigureAwait(false));
 
     [McpServerTool(Name = "write_text")]
-    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 25 files under ONE compile gate. A .cs file is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED; a rollback, or a dryRun that would land, ends with a retryWith token holding the content. A new .cs file needs force=true; one no project globs stays ungated. force=true also lands a write outside every workspace root, never in another loaded one. delete=true removes a file or an EMPTY directory, recursive=true the tree. A write keeping under a quarter of a file's content lines is refused unless overwrite=true.")]
+    [Description("Create or overwrite a file atomically, delete one with delete=true, or restore one from a git ref with ref=HEAD. files=[{path,content,force}, ...] writes up to 25 files under ONE compile gate. A .cs file is compile-gated exactly like replace_symbol - rolled back on a new error unless allowErrors=true - except a CS0246/CS0234 a NEW file cannot resolve, which lands as UNRESOLVED; a rollback, or a dryRun that would land, ends with a retryWith token holding the content. A new .cs file needs force=true; one no project globs stays ungated. force=true also lands a write outside every workspace root, never in another loaded one. delete=true removes a file or an EMPTY directory, recursive=true the tree. stage=true writes the git index instead.")]
     public Task<string> WriteText(
         [Description("Path, absolute or workspace-relative.")] string? path = null,
         [Description("Full new content. Omit only with delete=true, ref= or retryWith=; an empty write needs allowEmpty=true.")] string? content = null,
@@ -157,9 +157,10 @@ bool verbose) =>
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Apply a write the .terse.json code policy would reject; the response names every rule it bypassed. Default false.")] bool allowPolicy = false,
         [Description(StaleHelp)] string? ifUnchangedSince = null,
-        [Description("Token a rejected write, or a dryRun that would land, printed on its LAST line, e.g. r3. It holds every file's content, so the retry re-sends nothing - add usings= for a CS0246 rollback, or allowErrors=true. A path or content you pass outranks a one-file token's held one.")] string? retryWith = null,
+        [Description("Token a rejected write, or a dryRun that would land, printed on its LAST line, e.g. r3. It holds every file's content, so the retry re-sends nothing. A path or content you pass outranks a one-file token's held one.")] string? retryWith = null,
         [Description("Namespaces added to each .cs file this retry replays. Ignored without retryWith=.")] string[]? usings = null,
         [Description("Replace a file even when this write keeps under a quarter of its content lines; force=true does not lift that refusal.")] bool overwrite = false,
+        [Description("Write content= to the git INDEX only, byte for byte, working tree untouched; with ref= reset that path's index entry to the ref. Default false.")] bool stage = false,
         CancellationToken cancellationToken = default)
     {
         if (@ref is { Length: > 0 } && (delete || content is not null || files is { Length: > 0 }))
@@ -170,6 +171,9 @@ bool verbose) =>
         }
 
         var options = new WriteOptions(dryRun, force, allowErrors, verbose, allowPolicy, ifUnchangedSince, overwrite);
+
+        if (stage)
+            return Staging(workspace, path, content, @ref, files is { Length: > 0 } || delete || retryWith is { Length: > 0 }, options, cancellationToken);
 
         if (retryWith is { Length: > 0 } token)
             return Replayed(token, workspace, path, content, usings, options, cancellationToken);
@@ -1518,4 +1522,13 @@ context.RejectWrite() is { } rejection
 
         return WrittenMany(workspace, null, null, false, false, Replays(held, imports), options, held.Root, imports, cancellationToken);
     }
+
+    private Task<string> Staging(string? workspace, string? path, string? content, string? reference, bool unstageable, WriteOptions options, CancellationToken cancellationToken) => (path, content, reference, unstageable) switch
+    {
+        ({ Length: > 0 } target, { } text, null or "", false) => Guarded(workspace, target, loaded => IndexWrite.StageAsync(loaded.Root, target, text, options.DryRun, options.Verbose, cancellationToken), false, cancellationToken),
+        ({ Length: > 0 } target, null, { Length: > 0 } from, false) => Guarded(workspace, target, loaded => IndexWrite.UnstageAsync(loaded.Root, target, from, cancellationToken), false, cancellationToken),
+        _ => Task.FromResult(Errors.Invalid(
+            "stage=true writes ONE path's content= to the index, or with ref= resets its index entry - not both, and not beside files=, delete= or retryWith=",
+            "pass path= with content= to stage that text, or path= with ref=HEAD to unstage it").Render()),
+    };
 }
