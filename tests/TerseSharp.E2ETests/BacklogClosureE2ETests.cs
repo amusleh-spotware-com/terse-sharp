@@ -1798,6 +1798,20 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task SearchSymbols_WithQueriesAndAPathThatDeclaresOnlySomeOfThem_SaysWhichQueryFellBack()
+    {
+        var text = await server.CallAsync("search_symbols", new()
+        {
+            ["queries"] = new[] { "OrderSide", "Add" },
+            ["path"] = "src/Fixture.Trading/OrderSide.cs",
+        });
+
+        Assert.Contains("ServiceBag.AddScoped", text, StringComparison.Ordinal);
+        Assert.Contains("NOTE q2 'Add': path= declared no match - the whole solution was searched", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOTE q1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SearchSymbols_WithAPathNamingNoDocument_AnswersDocumentNotFound()
     {
         var text = await server.CallAsync("search_symbols", new()

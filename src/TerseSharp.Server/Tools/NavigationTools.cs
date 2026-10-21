@@ -520,10 +520,10 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
         var found = await Task.WhenAll(queries.Select(query => SymbolSearch.FindAsync(workspace, query, shape.Kind, shape.Scope, shape.MaxResults, cancellationToken, foldTests: true, inFile: scoped.Value))).ConfigureAwait(false);
 
-        return RenderedMany(workspace, queries, found, shape.MaxResults);
+        return RenderedMany(workspace, queries, found, shape.MaxResults, scoped.Value is { Length: > 0 });
     }
 
-    private static string RenderedMany(LoadedWorkspace workspace, ImmutableArray<string> queries, SymbolMatches[] found, int maxResults)
+    private static string RenderedMany(LoadedWorkspace workspace, ImmutableArray<string> queries, SymbolMatches[] found, int maxResults, bool inFile)
     {
         var tagged = Tagged(found);
         var shown = Math.Min(tagged.Count, ResultCap.Shown(tagged.Count, maxResults));
@@ -531,6 +531,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
         response.Summary(shown, tagged.Count, "symbols", "queries=, kind=, scope=, path= or maxResults=");
         Clipped(response, found);
+
+        if (inFile)
+            FellBackEach(response, queries, found);
 
         foreach (var (symbol, tags) in tagged.Take(shown))
             response.Line(string.Create(CultureInfo.InvariantCulture, $"{tags}  {Describe(workspace, symbol)}"));
@@ -570,6 +573,15 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
             tags[symbol] = string.Create(CultureInfo.InvariantCulture, $"q{query}");
             order.Add(symbol);
+        }
+    }
+
+    private static void FellBackEach(ResponseBuilder response, ImmutableArray<string> queries, SymbolMatches[] found)
+    {
+        for (var index = 0; index < found.Length; index++)
+        {
+            if (!found[index].Scoped)
+                response.Note(string.Create(CultureInfo.InvariantCulture, $"NOTE q{index + 1} '{queries[index]}': path= declared no match - the whole solution was searched"));
         }
     }
 }
