@@ -273,7 +273,7 @@ It covers `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx`, `.csproj`, `.sln` and fri
 tools (`grep`, `cat`, `sed`, `ls`, …) that name one of them — and, inside a .NET tree, any of them that
 names a path operand at all, while a piped `head -40` reading stdin still runs - even when its grep pattern names a `.cs` file. A denial names the
 replacing call with the command's own arguments translated (`git log --oneline -1` → `history
-maxResults=1`), a `2>&1` no longer forces a whole-command refusal, and a `$( )` no longer shadows the
+maxResults=1`, `git log -1 --stat` → `history commit=`, `wc -c` → `find_files stamps=true`; a path under an exported variable such as `$APPDATA` is judged by where it points), a `2>&1` no longer forces a whole-command refusal, and a `$( )` no longer shadows the
 real command. It also covers `dotnet build`/`test`/`format`/`clean`, `dotnet watch build`/`test`,
 `msbuild`, `dotnet list package`; a **bare `sleep`** — a segment whose command word is `sleep`, or a
 `powershell -Command "Start-Sleep …"` hosting one, outside a
@@ -539,7 +539,7 @@ touch nothing.
 
 Four solutions stay loaded at once (`--max-workspaces`, `TERSE_MAX_WORKSPACES` — a big solution costs
 gigabytes, so set `1` if you only ever work in one), compilations are given back once the server has
-served no call for 15 minutes (`--idle-minutes`), `--no-watch` turns the file watcher off, and responses are bounded and declare
+served no call for 60 minutes (`--idle-minutes`, or `.terse.json` `workspace.idleMinutes`), `--no-watch` turns the file watcher off, and responses are bounded and declare
 their truncation — a 5,000-type solution answers in the same shape as a 50-type one. Every answer names
 its worktree and branch, and an ambiguous request lists the candidates instead of guessing - except a
 write outside every root and a pathless `history`/`changed_files`/`diff_text`, which use the workspace

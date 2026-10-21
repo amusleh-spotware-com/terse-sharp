@@ -134,6 +134,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Projects** | editing a `.sln`/`.slnx` by hand | `solution_add_project` · `solution_remove_project` |
 | **Projects** | "which projects does this solution contain?" for a solution that is **not** loaded | `solution_projects(path: …)` |
 | **Git** | `Bash: git log` / `git show --stat` | `history` — `git blame` stays on the shell |
+| **Git** | `git hash-object -w` + `git update-index --cacheinfo` for a partial commit | `write_text(path, content, stage: true)` — index only, as `git add` stages it; `ref: "HEAD"` unstages |
 | **Git** | `Bash: git describe` | `history(describe: true)` |
 | **Git** | `Bash: git tag --list` / `git tag -l "v*"` | `history(tags: true)` — creating or deleting a tag stays on the shell |
 | **Git** | `Bash: git ls-remote --tags origin` | `history(tags: true, remote: true)` — every row tagged `local=yes\|no remote=yes\|no` |
@@ -156,7 +157,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Analyse** | one `analyze` call per touched file | `analyze(paths: [...])` |
 | **Analyse** | `dotnet format whitespace` / an IDE inspection | `analyze` — compiler + analyzers + dead code, down to `info` |
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` — one verdict line |
-| **Analyse** | an end-of-task sweep buried in findings this task did not author | `analyze baseRef="HEAD"` · `gate baseRef="HEAD"` · `get_diagnostics baseRef="HEAD"` — only the lines the working tree changed; the rest is one count |
+| **Analyse** | an end-of-task sweep buried in findings this task did not author | `analyze baseRef="HEAD"` · `gate baseRef="HEAD"` · `get_diagnostics baseRef="HEAD"` — only changed lines, plus every error; the rest is one count |
 | **Analyse** | `dotnet format style` / `dotnet format analyzers` | `cleanup fix=style\|analyzers\|all` |
 | **Analyse** | `dotnet format --verify-no-changes` | `format verify=true` · `cleanup verify=true` |
 | **Analyse** | one `cleanup` call per touched file | `cleanup(paths: [...])` |
@@ -212,7 +213,7 @@ one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=
 too and are covered by the same gate — including later in a compound command
 (`cd src && dotnet test`).
 
-**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md`, `S=<dir outside the tree>; wc -l "$S/f.log"` - is allowed; a `$VAR` assigned earlier in the command is expanded first, a Git-Bash `/tmp/...` or `/c/...` path is mapped on Windows, and `.git/` internals are never source. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched, so `git branch -a | head -40` still runs - a piped pattern - every `-e` included - is not an operand. A denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
+**In a .NET tree the shell text tools are denied even when the command names no `.cs` file** - `grep -rn TODO docs/`, `ls src`, `cat appsettings.json` all have a replacement there. A text command naming no .NET source whose every path operand is OUTSIDE the tree - `tail -5 /tmp/scan.out`, `wc -c ~/notes.md`, `S=<dir outside the tree>; wc -l "$S/f.log"` - is allowed; a `$VAR` assigned earlier, or an exported upper-case path like `$APPDATA`, is expanded first, a Git-Bash `/tmp/...` or `/c/...` path is mapped on Windows, and `.git/` internals are never source. A denied command that WRITES routes to `write_text`, not to an outline. A text tool reading STDIN is untouched (`git branch -a | head -40`). A denial names the replacing call **with your own arguments translated** - `git log --oneline -1` answers `history maxResults=1`.
 
 **This is enforced, not advisory, when `terse install --guard` is in place.** The `PreToolUse` hook
 denies the call, names the tool that replaces it, and tells you not to run it in `Bash` again, in
@@ -253,7 +254,7 @@ re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=t
 that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, as does one piped into `cmp` or a `sha*sum`, and so does a diff flag no tool serves (`-b`, `--check`). Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then a literal earlier `cd`, even one not created yet, then the working
-directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, and
+directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, `git log -1 --stat` is `history commit=`, and
 `git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=` (a file added after the ref answers `ABSENT`), and a `git tag` **listing** —
 bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. A tag listing of
 **origin** — `git ls-remote --tags` — is `history tags=true remote=true`, which merges both lists and
@@ -311,17 +312,16 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold`, and the first semantic call that realizes them appends
 `compilations=realized in Nms (once per load, not per call)` — a one-off, not the per-call cost of the tool that paid it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation; one that waited over 2 s while a build or test held the solution ends `NOTE queued Nms`, naming it.
-**Compilations are given back once the server has served no call for 15 minutes** (`--idle-minutes`,
-`TERSE_IDLE_MINUTES`, `0` to disable; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
+**Compilations are given back once the server has served no call for 60 minutes** (`--idle-minutes`,
+`TERSE_IDLE_MINUTES`, `.terse.json` `workspace.idleMinutes`; `0` off; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
 what it needs, then warms the rest in the background. While the startup load runs, the
 text, file and git tools already answer. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
 be invisible to `find_usages` with every gate green; whatever was chosen is printed as
-`targetFramework=`. A `WARNING config-mapping` line names a project the solution builds at another Configuration|Platform: its `get_diagnostics` severities follow the load, `build`'s the solution.
+`targetFramework=`. A `WARNING config-mapping` line names a project the solution builds at another Configuration|Platform: its warnaserror and nowarn severities are re-read at that configuration.
 Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory
-really does come back; it costs about a second, which is why it happens only when a workspace is
-genuinely dropped and why the unload-and-retry `build`/`run_tests` perform on a locked output skips it. It is skipped - `the workspace was NOT unloaded` - when every named holder is another live process, since unloading cannot release it.
+really does come back; it costs about a second, so the unload-and-retry `build`/`run_tests` perform on a locked output skips it. It is skipped - `the workspace was NOT unloaded` - when every named holder is another live process, since unloading cannot release it.
 
 **The analyzers a solution builds from source
 no longer block your own build**: every analyzer and source-generator assembly is loaded from a
@@ -441,7 +441,7 @@ answering `0 diagnostics` can no longer mean "the rule never ran". `ids=` also r
 
 `analyze`'s `changed=true` set is carried across the unload-and-reload `build`/`run_tests` perform on
 a locked output, so an analyze after a build no longer answers `no document under that scope was
-modified`; the end-of-task gate over a task's touched files is **one** call, not one per file. With no `baseRef=`, `changed=true` is `baseRef=HEAD` on a git tree: findings on lines this task did not change fold into one `pre-existing` count, and `baseRef=""` lists them.
+modified`; the end-of-task gate over a task's touched files is **one** call, not one per file. With no `baseRef=`, `changed=true` is `baseRef=HEAD` on a git tree: findings - never errors - on lines this task did not change fold into one `pre-existing` count, and `baseRef=""` lists them.
 `sinceLast=true` reports only what appeared since the previous run of the same scope, plus what was
 fixed. `cleanup` never rewrites generated code, and `clean` is not covered by `undo_last_change`.
 `gate` answers **one verdict line** - `clean` or `FAILED` - and, when it is not clean, each step's
@@ -693,8 +693,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    also accepts `symbol:` as an alias for `symbolId:`, and none of them declares the parameter
    required — a call with neither answers `ERROR InvalidArgument` naming `symbolId`.
    `add_member` addresses a *containing type*, so its canonical name is `typeSymbolId:` — but it
-   takes `symbolId:` as well, because that is the name every other symbol-addressed tool uses and
-   guessing it was the single most frequent rejected argument in a measured fortnight.
+   takes `symbolId:` as well.
    **Need several members?** `get_symbol_source(symbolIds: [...])` returns them in one response, and
    an id that does not resolve is reported inline as `NOT_RESOLVED <id>` plus its nearest ids, instead of
     failing the call.
@@ -1078,11 +1077,11 @@ values, and one `file:line` frame. Fix the test from that block, never `dotnet t
 | whole solution | `run_tests` — built **once**, then each test assembly run directly where its runner allows, **concurrently**, one process each; `timeoutSeconds` bounds **each**, `parallel: 1` restores the single `dotnet test` |
 | one project | `run_tests(project)` — a project **name** or a path to the `.csproj` |
 | one test, or a class/namespace prefix | `run_tests(test)` — not combined with `filter` |
-| several tests or classes of the same project | `run_tests(tests: [...])` — at most 10, combined into ONE filter expression and ONE verdict line, which replaces one targeted run per class |
+| several tests or classes of the same project | `run_tests(tests: [...])` — at most 10, combined into ONE filter and ONE verdict line; an entry that ran nothing is named |
 | a raw VSTest expression | `run_tests(filter)` |
-| only the test projects your change can reach | `run_tests(changed: true)` — the test projects that transitively reference a project you changed since the workspace loaded, at **assembly** granularity, naming both what it ran and what it skipped. Falls back to one whole-solution run, saying why, whenever it cannot reason (nothing changed, a changed file belongs to no project, no test project depends on it) or the change reaches more than 10 test projects. It never silently runs less than it should. Ignored when `project=` is passed |
+| only the test projects your change can reach | `run_tests(changed: true)` — the test projects that transitively reference a project you changed since the workspace loaded, at **assembly** granularity, naming both what it ran and what it skipped. Falls back to one whole-solution run, saying why, whenever it cannot reason (nothing changed, a changed file belongs to no project, no test project depends on it) or the change reaches more than 10 test projects. Ignored beside `project=` |
 | several projects at once | `run_tests(projects: [...], parallel: N)` — concurrent; `1` is serial |
-| skip the rebuild | `run_tests(noBuild: true)` |
+| skip the rebuild | `run_tests(noBuild: true)` — warns when a source is newer than the binary |
 | only what just failed | `rerun_failed` — a red `run_tests` verdict ends with that exact call |
 | only some of what just failed | `rerun_failed(tests: [...], exclude: [...])` - the answer names how many remembered failures it skipped |
 | the slowest N | `run_tests(slowest: 10)` |
@@ -1098,8 +1097,7 @@ projects it matched - pass that next time.
 produced no results says so, and never `0 failures`. A `filter=` carrying `&amp;` is refused, naming the decoded one.
 
 **A run that produced no results, and a build that failed, echo the command line they ran** -
-`command: dotnet test ...` - because that is exactly the case where the arguments are the answer and
-the payload is otherwise empty. `verbose=true` echoes it on any run.
+`command: dotnet test ...`; `verbose=true` echoes it on any run.
 
 **`STALE n document(s) changed after this run started`** ends a `build`/`run_tests` verdict when an
 edit landed mid-run: the answer is about the tree as it WAS - re-run it. It counts only documents a

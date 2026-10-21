@@ -237,7 +237,7 @@ a diff of a non-`.cs` path to `diff_text`, `git diff --cached` routed to `change
 `TaskList` are not denied — they are **allowed with a stand-down**, because polling for a result the
 harness already delivers cost 22.5 h and 29.7% of all tool wall time in a measured week, while 207 of
 those 272 calls followed a real completion notification and were legitimate. A denial names the replacing
-call with the command's own arguments translated — `git log --oneline -1` answers `history maxResults=1`.
+call with the command's own arguments translated — `git log --oneline -1` answers `history maxResults=1`, `git log -1 --stat` answers `history commit=`, and `wc -c` answers `find_files stamps=true`. A path under an exported variable such as `$APPDATA` is judged by where it points.
 
 Git rows fire only when the directory the command addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`,
 because the hook is installed user-wide. Plain `.css`, `.js`, `dotnet restore`/`pack`/`publish`/`run`, and
@@ -410,7 +410,7 @@ surgical file writes outside undo, so preview those with `dryRun`. `--read-only`
 refuse and touch nothing.
 
 Four solutions stay loaded at once (`--max-workspaces`, `TERSE_MAX_WORKSPACES`), compilations are given
-back once the server has served no call for 15 minutes (`--idle-minutes`), `--no-watch` turns the file watcher off, and
+back once the server has served no call for 60 minutes (`--idle-minutes`, or `.terse.json` `workspace.idleMinutes`), `--no-watch` turns the file watcher off, and
 responses are bounded and declare their truncation. A `.terse.json` `build` section -
 `{"build": {"configuration": "Debug", "projects": {"App.Tests": "Debug"}}}` - fills the configuration a
 `build`, `run_tests` or `list_tests` call omits, and the verdict says so. Every answer names its worktree and branch, and an
