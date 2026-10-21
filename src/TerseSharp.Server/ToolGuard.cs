@@ -213,6 +213,7 @@ public static class ToolGuard
         "ls-remote-tags" => "use history tags=true remote=true, which merges origin's tag list into the local one and tags every row local=yes|no remote=yes|no",
         "log" => "use history, which takes path=, baseRef=, contains= for the pickaxe and message= for the subject grep",
         "show" => "use history commit=<sha>, which answers the subject and one line per file with added and deleted counts",
+        "log-stat" => "use history commit=<that revision>, which answers its subject and one line per file with added and deleted counts - the whole of a one-commit --stat",
         "show-file" => "use read_text ref=<ref> path=<path>, or get_file_outline ref=<ref> path=<path> for a .cs file",
         "tag" => "use history tags=true, which lists every tag newest-first with the commit it names",
         "describe" => "use history describe=true, which answers the nearest tag, the commits since it, the short sha and whether the tree is dirty, as one line",
@@ -231,7 +232,7 @@ public static class ToolGuard
         "diff-text" or "diff-cached-text" => "diff_symbols answers a hunk as the C# declaration containing it, and the path this command names declares none, so it would be a dead end; diff_text returns that path's unified diff directly, bounded, workspace-relative, and it takes baseRef= and staged= as well.",
         "ls-files" => "find_files tracked=true lists the tracked files a glob selects, workspace-relative and with the build output already excluded, so telling a checked-in fixture from a scratch file needs no pipe through grep. Only the bare listing is replaced: git ls-files with any option is left alone.",
         "ls-remote-tags" => "history tags=true remote=true reads both tag lists through the same runner and answers one bounded line per tag saying which side has it, so 'was this version ever pushed?' needs no shell and no diffing two listings by eye. Only origin's tag listing is replaced: --heads, another remote and a bare ls-remote are left alone.",
-        "log" or "show" => "history answers the same commits workspace-relative and bounded, with the pickaxe and the subject grep as parameters instead of flags. Only git blame and index or history mutation stay on the shell.",
+        "log" or "log-stat" or "show" => "history answers the same commits workspace-relative and bounded, with the pickaxe and the subject grep as parameters instead of flags. Only git blame and index or history mutation stay on the shell.",
         "show-file" => "read_text ref= gives a revision's text the same numbering gutter, line ranges, tail=, section= and maxChars budget as the working tree, and a whole .cs file answers its outline instead of about three times the tokens.",
         "describe" => "history describe=true answers HEAD's position - nearest tag, commits since it, short sha, dirty flag - as one line through the same runner as every other git answer, so the release-state question needs no shell. Creating, deleting or verifying a tag stays on the shell.",
         "tag" => "history tags=true answers the tag list newest-first with the commit each names, bounded by maxResults and through the same runner as every other git answer. Only the listing is replaced: creating, deleting, signing or verifying a tag stays on the shell.",
@@ -311,6 +312,7 @@ public static class ToolGuard
         "Read" => "get_file_outline, get_symbol_source, xaml_outline or read_text",
         "Grep" => "search_symbols, find_usages, find_implementations, search_text or xaml_find",
         "Glob" => "find_files",
+        "Size" => "find_files stamps=true",
         "Write" or "Edit" or "MultiEdit" or "NotebookEdit" => Writer(target),
         _ => "the matching terse-sharp tool",
     };
@@ -388,6 +390,7 @@ public static class ToolGuard
             "diff" when IsDotNetTree(directed) && !Unserved(tokens) => Cached(tokens),
             "ls-files" when IsDotNetTree(directed) && Unflagged(tokens, "ls-files") => "ls-files",
             "ls-remote" when IsDotNetTree(directed) && RemoteTagListing(tokens) => "ls-remote-tags",
+            "log" when IsDotNetTree(directed) && LoggedRevision(tokens) is not null => "log-stat",
             "log" when IsDotNetTree(directed) && !Shaped(tokens) => "log",
             "show" when IsDotNetTree(directed) && !Scripted(tokens) => Showing(tokens),
             "tag" when IsDotNetTree(directed) && TagListing(tokens) => "tag",
@@ -651,6 +654,7 @@ public static class ToolGuard
         {
             "Grep" when SearchesAPattern(segment) => "search_text query=\"<the literal>\" glob=\"" + operand + "\"",
             "Glob" => Call("find_files", "glob", operand),
+            "Size" => Call("find_files", "glob", operand) + " stamps=true",
             "Edit" => Call("edit_text", "path", operand),
             _ => Call("read_text", "path", operand),
         };
@@ -682,6 +686,7 @@ public static class ToolGuard
         "ls-remote-tags" => "history tags=true remote=true",
         "log" => "history",
         "show" => "history",
+        "log-stat" => "history",
         "show-file" => "read_text",
         "tag" => "history tags=true",
         "describe" => "history describe=true",
@@ -846,6 +851,7 @@ public static class ToolGuard
         return name switch
         {
             _ when Rewrites(name, command) => "Edit",
+            "wc" when Array.Exists(command, token => token is "-c" or "--bytes") => "Size",
             _ when SearchCommands.Contains(name, StringComparer.OrdinalIgnoreCase) => "Grep",
             _ when ListCommands.Contains(name, StringComparer.OrdinalIgnoreCase) => "Glob",
             _ => "Read",
@@ -1186,6 +1192,7 @@ public static class ToolGuard
     private static string GitArguments(string subcommand, string segment) => subcommand switch
     {
         "log" => LogArguments(segment),
+        "log-stat" => " commit=" + LoggedRevision(Tokens(segment)),
         "show" => CommitArgument(segment),
         "status" or "diff" or "diff-cached" => DiffArguments(segment),
         _ => string.Empty,
@@ -1971,9 +1978,9 @@ public static class ToolGuard
             values[trimmed[..equals]] = value.ToString();
     }
 
-    private static string Filled(string text, Dictionary<string, string> values)
+    private static string Filled(string text, Dictionary<string, string> values, string? command = null)
     {
-        if (values.Count is 0 || !text.Contains('$'))
+        if (!text.Contains('$') || (values.Count is 0 && command is null))
             return text;
 
         var lookup = values.GetAlternateLookup<ReadOnlySpan<char>>();
@@ -1986,7 +1993,7 @@ public static class ToolGuard
             var rest = text.AsSpan(index);
             var (name, width) = quote is '\'' ? (default(Range), 0) : Reference(rest);
 
-            if (width > 0 && lookup.TryGetValue(rest[name], out var value))
+            if (width > 0 && Value(rest[name], lookup, command) is { } value)
             {
                 builder.Append(value);
                 index += width - 1;
@@ -2004,7 +2011,7 @@ public static class ToolGuard
 
     private static string? Resolved(string command)
     {
-        if (!command.Contains('$') || !command.Contains('='))
+        if (!command.Contains('$'))
             return null;
 
         var opened = Opened(command);
@@ -2013,7 +2020,7 @@ public static class ToolGuard
 
         foreach (var pipeline in Pipelines(command[..opened]))
         {
-            var text = Filled(pipeline.Text, values);
+            var text = Filled(pipeline.Text, values, command);
 
             builder.Append(pipeline.Lead).Append(text);
 
@@ -2670,6 +2677,48 @@ public static class ToolGuard
             CultureInfo.InvariantCulture,
             $"TerseSharp guard: this '&&' chain RAN without its trailing read - {dropped.Count} of its {total} links were stripped off its end, {names}, because the terse-sharp MCP answers them. Nothing followed them, so every link that ran is still gated as you wrote it; the '&&' would have run the stripped reads only if every link before them succeeded, so make the calls below only if the command succeeded. Do not re-issue the quoted commands in Bash.");
     }
+
+    private static string? Value(ReadOnlySpan<char> name, Dictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> assigned, string? command) =>
+            assigned.TryGetValue(name, out var value) ? value : command is null ? null : Environmental(name, command);
+
+    private static string? Environmental(ReadOnlySpan<char> name, string command)
+    {
+        if (!IsExportedName(name) || command.Contains(string.Concat(name, "="), StringComparison.Ordinal))
+            return null;
+
+        return Environment.GetEnvironmentVariable(name.ToString()) is { } value && IsPlainPath(value) ? value.Replace('\\', '/') : null;
+    }
+
+    private static string? LoggedRevision(string[] tokens)
+    {
+        var arguments = tokens[(Array.IndexOf(tokens, "log") + 1)..];
+        var revisions = Array.FindAll(arguments, IsRevision);
+        var shaped = revisions.Length <= 1 && Array.TrueForAll(arguments, token => IsOneCommitStatFlag(token) || IsRevision(token));
+
+        return shaped && arguments.Contains("--stat") && Array.Exists(arguments, token => token is "-1" or "-n1" or "--max-count=1")
+            ? revisions is [var named] ? named : "HEAD"
+            : null;
+    }
+
+    private static bool IsRevision(string token) => token switch
+    {
+        "HEAD" => true,
+        ['H', 'E', 'A', 'D', '~' or '^', .. var steps] => !steps.AsSpan().ContainsAnyExcept(RevisionSteps),
+        _ => IsSha(token),
+    };
+
+    private static readonly SearchValues<char> RevisionSteps = SearchValues.Create("0123456789~^");
+
+    private static bool IsPlainPath(string value) =>
+        value.Length > 0 && Path.IsPathFullyQualified(value) && value.AsSpan().IndexOfAny(UnplainPath) < 0;
+
+    private static readonly SearchValues<char> UnplainPath = SearchValues.Create(" \t|<>()&`$;\"'");
+    private static readonly SearchValues<char> ExportedNameChars = SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+
+    private static bool IsExportedName(ReadOnlySpan<char> name) =>
+        name is [>= 'A' and <= 'Z', _, ..] && !name.ContainsAnyExcept(ExportedNameChars) && name is not ("PWD" or "OLDPWD");
+
+    private static bool IsOneCommitStatFlag(string token) => token is "--stat" or "--oneline" or "--no-color" or "-1" or "-n1" or "--max-count=1";
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

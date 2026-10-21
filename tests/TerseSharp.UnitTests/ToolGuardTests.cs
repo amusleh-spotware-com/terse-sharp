@@ -1231,6 +1231,10 @@ public sealed class ToolGuardTests
     [InlineData("git add x && git log -1 | head -1")]
     [InlineData("git add x && sed -n 1,5p README.md")]
     [InlineData("cd src && cat appsettings.json")]
+    [InlineData("git status && git commit -m x")]
+    [InlineData("git commit -m x || git status")]
+    [InlineData("(git status; git commit -m x)")]
+    [InlineData("grep -q TODO README.md && rm README.md")]
     public void Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
@@ -2585,5 +2589,89 @@ public sealed class ToolGuardTests
 
         Assert.Null(verdict.Rewrite);
         Assert.DoesNotContain("RAN without its trailing read", verdict.Reason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("ls \"$TERSE_GUARD_OUTSIDE_PROBE/Spotware/Logs\"")]
+    [InlineData("ls -la $TERSE_GUARD_OUTSIDE_PROBE/Temp")]
+    [InlineData("tail -5 \"${TERSE_GUARD_OUTSIDE_PROBE}\\Spotware\\Logs\\a.log\"")]
+    public void Inspect_ForAPathUnderAnEnvironmentVariableOutsideTheTree_AllowsTheTextRead(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+
+        Environment.SetEnvironmentVariable("TERSE_GUARD_OUTSIDE_PROBE", Path.Combine(Path.GetTempPath(), "terse-guard-environment"));
+
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+        Assert.StartsWith("no-tool ", verdict.Allowance, StringComparison.Ordinal);
+    }
+    [Theory]
+    [InlineData("ls \"$TERSE_GUARD_UNSET_PROBE/notes.md\"")]
+    [InlineData("ls '$TERSE_GUARD_OUTSIDE_PROBE/notes.md'")]
+    [InlineData("ls \"$TERSE_GUARD_OUTSIDE_PROBE/notes.md\"; TERSE_GUARD_OUTSIDE_PROBE=src")]
+    [InlineData("TERSE_GUARD_OUTSIDE_PROBE=src; ls \"$TERSE_GUARD_OUTSIDE_PROBE/notes.md\"")]
+    [InlineData("cat \"$TERSE_GUARD_INSIDE_PROBE/notes.md\"")]
+    public void Inspect_ForAnEnvironmentVariableThatDoesNotSoundlyExpandOutsideTheTree_StillDeniesTheRead(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+
+        Environment.SetEnvironmentVariable("TERSE_GUARD_OUTSIDE_PROBE", Path.Combine(Path.GetTempPath(), "terse-guard-environment"));
+        Environment.SetEnvironmentVariable("TERSE_GUARD_INSIDE_PROBE", root);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root).Denied, command);
+    }
+
+    [Fact]
+    public void Inspect_ForAVariableTheShellManagesItself_NeverExpandsItFromTheHooksEnvironment()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var previous = Environment.GetEnvironmentVariable("PWD");
+
+        Environment.SetEnvironmentVariable("PWD", Path.Combine(Path.GetTempPath(), "terse-guard-environment"));
+
+        try
+        {
+            Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cat \"$PWD/notes.md\"" }, root).Denied);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PWD", previous);
+        }
+    }
+
+    [Fact]
+    public void Inspect_ForAByteCountOfAnInTreeFile_RoutesToTheFileListingInsteadOfReadingItWhole()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "wc -c dev-cid.user" }, root);
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("find_files glob=\"dev-cid.user\" stamps=true", verdict.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("read_text", verdict.Reason, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("git log -1 --stat", "history commit=HEAD")]
+    [InlineData("git log --oneline -1 --stat HEAD~2", "history commit=HEAD~2")]
+    [InlineData("git log -n1 --stat 1a2b3c4d", "history commit=1a2b3c4d")]
+    public void Inspect_ForAOneCommitLogStat_DeniesItAndRoutesToHistoryCommit(string command, string call)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.True(verdict.Denied, command);
+        Assert.Equal(call, verdict.Routing);
+    }
+
+    [Theory]
+    [InlineData("git log --oneline -3 --stat")]
+    [InlineData("git log -1 --stat -- README.md")]
+    [InlineData("git log -3 --format='%h %(trailers:key=Co-Authored-By)'")]
+    public void Inspect_ForALogShapeHistoryCannotAnswerInOneCall_StillAllowsIt(string command)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root).Denied, command);
     }
 }
