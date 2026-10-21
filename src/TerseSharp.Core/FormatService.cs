@@ -268,7 +268,7 @@ public static class FormatService
 
         return unnecessary.Length is 0
             ? document
-            : document.WithSyntaxRoot(root.RemoveNodes(unnecessary, SyntaxRemoveOptions.KeepNoTrivia)!);
+            : document.WithSyntaxRoot(HeaderKept(root, root.RemoveNodes(unnecessary, SyntaxRemoveOptions.KeepNoTrivia)!, unnecessary));
     }
 
     private static UsingDirectiveSyntax[] UnnecessaryUsings(SemanticModel model, SyntaxNode root, CancellationToken cancellationToken) =>
@@ -557,4 +557,17 @@ public static class FormatService
             after.Contains('\r', StringComparison.Ordinal) && !before.Contains('\r', StringComparison.Ordinal)
                 ? after.Replace("\r\n", "\n", StringComparison.Ordinal)
                 : after;
+
+    private static SyntaxNode HeaderKept(SyntaxNode original, SyntaxNode trimmed, UsingDirectiveSyntax[] removed)
+    {
+        var first = original.GetFirstToken(includeZeroWidth: true);
+
+        if (!Array.Exists(removed, directive => directive.GetFirstToken() == first))
+            return trimmed;
+
+        var next = trimmed.GetFirstToken(includeZeroWidth: true);
+        var leading = first.LeadingTrivia.AddRange(next.LeadingTrivia.SkipWhile(trivia => trivia.IsKind(SyntaxKind.EndOfLineTrivia) || trivia.IsKind(SyntaxKind.WhitespaceTrivia)));
+
+        return trimmed.ReplaceToken(next, next.WithLeadingTrivia(leading));
+    }
 }

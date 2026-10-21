@@ -171,6 +171,25 @@ public sealed class FormatServiceTests
         }
     }
 
+    [Theory]
+    [InlineData("using System.Text;\n\nnamespace N;\n\nclass C\n{\n}\n", "namespace N;\n\nclass C\n{\n}\n")]
+    [InlineData("// header\n\nusing System.Text;\n\nnamespace N;\n\nclass C\n{\n}\n", "// header\n\nnamespace N;\n\nclass C\n{\n}\n")]
+    [InlineData("#nullable enable\nusing System.Text;\nusing System;\n\nnamespace N;\n\nclass C\n{\n    Exception? E;\n}\n", "#nullable enable\nusing System;\n\nnamespace N;\n\nclass C\n{\n    Exception? E;\n}\n")]
+    public async Task RemoveUnusedUsings_OfTheFilesFirstDirective_KeepsItsHeaderAndLeavesNoBlankFirstLine(string text, string expected)
+    {
+        var cleaned = await FormatService.RemoveUnusedUsingsAsync(Referenced(text), TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, (await cleaned.GetTextAsync(TestContext.Current.CancellationToken)).ToString());
+    }
+
+    private static Document Referenced(string text)
+    {
+        var workspace = new AdhocWorkspace();
+        var project = workspace.AddProject("Cleaned", LanguageNames.CSharp).AddMetadataReference(MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
+
+        return project.AddDocument("Cleaned.cs", SourceText.From(text));
+    }
+
     private static Document Untouched(string root, string text = Untidy)
     {
         var workspace = new AdhocWorkspace();
