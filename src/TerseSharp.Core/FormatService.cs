@@ -27,7 +27,7 @@ public static class FormatService
             return await CiAsync(workspace, documents, request, options, cancellationToken).ConfigureAwait(false);
 
         var outcome = request.AppliesCodeFixes
-            ? await CodeFixService.ApplyAsync(workspace.Solution, documents, request, cancellationToken).ConfigureAwait(false)
+            ? await CodeFixService.ApplyAsync(workspace.Solution, documents, request with { Touched = scope.Touched }, cancellationToken).ConfigureAwait(false)
             : new FixOutcome(workspace.Solution, []);
 
         var updated = request.Reformats

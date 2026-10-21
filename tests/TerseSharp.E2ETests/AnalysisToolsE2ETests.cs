@@ -541,6 +541,32 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task Gate_WithBaseRef_FixesOnlyTheLinesTheWorkingTreeChangedInsideAChangedFile()
+    {
+        const string Sample = "src/Fixture.Trading/StyleSample.cs";
+        var full = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "StyleSample.cs");
+        var original = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(full);
+
+        await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = original.Replace("quantity * 3", "quantity * 4", StringComparison.Ordinal), ["force"] = true });
+
+        try
+        {
+            var applied = await server.CallAsync("gate", new() { ["path"] = Sample, ["baseRef"] = "HEAD", ["verbose"] = true });
+            var after = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+
+            Assert.Contains("public List<int> Quantities { get; } = new List<int>();", after, StringComparison.Ordinal);
+            Assert.Contains("quantity * 4", after, StringComparison.Ordinal);
+            Assert.Contains("remaining=0", applied, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = original, ["force"] = true });
+            File.SetLastWriteTimeUtc(full, stamp);
+        }
+    }
+
+    [Fact]
     public async Task Gate_OverTheChangedFilesWithNoBaseRef_FoldsWhatTheWorkingTreeDidNotChange_AndBaseRefEmptyOptsOut()
     {
         var full = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");

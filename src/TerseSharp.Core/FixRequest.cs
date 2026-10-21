@@ -18,6 +18,8 @@ public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, Diagnos
 {
     public bool MirrorsCi { get; init; }
 
+    public TouchedLines? Touched { get; init; }
+
     public bool AppliesCodeFixes => Mode is FixMode.Style or FixMode.Analyzers or FixMode.All or FixMode.Ci;
 
     public bool WithholdsVisibleShapeFixes => Mode is FixMode.All && !MirrorsCi;
@@ -28,7 +30,8 @@ public sealed record FixRequest(FixMode Mode, IReadOnlyList<string> Ids, Diagnos
         diagnostic.Severity >= Severity
         && !diagnostic.IsSuppressed
         && (Ids.Count is 0 || DiagnosticIds.MatchesAny(diagnostic.Id, Ids))
-        && InMode(diagnostic.Id);
+        && InMode(diagnostic.Id)
+        && (Touched?.Covers(diagnostic) ?? true);
 
     private bool InMode(string id) => Mode switch
     {
