@@ -41,7 +41,7 @@ public static class MissingDocument
         && Source(symbol) is not null;
 
     private static string? Steer(LoadedWorkspace workspace, ISymbol declared, string name) =>
-        Source(declared) is { } file
+        Source(declared) is { } file && File.Exists(file)
             ? string.Create(
                 CultureInfo.InvariantCulture,
                 $"'{name}' is declared in {PositionFormat.Relative(workspace.Root, file)} - use get_file_outline or get_type_outline on that path")
