@@ -26,7 +26,8 @@ public static class AnalysisService
 
         var value = collected.Value;
         var all = Filter(value.Found, value.Scope, minimum, ids);
-        var found = Introduced(all, touched);
+        var split = touched is null ? default : BaselineFold.Split(all, touched);
+        var found = touched is null ? all : split.Kept;
         var declaration = await DiagnosticDeclarations.ResolverAsync(found, cancellationToken).ConfigureAwait(false);
 
         return Render(
@@ -41,7 +42,7 @@ public static class AnalysisService
             ids,
             includeDeadCode,
             changed,
-            new Narrowed(touched, baseRef, all.Length - found.Length));
+            new Narrowed(touched, baseRef, all.Length - found.Length - split.Fileless, split));
     }
 
     public static async Task<Result<GateFindings>> FindingsAsync(
@@ -219,6 +220,12 @@ public static class AnalysisService
                 $"{narrowed.PreExisting + kept.Length - extra.Length} pre-existing finding(s) on these files were not reported - they sit outside every line the working tree changed against {narrowed.BaseRef} - baseRef=\"\" lists every finding in these files at once"));
         }
 
+        foreach (var note in new[] { BaselineFold.UnchangedErrorNote(narrowed.Split), BaselineFold.FilelessNote(narrowed.Split, narrowed.BaseRef) })
+        {
+            if (note is not null)
+                response.Note(note);
+        }
+
         if (!sinceLast && occurrences.Length != shown.Count)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"total={occurrences.Length} occurrence(s) folded onto {shown.Count} record(s)"));
 
@@ -291,10 +298,10 @@ public static class AnalysisService
         return [.. found.Select(finding => finding.Diagnostic())];
     }
 
-    private readonly record struct Narrowed(TouchedLines? Touched, string BaseRef, int PreExisting);
+    private readonly record struct Narrowed(TouchedLines? Touched, string BaseRef, int PreExisting, BaselineSplit Split = default);
 
     private static Diagnostic[] Introduced(Diagnostic[] found, TouchedLines? touched) =>
-        touched is null ? found : [.. found.Where(touched.Covers)];
+        touched is null ? found : BaselineFold.Split(found, touched).Kept;
 
     private static string[] Introduced(string[] extra, TouchedLines? touched) =>
         touched is null ? extra : [.. extra.Where(touched.CoversRecord)];

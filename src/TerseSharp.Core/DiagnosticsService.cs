@@ -15,10 +15,10 @@ public static class DiagnosticsService
             ParallelWork.Options(cancellationToken),
             (project, token) => CollectAsync(project, scope, request.Minimum, found, token)).ConfigureAwait(false);
 
-        var kept = request.Touched is { } touched ? found.Where(touched.Covers).ToArray() : [.. found];
-        var declaration = await DiagnosticDeclarations.ResolverAsync(kept, cancellationToken).ConfigureAwait(false);
+        var split = request.Touched is { } touched ? BaselineFold.Split(found, touched) : new BaselineSplit([.. found], 0, 0, 0, string.Empty);
+        var declaration = await DiagnosticDeclarations.ResolverAsync(split.Kept, cancellationToken).ConfigureAwait(false);
 
-        return Render(workspace.Root, request, kept, declaration, found.Count - kept.Length, workspace.Load.Mismatched.Count);
+        return Render(workspace.Root, request, split, declaration, workspace.Load.Mismatched.Count);
     }
 
     private static async ValueTask CollectAsync(
@@ -47,11 +47,11 @@ public static class DiagnosticsService
     private static string Render(
         string root,
         DiagnosticsRequest request,
-        Diagnostic[] found,
+        BaselineSplit split,
         Func<Location, string?> declaration,
-        int preExisting,
         int mismatched)
     {
+        var found = split.Kept;
         var deduplicated = DiagnosticFold.Lines(root, found, Head, declaration);
 
         var response = new ResponseBuilder("get_diagnostics", request.Path ?? "solution");
@@ -62,7 +62,7 @@ public static class DiagnosticsService
             response.Note(Occurrences(found));
 
         if (request.Touched is not null)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"{preExisting} pre-existing diagnostic(s) were not reported - they sit outside every line the working tree changed against {request.BaseRef} - drop baseRef= to list them"));
+            AppendBaseline(response, split, request.BaseRef);
 
         if (mismatched > 0)
             response.Note(string.Create(CultureInfo.InvariantCulture, $"config-mapping {mismatched} project(s) load at a different Configuration|Platform than the solution builds them - severities here follow the loaded one, build follows the solution; load_workspace names them"));
@@ -93,6 +93,17 @@ public static class DiagnosticsService
         return string.Create(
             CultureInfo.InvariantCulture,
             $"occurrences={found.Length} errors={errors} warnings={warnings} - a line folds every position sharing its id and message; an edit's errors= counts the same way over the projects it touched");
+    }
+
+    private static void AppendBaseline(ResponseBuilder response, BaselineSplit split, string baseRef)
+    {
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"{split.PreExisting} pre-existing diagnostic(s) were not reported - they sit outside every line the working tree changed against {baseRef} - drop baseRef= to list them"));
+
+        if (BaselineFold.UnchangedErrorNote(split) is { } unchanged)
+            response.Note(unchanged);
+
+        if (BaselineFold.FilelessNote(split, baseRef) is { } fileless)
+            response.Note(fileless);
     }
 }
 

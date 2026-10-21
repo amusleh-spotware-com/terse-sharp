@@ -1046,13 +1046,14 @@ public sealed class CompileGateE2ETests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetDiagnostics_WithBaseRef_FoldsTheDiagnosticsNoChangedLineCarriesIntoOneCount()
+    public async Task GetDiagnostics_WithBaseRef_StillListsAnErrorOnALineTheTreeDidNotChange()
     {
         var text = await CallAsync("get_diagnostics", new() { ["minSeverity"] = "error", ["baseRef"] = "HEAD" });
 
-        Assert.StartsWith("0 diagnostics", text, StringComparison.Ordinal);
-        Assert.Contains("1 pre-existing diagnostic(s)", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("PreExistingError", text, StringComparison.Ordinal);
+        Assert.StartsWith("1 diagnostics", text, StringComparison.Ordinal);
+        Assert.Contains("Calculator.PreExistingError", text, StringComparison.Ordinal);
+        Assert.Contains("1 error(s) on lines the working tree did not change are listed anyway", text, StringComparison.Ordinal);
+        Assert.Contains("0 pre-existing diagnostic(s)", text, StringComparison.Ordinal);
     }
 
     [Fact]
