@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Formatting;
+using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.Core;
 
@@ -282,19 +283,20 @@ public static class SymbolEditService
         CancellationToken cancellationToken)
     {
         var solution = workspace.Solution;
-        var groups = deletions.GroupBy(deletion => deletion.Target.Document.Id).ToArray();
+        var changed = new List<DocumentId>(deletions.Length);
 
-        foreach (var group in groups)
+        foreach (var file in deletions.GroupBy(deletion => deletion.Target.Document.FilePath ?? deletion.Target.Document.Id.ToString()))
         {
-            var trimmed = await TrimmedAsync(solution, group, cancellationToken).ConfigureAwait(false);
+            var trimmed = await TrimmedFileAsync(solution, [.. file.GroupBy(deletion => deletion.Target.Document.Id)], cancellationToken).ConfigureAwait(false);
 
             if (!trimmed.IsOk)
                 return Result.Fail<string>(trimmed.Error!);
 
-            solution = trimmed.Value!;
+            (solution, var documents) = trimmed.Value;
+            changed.AddRange(documents);
         }
 
-        return await PrunedAsync(workspace, solution, [.. groups.Select(group => group.Key)], options, cancellationToken).ConfigureAwait(false);
+        return await PrunedAsync(workspace, solution, [.. changed], options, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<Solution>> TrimmedAsync(
@@ -1991,6 +1993,65 @@ public static class SymbolEditService
         && PathBoundary.Contains(directory, document.FilePath!)
         && document.Project.Solution.GetDocumentIdsWithFilePath(document.FilePath).Select(id => document.Project.Solution.GetProject(id.ProjectId)?.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() is 1
         && ProjectGlobs.CompilesByGlob(project) is true;
+
+    private static async Task<Result<(Solution Solution, DocumentId[] Documents)>> TrimmedFileAsync(
+        Solution solution,
+        IGrouping<DocumentId, Deletion>[] byDocument,
+        CancellationToken cancellationToken)
+    {
+        if (byDocument.Length is 1)
+        {
+            var trimmed = await TrimmedAsync(solution, byDocument[0], cancellationToken).ConfigureAwait(false);
+
+            return trimmed.IsOk
+                ? Result.Ok((trimmed.Value!, new[] { byDocument[0].Key }))
+                : Result.Fail<(Solution, DocumentId[])>(trimmed.Error!);
+        }
+
+        return await LinkedTrimmedAsync(solution, [.. byDocument.SelectMany(group => group)], cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<Result<(Solution Solution, DocumentId[] Documents)>> LinkedTrimmedAsync(
+        Solution solution,
+        Deletion[] deletions,
+        CancellationToken cancellationToken)
+    {
+        if (Array.Find(deletions, deletion => deletion.Target.Node is not MemberDeclarationSyntax or EnumMemberDeclarationSyntax) is { Symbol: { } listed })
+            return Result.Fail<(Solution, DocumentId[])>(Errors.Invalid("'" + listed.Name + "' sits in a list its file shares with another target framework's compilation, which a symbolIds= batch cannot trim in one pass", "delete it with delete_symbol symbolId= on its own"));
+
+        var document = deletions[0].Target.Document;
+        var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
+        var trimmed = text.WithChanges(Removals(deletions));
+        var linked = solution.GetDocumentIdsWithFilePath(document.FilePath);
+
+        foreach (var id in linked)
+            solution = solution.WithDocumentText(id, trimmed, PreservationMode.PreserveIdentity);
+
+        return Result.Ok((solution, linked.ToArray()));
+    }
+
+    private static TextChange[] Removals(Deletion[] deletions)
+    {
+        var spans = deletions.Select(deletion => RemovedSpan(deletion.Target.Node)).Distinct().ToArray();
+
+        return
+        [
+            .. spans
+            .Where(span => !Array.Exists(spans, other => other != span && other.Contains(span)))
+            .OrderBy(span => span.Start)
+            .Select(span => new TextChange(span, string.Empty)),
+    ];
+    }
+
+    private static TextSpan RemovedSpan(SyntaxNode node)
+    {
+        var lastLeadingDirective = node.GetLeadingTrivia().LastOrDefault(trivia => trivia.IsDirective);
+        var firstTrailingDirective = node.GetTrailingTrivia().FirstOrDefault(trivia => trivia.IsDirective);
+
+        return TextSpan.FromBounds(
+            lastLeadingDirective.IsDirective ? lastLeadingDirective.FullSpan.End : node.FullSpan.Start,
+            firstTrailingDirective.IsDirective ? firstTrailingDirective.FullSpan.Start : node.FullSpan.End);
+    }
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node, ISymbol Symbol);

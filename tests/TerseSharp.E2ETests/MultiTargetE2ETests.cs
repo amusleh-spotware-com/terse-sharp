@@ -61,6 +61,49 @@ public sealed class MultiTargetE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeleteSymbol_OfTwoMembersOneDeclaredForOneTargetFrameworkOnly_RemovesBothAndListsTheFileOnce()
+    {
+        var path = Path.Combine(Root, "src", "Multi.Core", "Numbers.cs");
+        var before = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+        try
+        {
+            await File.WriteAllTextAsync(path, GuardedNumbers, TestContext.Current.CancellationToken);
+            await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(Root, "MultiTargetSolution.slnx"), ["reload"] = true }, TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("delete_symbol", new() { ["symbolIds"] = new[] { "Numbers.Unused", "Numbers.Modern" } }, TestContext.Current.CancellationToken);
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.Single(text.Split('\n'), line => line.Contains("Numbers.cs  changedLines=", StringComparison.Ordinal));
+            Assert.DoesNotContain("<<<<<<<", after, StringComparison.Ordinal);
+            Assert.DoesNotContain("Unused", after, StringComparison.Ordinal);
+            Assert.DoesNotContain("Modern", after, StringComparison.Ordinal);
+            Assert.Contains("#if NET10_0_OR_GREATER", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, before, TestContext.Current.CancellationToken);
+            await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(Root, "MultiTargetSolution.slnx"), ["reload"] = true }, TestContext.Current.CancellationToken);
+        }
+    }
+
+    private const string GuardedNumbers = """
+    namespace Multi.Core;
+
+    public static class Numbers
+    {
+        public static int Doubled(int value) => value * 2;
+
+        public static int Unused() => 1;
+
+    #if NET10_0_OR_GREATER
+        public static int Modern() => 2;
+    #endif
+    }
+
+    """;
+
+    [Fact]
     public async Task Cleanup_WhereNoEditorConfigGovernsTheFile_SaysSoInsteadOfRewritingSilently()
     {
         var text = await Cleaned("src/Multi.Core/Squashed.cs", "all");

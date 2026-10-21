@@ -134,7 +134,7 @@ public static class EditGate
         {
             var diff = await DocumentDiff.CreateAsync(before, after, id, priced, cancellationToken).ConfigureAwait(false);
 
-            if (diff is not null)
+            if (diff is not null && !diffs.Exists(listed => string.Equals(listed.Path, diff.Path, StringComparison.Ordinal)))
                 diffs.Add(diff);
         }
 
