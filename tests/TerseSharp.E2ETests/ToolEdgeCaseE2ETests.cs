@@ -132,6 +132,25 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task SearchText_ForAnAbsentQueryShapedLikeAFileName_NamesTheFileTools()
+    {
+        var single = await server.CallAsync("search_text", new() { ["query"] = "NoSuchProbeRepository.cs" });
+        var batched = await server.CallAsync("search_text", new() { ["queries"] = new[] { "OrderService", "src/NoSuchProbe/Folder.json" } });
+
+        Assert.Contains("NOTE 'NoSuchProbeRepository.cs' looks like a file name - find_files name=\"NoSuchProbeRepository.cs\" finds the file, glob= searches inside it", single, StringComparison.Ordinal);
+        Assert.Contains("NOTE q2 'src/NoSuchProbe/Folder.json' looks like a file name", batched, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOTE q1", batched, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchText_ForAnAbsentQueryThatIsNoFileName_AddsNoFileHint()
+    {
+        var text = await server.CallAsync("search_text", new() { ["query"] = "zzz-no-such-token-zzz" });
+
+        Assert.DoesNotContain("looks like a file name", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetSymbol_WithAMalformedId_NamesTheErrorAndSuggestsSearch()
     {
         var text = await server.CallAsync("get_symbol", new() { ["symbolId"] = "notanid" });

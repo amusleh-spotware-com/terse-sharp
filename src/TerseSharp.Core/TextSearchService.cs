@@ -309,6 +309,7 @@ public static class TextSearchService
         response.Summary(tally.Shown, tally.Total, "matches", "glob= or maxResults=");
 
         Annotate(response, records.Count, request, tally);
+        FileShaped(response, records, request, tally);
 
         foreach (var record in records)
             response.Line(record);
@@ -1229,5 +1230,69 @@ public static class TextSearchService
             : Selected(Matched(index, root, "**"), root, request.Globs.AsSpan());
 
         return await ScannedAsync(Kept([.. selected.Where(IsSearchableFile)], request.Exclude), request, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void FileShaped(ResponseBuilder response, List<string> records, TextSearchRequest request, SearchTally tally)
+    {
+        if (request.Regex || tally.Shown < tally.Total)
+            return;
+
+        for (var index = 0; index < request.Patterns.Length; index++)
+        {
+            var pattern = request.Patterns[index];
+            var tag = request.SeveralPatterns ? string.Create(CultureInfo.InvariantCulture, $"q{index + 1}") : null;
+
+            if (LooksLikeFileName(pattern) && !records.Exists(record => tag is null || Carries(record, tag)))
+                response.Note(FileHint(pattern, tag));
+        }
+    }
+
+    private static string FileHint(string pattern, string? tag)
+    {
+        var name = pattern.AsSpan(pattern.AsSpan().LastIndexOfAny('/', '\\') + 1);
+
+        return tag is null
+            ? string.Create(CultureInfo.InvariantCulture, $"NOTE '{pattern}' looks like a file name - find_files name=\"{name}\" finds the file, glob= searches inside it")
+            : string.Create(CultureInfo.InvariantCulture, $"NOTE {tag} '{pattern}' looks like a file name - find_files name=\"{name}\" finds the file, glob= searches inside it");
+    }
+
+    private static bool LooksLikeFileName(ReadOnlySpan<char> pattern)
+    {
+        if (pattern.IsEmpty || pattern.ContainsAny(' ', '\t'))
+            return false;
+
+        var name = pattern[(pattern.LastIndexOfAny('/', '\\') + 1)..];
+        var dot = name.LastIndexOf('.');
+
+        return dot > 0 && FileExtensions.GetAlternateLookup<ReadOnlySpan<char>>().Contains(name[(dot + 1)..]);
+    }
+
+    private static bool Carries(string record, string tag)
+    {
+        var tags = TagField(record);
+
+        foreach (var range in tags.Split(','))
+        {
+            if (tags[range].SequenceEqual(tag))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static readonly FrozenSet<string> FileExtensions = FrozenSet.Create(
+        StringComparer.OrdinalIgnoreCase,
+        "cs", "csproj", "props", "targets", "sln", "slnx", "slnf", "json", "xml", "xaml", "axaml", "resx", "resw", "razor", "cshtml", "md", "txt", "yml", "yaml", "config", "ps1", "sh", "js", "ts", "py", "editorconfig", "log");
+
+    private static ReadOnlySpan<char> TagField(string record)
+    {
+        var line = record.AsSpan();
+        var end = line.IndexOf('\n');
+        var first = end < 0 ? line : line[..end];
+        var start = first.IndexOf("  ");
+        var rest = start < 0 ? [] : first[(start + 2)..];
+        var stop = rest.IndexOf("  ");
+
+        return stop < 0 ? rest : rest[..stop];
     }
 }
