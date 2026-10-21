@@ -2705,4 +2705,94 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Notes, ["delete"] = true });
         }
     }
+
+    [Theory]
+    [InlineData("", "one\ntwo", "one\nthree\n", "one\nthree", "NOTE final newline removed")]
+    [InlineData("", "one\ntwo\n", "one\nthree", "one\nthree\n", "NOTE final newline added")]
+    [InlineData("insert_final_newline = true\n", "one", "two", "two\n", "insert_final_newline=true")]
+    [InlineData("insert_final_newline = false\n", "one\n", "two\n", "two", "insert_final_newline=false")]
+    [InlineData("", "one\n", "two\n", "two\n", null)]
+    public async Task WriteText_OverAnExistingFile_KeepsItsFinalNewlineUnlessTheEditorconfigSaysOtherwiseAndSaysWhenItChangedTheContent(
+        string editorconfig,
+        string existing,
+        string content,
+        string expected,
+        string? note)
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-final-newline");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, ".editorconfig"), "root = true\n\n[*]\n" + editorconfig, TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(scratch, "probe.txt"), existing, TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("write_text", new() { ["path"] = "scratch-final-newline/probe.txt", ["content"] = content, ["overwrite"] = true });
+            var written = await File.ReadAllTextAsync(Path.Combine(scratch, "probe.txt"), TestContext.Current.CancellationToken);
+
+            Assert.Equal(expected, written);
+            Assert.Equal(note is not null, text.Contains("NOTE final newline", StringComparison.Ordinal));
+
+            if (note is not null)
+                Assert.Contains(note, text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, new byte[] { 0xEF, 0xBB, 0xBF, (byte)'b', (byte)'\n' }, false)]
+    [InlineData(false, new byte[] { 0xEF, 0xBB, 0xBF, (byte)'b', (byte)'\n' }, true)]
+    public async Task WriteText_WithContentOpeningWithAByteOrderMark_WritesExactlyOneAndSaysWhenItAddedOne(bool existingBom, byte[] expected, bool noted)
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-byte-order-mark");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, ".editorconfig"), "root = true\n", TestContext.Current.CancellationToken);
+            await File.WriteAllBytesAsync(Path.Combine(scratch, "probe.txt"), existingBom ? [0xEF, 0xBB, 0xBF, (byte)'a', (byte)'\n'] : [(byte)'a', (byte)'\n'], TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("write_text", new() { ["path"] = "scratch-byte-order-mark/probe.txt", ["content"] = "﻿b\n", ["overwrite"] = true });
+            var written = await File.ReadAllBytesAsync(Path.Combine(scratch, "probe.txt"), TestContext.Current.CancellationToken);
+
+            Assert.Equal(expected, written);
+            Assert.Equal(noted, text.Contains("NOTE byte order mark added", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_AFilesBatchOverAFileWithNoFinalNewline_KeepsItAndNamesTheFileInTheNote()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-final-newline-batch");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, ".editorconfig"), "root = true\n", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(scratch, "probe.txt"), "one\ntwo", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("write_text", new()
+            {
+                ["files"] = new object[] { new Dictionary<string, object?> { ["path"] = "scratch-final-newline-batch/probe.txt", ["content"] = "one\nthree\n" } },
+                ["overwrite"] = true,
+            });
+
+            Assert.Equal("one\nthree", await File.ReadAllTextAsync(Path.Combine(scratch, "probe.txt"), TestContext.Current.CancellationToken));
+            Assert.Contains("scratch-final-newline-batch/probe.txt  NOTE final newline removed", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
 }

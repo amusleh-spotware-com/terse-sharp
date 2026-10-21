@@ -822,12 +822,13 @@ public static class FileService
     public readonly record struct FileWrite(string Path, string Content, bool Force = false);
 
     private readonly record struct PendingWrite(
-        string Path,
-        string Full,
-        string Before,
-        string After,
-        Microsoft.CodeAnalysis.DocumentId? Document,
-        bool IsNew);
+            string Path,
+            string Full,
+            string Before,
+            string After,
+            Microsoft.CodeAnalysis.DocumentId? Document,
+            bool IsNew,
+            string? Ending = null);
 
     private static async Task<Result<PendingWrite>> PreparedAsync(
         LoadedWorkspace workspace,
@@ -845,11 +846,9 @@ public static class FileService
         if (SourceFile.Reject(workspace, file.Path, full, force || file.Force) is { } refusal)
             return Result.Fail<PendingWrite>(refusal.Error!);
 
-        var exists = File.Exists(full);
-        var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
-        var after = LineEndings.Adopt(file.Content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
+        var (before, after, ending) = await AdoptedAsync(workspace, full, file.Content, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(Pending(workspace, file.Path, full, before, after));
+        return Result.Ok(Pending(workspace, file.Path, full, before, after) with { Ending = ending });
     }
 
     private static async Task<Result<string>?> GateManyAsync(
@@ -909,7 +908,7 @@ public static class FileService
         if (gated is { IsOk: false })
             return gated.Value;
 
-        var rendered = new List<string>(pending.Count + 1);
+        var rendered = new List<string>((pending.Count * 3) + 1);
 
         if (gated is { } applied)
             rendered.Add(applied.Value!);
@@ -918,7 +917,10 @@ public static class FileService
             rendered.Add(await PlainAsync(workspace, entry, dryRun, verbose, cancellationToken).ConfigureAwait(false));
 
         foreach (var entry in pending)
+        {
             rendered.Add(DroppedDeclarations.Warning(entry.Path, entry.Before, entry.After) ?? string.Empty);
+            rendered.Add(entry.Ending is { } ending ? entry.Path + "  " + ending : string.Empty);
+        }
 
         return Result.Ok(string.Join('\n', rendered.FindAll(line => line.Length > 0)));
     }
@@ -1398,7 +1400,7 @@ public static class FileService
         return force ? Result.Ok(full) : Result.Fail<string>(Errors.OutsideWrite(full));
     }
 
-    private static async Task<(string Before, string After)> AdoptedAsync(
+    private static async Task<(string Before, string After, string? Note)> AdoptedAsync(
             LoadedWorkspace workspace,
             string full,
             string content,
@@ -1406,8 +1408,10 @@ public static class FileService
     {
         var exists = File.Exists(full);
         var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
+        var adopted = LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding);
+        var (after, note) = await FileEnding.KeptAsync(full, exists, before, adopted, cancellationToken).ConfigureAwait(false);
 
-        return (before, LineEndings.Adopt(content, exists ? LineEndings.Dominant(before) : workspace.LineEnding));
+        return (before, after, note);
     }
 
     private static async Task<Result<string>> InsideAsync(
@@ -1422,7 +1426,7 @@ public static class FileService
                 bool overwrite,
                 CancellationToken cancellationToken)
     {
-        var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
+        var (before, after, ending) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
 
         if (!overwrite && ReplacedContent.Measure(before, after) is { Unrelated: true } overlap)
             return Result.Fail<string>(ReplacedContent.Refusal(path, overlap));
@@ -1431,12 +1435,12 @@ public static class FileService
         var quiet = !dryRun && !verbose;
 
         if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
-            return gated.IsOk ? Result.Ok(ReplacedContent.Marked(DroppedDeclarations.Warned(gated.Value!, dropped), before, after, quiet)) : gated;
+            return gated.IsOk ? Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(gated.Value!, dropped), before, after, quiet), ending)) : gated;
 
         if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, dryRun, verbose), dropped), before, after, quiet));
+        return Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, dryRun, verbose), dropped), before, after, quiet), ending));
     }
 
     private static async Task<Result<string>> OutsideWriteAsync(
@@ -1447,12 +1451,12 @@ public static class FileService
             bool verbose,
             CancellationToken cancellationToken)
     {
-        var (before, after) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
+        var (before, after, ending) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
 
         if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
             await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DiffResponse("write_text", full, before, after, dryRun, verbose, full));
+        return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, dryRun, verbose, full), ending));
     }
 
     private static void AppendSections(ResponseBuilder response, string path, string text, ReadRequest request, LineSelection selection)

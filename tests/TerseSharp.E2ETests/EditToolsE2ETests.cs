@@ -204,12 +204,12 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
             var written = await server.CallAsync("write_text", new()
             {
                 ["path"] = "scratch.json",
-                ["content"] = "{ \"written\": true }",
+                ["content"] = "{ \"written\": true }\n",
                 ["dryRun"] = false,
             });
 
             Assert.Equal("scratch.json  changedLines=1", written);
-            Assert.Equal("{ \"written\": true }", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+            Assert.Equal("{ \"written\": true }", (await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken)).TrimEnd('\r', '\n'));
 
             var read = await server.CallAsync("read_text", new() { ["path"] = "scratch.json" });
 
