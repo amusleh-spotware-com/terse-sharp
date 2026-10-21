@@ -18,7 +18,7 @@ static async Task<int> CommandLineAsync(string[] arguments)
 
     var maxWorkspacesOption = new Option<int?>("--max-workspaces") { Description = "How many solutions stay loaded at once; the least recently used is unloaded beyond that. Default 4. TERSE_MAX_WORKSPACES does the same. A large solution costs gigabytes, so set 1 when you only ever work in one." };
 
-    var idleMinutesOption = new Option<int?>("--idle-minutes") { Description = "Drop a workspace's Roslyn compilations after it has been idle this long, and return the memory. Default 15; 0 keeps them for the life of the process. TERSE_IDLE_MINUTES does the same. The next semantic call re-realizes what it needs." };
+    var idleMinutesOption = new Option<int?>("--idle-minutes") { Description = "Drop a workspace's Roslyn compilations after it has been idle this long, and return the memory. Default 60; 0 keeps them for the life of the process. TERSE_IDLE_MINUTES does the same, and .terse.json workspace.idleMinutes sets it below both. The next semantic call re-realizes what it needs." };
 
     var toolsOption = new Option<string?>("--tools") { Description = TerseSharp.Server.ToolProfile.ToolsOptionDescription };
 
@@ -35,15 +35,15 @@ static async Task<int> CommandLineAsync(string[] arguments)
     var jsonOption = new Option<string?>("--json") { Description = "Tool arguments as a JSON object, e.g. '{\"path\": \"src/App.cs\"}'. Omit for none." };
     var call = new Command("call", "Call one MCP tool of this binary from the shell and print its response, so a claim about a freshly built terse can be tested without hand-writing JSON-RPC.") { toolArgument, workspaceOption, jsonOption };
 
-    serve.SetAction((result, cancellationToken) =>
-        McpHost.RunAsync(
+    serve.SetAction(async (result, cancellationToken) =>
+        await McpHost.RunAsync(
             result.GetValue(workspaceOption),
             result.GetValue(readOnlyOption),
             Watching(result.GetValue(noWatchOption)),
             WorkspaceLimit.Resolve(result.GetValue(maxWorkspacesOption)),
-            IdleLimit.Resolve(result.GetValue(idleMinutesOption)),
+            await IdleLimit.ResolveAsync(result.GetValue(idleMinutesOption), Directory.GetCurrentDirectory(), cancellationToken).ConfigureAwait(false),
             result.GetValue(toolsOption),
-            cancellationToken));
+            cancellationToken).ConfigureAwait(false));
 
     static bool Watching(bool disabled) =>
         !disabled && !string.Equals(Environment.GetEnvironmentVariable("TERSE_WATCH"), "0", StringComparison.Ordinal);

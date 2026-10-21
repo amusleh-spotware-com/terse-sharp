@@ -15,7 +15,7 @@ public sealed class RealizedNoteTests
     [Fact]
     public void Realized_AfterAnIdleDrop_SaysItIsARealizationAgainAndWhy() =>
         Assert.Equal(
-            "compilations=realized in 84782ms (again - drop #3 released them after 2m idle; --idle-minutes or TERSE_IDLE_MINUTES=0 keeps them)",
+            "compilations=realized in 84782ms (again - drop #3 released them after 2m idle; --idle-minutes, TERSE_IDLE_MINUTES or .terse.json workspace.idleMinutes raises it, 0 keeps them)",
             ToolContext.Realized(84782, drops: 3, TimeSpan.FromMinutes(2)));
 
     [Fact]

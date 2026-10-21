@@ -414,7 +414,7 @@ public sealed class FieldReportE2ETests(TerseServerFixture server)
 
         var loaded = await solution.CallAsync("load_workspace", new() { ["reload"] = true });
 
-        Assert.Contains("kept until the server serves no call for 15m, then released - --idle-minutes=0 or TERSE_IDLE_MINUTES=0 keeps them", loaded, StringComparison.Ordinal);
+        Assert.Contains("kept until the server serves no call for 60m, then released - --idle-minutes, TERSE_IDLE_MINUTES or .terse.json workspace.idleMinutes raises it, 0 keeps them", loaded, StringComparison.Ordinal);
     }
 
     private static object[] Entries(string first, string second) =>

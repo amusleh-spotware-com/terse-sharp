@@ -274,7 +274,7 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
     }
 
     internal static string Kept(TimeSpan idleFor) => idleFor > TimeSpan.Zero
-        ? string.Create(CultureInfo.InvariantCulture, $"; kept until the server serves no call for {(int)idleFor.TotalMinutes}m, then released - --idle-minutes=0 or TERSE_IDLE_MINUTES=0 keeps them; memory pressure releases another workspace's sooner")
+        ? string.Create(CultureInfo.InvariantCulture, $"; kept until the server serves no call for {(int)idleFor.TotalMinutes}m, then released - --idle-minutes, TERSE_IDLE_MINUTES or {IdleLimit.Setting} raises it, 0 keeps them; memory pressure releases another workspace's sooner")
         : "; kept for the life of the server";
 
     private static string Loaded(WorkspaceLoadResult result, bool verbose) => verbose

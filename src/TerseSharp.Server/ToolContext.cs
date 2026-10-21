@@ -503,7 +503,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             ? string.Create(CultureInfo.InvariantCulture, $"compilations=realized in {milliseconds}ms (once per load, not per call)")
             : string.Create(
                 CultureInfo.InvariantCulture,
-                $"compilations=realized in {milliseconds}ms (again - drop #{drops} released them after {(int)droppedAfter.TotalMinutes}m idle; --idle-minutes or TERSE_IDLE_MINUTES=0 keeps them)");
+                $"compilations=realized in {milliseconds}ms (again - drop #{drops} released them after {(int)droppedAfter.TotalMinutes}m idle; --idle-minutes, TERSE_IDLE_MINUTES or {IdleLimit.Setting} raises it, 0 keeps them)");
 
     internal static string Grew(long milliseconds, int realized, int compiled, int total, int drops) => drops is 0
         ? string.Create(CultureInfo.InvariantCulture, $"compilations=realized in {milliseconds}ms ({realized} more of {total} projects, {compiled} compiled now)")
