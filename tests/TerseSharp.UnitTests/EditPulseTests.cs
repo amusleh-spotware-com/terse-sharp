@@ -1,4 +1,5 @@
 using TerseSharp.Core;
+using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
 
@@ -54,6 +55,34 @@ public sealed class EditPulseTests
         Assert.NotNull(note);
         Assert.Contains("OrderService.cs)", note, StringComparison.Ordinal);
         Assert.DoesNotContain(root, note, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StaleNote_WhenEveryDocumentWrittenSinceTheRunStartedLiesOutsideItsRoots_IsNull()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-stale-root");
+        var before = EditPulse.Material;
+
+        EditPulse.Bump(Path.Combine(Path.GetTempPath(), "terse-stale-elsewhere", "Other.cs"));
+        EditPulse.Bump(Path.Combine(root, ".claude", "worktrees", "agent-x", "src", "Sibling.cs"));
+
+        Assert.Null(StaleRun.Note(before, EditPulse.Material, [root]));
+    }
+
+    [Fact]
+    public void StaleNote_WhenADocumentInsideTheRunsRootChangesBesideOneOutside_CountsAndNamesOnlyTheInsideOne()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-stale-root");
+        var before = EditPulse.Material;
+
+        EditPulse.Bump(Path.Combine(Path.GetTempPath(), "terse-stale-elsewhere", "Other.cs"));
+        EditPulse.Bump(Path.Combine(root, "src", "Inside.cs"));
+
+        var note = StaleRun.Note(before, EditPulse.Material, [root]);
+
+        Assert.NotNull(note);
+        Assert.StartsWith("STALE 1 document(s) changed after this run started (src", note, StringComparison.Ordinal);
+        Assert.DoesNotContain("Other.cs", note, StringComparison.Ordinal);
     }
 }
 

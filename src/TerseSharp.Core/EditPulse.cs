@@ -49,19 +49,19 @@ public static class EditPulse
         }
     }
 
-    public static IReadOnlyList<string> Since(int watermark, int limit)
+    public static IReadOnlyList<string> Written(int watermark)
     {
         lock (Gate)
         {
-            var named = new List<string>(Math.Min(limit, Recent.Count));
+            var written = new List<string>(Recent.Count);
 
             foreach (var entry in Recent)
             {
-                if (entry.At > watermark && named.Count < limit && !named.Contains(entry.Path, StringComparer.OrdinalIgnoreCase))
-                    named.Add(entry.Path);
+                if (entry.At > watermark)
+                    written.Add(entry.Path);
             }
 
-            return named;
+            return written;
         }
     }
 
