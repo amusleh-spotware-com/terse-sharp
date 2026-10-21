@@ -135,7 +135,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         var timing = new GitTiming(TimeSpan.Zero, Stopwatch.GetElapsedTime(started, numstatDone), Stopwatch.GetElapsedTime(numstatDone, statusDone), Stopwatch.GetElapsedTime(statusDone));
 
         return untracked.IsOk
-            ? new Listing(Render(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen, new ListingRoot(root, baseRef?.Contains("..", StringComparison.Ordinal) is not true)), timing)
+            ? new Listing(await RenderAsync(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen, new ListingRoot(root, baseRef?.Contains("..", StringComparison.Ordinal) is not true), cancellationToken).ConfigureAwait(false), timing)
             : new Listing(untracked.Error!.Render(), default);
     }
 
@@ -160,7 +160,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         private static long WholeMilliseconds(TimeSpan span) => (long)span.TotalMilliseconds;
     }
 
-    private static string Render(
+    private static async Task<string> RenderAsync(
                 string numstat,
                 string nameStatus,
                 string untracked,
@@ -170,10 +170,14 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
                 string? outside,
                 string? steer,
                 bool chosen,
-                ListingRoot root)
+                ListingRoot root,
+                CancellationToken cancellationToken)
     {
         var excluded = Excluded(exclude);
         var listed = Lines(Tracked(numstat, nameStatus, excluded, root), untracked, excluded, path);
+
+        await CountUntrackedAsync(root.Path, listed.Rows, listed.Tracked, cancellationToken).ConfigureAwait(false);
+
         var response = new ResponseBuilder("changed_files", string.Empty).Chosen(chosen);
         var capped = chosen ? ResultCap.Shown(listed.Rows.Count, maxResults) : ResultCap.Whole(listed.Rows.Count, maxResults);
         var shown = (chosen ? listed.Rows.Capped(maxResults) : listed.Rows.CappedWhole(maxResults)).ToArray();
@@ -248,9 +252,10 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         if (!diff.IsOk)
             return diff.Error!.Render();
 
+        var untracked = await UntrackedDiffAsync(root, baseRef, paths, shape, cancellationToken).ConfigureAwait(false);
         var skipped = Math.Max(0, skipLines);
         var lines = new List<string>(Math.Min(maxLines, 512));
-        var total = Windowed(diff.Value!, skipped, maxLines, lines);
+        var total = Windowed(untracked.Length is 0 ? diff.Value! : diff.Value! + untracked, skipped, maxLines, lines);
         var response = new ResponseBuilder("diff_text", paths.Count is 0 ? string.Empty : string.Join(" ", paths));
 
         response.Summary(
@@ -1060,9 +1065,26 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             var directory = kept[index].AsSpan(0, lengths[index]);
 
             if (directory.IsEmpty || byDirectory[directory] <= UntrackedFold)
-                rows.Add(kept[index] + "  +? -?  ?");
+                rows.Add(kept[index] + UncountedUntracked);
             else if (seen.Add(directory))
                 rows.Add(string.Create(CultureInfo.InvariantCulture, $"{directory}/**  +? -?  ?  x{byDirectory[directory]} untracked"));
+        }
+    }
+    private static async Task CountUntrackedAsync(string root, List<string> rows, int first, CancellationToken cancellationToken)
+    {
+        var budget = UntrackedCountBudget;
+
+        for (var index = first; index < rows.Count && budget > 0; index++)
+        {
+            if (!rows[index].EndsWith(UncountedUntracked, StringComparison.Ordinal) || Folded(rows[index]))
+                continue;
+
+            var path = rows[index][..^UncountedUntracked.Length];
+
+            budget--;
+
+            if (await UntrackedFile.LinesAsync(Path.Join(root, path), cancellationToken).ConfigureAwait(false) is { } lines)
+                rows[index] = string.Create(CultureInfo.InvariantCulture, $"{path}  +{lines} -0  ?");
         }
     }
 
@@ -1160,5 +1182,22 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             (false, true) => 1,
             _ => string.CompareOrdinal(right, left),
         };
+    }
+
+    private const string UncountedUntracked = "  +? -?  ?";
+    private const int UntrackedCountBudget = 100;
+
+    private static async Task<string> UntrackedDiffAsync(string root, string? baseRef, IReadOnlyList<string> paths, DiffShape shape, CancellationToken cancellationToken)
+    {
+        if (shape.Staged || baseRef is { Length: > 0 } || paths.Count is 0)
+            return string.Empty;
+
+        var listed = await GitRunner.ReadAsync(root, ["--no-optional-locks", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "--", .. paths], cancellationToken).ConfigureAwait(false);
+        var diffs = new StringBuilder();
+
+        foreach (var file in Kept(listed.IsOk ? listed.Value! : string.Empty, null))
+            diffs.Append(await UntrackedFile.DiffAsync(root, file, cancellationToken).ConfigureAwait(false));
+
+        return diffs.ToString();
     }
 }

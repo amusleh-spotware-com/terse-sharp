@@ -490,7 +490,8 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             "probe");
     }
 
-    internal static async Task RunGitAsync(string root, params string[] arguments)
+    internal static Task RunGitAsync(string root, params string[] arguments) => GitOutputAsync(root, arguments);
+    internal static async Task<string> GitOutputAsync(string root, params string[] arguments)
     {
         var start = new System.Diagnostics.ProcessStartInfo("git")
         {
@@ -514,8 +515,82 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
 
         await Task.WhenAll(output, error, process.WaitForExitAsync(TestContext.Current.CancellationToken));
 
-        if (process.ExitCode is not 0)
-            throw new InvalidOperationException("git " + arguments[^1] + " exited " + process.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + await error);
+        return process.ExitCode is 0
+            ? await output
+            : throw new InvalidOperationException("git " + arguments[^1] + " exited " + process.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + await error);
+    }
+
+    [Fact]
+    public async Task ChangedFiles_ForUntrackedFiles_CountsEveryLineAsAddedAndKeepsABinaryFileUncounted()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-untracked-count");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, "three.txt"), "a\nb\nc", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(scratch, "four.txt"), "1\n2\n3\n4\n", TestContext.Current.CancellationToken);
+            await File.WriteAllBytesAsync(Path.Combine(scratch, "blob.bin"), [1, 0, 2, 10, 3], TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("changed_files", new() { ["path"] = "scratch-untracked-count" });
+
+            Assert.Contains("scratch-untracked-count/three.txt  +3 -0  ?", text, StringComparison.Ordinal);
+            Assert.Contains("scratch-untracked-count/four.txt  +4 -0  ?", text, StringComparison.Ordinal);
+            Assert.Contains("scratch-untracked-count/blob.bin  +? -?  ?", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DiffText_ForAnUntrackedFileItNames_AnswersItAsAllAddedLines()
+    {
+        var scratch = Path.Combine(TerseServerFixture.FixtureRoot, "scratch-untracked-diff");
+
+        Directory.CreateDirectory(scratch);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(scratch, "new.txt"), "alpha\nbeta", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("diff_text", new() { ["path"] = "scratch-untracked-diff/new.txt" });
+
+            Assert.Contains("+++ b/scratch-untracked-diff/new.txt", text, StringComparison.Ordinal);
+            Assert.Contains("@@ -0,0 +1,2 @@", text, StringComparison.Ordinal);
+            Assert.Contains("+alpha", text, StringComparison.Ordinal);
+            Assert.Contains("+beta", text, StringComparison.Ordinal);
+            Assert.Contains("\\ No newline at end of file", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_CreatingThenDeletingACsFile_NeverStagesAnythingInTheGitIndex()
+    {
+        const string Probe = "src/Fixture.Trading/Alpha/IndexProbe.cs";
+        var staged = await GitOutputAsync(TerseServerFixture.FixtureRoot, "diff", "--cached", "--name-only", "--relative", "--", ".");
+
+        try
+        {
+            var created = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading.Alpha;\n\npublic sealed class IndexProbe;\n", ["force"] = true });
+            var afterCreate = await GitOutputAsync(TerseServerFixture.FixtureRoot, "diff", "--cached", "--name-only", "--relative", "--", ".");
+            var deleted = await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+            var afterDelete = await GitOutputAsync(TerseServerFixture.FixtureRoot, "ls-files", "--stage", "--", Probe);
+
+            Assert.DoesNotContain("ERROR", created + deleted, StringComparison.Ordinal);
+            Assert.Equal(staged, afterCreate);
+            Assert.Equal(string.Empty, afterDelete);
+        }
+        finally
+        {
+            File.Delete(Path.Combine(TerseServerFixture.FixtureRoot, Probe));
+        }
     }
 
     [Fact]
