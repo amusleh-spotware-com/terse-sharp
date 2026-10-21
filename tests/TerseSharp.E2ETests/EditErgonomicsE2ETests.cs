@@ -796,7 +796,7 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             var refused = await server.CallAsync("write_text", new() { ["path"] = Folder, ["delete"] = true });
 
             Assert.Contains("is a directory and it is not empty", refused, StringComparison.Ordinal);
-            Assert.Contains("a.md", refused, StringComparison.Ordinal);
+            Assert.Contains(inside, path => refused.Contains(Path.GetFileName(path), StringComparison.Ordinal));
             Assert.Contains("and more it did not list", refused, StringComparison.Ordinal);
 
             foreach (var path in inside)
