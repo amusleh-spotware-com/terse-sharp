@@ -87,8 +87,10 @@ public static class FileService
             : Result.Fail<string>(rewritten.Error!);
     }
 
-    private static Result<string> Rewrite(string before, EditRequest request, List<string> notes)
+    private static Result<string> Rewrite(string before, EditRequest requested, List<string> notes)
     {
+        var request = requested with { OldText = WithoutByteOrderMark(requested.OldText), NewText = WithoutByteOrderMark(requested.NewText) };
+
         if (Misplaced(request) is { } misplaced)
             return Result.Fail<string>(misplaced);
 
@@ -2071,7 +2073,7 @@ public static class FileService
 
         for (var index = 0; index < starts.Length; index++)
         {
-            if (!ByText(edits[index]))
+            if (!ByText(edits[index]) || edits[index].ReplaceAll)
                 return null;
 
             var match = SnippetSearch.Find(before, edits[index].OldText!, edits[index].Occurrence > 0 ? edits[index].Occurrence : 1);
@@ -2130,6 +2132,8 @@ public static class FileService
         : "send the second in its own call - the first entry adds or drops a heading, so the ordinals move under it";
 
     private static int Ordinal(TextEdit edit) => edit.Occurrence > 0 ? edit.Occurrence : 1;
+
+    private static string WithoutByteOrderMark(string text) => text.StartsWith('﻿') ? text[1..] : text;
 
     private static Result<string> RemovedTree(LoadedWorkspace workspace, string path, string full, bool dryRun, bool force)
     {

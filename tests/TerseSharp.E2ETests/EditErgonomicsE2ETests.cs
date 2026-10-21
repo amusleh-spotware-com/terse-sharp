@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.CodeAnalysis;
 
 namespace TerseSharp.E2ETests;
@@ -915,6 +916,58 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
         finally
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithAReplaceAllListedAfterAnAnchoredEntry_AppliesTheEntriesInTheOrderGiven()
+    {
+        const string Probe = "terse-batch-order-probe.md";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\n- first: old name\n- old name later\n- old name again\n" });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["oldText"] = "- first: old name", ["newText"] = "- first: kept" },
+                    new Dictionary<string, object?> { ["oldText"] = "old name", ["newText"] = "new name", ["replaceAll"] = true },
+                },
+            });
+            var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.DoesNotContain("matched 0 times", applied, StringComparison.Ordinal);
+            Assert.Contains("- first: kept", after, StringComparison.Ordinal);
+            Assert.Contains("- new name later", after, StringComparison.Ordinal);
+            Assert.Contains("- new name again", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task EditText_WithAnOldTextThatStartsWithTheByteOrderMark_MatchesTheFileStartAndKeepsTheMark()
+    {
+        const string Probe = "terse-bom-anchor-probe.md";
+        var full = Path.Combine(TerseServerFixture.FixtureRoot, Probe);
+
+        await File.WriteAllTextAsync(full, "# Probe\n\nbody\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), TestContext.Current.CancellationToken);
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "﻿# Probe", ["newText"] = "﻿# Renamed" });
+            var bytes = await File.ReadAllBytesAsync(full, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Equal([0xEF, 0xBB, 0xBF, (byte)'#'], bytes[..4]);
+            Assert.Equal("# Renamed\n\nbody\n", Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3));
+        }
+        finally
+        {
+            File.Delete(full);
         }
     }
 
