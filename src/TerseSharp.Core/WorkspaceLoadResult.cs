@@ -9,9 +9,12 @@ public sealed record WorkspaceLoadResult(
     IReadOnlyList<string> Warnings,
     string? TargetFramework = null,
     UnresolvedAnalyzers? Analyzers = null,
-    IReadOnlyList<string>? ConfigurationMismatches = null)
+    IReadOnlyList<string>? ConfigurationMismatches = null,
+    IReadOnlyList<SeverityRemap>? SeverityRemaps = null)
 {
     public UnresolvedAnalyzers Unresolved => Analyzers ?? UnresolvedAnalyzers.None;
 
     public IReadOnlyList<string> Mismatched => ConfigurationMismatches ?? [];
+
+    public IReadOnlyList<SeverityRemap> Remapped => SeverityRemaps ?? [];
 }

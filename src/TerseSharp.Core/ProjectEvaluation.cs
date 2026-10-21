@@ -73,14 +73,14 @@ public static class ProjectEvaluation
         && PathBoundary.Contains(root, file)
         && (name is not { Length: > 0 } || property.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
-    public static string[]? Values(string projectPath, string[] names)
+    public static string[]? Values(string projectPath, string[] names, IDictionary<string, string>? globalProperties = null)
     {
         try
         {
             lock (ProjectGlobs.EvaluationGate)
             {
                 using var collection = new ProjectCollection();
-                var project = collection.LoadProject(projectPath);
+                var project = globalProperties is null ? collection.LoadProject(projectPath) : collection.LoadProject(projectPath, globalProperties, null);
 
                 try
                 {

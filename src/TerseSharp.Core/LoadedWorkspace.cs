@@ -260,7 +260,7 @@ public sealed class LoadedWorkspace : IDisposable
             Shutdown();
     }
 
-    private Solution Forked() => AnalyzerRebind.Rebound(workspace.CurrentSolution, ShadowCopyAnalyzerLoader.Shared);
+    private Solution Forked() => SeverityRemaps.Rebound(AnalyzerRebind.Rebound(workspace.CurrentSolution, ShadowCopyAnalyzerLoader.Shared), Load.Remapped);
 
     private bool Committed(Solution rebased, Solution forked, HistoryEntry entry)
     {

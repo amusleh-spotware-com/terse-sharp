@@ -18,7 +18,7 @@ public static class DiagnosticsService
         var split = request.Touched is { } touched ? BaselineFold.Split(found, touched) : new BaselineSplit([.. found], 0, 0, 0, string.Empty);
         var declaration = await DiagnosticDeclarations.ResolverAsync(split.Kept, cancellationToken).ConfigureAwait(false);
 
-        return Render(workspace.Root, request, split, declaration, workspace.Load.Mismatched.Count);
+        return Render(workspace.Root, request, split, declaration, workspace.Load);
     }
 
     private static async ValueTask CollectAsync(
@@ -49,7 +49,7 @@ public static class DiagnosticsService
         DiagnosticsRequest request,
         BaselineSplit split,
         Func<Location, string?> declaration,
-        int mismatched)
+        WorkspaceLoadResult load)
     {
         var found = split.Kept;
         var deduplicated = DiagnosticFold.Lines(root, found, Head, declaration);
@@ -64,8 +64,8 @@ public static class DiagnosticsService
         if (request.Touched is not null)
             AppendBaseline(response, split, request.BaseRef);
 
-        if (mismatched > 0)
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"config-mapping {mismatched} project(s) load at a different Configuration|Platform than the solution builds them - severities here follow the loaded one, build follows the solution; load_workspace names them"));
+        if (load.Mismatched.Count > 0)
+            response.Note(MappingNote(load.Mismatched.Count, load.Remapped.Count));
 
         foreach (var line in deduplicated.Capped(request.MaxResults))
             response.Line(line);
@@ -105,6 +105,10 @@ public static class DiagnosticsService
         if (BaselineFold.FilelessNote(split, baseRef) is { } fileless)
             response.Note(fileless);
     }
+
+    private static string MappingNote(int mismatched, int remapped) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"config-mapping {mismatched} project(s) load at a different Configuration|Platform than the solution builds them - {(remapped == mismatched ? "their warnaserror and nowarn severities were re-read at the solution's configuration, so severities here match build; DefineConstants and every other property follow the loaded one" : string.Create(CultureInfo.InvariantCulture, $"{remapped} had their warnaserror and nowarn severities re-read at the solution's configuration; the rest follow the loaded one, build follows the solution"))}; load_workspace names them");
 }
 
 public readonly record struct DiagnosticsRequest(string? Path, DiagnosticSeverity Minimum, int MaxResults, TouchedLines? Touched = null, string BaseRef = "");
