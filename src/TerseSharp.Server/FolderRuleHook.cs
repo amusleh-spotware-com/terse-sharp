@@ -86,4 +86,22 @@ internal sealed record FolderRuleHook(string Event, string Session, string Cwd, 
     private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue(out string? text) ? text : null;
 
     internal bool DryRun => Input["dryRun"] is JsonValue value && value.TryGetValue(out bool dryRun) && dryRun;
+
+    private static readonly string[] TextReadingParameters = ["verbose", "startLine", "endLine", "lines", "ranges", "tail"];
+    private static readonly string[] OutlineReadingParameters = ["headings", "section", "columns", "ref"];
+
+    internal bool ReadsText
+    {
+        get
+        {
+            var given = Input.Where(pair => pair.Value switch
+            {
+                null => false,
+                JsonValue value when value.TryGetValue(out bool flag) => flag,
+                _ => true,
+            }).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+
+            return TextReadingParameters.Any(given.Contains) && !OutlineReadingParameters.Any(given.Contains);
+        }
+    }
 }

@@ -1,4 +1,6 @@
+using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
@@ -113,7 +115,7 @@ public sealed class FolderRulesTests : IDisposable
     [Fact]
     public async Task PostToolUse_ForRulesOverTheHookBudget_NamesTheFileToReadInsteadOfInliningIt()
     {
-        var oversized = new string('x', FolderRules.Budget + 1);
+        var oversized = new string('x', FolderRules.ContextLimit + 1);
         await File.WriteAllTextAsync(FooRules, oversized, TestContext.Current.CancellationToken);
 
         var context = Context(await HookAsync(Read()));
@@ -121,13 +123,14 @@ public sealed class FolderRulesTests : IDisposable
         Assert.Contains("UNIT RULES", context, StringComparison.Ordinal);
         Assert.DoesNotContain(oversized, context, StringComparison.Ordinal);
         Assert.Contains("read_text path=\"" + FooRules + "\" verbose=true", context, StringComparison.Ordinal);
+        Assert.Contains("MUST read", context, StringComparison.Ordinal);
         Assert.InRange(context.Length, 1, FolderRules.ContextLimit);
     }
 
     [Fact]
     public async Task PostToolUse_ForRulesOverTheHookBudget_InlinesTheirHeadingsAndBindingLinesBesideThePointer()
     {
-        var filler = string.Concat(Enumerable.Repeat("Background prose that states no rule at all.\n", FolderRules.Budget / 40));
+        var filler = string.Concat(Enumerable.Repeat("Background prose that states no rule at all.\n", FolderRules.ContextLimit / 40));
         var rules = "# Unit tests\n\n" + filler + "## Asserts\n- Never use FluentAssertions in new tests.\n- Tests MUST assert values.\n" + filler;
         await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
 
@@ -439,5 +442,203 @@ public sealed class FolderRulesTests : IDisposable
         using var output = new StringWriter();
 
         Assert.Equal(0, await BatchNudge.RunAsync(new StringReader(payload.ToJsonString()), output, Home, log: false, TestContext.Current.CancellationToken));
+    }
+
+    private const string ToolResultText = "1: class BarTests;";
+
+    private static JsonObject ReadAnswered()
+    {
+        var payload = Read();
+        payload["tool_response"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = ToolResultText });
+
+        return payload;
+    }
+
+    private static string LayoutRules(int length)
+    {
+        var rules = new StringBuilder("# UnitTests\n\n## Test Class Layout\n\nOrder inside test class:\n\n1. `[SetUp]` method\n2. `Create()` factory helper for SUT\n", length + 64);
+
+        while (rules.Length < length)
+            rules.Append("Background prose that explains the layout of the suite.\n");
+
+        return rules.ToString();
+    }
+
+    private static string[] ResultTexts(JsonObject? output) =>
+        [.. output!["updatedToolOutput"]!.AsArray().Select(block => block!["text"]!.GetValue<string>())];
+
+    [Fact]
+    public async Task PostToolUse_ForRulesOverTheContextCap_AppendsThemWholeToTheToolResult()
+    {
+        var rules = LayoutRules(34_555);
+        await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
+
+        var output = await HookAsync(ReadAnswered());
+        var texts = ResultTexts(output);
+
+        Assert.Null(output!["additionalContext"]);
+        Assert.Equal(ToolResultText, texts[0]);
+        Assert.Contains(rules.TrimEnd(), texts[1], StringComparison.Ordinal);
+        Assert.Contains("UNIT RULES", texts[1], StringComparison.Ordinal);
+        Assert.InRange(texts.Sum(text => text.Length), 1, FolderRules.ToolResultLimit);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteBelowRulesOverTheContextCap_DeniesWithTheWholeRules()
+    {
+        var rules = LayoutRules(34_555);
+        await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
+
+        var denial = await HookAsync(Write());
+
+        Assert.Equal("deny", denial!["permissionDecision"]!.GetValue<string>());
+        Assert.Contains(rules.TrimEnd(), denial["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains("it will not be stopped twice", denial["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteBelowRulesAReadOnlyDigested_DeniesItWithTheWholeRulesOnce()
+    {
+        var rules = LayoutRules(FolderRules.ContextLimit * 2);
+        await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
+
+        var digest = Context(await HookAsync(Read()));
+        await EndBatchAsync();
+        var denial = await HookAsync(Write());
+        await EndBatchAsync();
+        var retry = await HookAsync(Write());
+
+        Assert.DoesNotContain("1. `[SetUp]` method", digest, StringComparison.Ordinal);
+        Assert.Contains(rules.TrimEnd(), denial!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Null(retry);
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForRulesThatOverflowOneToolResult_DefersTheRestAndTheWriteGateCarriesThem()
+    {
+        var outer = LayoutRules(30_000).Replace("# UnitTests", "# Outer", StringComparison.Ordinal);
+        var inner = LayoutRules(30_000);
+        await File.WriteAllTextAsync(Path.Combine(Repository, "UnitTests", "CLAUDE.md"), outer, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(FooRules, inner, TestContext.Current.CancellationToken);
+
+        var appended = ResultTexts(await HookAsync(ReadAnswered()))[1];
+        await EndBatchAsync();
+        var denial = (await HookAsync(Write()))!["permissionDecisionReason"]!.GetValue<string>();
+
+        Assert.Contains(outer.TrimEnd(), appended, StringComparison.Ordinal);
+        Assert.DoesNotContain("--- " + FooRules + " ---", appended, StringComparison.Ordinal);
+        Assert.Contains("1 more folder rule file(s) did not fit here and arrive whole with your next terse call below them: " + FooRules, appended, StringComparison.Ordinal);
+        Assert.Contains(inner.TrimEnd(), denial, StringComparison.Ordinal);
+        Assert.DoesNotContain("# Outer", denial, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForARuleLargerThanAToolResult_AppendsItsOpeningVerbatimAndWhereTheRestStarts()
+    {
+        var rules = LayoutRules(FolderRules.ToolResultLimit * 2);
+        await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
+
+        var texts = ResultTexts(await HookAsync(ReadAnswered()));
+
+        Assert.Contains(rules[..1_000], texts[1], StringComparison.Ordinal);
+        Assert.Matches("read_text path=\"" + Regex.Escape(FooRules) + "\" startLine=[0-9]+", texts[1]);
+        Assert.InRange(texts.Sum(text => text.Length), 1, FolderRules.ToolResultLimit);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteBelowARuleLargerThanAToolResult_KeepsDenyingUntilTheRuleFileIsRead()
+    {
+        var rules = LayoutRules(FolderRules.ToolResultLimit * 2);
+        await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
+
+        var first = (await HookAsync(Write()))!["permissionDecisionReason"]!.GetValue<string>();
+        await EndBatchAsync();
+        var unread = await HookAsync(Write());
+        await HookAsync(Call("PostToolUse", "mcp__terse-sharp__read_text", new() { ["path"] = FooRules, ["startLine"] = 2 }));
+        await EndBatchAsync();
+        var read = await HookAsync(Write());
+
+        Assert.Contains("MUST read", first, StringComparison.Ordinal);
+        Assert.Contains("it is stopped again until every rule below has arrived whole or been read", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("will not be stopped twice", first, StringComparison.Ordinal);
+        Assert.Equal("deny", unread!["permissionDecision"]!.GetValue<string>());
+        Assert.Null(read);
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForAReadTextOfTheRuleFileThatReturnsOnlyItsSectionMap_KeepsTheWriteDenied()
+    {
+        await File.WriteAllTextAsync(FooRules, LayoutRules(FolderRules.ContextLimit * 2), TestContext.Current.CancellationToken);
+
+        await HookAsync(Read());
+        await HookAsync(Call("PostToolUse", "mcp__terse-sharp__read_text", new() { ["path"] = FooRules, ["headings"] = true }));
+        await HookAsync(Call("PostToolUse", "mcp__terse-sharp__read_text", new() { ["path"] = FooRules }));
+        await EndBatchAsync();
+        var write = await HookAsync(Write());
+
+        Assert.Equal("deny", write!["permissionDecision"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForASiblingWriteBelowARuleSeenOnlyAsADigest_DeniesItWithTheRulesUntilTheBatchEnds()
+    {
+        await File.WriteAllTextAsync(FooRules, LayoutRules(FolderRules.ContextLimit * 2), TestContext.Current.CancellationToken);
+
+        await HookAsync(Read());
+        await EndBatchAsync();
+        var first = await HookAsync(Write());
+        var sibling = await HookAsync(Write());
+
+        Assert.Equal("deny", first!["permissionDecision"]!.GetValue<string>());
+        Assert.Equal("deny", sibling!["permissionDecision"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForRulesBesideAToolResultTooLargeToShareItsRoom_DigestsThemIntoContextAndKeepsTheWriteDenied()
+    {
+        var rules = LayoutRules(34_555);
+        await File.WriteAllTextAsync(FooRules, rules, TestContext.Current.CancellationToken);
+        var payload = Read();
+        payload["tool_response"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = new string('r', 40_000) });
+
+        var output = await HookAsync(payload);
+        await EndBatchAsync();
+        var write = await HookAsync(Write());
+
+        Assert.Null(output!["updatedToolOutput"]);
+        Assert.Contains("MUST read", Context(output), StringComparison.Ordinal);
+        Assert.InRange(Context(output).Length, 1, FolderRules.ContextLimit);
+        Assert.Contains(rules.TrimEnd(), write!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenAWholeDenialCannotBeWritten_KeepsTheDigestedRulePartialSoTheNextWriteIsStillDenied()
+    {
+        await File.WriteAllTextAsync(FooRules, LayoutRules(FolderRules.ContextLimit * 2), TestContext.Current.CancellationToken);
+        await HookAsync(Read());
+        await EndBatchAsync();
+        var write = Write();
+        write["session_id"] = "s1";
+        write["cwd"] = Repository;
+        using var broken = new BrokenWriter();
+
+        await FolderRules.RunAsync(new StringReader(write.ToJsonString()), broken, Home, TestContext.Current.CancellationToken);
+        await EndBatchAsync();
+        var retry = await HookAsync(Write());
+
+        Assert.Equal("deny", retry!["permissionDecision"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteBelowRulesThatOverflowOneDenial_SaysItStopsTheRetryUntilTheRestArrives()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Repository, "UnitTests", "CLAUDE.md"), LayoutRules(30_000), TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(FooRules, LayoutRules(30_000), TestContext.Current.CancellationToken);
+
+        var reason = (await HookAsync(Write()))!["permissionDecisionReason"]!.GetValue<string>();
+
+        Assert.Contains("it is stopped again until every rule below has arrived whole or been read", reason, StringComparison.Ordinal);
+        Assert.Contains("1 more folder rule file(s) did not fit here", reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("will not be stopped twice", reason, StringComparison.Ordinal);
     }
 }

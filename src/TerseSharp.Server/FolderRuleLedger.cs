@@ -119,7 +119,11 @@ internal sealed class FolderRuleLedger(string home, string session)
         {
             File.Delete(marker);
             File.Delete(marker + PendingSuffix);
+            File.Delete(marker + PartialSuffix);
         }
+
+        foreach (var rule in completed)
+            Partial(rule);
     }
 
     private static string FileName(string session) => string.Create(session.Length, session, static (name, source) =>
@@ -133,7 +137,7 @@ internal sealed class FolderRuleLedger(string home, string session)
     private const string PendingSuffix = ".pending";
     private static readonly TimeSpan Unsettled = TimeSpan.FromSeconds(30);
 
-    internal bool Settled(string rule) => Seen(rule) && !Pending(Marker(rule));
+    internal bool Settled(string rule) => Seen(rule) && !Pending(Marker(rule)) && !File.Exists(Marker(rule) + PartialSuffix);
 
     internal void Settle()
     {
@@ -150,11 +154,65 @@ internal sealed class FolderRuleLedger(string home, string session)
     {
         try
         {
-            if (!File.Exists(marker))
+            if (!File.Exists(marker) || File.Exists(marker + PartialSuffix))
                 File.OpenHandle(marker + PendingSuffix, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+        }
+    }
+
+    private const string PartialSuffix = ".partial";
+
+    internal void Partial(string rule) => Touch(Marker(rule) + PartialSuffix);
+
+    internal void Complete(string rule)
+    {
+        if (Unmark(rule))
+            completed.Add(rule);
+    }
+
+    internal void Read(IReadOnlyList<string> rules)
+    {
+        if (rules is [] || !Prepared())
+            return;
+
+        foreach (var rule in rules)
+        {
+            Touch(Marker(rule));
+            Unmark(rule);
+        }
+    }
+
+    private static void Touch(string path)
+    {
+        try
+        {
+            File.OpenHandle(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete).Dispose();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private readonly List<string> completed = [];
+
+    private bool Unmark(string rule)
+    {
+        var partial = Marker(rule) + PartialSuffix;
+
+        try
+        {
+            if (!File.Exists(partial))
+                return false;
+
+            File.Delete(partial);
+
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 }

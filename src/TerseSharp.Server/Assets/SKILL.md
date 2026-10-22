@@ -220,7 +220,7 @@ denies the call, names the tool that replaces it, and tells you not to run it in
 any spelling.
 **The denial also hands you the answer**: a system reminder beside the tool result reads
 `Call this instead: <the complete call, with the arguments already filled in from what you tried>`.
-Run that call verbatim; it follows the file kind (`.xaml` to `xaml_outline`, `.resx` to `resx_get`). A `PostToolBatch` hook reminds you to batch after a lone read-only call. Nested `CLAUDE.md` rules arrive once per session; a real (not dryRun) write below unseen ones is denied with them - comply, resend.
+Run that call verbatim; it follows the file kind (`.xaml` to `xaml_outline`, `.resx` to `resx_get`). A `PostToolBatch` hook reminds you to batch after a lone read-only call. Nested `CLAUDE.md` rules arrive once per session; a real (not dryRun) write below unseen ones is denied with them - comply, resend. A rules file ending `You MUST read the rest` is too big to arrive whole: run that `read_text` (as text) first; writes stay denied until then.
 
 `dotnet format` and `dotnet clean` are covered too, with the **exact** replacement per sub-command:
 `dotnet format analyzers` -> `cleanup fix=analyzers` (add `verify=true` for `--verify-no-changes`),

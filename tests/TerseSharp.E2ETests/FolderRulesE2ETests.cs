@@ -114,4 +114,18 @@ public sealed class FolderRulesE2ETests : IDisposable
         Assert.Contains("Use NUnit classic asserts only.", JsonNode.Parse(sibling)!["hookSpecificOutput"]!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Empty(retry.Trim());
     }
+
+    [Fact]
+    public async Task GuardFolderRules_AppendsANestedClaudeMdOverTheContextCapWholeToTheToolResult()
+    {
+        var rules = "# Tests\n\n1. `[SetUp]` method first\n" + string.Concat(Enumerable.Repeat("Background prose that explains the layout of the suite.\n", 600));
+        await File.WriteAllTextAsync(Path.Combine(Repository, "tests", "CLAUDE.md"), rules, TestContext.Current.CancellationToken);
+        var payload = Payload("PostToolUse", "mcp__terse-sharp__get_file_outline", "tests/Unit/OrderTests.cs");
+        payload["tool_response"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "class OrderTests" });
+
+        var blocks = JsonNode.Parse(await GuardAsync(payload))!["hookSpecificOutput"]!["updatedToolOutput"]!.AsArray();
+
+        Assert.Equal("class OrderTests", blocks[0]!["text"]!.GetValue<string>());
+        Assert.Contains(rules.TrimEnd(), blocks[1]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
 }

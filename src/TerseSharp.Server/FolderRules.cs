@@ -6,32 +6,34 @@ namespace TerseSharp.Server;
 
 public static class FolderRules
 {
-    internal const int Budget = 8_000;
-
     internal const int ContextLimit = 10_000;
 
+    internal const int ToolResultLimit = 45_000;
+
     private const int SectionFrame = 11;
+
+    private const string ReadTool = "read_text";
 
     private const string Preface =
         "Folder rules from nested CLAUDE.md files. Claude Code loads these only for its own Read, Edit and Write, so terse injects them for the files this call touched. They bind every read, edit and test below their folder:";
 
     private const string Refusal =
-        "This write lands below folder rules this session has not seen - Claude Code loads nested CLAUDE.md files only for its own Read, Edit and Write. Make the write comply with them, then send the same call again; it will not be stopped twice:";
+        "This write lands below folder rules this session has not seen - Claude Code loads nested CLAUDE.md files only for its own Read, Edit and Write. Make the write comply with them, then send the same call again";
 
     private static readonly Lazy<FrozenSet<string>> WriterSet = new(FolderRuleHook.WritingTools);
 
-    private static readonly Reply Injection = new(Preface, ShowUnrecorded: true, rules => new JsonObject
+    private static readonly Reply Injection = new(Preface, rules => new JsonObject
     {
         ["hookEventName"] = "PostToolUse",
         ["additionalContext"] = rules,
     });
 
-    private static readonly Reply Denial = new(Refusal, ShowUnrecorded: false, rules => new JsonObject
+    private static readonly Reply Denial = new(Refusal, rules => new JsonObject
     {
         ["hookEventName"] = "PreToolUse",
         ["permissionDecision"] = "deny",
         ["permissionDecisionReason"] = rules,
-    }, ShowLost: true, Hold: true);
+    }, Hold: true, new("; it will not be stopped twice:", "; it is stopped again until every rule below has arrived whole or been read:"));
 
     internal static IReadOnlySet<string> Writers => WriterSet.Value;
 
@@ -72,16 +74,17 @@ public static class FolderRules
     private static async Task<Answer?> AnsweredAsync(FolderRuleHook hook, string home, Reply reply, CancellationToken cancellationToken)
     {
         var ledger = new FolderRuleLedger(home, hook.Session);
-        var unseen = FolderRulePaths.Rules(hook.Targets(), hook.Mentioned(), hook.Bases(), hook.Cwd).Where(rule => reply.Hold ? !ledger.Settled(rule) : !ledger.Seen(rule)).ToList();
+        var unseen = Unseen(hook, ledger, reply);
 
         if (unseen is [])
             return null;
 
-        var planned = Planned(reply.Preface.Length, await ContentsAsync(unseen, cancellationToken).ConfigureAwait(false));
-        var shown = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost, reply.Hold);
-        string[] text = [reply.Preface, .. planned.Where(section => shown.Contains(section.Rule)).Select(section => section.Text)];
+        var contents = await ContentsAsync(unseen, cancellationToken).ConfigureAwait(false);
+        var channel = ChannelFor(reply, hook, Whole(reply.Framing, contents));
+        var planned = Planned(reply.Framing, channel, contents);
+        var shown = Shown(ledger, reply, planned);
 
-        return shown.Count is 0 ? null : new Answer(new JsonObject { ["hookSpecificOutput"] = reply.Output(string.Concat(text)) }.ToJsonString(), ledger);
+        return shown is [] ? null : new Answer(new JsonObject { ["hookSpecificOutput"] = channel.Output(Rendered(reply, shown, Waiting(contents, planned))) }.ToJsonString(), ledger);
     }
 
     private static async Task<List<(string Rule, string Content)>> ContentsAsync(List<string> rules, CancellationToken cancellationToken)
@@ -94,36 +97,88 @@ public static class FolderRules
         return contents;
     }
 
-    private static List<RuleSection> Planned(int used, List<(string Rule, string Content)> contents)
+    private static int Whole(int used, List<(string Rule, string Content)> contents) =>
+        used + contents.Sum(item => SectionFrame + item.Rule.Length + item.Content.AsSpan().TrimEnd().Length);
+
+    private static Channel ChannelFor(Reply reply, FolderRuleHook hook, int whole) => (reply.Hold, whole <= ContextLimit, ResultRoom(hook)) switch
+    {
+        (true, _, _) => new(ToolResultLimit - NoteReserve, Verbatim: true, reply.Output),
+        (false, true, _) => new(ContextLimit, Verbatim: false, reply.Output),
+        (false, false, ({ } response, >= ContextLimit and var room)) => new(room - NoteReserve, Verbatim: true, rules => Appended(response, rules)),
+        _ => new(ContextLimit - NoteReserve, Verbatim: false, reply.Output),
+    };
+
+    private static int ResultLength(JsonArray response) =>
+        response.Sum(block => block is JsonObject item && item["text"] is JsonValue text && text.TryGetValue(out string? value) ? value.Length : block?.ToJsonString().Length ?? 0);
+
+    private static JsonObject Appended(JsonArray response, string rules)
+    {
+        JsonNode?[] blocks = [.. response.Select(block => block?.DeepClone()), new JsonObject { ["type"] = "text", ["text"] = rules }];
+
+        return new JsonObject
+        {
+            ["hookEventName"] = "PostToolUse",
+            ["updatedToolOutput"] = new JsonArray(blocks),
+        };
+    }
+
+    private static List<RuleSection> Planned(int used, Channel channel, List<(string Rule, string Content)> contents)
     {
         var planned = new List<RuleSection>(contents.Count);
+        var fresh = channel.Capacity - used;
 
         foreach (var (rule, content) in contents)
         {
-            var text = Section(rule, content, used);
-
-            if (used + text.Length > ContextLimit)
+            if (Section(rule, content.AsSpan().TrimEnd(), channel with { Capacity = channel.Capacity - used }, fresh) is not { } section)
                 continue;
 
-            used += text.Length;
-            planned.Add(new(rule, text));
+            used += section.Text.Length;
+            planned.Add(section);
         }
 
         return planned;
     }
 
-    private static string Section(string rule, string content, int used)
+    private static RuleSection? Section(string rule, ReadOnlySpan<char> body, Channel room, int fresh) =>
+    (SectionFrame + rule.Length + body.Length) switch
     {
-        var body = content.AsSpan().TrimEnd();
+        var whole when whole <= room.Capacity => new(rule, string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} ---\n{body}"), Whole: true),
+        var whole when whole <= fresh || room.Capacity - PointerReserve - (3 * rule.Length) < MinimumRoom => null,
+        _ when room.Verbatim => new(rule, Opening(rule, body, room.Capacity - PointerReserve - (3 * rule.Length)), Whole: false),
+        _ => new(rule, Digested(rule, body, room.Capacity - PointerReserve - (3 * rule.Length)), Whole: false),
+    };
 
-        return used + SectionFrame + rule.Length + body.Length <= Budget
-            ? string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} ---\n{body}")
-            : Digested(rule, body, Budget - used - SectionFrame - rule.Length - PointerReserve);
+    private static List<RuleSection> Shown(FolderRuleLedger ledger, Reply reply, List<RuleSection> planned)
+    {
+        var claimed = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost, reply.Hold);
+        var shown = planned.FindAll(section => claimed.Contains(section.Rule));
+
+        foreach (var section in shown)
+            Record(ledger, section, reply.Hold);
+
+        return shown;
     }
 
-    private sealed record Reply(string Preface, bool ShowUnrecorded, Func<string, JsonObject> Output, bool ShowLost = false, bool Hold = false);
+    private static void Record(FolderRuleLedger ledger, RuleSection section, bool hold)
+    {
+        if (!section.Whole)
+            ledger.Partial(section.Rule);
+        else if (hold)
+            ledger.Complete(section.Rule);
+    }
 
-    private readonly record struct RuleSection(string Rule, string Text);
+    private sealed record Reply(string Preface, Func<string, JsonObject> Output, bool Hold = false, Closing Closing = default)
+    {
+        internal bool ShowUnrecorded => !Hold;
+
+        internal bool ShowLost => Hold;
+
+        internal int Framing => Preface.Length + Closing.Length;
+    }
+
+    private sealed record Channel(int Capacity, bool Verbatim, Func<string, JsonObject> Output);
+
+    private readonly record struct RuleSection(string Rule, string Text, bool Whole);
 
     internal const string Variable = "TERSE_FOLDER_RULES";
 
@@ -155,12 +210,44 @@ public static class FolderRules
         }
     }
 
-    private const int PointerReserve = 240;
+    private const int PointerReserve = 360;
     private static readonly string[] BindingMarkers = ["MUST", "NEVER", "Never", "never", "Do not", "do not", "Don't", "don't", "BANNED", "Banned", "banned", "HARD GATE", "🚫", "ALWAYS", "Always", "always", "FORBIDDEN", "Forbidden", "forbidden", "MANDATORY", "Mandatory", "mandatory", "REQUIRED", "required"];
+
+    private static string Opening(string rule, ReadOnlySpan<char> body, int room)
+    {
+        var end = OpeningEnd(body, room, out var lines);
+        var head = body[..end].TrimEnd();
+        var rest = string.Create(CultureInfo.InvariantCulture, $"read_text path=\"{rule}\" startLine={lines + 1}");
+
+        return string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- {body.Length} characters, too long for one tool result, so lines 1-{lines} follow\n{head}{Directive(rule, rest)}");
+    }
+
+    private static int OpeningEnd(ReadOnlySpan<char> body, int room, out int lines)
+    {
+        var end = 0;
+        lines = 0;
+
+        while (end < body.Length)
+        {
+            var newline = body[end..].IndexOf('\n');
+            var next = newline < 0 ? body.Length : end + newline + 1;
+
+            if (next > room)
+                break;
+
+            end = next;
+            lines++;
+        }
+
+        return end;
+    }
+
+    private static string Directive(string rule, string read) =>
+        string.Create(CultureInfo.InvariantCulture, $"\nYou MUST read the rest of {rule} before reading or changing anything below {Path.GetDirectoryName(rule)} - a terse write below it is denied until you have: {read}");
 
     private static string Digested(string rule, ReadOnlySpan<char> body, int room)
     {
-        var digest = new StringBuilder(Math.Clamp(room, 0, Budget));
+        var digest = new StringBuilder(Math.Clamp(room, 0, ContextLimit));
         var kept = 0;
         var fenced = false;
 
@@ -175,7 +262,7 @@ public static class FolderRules
             kept++;
         }
 
-        return string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- {body.Length} characters, over this hook's {Budget}-character budget, so only its {kept} heading and rule line(s) follow - read it now: read_text path=\"{rule}\" verbose=true{digest}");
+        return string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- {body.Length} characters, too long to inject whole, so only its {kept} heading and rule line(s) follow{digest}{Directive(rule, string.Create(CultureInfo.InvariantCulture, $"read_text path=\"{rule}\" verbose=true"))}");
     }
 
     private static bool Binding(ReadOnlySpan<char> line)
@@ -200,5 +287,42 @@ public static class FolderRules
         fenced = !fenced;
 
         return true;
+    }
+
+    private static (JsonArray? Response, int Room) ResultRoom(FolderRuleHook hook) =>
+        hook.Payload["tool_response"] is JsonArray response ? (response, ToolResultLimit - ResultLength(response)) : (null, 0);
+
+    private const int MinimumRoom = 1_000;
+
+    private static string Waiting(List<(string Rule, string Content)> contents, List<RuleSection> planned)
+    {
+        var waiting = contents.Where(item => !planned.Exists(section => PathBoundary.Comparer.Equals(section.Rule, item.Rule))).Select(item => item.Rule).ToList();
+        var more = waiting.Count > NamedWaiting ? ", ..." : string.Empty;
+
+        return waiting is []
+            ? string.Empty
+            : string.Create(CultureInfo.InvariantCulture, $"\n\n{waiting.Count} more folder rule file(s) did not fit here and arrive whole with your next terse call below them: {string.Join(", ", waiting.Take(NamedWaiting))}{more}");
+    }
+
+    private const int NoteReserve = 1_000;
+    private const int NamedWaiting = 3;
+
+    private static List<string> Unseen(FolderRuleHook hook, FolderRuleLedger ledger, Reply reply)
+    {
+        ledger.Read(hook is { Tool: ReadTool, ReadsText: true } ? FolderRulePaths.RuleFiles(hook.Targets(), hook.Bases()) : []);
+
+        return [.. FolderRulePaths.Rules(hook.Targets(), hook.Mentioned(), hook.Bases(), hook.Cwd).Where(rule => reply.Hold ? !ledger.Settled(rule) : !ledger.Seen(rule))];
+    }
+
+    private readonly record struct Closing(string Settled, string Held)
+    {
+        internal int Length => Math.Max(Settled?.Length ?? 0, Held?.Length ?? 0);
+    }
+
+    private static string Rendered(Reply reply, List<RuleSection> shown, string waiting)
+    {
+        string[] text = [reply.Preface, shown.TrueForAll(section => section.Whole) && waiting.Length is 0 ? reply.Closing.Settled : reply.Closing.Held, .. shown.Select(section => section.Text), waiting];
+
+        return string.Concat(text);
     }
 }

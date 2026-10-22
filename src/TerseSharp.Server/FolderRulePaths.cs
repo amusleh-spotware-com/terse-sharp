@@ -80,4 +80,19 @@ internal static class FolderRulePaths
 
         return null;
     }
+
+    internal static IReadOnlyList<string> RuleFiles(IEnumerable<string> targets, IReadOnlyList<string> bases) =>
+        [.. targets.Select(path => RuleFile(path, bases)).OfType<string>()];
+
+    private static string? RuleFile(string named, IReadOnlyList<string> bases)
+    {
+        var hosted = Hosted(named.AsSpan().Trim().Trim("\"'"));
+
+        if (!Path.GetFileName(hosted.AsSpan()).Equals(FileName, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var resolved = Resolved(hosted, bases);
+
+        return File.Exists(resolved) ? resolved : null;
+    }
 }
