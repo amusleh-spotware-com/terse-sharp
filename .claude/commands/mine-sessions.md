@@ -1819,6 +1819,9 @@ shares no data with M2 and has no reason to wait for it.
 | **Speculative tool execution (PASTE): −48.5% task completion time, 1.8× throughput** — but it *loses* when tool-idle is under ~5% | primary source (Microsoft Research, 2026) | confirmed, with the breakeven — section B prints the gap share that decides it |
 | **Context rot**: accuracy degrades continuously with input length well before the limit | primary source | confirmed — trimming is an accuracy lever, not only a cost one |
 | **Cache invalidation is asymmetric**: a broken prefix loses the ~90% read discount *and* re-pays the 25% write premium; tool-schema reordering is a common cause | primary source | confirmed — the `mid-session re-prime` counter exists for this |
+| **Cross-session repo adaptation** (facts mined from recurring failures, usage-based tool pruning, a stuck-turn guard): **18.4–30.9% lower cost on 277 SWE-Bench tasks at −1.0 to +2.6 pts pass@1**, savings in all 30 repo × agent-model cells | primary source (microsoft/TokenEconomizer README, read 2026-10-22) | confirmed — the three mechanisms are open rows `I813`, `I814`, `I816` |
+| A conversation continued under a changed tool list "writes its whole history to the cache again instead of reading it", so tool changes are applied only after the repo idles longer than a cache lives (`toolprune_quiet_minutes` 60) | primary source (TokenEconomizer `docs/PLUGIN.md`) | confirmed for a resumed conversation; a mid-session `tools/list_changed` is still unmeasured — `I817` |
+| A stuck-turn guard counts **shell-side edits** — `sed -i`, `perl -pi`, redirects, `tee`, inline Python, `patch`/`git apply` — and redirects once via `PostToolUse` before ever notifying the user; floor 20 calls, backstop 2.5× the repo's learned turn envelope | primary source (TokenEconomizer `docs/PLUGIN.md`) | confirmed — the guard gap is `I815`, the redirect `I814` |
 
 Anything in that table is a premise, not a research task.
 
@@ -1842,7 +1845,14 @@ Anything in that table is a premise, not a research task.
   rates of deprecated API use in LLM completions, and which intervention shape — schema wording, an
   in-response diagnostic, a worked example, an analyzer surfaced at the write — measurably changes it;
 - benchmark evidence: token, latency and accuracy numbers from published evaluations of MCP servers
-  and semantic code-navigation tools.
+  and semantic code-navigation tools;
+- **cross-session adaptation**: mechanisms that learn from a repository's own past sessions — facts
+  mined from recurring failures, usage-based tool pruning, stuck-loop and edit-test-spiral detection,
+  learned per-repo envelopes — and, for each, its evidence gate, its retirement rule and when it may
+  change the surface without breaking a warm cache;
+- **peer projects** (the M7.5 sweep): token-saving plugins, agent harness add-ons, and other MCP
+  servers for semantic code navigation, Roslyn, LSP or refactoring, published or updated since the
+  last run — what each does, with its own measured numbers, diffed against TerseSharp.
 
 ### M7.3 — Method: fan out once, then refute
 
@@ -1864,6 +1874,36 @@ Anything in that table is a premise, not a research task.
 6. If the run is killed, recover from `<session>/subagents/workflows/<runId>/agent-*.jsonl` — the
    `StructuredOutput` tool input on each agent's last turn is the full result — rather than re-running
    the fan-out.
+7. **One of the four to six is always the M7.5 peer-project sweep.** It does not raise the count.
+
+### M7.5 — The peer-project sweep: what similar tools already ship
+
+Papers say what is possible; peer projects say what someone shipped and measured. A delta found
+there is cheaper to adopt, because it comes with numbers and with the failure modes already
+hit. This sweep runs **every time**, as one of M7.3's subagents, briefed with the topic only (gate 3).
+
+1. **Find.** Search GitHub (topics `mcp-server`, `claude-code`, `coding-agent`, `roslyn`, `lsp`), the
+   Claude Code / Codex / Copilot plugin marketplaces, vendor engineering blogs and arXiv `cs.SE`/`cs.AI`
+   for projects that cut an agent's tokens, calls or wall time, or improve its accuracy on code.
+   Queries to use: *coding agent token cost reduction*, *MCP server semantic code navigation*, *agent
+   tool pruning*, *agent loop detection*, *learned repository facts*, *tool output compression*,
+   *Roslyn MCP*, *LSP MCP*. Keep projects created or updated since the date of the last ledger row
+   below, plus any project the ledger names whose README now reports a new number.
+2. **Read the primary source.** For each project: its README and its design docs, never a summary.
+   Record every mechanism it uses and every measured number, with the sentence quoted. A number with
+   no benchmark named is `UNVERIFIED`.
+3. **Diff against TerseSharp.** Classify each mechanism: *already true here* (name the tool or gate),
+   *already logged* (name the open or archived row; a refuted approach in a `Rejected` cell stays
+   refuted), or *delta*. Probe the claim against this repo before calling it a delta — the guard
+   gap in `I815` was confirmed with `workspace_status guard=` on the real command, not inferred from
+   the peer's docs, and a probe answered by the installed server names its version.
+4. **Convert** each delta through M7.4. Then append one line to the ledger below: the project, the date,
+   and the rows it produced, or `nothing new`. A project already in the ledger is re-read only for
+   what changed since its date.
+
+| Peer project | Analysed | What it gave |
+|---|---|---|
+| microsoft/TokenEconomizer | 2026-10-22 | `I813` repo facts at `SessionStart`, `I814` stuck-turn redirect, `I815` shell-edit guard gap, `I816` usage-based pruning, `I817` cache cost of a changed tool list; its cache-aware ledger was already true here (M2 section A) |
 
 ### M7.4 — Conversion
 
@@ -1894,6 +1934,16 @@ existing row is **not** a new row:
   it materially changes the ratio the decision was made on;
 - a candidate whose approach appears in an open row's **`Rejected`** cell is already refuted for that
   row. Do not propose it again; propose a different mechanism or strengthen the row.
+- an open row whose `Expected saving` says it is **unmeasured** or that `mine-sessions` measures it
+  first is a **measurement task for this run**, not a candidate. Find them with
+  `search_text query="mine-sessions" glob="IMPROVEMENTS.md"`, compute the counter the row names
+  (extend the M2 script when no section prints it), and strengthen the row with the number, or
+  close it to the archive as not reproduced when the corpus shows the waste is not there. At the time
+  of writing: `I813` (rejections whose correction an earlier session of the same repo already made),
+  `I814` (runs of 3+ red `run_tests`/`rerun_failed` with an unchanged failed set and writes between),
+  `I815` (`Bash` calls running `perl -pi`, `python -c`, `tee` or `node -e` on a .NET path), `I816`
+  (tools no session of a repo called in its last 10 sessions), `I817` (`cache_creation_input_tokens`
+  on the request after a mid-session `tools/list_changed` against the request before).
 
 ## M9 — Write the rows
 
@@ -1984,7 +2034,7 @@ existing row is **not** a new row:
 | Trim ledger | the full ledger in tokens per class and share of output — **and the placebo section stated as zero**, so the next run does not re-propose it |
 | Surface cost | total `[Description]` bytes and `SKILL.md` bytes, what they cost per request, and the **distinct-tools-per-session** figure that prices deferral |
 | Latency & memory | slowest tools by `p99` and by total hours, the verification tax (calls and hours per cycle, scoped vs whole split, identical re-runs under 5 min apart), the duplicate ledger in hours, bare-wait count and seconds, subagent p99 and max, RSS per workspace and per document, any cold-path trigger named |
-| Research | the methods M7 found worth adopting, each with **the instrument that verified it** and the refutation attempt it survived; the ones dropped as already-true or not actionable here; an explicit `UNVERIFIED` list |
+| Research | the methods M7 found worth adopting, each with **the instrument that verified it** and the refutation attempt it survived; the ones dropped as already-true or not actionable here; an explicit `UNVERIFIED` list; the M7.5 peer-project ledger lines this run added |
 | Emitted code | legacy and slow-construct rates per 1000 emitted lines, top classes with session counts, which instrument (d) confirmed each, and the classes dropped as already-caught, out-of-scope for the allocation gate, or deliberately-off in `.editorconfig` |
 | Interventions | interventions per session and as a share of prompts, the cue histogram, the tool immediately before each, and the shape each top entry was classified into |
 | Traps & rework | the trap ledger with counts and re-paid input tokens, the edit rejection rate per tool, gates red after an edit, the same-target rework distribution |
