@@ -266,6 +266,7 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
 
         response.Note(Loaded(result, verbose));
         AppendLoadDiagnostics(response, result, verbose);
+        AppendRestore(response, result.Unrestored);
 
         if (loaded is { CompilationsRealized: false })
             response.Note("compilations=cold - the first semantic call realizes them and pays for it once" + Kept(registry.IdleFor));
@@ -584,4 +585,20 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
         [] => "not loaded - nothing is loaded",
         var loaded => "not loaded - loaded: " + string.Join(", ", loaded.Select(workspace => workspace.SolutionPath)),
     };
+
+    private const int MaxRestoreNames = 5;
+
+    private static void AppendRestore(ResponseBuilder response, IReadOnlyList<string> unrestored)
+    {
+        if (unrestored.Count is 0)
+            return;
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"restore=missing in {unrestored.Count} project(s): {RestoreNames(unrestored)} - no obj/project.assets.json, so package types and generated global usings answer CS0246/CS0103; build once, then load_workspace reload=true"));
+    }
+
+    private static string RestoreNames(IReadOnlyList<string> projects) => projects.Count > MaxRestoreNames
+        ? string.Join(", ", projects.Take(MaxRestoreNames).Select(project => Path.GetFileName(project.AsSpan()).ToString())) + string.Create(CultureInfo.InvariantCulture, $" +{projects.Count - MaxRestoreNames} more")
+        : string.Join(", ", projects.Select(project => Path.GetFileName(project.AsSpan()).ToString()));
 }

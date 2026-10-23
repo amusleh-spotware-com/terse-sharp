@@ -735,7 +735,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    does **not** cover emit-time or source-generator errors, so `build` is worth one call **before you
    push, not after every edit**; the first *applied* gated edit of a process says so once as
    `gate=semantic …`.
-   An edit introducing a new compile error is rolled back and the error returned. **One exception:** a `CS0246`/`CS0234` a NEW file cannot resolve lands as `UNRESOLVED` (`would be applied` on a `dryRun`); any other error in a new file is rolled back. `allowErrors: true` opts out — use it only mid-refactor on purpose.
+   An edit introducing a new compile error is rolled back and the error returned. **Exceptions:** an unused field `add_member` adds lands `PENDING`; a `CS0246`/`CS0234` a NEW file cannot resolve lands as `UNRESOLVED`; any other error in a new file is rolled back. `allowErrors: true` opts out, on purpose only.
    **A rollback keeps your text**: the error ends `retryWith=r3`; `replace_symbol`,
    `replace_symbol_body`, `add_member`, `write_text` and `edit_text` take the token to replay what was rejected - after adding the
    missing callee, or with `allowErrors: true` - and the last 16 are held. A corrected

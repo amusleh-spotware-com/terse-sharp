@@ -1706,4 +1706,42 @@ public sealed class RegionTail
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Fact]
+    public async Task AddMember_OfAFieldNothingUsesYetUnderWarningsAsErrors_LandsPendingAndItsUserLandsInTheNextCall()
+    {
+        var props = Path.Combine(TerseServerFixture.FixtureRoot, "Directory.Build.props");
+        var solution = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx");
+        var propsBefore = await File.ReadAllTextAsync(props, TestContext.Current.CancellationToken);
+        var propsStamp = File.GetLastWriteTimeUtc(props);
+        var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(OrderServicePath);
+
+        try
+        {
+            await File.WriteAllTextAsync(props, propsBefore.Replace("</PropertyGroup>", "  <WarningsAsErrors>CS0169</WarningsAsErrors>\n  </PropertyGroup>", StringComparison.Ordinal), TestContext.Current.CancellationToken);
+            await server.CallAsync("load_workspace", new() { ["path"] = solution, ["reload"] = true });
+
+            var field = await server.CallAsync("add_member", new() { ["typeSymbolId"] = "T:Fixture.Trading.OrderService", ["declaration"] = "private int terseProbeCount;", ["position"] = "afterFields" });
+            var user = await server.CallAsync("add_member", new() { ["typeSymbolId"] = "T:Fixture.Trading.OrderService", ["declaration"] = "public int TerseProbeBump() => ++terseProbeCount;" });
+            var after = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+
+            Assert.Contains("PENDING 1 field(s)", field, StringComparison.Ordinal);
+            Assert.Contains("CS0169", field, StringComparison.Ordinal);
+            Assert.Contains("'OrderService.terseProbeCount'", field, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", field, StringComparison.Ordinal);
+            Assert.DoesNotContain("PENDING", user, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", user, StringComparison.Ordinal);
+            Assert.Contains("private int terseProbeCount;", after, StringComparison.Ordinal);
+            Assert.Contains("public int TerseProbeBump() => ++terseProbeCount;", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(OrderServicePath, before, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(OrderServicePath, stamp);
+            await File.WriteAllTextAsync(props, propsBefore, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(props, propsStamp);
+            await server.CallAsync("load_workspace", new() { ["path"] = solution, ["reload"] = true });
+        }
+    }
 }

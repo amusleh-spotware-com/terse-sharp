@@ -2878,4 +2878,34 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         Assert.Contains("InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("example: read_text path=\"src/App/Order.cs\" ranges=[\"42\",\"101-102\"]", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task EditText_WhosePayloadWritesAnInvisibleCharacter_SaysWhereAndAnEscapeLandsVerbatim()
+    {
+        const string Probe = "src/Fixture.Trading/InvisiblePayloadProbe.cs";
+        var escape = (char)92 + "uFEFF";
+        var mark = ((char)0xFEFF).ToString();
+        var empty = "public string Value => \"\";";
+        var escaped = "public string Value => \"" + escape + "\";";
+        var marked = "public string Value => \"" + mark + "\";";
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class InvisiblePayloadProbe\n{\n    " + empty + "\n}\n", ["force"] = true });
+        try
+        {
+            var plain = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = empty, ["newText"] = escaped });
+            var verbatim = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+            var invisible = await server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = escaped, ["newText"] = marked });
+
+            Assert.DoesNotContain("ERROR", plain, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOTE invisible", plain, StringComparison.Ordinal);
+            Assert.Contains(escaped, verbatim, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", invisible, StringComparison.Ordinal);
+            Assert.Contains("NOTE invisible U+FEFF written at ", invisible, StringComparison.Ordinal);
+            Assert.Contains("InvisiblePayloadProbe.cs:5 - the payload carried the character itself", invisible, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

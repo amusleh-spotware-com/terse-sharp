@@ -65,7 +65,8 @@ internal static class WorkspaceLoader
             empty.Length is 0 ? stopped : [.. stopped, .. empty],
             Messages(reported, loaded, stopped: false),
             targetFramework,
-            AnalyzerRebind.Unresolved(solution));
+            AnalyzerRebind.Unresolved(solution),
+            RestoreMissing: UnrestoredProjects.Find(solution));
     }
 
     private static string[] Messages(

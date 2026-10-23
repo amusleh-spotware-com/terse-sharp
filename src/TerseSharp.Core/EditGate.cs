@@ -17,15 +17,16 @@ public static class EditGate
     {
         var adopted = await AdoptEndingsAsync(workspace, updated, changed, cancellationToken).ConfigureAwait(false);
         var diff = await DiffAsync(workspace.Solution, adopted, changed, !options.AllowErrors, cancellationToken).ConfigureAwait(false);
+        var invisible = await InvisiblePayload.NoteAsync(workspace.Solution, adopted, changed, workspace.Root, cancellationToken).ConfigureAwait(false);
 
         var report = options.AllowErrors
             ? null
-            : await AnalyseAsync(workspace.Solution, adopted, changed, workspace.Root, options.Usings, cancellationToken).ConfigureAwait(false);
+            : await AnalyseAsync(workspace.Solution, adopted, changed, workspace.Root, options, cancellationToken).ConfigureAwait(false);
 
         var policy = await PolicyGate.EvaluateAsync(workspace, adopted, changed, options.AllowPolicy, cancellationToken).ConfigureAwait(false);
 
         if (options.DryRun)
-            return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root, policy));
+            return Result.Ok(Render(options, diff, "dryRun", report, workspace.Root, policy, invisible));
 
         if (Blocked(report, policy, options.Tool) is { } failure)
             return Result.Fail<string>(failure);
@@ -36,10 +37,10 @@ public static class EditGate
         foreach (var written in diff)
             EditPulse.Bump(written.Path);
 
-        return Result.Ok(Render(options, diff, "applied", report, workspace.Root, policy));
+        return Result.Ok(Render(options, diff, "applied", report, workspace.Root, policy, invisible));
     }
 
-    private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root, PolicyVerdict policy)
+    private static string Render(EditOptions options, DocumentDiff[] diffs, string state, GateReport? report, string root, PolicyVerdict policy, string? invisible)
     {
         var response = new ResponseBuilder(options.Tool, state).Verbose(options.Verbose);
         var condensed = Condensed(options, diffs, report, policy);
@@ -49,6 +50,9 @@ public static class EditGate
 
         if (diffs.Length is 0)
             response.Note("no change - the result is identical to what is already there");
+
+        if (invisible is not null)
+            response.Note(invisible);
 
         if (options.DryRun && !options.Verbose)
             response.Note("dryRun");
@@ -87,6 +91,9 @@ public static class EditGate
         if (report.Unresolved.Length > 0)
             Unresolved(response, report, dryRun);
 
+        if (report.Pending.Length > 0)
+            Deferred(response, report, dryRun);
+
         if (report.NewErrors.Length > 0)
             Rejected(response, report, tool);
     }
@@ -115,6 +122,9 @@ public static class EditGate
             response.Note(error);
 
         Advice(response, report.Hints, tool);
+
+        if (report.Restore is { } restore)
+            response.Note(restore);
     }
 
     private static string Describe(GateReport report, bool verbose) => verbose
@@ -146,7 +156,7 @@ public static class EditGate
                 Solution after,
                 IReadOnlyList<DocumentId> changed,
                 string root,
-                ImmutableArray<string> usings,
+                EditOptions options,
                 CancellationToken cancellationToken)
     {
         var projects = Affected(before, changed);
@@ -154,7 +164,8 @@ public static class EditGate
         var current = await TallyAsync(after, projects, root, cancellationToken).ConfigureAwait(false);
         var appeared = current.Errors.Where(entry => Appeared(baseline.Errors, entry)).Select(entry => entry.Key).ToArray();
         var arrived = Arrived(before, after, changed, root);
-        var regressions = appeared.Where(key => !Unresolvable(key, arrived, baseline.Errors)).Take(10).ToArray();
+        var pending = await PendingAsync(before, after, changed, options.Tool, appeared, cancellationToken).ConfigureAwait(false);
+        var regressions = appeared.Where(key => !Unresolvable(key, arrived, baseline.Errors) && Array.IndexOf(pending, key) < 0).Take(10).ToArray();
 
         return new GateReport(
             regressions,
@@ -166,11 +177,13 @@ public static class EditGate
             new RollbackHints(
                 await ImportHintAsync(after, changed, root, regressions, cancellationToken).ConfigureAwait(false),
                 await CallerHintAsync(after, root, regressions, current.Lines, cancellationToken).ConfigureAwait(false),
-                Collided(regressions, usings),
+                Collided(regressions, options.Usings),
                 ImplementerHint(regressions),
                 FieldHint(regressions)),
             [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
-            [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)]);
+            [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
+            [.. pending.Take(10)],
+            RestoreHint(after, changed, root, regressions));
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -280,15 +293,17 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-                string[] NewErrors,
-                string[] Unresolved,
-                int Errors,
-                int ErrorDelta,
-                int Warnings,
-                int WarningDelta,
-                RollbackHints Hints,
-                string[] NewWarnings,
-                string[] NewInfos);
+                    string[] NewErrors,
+                    string[] Unresolved,
+                    int Errors,
+                    int ErrorDelta,
+                    int Warnings,
+                    int WarningDelta,
+                    RollbackHints Hints,
+                    string[] NewWarnings,
+                    string[] NewInfos,
+                    string[] Pending,
+                    string? Restore = null);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,
@@ -315,7 +330,8 @@ public static class EditGate
         && diffs.Length is not 0
         && policy.Notice is null
         && report is not { NewErrors.Length: > 0 }
-        && report is not { Unresolved.Length: > 0 };
+        && report is not { Unresolved.Length: > 0 }
+        && report is not { Pending.Length: > 0 };
 
     private static async Task<string?> EndingAsync(
         LoadedWorkspace workspace,
@@ -568,7 +584,7 @@ public static class EditGate
 
     private static TerseError? Blocked(GateReport? report, PolicyVerdict policy, string tool) => report switch
     {
-        { NewErrors.Length: > 0 } => Errors.CompileRegression(report.NewErrors, report.Hints, tool),
+        { NewErrors.Length: > 0 } => Restored(Errors.CompileRegression(report.NewErrors, report.Hints, tool), report.Restore),
         _ => policy.Blocks ? Errors.PolicyViolation(policy) : null,
     };
 
@@ -688,4 +704,93 @@ public static class EditGate
         if (hints.Fields is { Count: > 0 } fields)
             response.Note(Errors.Unassigned(fields, tool));
     }
+
+    private static bool IsUnusedField(string key) =>
+            IsUnwrittenField(key) || key.StartsWith("CS0414 ", StringComparison.Ordinal);
+
+    private static bool AddedField(string key, HashSet<string> introduced)
+    {
+        var message = key.AsSpan(key.IndexOf(": ", StringComparison.Ordinal) + 2);
+        var open = message.IndexOf('\'');
+        var close = open < 0 ? -1 : message[(open + 1)..].IndexOf('\'');
+
+        if (close <= 0)
+            return false;
+
+        var name = message.Slice(open + 1, close);
+
+        return introduced.GetAlternateLookup<ReadOnlySpan<char>>().Contains(name[(name.LastIndexOf('.') + 1)..]);
+    }
+
+    private static async Task<string[]> PendingAsync(
+        Solution before,
+        Solution after,
+        IReadOnlyList<DocumentId> changed,
+        string tool,
+        string[] appeared,
+        CancellationToken cancellationToken)
+    {
+        if (tool is not "add_member" || !Array.Exists(appeared, IsUnusedField))
+            return [];
+
+        var introduced = await IntroducedFieldsAsync(before, after, changed, cancellationToken).ConfigureAwait(false);
+
+        return [.. appeared.Where(key => IsUnusedField(key) && AddedField(key, introduced))];
+    }
+
+    private static async Task<HashSet<string>> IntroducedFieldsAsync(
+        Solution before,
+        Solution after,
+        IReadOnlyList<DocumentId> changed,
+        CancellationToken cancellationToken)
+    {
+        var introduced = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var id in changed)
+        {
+            var existing = await FieldNamesAsync(before.GetDocument(id), cancellationToken).ConfigureAwait(false);
+
+            foreach (var name in await FieldNamesAsync(after.GetDocument(id), cancellationToken).ConfigureAwait(false))
+            {
+                if (!existing.Remove(name))
+                    introduced.Add(name);
+            }
+        }
+
+        return introduced;
+    }
+
+    private static async Task<List<string>> FieldNamesAsync(Document? document, CancellationToken cancellationToken)
+    {
+        var root = document is null ? null : await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+
+        return root is null
+            ? []
+            : [.. root.DescendantNodes().OfType<VariableDeclaratorSyntax>().Where(variable => variable.Parent?.Parent is FieldDeclarationSyntax).Select(variable => variable.Identifier.ValueText)];
+    }
+
+    private static void Deferred(ResponseBuilder response, GateReport report, bool dryRun)
+    {
+        var outcome = dryRun ? "would be applied" : "was applied";
+
+        response.Note(string.Create(
+            CultureInfo.InvariantCulture,
+            $"PENDING {report.Pending.Length} field(s) this edit adds that nothing uses yet; the edit {outcome}, not rolled back"));
+
+        foreach (var pending in report.Pending)
+            response.Note(pending);
+
+        response.Note("remedy: add the member that uses it next - the project does not build until it lands");
+    }
+
+    private static TerseError Restored(TerseError error, string? restore) =>
+        restore is null ? error : error with { Remedy = restore + "; " + error.Remedy };
+
+    private static string? RestoreHint(Solution after, IReadOnlyList<DocumentId> changed, string root, string[] regressions) =>
+        regressions.Length > 0
+        && Array.TrueForAll(regressions, key => IsMissingName(key) || UnresolvedName(key))
+        && Erroring(after, root, regressions[0], changed) is { FilePath: { Length: > 0 } project }
+        && UnrestoredProjects.IsUnrestored(project)
+            ? string.Create(CultureInfo.InvariantCulture, $"restore=missing - {Path.GetFileName(project.AsSpan())} has no obj/project.assets.json, so its package types and generated global usings do not resolve; build once, then load_workspace reload=true and retry")
+            : null;
 }
