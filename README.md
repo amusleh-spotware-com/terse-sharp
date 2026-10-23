@@ -539,7 +539,7 @@ touch nothing.
 
 Four solutions stay loaded at once (`--max-workspaces`, `TERSE_MAX_WORKSPACES` — a big solution costs
 gigabytes, so set `1` if you only ever work in one), compilations are given back once the server has
-served no call for 60 minutes (`--idle-minutes`, or `.terse.json` `workspace.idleMinutes`), `--no-watch` turns the file watcher off, and responses are bounded and declare
+served no call for 60 minutes (`--idle-minutes`, or `workspace.idleMinutes` in the `.terse.json` where the server starts - server-wide, not per workspace), `--no-watch` turns the file watcher off, and responses are bounded and declare
 their truncation — a 5,000-type solution answers in the same shape as a 50-type one. Every answer names
 its worktree and branch, and an ambiguous request lists the candidates instead of guessing - except a
 write outside every root and a pathless `history`/`changed_files`/`diff_text`, which use the workspace

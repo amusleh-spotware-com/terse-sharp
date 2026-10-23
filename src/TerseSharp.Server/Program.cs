@@ -18,7 +18,7 @@ static async Task<int> CommandLineAsync(string[] arguments)
 
     var maxWorkspacesOption = new Option<int?>("--max-workspaces") { Description = "How many solutions stay loaded at once; the least recently used is unloaded beyond that. Default 4. TERSE_MAX_WORKSPACES does the same. A large solution costs gigabytes, so set 1 when you only ever work in one." };
 
-    var idleMinutesOption = new Option<int?>("--idle-minutes") { Description = "Drop a workspace's Roslyn compilations after it has been idle this long, and return the memory. Default 60; 0 keeps them for the life of the process. TERSE_IDLE_MINUTES does the same, and .terse.json workspace.idleMinutes sets it below both. The next semantic call re-realizes what it needs." };
+    var idleMinutesOption = new Option<int?>("--idle-minutes") { Description = "Drop a workspace's Roslyn compilations after it has been idle this long, and return the memory. Default 60; 0 keeps them for the life of the process. TERSE_IDLE_MINUTES does the same, and .terse.json workspace.idleMinutes sets it below both - read from the directory the server starts in, so it is server-wide, not per workspace. The next semantic call re-realizes what it needs." };
 
     var toolsOption = new Option<string?>("--tools") { Description = TerseSharp.Server.ToolProfile.ToolsOptionDescription };
 

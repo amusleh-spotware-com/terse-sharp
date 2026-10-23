@@ -272,6 +272,9 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     }
 
     private static int Tokens(string text) => ToolCensus.Tokens(text);
+
+    private static string WithoutTheOncePerLoadNote(string response) =>
+        string.Join('\n', response.Split('\n').Where(line => !line.StartsWith("compilations=realized", StringComparison.Ordinal)));
     private static int Lines(string text) => text.Split('\n').Length;
 
     private static int Gutters(string text) => text
@@ -579,10 +582,10 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
     [Fact]
     public async Task GetSymbolSource_OnACompactType_CostsLessThanTheSteerItReplaces()
     {
-        var widest = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Tag" });
-        var wide = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Wide" });
-        var documented = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Money" });
-        var inlined = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Money", ["verbose"] = true });
+        var widest = WithoutTheOncePerLoadNote(await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Tag" }));
+        var wide = WithoutTheOncePerLoadNote(await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Wide" }));
+        var documented = WithoutTheOncePerLoadNote(await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Money" }));
+        var inlined = WithoutTheOncePerLoadNote(await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Fixture.Trading.Money", ["verbose"] = true }));
 
         Assert.DoesNotContain("steer: get_symbol_source", widest, StringComparison.Ordinal);
         Assert.Contains("steer: get_symbol_source", wide, StringComparison.Ordinal);

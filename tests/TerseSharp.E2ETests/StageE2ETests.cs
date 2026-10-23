@@ -134,4 +134,20 @@ public sealed class StageE2ETests : IAsyncLifetime
 
     private Task<string> CallAsync(string tool, Dictionary<string, object?> arguments) =>
         server.CallAsync(tool, arguments, TestContext.Current.CancellationToken);
+
+    [Fact]
+    public async Task DiffTextAndDiffSymbols_WithNoBaseRef_StillReadAFullyStagedChange()
+    {
+        await File.WriteAllTextAsync(Path.Combine(Solution, "notes.txt"), "staged-only\n", TestContext.Current.CancellationToken);
+        await GitAsync("add", "--", "sub/notes.txt");
+
+        var working = await CallAsync("diff_text", new() { ["path"] = "notes.txt" });
+        var staged = await CallAsync("diff_text", new() { ["path"] = "notes.txt", ["staged"] = true });
+        var mapped = await CallAsync("diff_symbols", new() { ["path"] = "notes.txt" });
+
+        Assert.Contains("+staged-only", working, StringComparison.Ordinal);
+        Assert.Contains("+staged-only", staged, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", mapped, StringComparison.Ordinal);
+        Assert.Contains("notes.txt", mapped, StringComparison.Ordinal);
+    }
 }

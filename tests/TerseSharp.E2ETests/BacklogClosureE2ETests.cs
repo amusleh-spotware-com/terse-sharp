@@ -2671,6 +2671,8 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     [Fact]
     public async Task WorkspaceStatus_PricesRunTestsWriteTextAndEditText_WithHeadroomUnderTheSchemaCap()
     {
+        await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
         var text = await server.CallAsync("workspace_status", new() { ["tools"] = true });
 
         Assert.InRange(Priced(text, "run_tests"), 1, 930);

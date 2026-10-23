@@ -23,6 +23,7 @@ public static class ToolExamples
         ["find_files"] = "find_files glob=\"src/**/*.{cs,csproj}\"",
         ["search_text"] = "search_text query=\"OrderService\" glob=\"src/**/*.cs\"",
         ["search_regex"] = "search_regex query=\"class \\\\w+Service\" glob=\"src/**/*.cs\"",
+        ["read_text"] = "read_text path=\"src/App/Order.cs\" ranges=[\"42\",\"101-102\"]",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static IReadOnlyCollection<string> Tools => Worked.Keys;

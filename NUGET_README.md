@@ -410,7 +410,7 @@ surgical file writes outside undo, so preview those with `dryRun`. `--read-only`
 refuse and touch nothing.
 
 Four solutions stay loaded at once (`--max-workspaces`, `TERSE_MAX_WORKSPACES`), compilations are given
-back once the server has served no call for 60 minutes (`--idle-minutes`, or `.terse.json` `workspace.idleMinutes`), `--no-watch` turns the file watcher off, and
+back once the server has served no call for 60 minutes (`--idle-minutes`, or `workspace.idleMinutes` in the `.terse.json` where the server starts - server-wide, not per workspace), `--no-watch` turns the file watcher off, and
 responses are bounded and declare their truncation. A `.terse.json` `build` section -
 `{"build": {"configuration": "Debug", "projects": {"App.Tests": "Debug"}}}` - fills the configuration a
 `build`, `run_tests` or `list_tests` call omits, and the verdict says so. Every answer names its worktree and branch, and an

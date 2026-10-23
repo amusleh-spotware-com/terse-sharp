@@ -40,7 +40,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
     [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
     public Task<string> DiffSymbols(
-        [Description("Commit, branch or range to compare against. Empty compares the working tree against the INDEX, so a fully staged change set maps nothing - pass staged=true for the index against HEAD.")] string? baseRef = null,
+        [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD, so a staged change still maps - pass staged=true for the index alone against HEAD.")] string? baseRef = null,
         [Description("Map the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
         [Description("Limit to one path or pathspec.")] string? path = null,
         [Description("Max results (200).")] int maxResults = 0,
@@ -60,7 +60,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     [McpServerTool(Name = "diff_text", ReadOnly = true)]
     [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. Pass paths to diff up to 10 files in ONE call. Replaces one call per file: every entry is handed to the same git invocation as its own pathspec, so the answer is one unified diff already labelled per file. It costs about one line of response per changed line, so bound it: path= and paths= scope it and maxLines= caps it at 3000 by default. A clipped answer is labelled INCOMPLETE and names the skipLines= that returns the rest without re-paying the lines you already have. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
     public Task<string> DiffText(
-    [Description("Commit, branch or range to compare against. Empty compares the working tree against the INDEX, so a fully staged change set reads 0 lines - pass staged=true for the index against HEAD.")] string? baseRef = null,
+    [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD, so a staged change still reads - pass staged=true for the index alone against HEAD.")] string? baseRef = null,
     [Description("Answer the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
     [Description("Limit to one path or pathspec; the cheapest way to bound the response.")] string? path = null,
     [Description("Several paths or pathspecs answered in one diff, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,

@@ -306,7 +306,7 @@ public static class SymbolEditService
     {
         var document = group.First().Target.Document;
         var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-        var trimmed = root?.RemoveNodes(group.Select(deletion => deletion.Target.Node), SyntaxRemoveOptions.KeepNoTrivia);
+        var trimmed = root?.RemoveNodes(group.Select(deletion => deletion.Target.Node), SyntaxRemoveOptions.KeepUnbalancedDirectives);
 
         return trimmed is null
             ? Result.Fail<Solution>(Errors.DocumentNotFound(document.FilePath ?? document.Name))
@@ -395,7 +395,7 @@ public static class SymbolEditService
         CancellationToken cancellationToken)
     {
         var root = await target.Document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
-        var trimmed = root?.RemoveNode(target.Node, SyntaxRemoveOptions.KeepNoTrivia);
+        var trimmed = root?.RemoveNode(target.Node, SyntaxRemoveOptions.KeepUnbalancedDirectives);
 
         if (trimmed is null)
             return Result.Fail<string>(Errors.DocumentNotFound(target.Document.FilePath ?? target.Document.Name));

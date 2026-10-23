@@ -1680,4 +1680,30 @@ public sealed class RegionTail
         Assert.Contains("is a C# file", text, StringComparison.Ordinal);
         Assert.Contains("replace_symbol_body", text, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("symbolId")]
+    [InlineData("symbolIds")]
+    public async Task DeleteSymbol_OfAMemberGuardedByIf_KeepsTheIfBesideItsEndif(string parameter)
+    {
+        const string Probe = "src/Fixture.Trading/TerseDirectiveProbe.cs";
+        var path = Path.Combine(Path.GetDirectoryName(OrderServicePath)!, "TerseDirectiveProbe.cs");
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseDirectiveProbe\n{\n    public int Kept() => 1;\n\n#if !TERSE_NEVER_DEFINED\n    public int Guarded() => 2;\n#endif\n}\n", ["force"] = true });
+        try
+        {
+            object target = parameter is "symbolId" ? "TerseDirectiveProbe.Guarded" : new[] { "TerseDirectiveProbe.Guarded" };
+            var text = await server.CallAsync("delete_symbol", new() { [parameter] = target });
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Guarded", after, StringComparison.Ordinal);
+            Assert.Contains("Kept", after, StringComparison.Ordinal);
+            Assert.Contains("#if !TERSE_NEVER_DEFINED", after, StringComparison.Ordinal);
+            Assert.Contains("#endif", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

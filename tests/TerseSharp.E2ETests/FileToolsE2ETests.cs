@@ -2863,4 +2863,19 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             Directory.Delete(scratch, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task ReadText_WithRangesSentAsObjects_AnswersARemedyCarryingTheWorkedRangesExample()
+    {
+        using var ranges = System.Text.Json.JsonDocument.Parse("""[{"path":"src/Fixture.Trading/OrderService.cs","startLine":1,"endLine":2}]""");
+
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/OrderService.cs" },
+            ["ranges"] = ranges.RootElement,
+        });
+
+        Assert.Contains("InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("example: read_text path=\"src/App/Order.cs\" ranges=[\"42\",\"101-102\"]", text, StringComparison.Ordinal);
+    }
 }

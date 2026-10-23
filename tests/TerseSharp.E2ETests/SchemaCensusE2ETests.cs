@@ -309,4 +309,18 @@ public sealed class SchemaCensusE2ETests(TerseServerFixture server)
         Assert.NotEmpty(ReadOnlyServerE2ETests.Writers);
         Assert.True(stale.Length is 0, "enrolled as a read-only writer but not an advertised mutating tool: " + string.Join(", ", stale));
     }
+
+    [Fact]
+    public async Task DiffTextAndDiffSymbols_DescribeAnEmptyBaseRefAsTheWorkingTreeAgainstHead()
+    {
+        var tools = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+
+        foreach (var name in new[] { "diff_text", "diff_symbols" })
+        {
+            var description = tools.Single(tool => tool.Name == name).JsonSchema.GetProperty("properties").GetProperty("baseRef").GetProperty("description").GetString();
+
+            Assert.Contains("Empty compares the working tree against HEAD", description, StringComparison.Ordinal);
+            Assert.DoesNotContain("INDEX", description, StringComparison.Ordinal);
+        }
+    }
 }
