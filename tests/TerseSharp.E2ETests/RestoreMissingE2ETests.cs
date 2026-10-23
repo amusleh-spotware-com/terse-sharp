@@ -24,7 +24,7 @@ public sealed class RestoreMissingE2ETests : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         await server.StopAsync();
-        Directory.Delete(root, recursive: true);
+        TerseTempSolution.Delete(root);
     }
 
     [Fact]
@@ -39,9 +39,12 @@ public sealed class RestoreMissingE2ETests : IAsyncLifetime
     [Fact]
     public async Task LoadWorkspace_OnARestoredProject_SaysNothingAboutRestore()
     {
-        var text = await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(TerseServerFixture.RepositoryRoot, "fixtures", "FixtureSolution", "FixtureSolution.slnx") }, TestContext.Current.CancellationToken);
+        Directory.CreateDirectory(Path.Combine(Fresh, "obj"));
+        await File.WriteAllTextAsync(Path.Combine(Fresh, "obj", "project.assets.json"), "{}", TestContext.Current.CancellationToken);
 
-        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        var text = await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(Fresh, "Fresh.csproj"), ["reload"] = true }, TestContext.Current.CancellationToken);
+
+        Assert.Contains("Fresh.csproj", text, StringComparison.Ordinal);
         Assert.DoesNotContain("restore=missing", text, StringComparison.Ordinal);
     }
 }

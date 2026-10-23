@@ -86,7 +86,7 @@ internal sealed class TerseTempSolution : IAsyncDisposable
 
     private static bool Copyable(string directory) => Path.GetFileName(directory) is not ("bin" or "obj");
 
-    private static void Delete(string root)
+    internal static void Delete(string root)
     {
         try
         {

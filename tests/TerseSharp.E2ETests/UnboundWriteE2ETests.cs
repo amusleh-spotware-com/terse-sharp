@@ -20,7 +20,7 @@ public sealed class UnboundWriteE2ETests : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         await server.StopAsync();
-        Directory.Delete(home, recursive: true);
+        TerseTempSolution.Delete(home);
     }
 
     [Fact]

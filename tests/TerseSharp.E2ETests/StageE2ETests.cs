@@ -33,7 +33,7 @@ public sealed class StageE2ETests : IAsyncLifetime
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
             File.SetAttributes(file, FileAttributes.Normal);
 
-        Directory.Delete(root, recursive: true);
+        TerseTempSolution.Delete(root);
     }
 
     [Fact]
