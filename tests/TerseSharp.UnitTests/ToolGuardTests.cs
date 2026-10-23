@@ -2725,6 +2725,7 @@ public sealed class ToolGuardTests
     [InlineData("python -c \"p='src/TerseSharp.Core/OutlineService.cs'; open(p,'w').write('x')\"")]
     [InlineData("python3 -c \"open('src/TerseSharp.Core/OutlineService.cs','w')\"")]
     [InlineData("py -c \"open('src/TerseSharp.Core/OutlineService.cs','w')\"")]
+    [InlineData("python -c \"import shutil; shutil.copy('/tmp/x','src/TerseSharp.Core/OutlineService.cs')\"")]
     [InlineData("node -e \"require('fs').writeFileSync('src/TerseSharp.Core/OutlineService.cs','x')\"")]
     public void Inspect_ForAShellEditOfInTreeDotNetSource_DeniesItAndRoutesToAWriteTool(string command)
     {
@@ -2805,6 +2806,8 @@ public sealed class ToolGuardTests
 
     [Theory]
     [InlineData("python3 -c \"print(open('src/TerseSharp.Core/OutlineService.cs').read()[:200])\"")]
+    [InlineData("python3 -c \"print(open('src/TerseSharp.Core/AtomicWrite.cs').read())\"")]
+    [InlineData("python3 -c \"import sys; sys.stdout.write(open('src/TerseSharp.Core/OutlineService.cs').read().split('a')[0])\"")]
     [InlineData("node -e \"console.log(require('fs').readFileSync('src/TerseSharp.Core/OutlineService.cs','utf8'))\"")]
     public void Inspect_ForAScriptThatOnlyReadsInTreeSource_IsNeverRoutedToAWriteTool(string command)
     {

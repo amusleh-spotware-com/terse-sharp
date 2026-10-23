@@ -2800,10 +2800,12 @@ public static class ToolGuard
         return null;
     }
 
-    private static readonly string[] ScriptWriteMarkers = ["'w'", "\"w\"", "'a'", "\"a\"", "'wb'", "\"wb\"", "write", "Write", "appendFile", "unlink", "remove(", "rename"];
+    private static readonly string[] ScriptWriteMarkers = [",'w'", ", 'w'", ",'wb'", ", 'wb'", ",'a'", ", 'a'", ",'ab'", ", 'ab'", ",\"w\"", ", \"w\"", ",\"a\"", ", \"a\"", "mode='w", "mode=\"w", "mode='a", "mode=\"a", ".write(", ".write_text(", ".write_bytes(", "writeFile", "appendFile", "copyFile", "shutil.", "os.replace(", "os.rename(", "os.remove(", "os.unlink(", ".unlink(", ".rename(", "fs.rm", "fs.cp"];
 
-    private static bool ScriptWrites(string script)
+    private static bool ScriptWrites(string segment)
     {
+        var script = segment.Replace("stdout.write(", string.Empty, StringComparison.Ordinal).Replace("stderr.write(", string.Empty, StringComparison.Ordinal);
+
         foreach (var marker in ScriptWriteMarkers)
         {
             if (script.Contains(marker, StringComparison.Ordinal))
