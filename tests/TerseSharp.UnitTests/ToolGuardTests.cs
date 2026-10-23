@@ -2674,4 +2674,132 @@ public sealed class ToolGuardTests
 
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root).Denied, command);
     }
+
+    [Fact]
+    public void Guard_ForAnAndChainEndingInATreeThatWritesAFile_IsNeverRewrittenAsATrailingRead()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git add x && tree -o listing.txt" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+    }
+
+    [Fact]
+    public void Guard_ForAnAndChainEndingInAPlainTree_StillRunsWithoutIt() =>
+        Assert.Equal("git add x", ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git add x && tree src" }, Fixtures.RepositoryRoot).Rewrite);
+
+    [Theory]
+    [InlineData("git diff --output=x.patch")]
+    [InlineData("git diff --output x.patch HEAD~1")]
+    [InlineData("git show --output=show.txt HEAD")]
+    public void Inspect_ForAGitReadWritingItsOutputOptionToAFileOutsideTheSource_AllowsIt(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied);
+
+    [Theory]
+    [InlineData("git diff --output=src/TerseSharp.Core/Leak.cs")]
+    [InlineData("git diff")]
+    public void Inspect_ForAGitReadWritingItsOutputOptionIntoTheSource_StillDeniesIt(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied);
+
+    [Theory]
+    [InlineData("ls \"$(dirname \"$(which claude)\")\"")]
+    [InlineData("wc -c \"$(mktemp)\"")]
+    [InlineData("ls -la \"$(dirname \"$(which dotnet)\")\" 2>/dev/null")]
+    public void Inspect_ForAMetadataReadOfAnOperandOnlyTheShellCanExpand_AllowsIt(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied);
+
+    [Theory]
+    [InlineData("cat \"$TERSE_GUARD_UNSET_PROBE/notes.md\"")]
+    [InlineData("wc -l \"$TERSE_GUARD_UNSET_PROBE/notes.md\"")]
+    [InlineData("wc -c \"$TERSE_GUARD_UNSET_PROBE/OrderService.cs\"")]
+    [InlineData("ls \"$TERSE_GUARD_UNSET_PROBE\" src")]
+    [InlineData("ls \"$(pwd)/src\"")]
+    public void Inspect_ForAnUnexpandedOperandThatIsNoMetadataReadOrBesideAPlainOne_StillDeniesIt(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied);
+
+    [Theory]
+    [InlineData("perl -pi -e 's/a/b/' src/TerseSharp.Core/OutlineService.cs")]
+    [InlineData("perl -0777 -pi -e 's/a/b/g' src/TerseSharp.Core/OutlineService.cs")]
+    [InlineData("perl -i.bak -pe 's/a/b/' src/TerseSharp.Core/OutlineService.cs")]
+    [InlineData("echo x | tee src/TerseSharp.Core/OutlineService.cs")]
+    [InlineData("python -c \"p='src/TerseSharp.Core/OutlineService.cs'; open(p,'w').write('x')\"")]
+    [InlineData("python3 -c \"open('src/TerseSharp.Core/OutlineService.cs','w')\"")]
+    [InlineData("py -c \"open('src/TerseSharp.Core/OutlineService.cs','w')\"")]
+    [InlineData("node -e \"require('fs').writeFileSync('src/TerseSharp.Core/OutlineService.cs','x')\"")]
+    public void Inspect_ForAShellEditOfInTreeDotNetSource_DeniesItAndRoutesToAWriteTool(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Matches("^(edit_text|write_text) path=\"src/TerseSharp.Core/OutlineService.cs\"", verdict.Routing);
+    }
+
+    [Fact]
+    public void Inspect_ForAnInPlaceSedOfACSharpFile_RoutesToEditTextNotARead()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "sed -i 's/a/b/' src/TerseSharp.Core/OutlineService.cs" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.StartsWith("edit_text path=\"src/TerseSharp.Core/OutlineService.cs\" force=true edits=", verdict.Routing, StringComparison.Ordinal);
+        Assert.DoesNotContain("get_file_outline", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Inspect_ForATeeThatOverwritesInTreeSource_RoutesToWriteText() =>
+        Assert.StartsWith(
+            "write_text path=\"src/TerseSharp.Core/OutlineService.cs\" force=true",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "echo x | tee src/TerseSharp.Core/OutlineService.cs" }, Fixtures.RepositoryRoot).Routing,
+            StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData("python scripts/report.py")]
+    [InlineData("python -c \"print(1)\"")]
+    [InlineData("echo x | tee notes.txt")]
+    [InlineData("perl -ne 'print if /a/' notes.txt")]
+    public void Inspect_ForAShellCommandThatEditsNoInTreeDotNetSource_StillAllowsIt(string command) =>
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied);
+
+    [Fact]
+    public void Inspect_ForATeeIntoADotNetFileOutsideTheTree_AllowsIt()
+    {
+        var outside = Path.Combine(Path.GetTempPath(), "terse-guard-tee-" + Guid.NewGuid().ToString("N") + ".cs").Replace('\\', '/');
+
+        Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "echo x | tee " + outside }, Fixtures.RepositoryRoot).Denied);
+    }
+
+    [Fact]
+    public void Guard_ForAHeredocWriteAfterALiteralCdOutOfTheTree_JudgesTheRedirectThereAndAllowsIt()
+    {
+        var plain = Directory.CreateTempSubdirectory("terse-guard-cd");
+
+        try
+        {
+            var command = "cd " + plain.FullName.Replace('\\', '/') + " && cat > x.py <<'EOF'\nimport os\nfor n in range(3): print(n)\nEOF\npython x.py";
+
+            Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied);
+        }
+        finally
+        {
+            plain.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void Guard_ForAHeredocWriteAfterALiteralCdIntoTheTree_RoutesToWriteTextWithTheCdResolvedPath()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "cd src && cat > notes.txt <<'EOF'\nbody line\nEOF\nnpm test" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.StartsWith("write_text path=\"src/notes.txt\"", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForADeniedCompoundCarryingAHeredoc_ListsItsBodyWithTheSegmentThatOpenedIt()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git add x && python3 - <<'EOF'\nimport os\nfor n in range(3): print(n)\nEOF\ncat src/App/OrderService.cs" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("python3 - <<'EOF'\nimport os\nfor n in range(3): print(n)\nEOF", verdict.Routing, StringComparison.Ordinal);
+        Assert.DoesNotContain("  |  import os", verdict.Routing, StringComparison.Ordinal);
+    }
 }

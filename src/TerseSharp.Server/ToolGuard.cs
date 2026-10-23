@@ -161,7 +161,7 @@ public static class ToolGuard
             return "build";
 
         if (driver.Equals("git", StringComparison.OrdinalIgnoreCase))
-            return StdoutFile(segment) is { } target && !WritesSource(target, cwd) ? null : Git(tokens, cwd);
+            return (StdoutFile(segment) ?? OutputFile(tokens)) is { } target && !WritesSource(target, cwd) ? null : Git(tokens, cwd);
 
         if (!driver.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
             return null;
@@ -866,7 +866,7 @@ public static class ToolGuard
     {
         var direct = Direct(stage, cwd, compound, unfenceable);
 
-        return direct.Denied || !stage.Text.Contains("$(", StringComparison.Ordinal)
+        return direct.Denied || !stage.Text.Contains("$(", StringComparison.Ordinal) || Unresolved(stage.Text)
             ? direct
             : Direct(stage with { Text = stage.Text.Replace("$(", " ", StringComparison.Ordinal), Fed = false }, cwd, compound, unfenceable);
     }
@@ -1061,8 +1061,10 @@ public static class ToolGuard
         var compound = judged.Length > 1;
         var unfenceable = compound ? Unfenceable(command) : string.Empty;
         var directories = Directories(command, cwd, judged.Length);
+        var bodies = Embodied(judged, command);
         var allowed = new List<string>(judged.Length);
         var calls = new List<string>();
+        var attached = false;
         GuardVerdict? refused = null;
         string? allowance = null;
 
@@ -1072,9 +1074,10 @@ public static class ToolGuard
             var directory = directories is null ? new StageDirectory(cwd, false) : directories[index];
             var verdict = Denial(stage with { Text = Unkeyworded(stage.Text), Adrift = directory.Adrift }, directory.Here, compound, unfenceable);
 
+            attached = Listed(allowed, stage.Text, bodies[index], attached, verdict.Denied);
+
             if (!verdict.Denied)
             {
-                allowed.Add(stage.Text.Trim());
                 allowance ??= verdict.Allowance;
 
                 continue;
@@ -1433,17 +1436,13 @@ public static class ToolGuard
                 BuildReplacement(Diffing(subcommand, segment)));
         }
 
+        if (EditedSource(segment, cwd) is { } edited)
+            return ShellEdit(segment.Trim(), TreeRelative(edited, cwd), compound, unfenceable);
+
         if (!Denies(segment, cwd, stage.Fed, stage.Adrift))
             return Allowance(segment, cwd) is { } allowance ? Allowed with { Allowance = allowance } : Allowed;
 
-        var trimmed = segment.Trim();
-
-        if (WriteTarget(segment) is { Length: > 0 } target)
-            return new GuardVerdict(true, ShellWriteReason(trimmed, target) + Priced + Nothing(compound, unfenceable), ShellWriteRouting(target), ShellWriter(target));
-
-        var reason = Covered(trimmed) ? Reason("Bash", trimmed) : InTree(trimmed);
-
-        return new GuardVerdict(true, reason + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
+        return Refusal(segment, cwd, compound, unfenceable);
     }
 
     private static readonly string[] PatternCommands = ["grep", "rg", "egrep", "fgrep", "findstr", "select-string", "sls", "awk", "sed"];
@@ -1741,7 +1740,7 @@ public static class ToolGuard
     private static bool Denies(string segment, string? cwd, bool fed, bool adrift = false) =>
         IsTextRead(segment)
         && !(fed && ReadsStdin(segment))
-        && (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment) && !OutsideTree(segment, cwd, adrift)));
+        && (Covered(segment) || (IsDotNetTree(cwd) && Operanded(segment) && !OutsideTree(segment, cwd, adrift) && !Unresolved(segment)));
 
     private static int Written(ReadOnlySpan<char> token)
     {
@@ -2249,7 +2248,7 @@ public static class ToolGuard
 
     private static StageDirectory[]? Directories(string command, string? cwd, int count)
     {
-        if (!Followable(command))
+        if (!Followable(Bodiless(command)))
             return null;
 
         var walked = Walked(command, cwd);
@@ -2645,9 +2644,10 @@ public static class ToolGuard
         if (pipeline.AsSpan().IndexOfAny('<', '>') >= 0 || pipeline.Contains("--output", StringComparison.Ordinal))
             return false;
 
-        var first = Command(pipeline).FirstOrDefault() ?? string.Empty;
+        var command = Command(pipeline);
+        var driver = Path.GetFileNameWithoutExtension((command.FirstOrDefault() ?? string.Empty).AsSpan());
 
-        return Reads(Path.GetFileNameWithoutExtension(first.AsSpan()));
+        return Reads(driver) && !(driver.Equals("tree", StringComparison.OrdinalIgnoreCase) && Array.Exists(command, OutputsTree));
     }
 
     private static bool Reads(ReadOnlySpan<char> driver)
@@ -2719,6 +2719,241 @@ public static class ToolGuard
         name is [>= 'A' and <= 'Z', _, ..] && !name.ContainsAnyExcept(ExportedNameChars) && name is not ("PWD" or "OLDPWD");
 
     private static bool IsOneCommitStatFlag(string token) => token is "--stat" or "--oneline" or "--no-color" or "-1" or "-n1" or "--max-count=1";
+
+    private static readonly string[] MetadataCommands = ["ls", "dir", "tree", "get-childitem", "gci"];
+    private static readonly SearchValues<char> PerlArguments = SearchValues.Create("0eEIlmMx");
+
+    private static string? OutputFile(string[] tokens)
+    {
+        for (var index = 1; index < tokens.Length; index++)
+        {
+            if (tokens[index].StartsWith("--output=", StringComparison.Ordinal))
+                return Bare(tokens[index][9..]);
+
+            if (tokens[index] is "--output" && index + 1 < tokens.Length)
+                return Bare(tokens[index + 1]);
+        }
+
+        return null;
+    }
+
+    private static bool OutputsTree(string token) => token is ['-', not '-', ..] && token.AsSpan(1).Contains('o');
+
+    private static bool Metadata(string[] command)
+    {
+        var name = command.Length > 0 ? Path.GetFileNameWithoutExtension(command[0].AsSpan()) : [];
+
+        if (name.Equals("wc", StringComparison.OrdinalIgnoreCase))
+            return Array.Exists(command, token => token is "-c" or "--bytes");
+
+        foreach (var listing in MetadataCommands)
+        {
+            if (name.Equals(listing, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool Unresolved(string segment) =>
+        Metadata(Command(segment)) && SubstitutionOnly(Operands(segment));
+
+    private static bool PerlInPlace(string token)
+    {
+        if (token is not ['-', not '-', ..])
+            return false;
+
+        var cluster = token.AsSpan(1);
+        var stop = cluster.IndexOfAny(PerlArguments);
+
+        return (stop < 0 ? cluster : cluster[..stop]).Contains('i');
+    }
+
+    private static string? SourceOperand(string[] command, string? cwd, bool scoped)
+    {
+        for (var index = 1; index < command.Length; index++)
+        {
+            var token = command[index];
+
+            if (token is "-e" or "-E" or "--expression")
+                index++;
+            else if (!token.StartsWith('-') && (scoped ? WritesSource(token, cwd) : IsDotNet(token)))
+                return token;
+        }
+
+        return null;
+    }
+
+    private static string? ScriptSource(string[] command, string flag, string? cwd)
+    {
+        var at = Array.IndexOf(command, flag);
+
+        if (at < 1 || at + 1 >= command.Length)
+            return null;
+
+        foreach (var token in Tokens(command[at + 1]))
+        {
+            if (WritesSource(token, cwd))
+                return token.TrimEnd('.', ':', ';');
+        }
+
+        return null;
+    }
+
+    private static string? EditedSource(string segment, string? cwd)
+    {
+        var command = Command(segment);
+        var name = command.Length > 0 ? Path.GetFileNameWithoutExtension(command[0].AsSpan()) : [];
+
+        return name switch
+        {
+            "sed" when Rewrites("sed", command) => SourceOperand(command, cwd, false),
+            "perl" when Array.Exists(command, PerlInPlace) => SourceOperand(command, cwd, true),
+            "tee" => SourceOperand(command, cwd, true),
+            "python" or "python3" or "py" => ScriptSource(command, "-c", cwd),
+            "node" => ScriptSource(command, "-e", cwd) ?? ScriptSource(command, "--eval", cwd),
+            _ => null,
+        };
+    }
+
+    private static bool Overwrites(string segment)
+    {
+        var command = Command(segment);
+
+        return command.Length > 0
+            && Path.GetFileNameWithoutExtension(command[0].AsSpan()).Equals("tee", StringComparison.OrdinalIgnoreCase)
+            && !Array.Exists(command, token => token is "-a" or "--append");
+    }
+
+    private static string ShellEditTool(string target) => IsCSharp(target) ? "edit_text" : EditTool(target);
+
+    private static string ShellEditor(string target) => IsCSharp(target)
+        ? "edit_text(path, edits=[{oldText, newText}], force=true) or write_text(path, content, force=true) - both are compile-gated and undo_last_change reverts them, which a shell edit skips"
+        : ShellEditTool(target) + " or write_text(path, content)";
+
+    private static string ShellEditReason(string segment, string target) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"TerseSharp guard: this Bash command EDITS '{Trim(target)}' - '{Trim(segment)}' rewrites it from the shell, so the replacement is a WRITE tool, not a read one. Use the terse-sharp MCP instead - {ShellEditor(target)}. Read the tool's remedy: line rather than falling back to a built-in.");
+
+    private static string ShellEditRouting(string segment, string target) => (Overwrites(segment), ShellEditTool(target)) switch
+    {
+        (true, _) => ShellWriteRouting(target),
+        (_, "edit_text") => Call("edit_text", "path", target) + (IsCSharp(target) ? " force=true" : string.Empty) + " edits=[{oldText, newText}]",
+        (_, var tool) => Call(tool, "path", target),
+    };
+
+    private static GuardVerdict ShellEdit(string segment, string target, bool compound, string unfenceable) => new(
+        true,
+        ShellEditReason(segment, target) + Priced + Nothing(compound, unfenceable),
+        ShellEditRouting(segment, target),
+        ShellEditor(target));
+
+    private static string TreeRelative(string target, string? cwd) =>
+        Path.IsPathRooted(target) || cwd is not { Length: > 0 } || TreeRoot(cwd) is not { } root
+            ? target
+            : Path.GetRelativePath(root, Path.Combine(cwd, target)).Replace('\\', '/');
+
+    private static bool InBody(string text, string command, string masked, ref int cursor)
+    {
+        var at = command.IndexOf(text, cursor, StringComparison.Ordinal);
+
+        if (at < 0)
+            return false;
+
+        cursor = at + text.Length;
+
+        return text.Length > 0 && masked.AsSpan(at, text.Length).IndexOfAnyExcept('x') < 0;
+    }
+
+    private static bool[] Embodied(Stage[] stages, string command)
+    {
+        var bodies = new bool[stages.Length];
+        var masked = Bodiless(command);
+        var cursor = 0;
+
+        for (var index = 0; index < stages.Length && !ReferenceEquals(masked, command); index++)
+            bodies[index] = InBody(stages[index].Text, command, masked, ref cursor);
+
+        return bodies;
+    }
+
+    private static bool Listed(List<string> allowed, string text, bool body, bool attached, bool denied)
+    {
+        if (body && attached)
+            allowed[^1] = string.Concat(allowed[^1], "\n", text.TrimEnd('\r'));
+        else if (!body && !denied)
+            allowed.Add(text.Trim());
+
+        return body ? attached : !denied;
+    }
+
+    private static GuardVerdict Refusal(string segment, string? cwd, bool compound, string unfenceable)
+    {
+        var trimmed = segment.Trim();
+
+        if (WriteTarget(segment) is { Length: > 0 } written && TreeRelative(written, cwd) is var target)
+            return new GuardVerdict(true, ShellWriteReason(trimmed, target) + Priced + Nothing(compound, unfenceable), ShellWriteRouting(target), ShellWriter(target));
+
+        var reason = Covered(trimmed) ? Reason("Bash", trimmed) : InTree(trimmed);
+
+        return new GuardVerdict(true, reason + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
+    }
+
+    private static ReadOnlySpan<char> Operands(string segment)
+    {
+        var text = segment.AsSpan().Trim();
+        var gap = text.IndexOfAny(' ', '\t');
+
+        return gap < 0 ? [] : text[gap..];
+    }
+
+    private static bool SubstitutionOnly(ReadOnlySpan<char> rest)
+    {
+        var found = false;
+
+        for (rest = rest.TrimStart(); !rest.IsEmpty; rest = rest.TrimStart())
+        {
+            var flag = rest[0] is '-' or '>' or '<' || rest is [>= '0' and <= '9', '>', ..];
+            var length = flag ? Word(rest) : Substitution(rest);
+
+            if (length <= 0)
+                return false;
+
+            found |= !flag;
+            rest = rest[length..];
+        }
+
+        return found;
+    }
+
+    private static int Word(ReadOnlySpan<char> text) => text.IndexOfAny(' ', '\t') is var gap and >= 0 ? gap : text.Length;
+
+    private static int Substitution(ReadOnlySpan<char> rest)
+    {
+        var quoted = rest[0] is '"' ? 1 : 0;
+
+        if (!rest[quoted..].StartsWith("$(", StringComparison.Ordinal) || Closing(rest, quoted + 1) is not (>= 0 and var close) || rest[(quoted + 2)..close].ContainsAny('/', '\\'))
+            return -1;
+
+        var end = close + 1 + quoted;
+
+        return end <= rest.Length && (end == rest.Length || char.IsWhiteSpace(rest[end])) && (quoted is 0 || rest[end - 1] is '"') ? end : -1;
+    }
+
+    private static int Closing(ReadOnlySpan<char> text, int open)
+    {
+        var depth = 0;
+
+        for (var index = open; index < text.Length; index++)
+        {
+            depth += text[index] switch { '(' => 1, ')' => -1, _ => 0 };
+
+            if (depth is 0)
+                return index;
+        }
+
+        return -1;
+    }
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

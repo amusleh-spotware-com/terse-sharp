@@ -258,7 +258,7 @@ arguments filled in from the command it just denied** — which Claude Code plac
 `Call this instead: get_file_outline path="src/App/OrderService.cs"`. A positive routing instruction at
 the moment the agent is about to fall back beats a negation. The call it names follows the **direction**
 as well as the file kind, so a shell redirect that creates a file answers
-`write_text path="..." force=true`, never an outline. And the shell-text rows are scoped to the tree:
+`write_text path="..." force=true`, never an outline, and a shell edit of .NET source in the tree - `sed -i`, `perl -i`, `tee`, or a `python -c`/`node -e` script naming it - answers `edit_text ... edits=` (`write_text` for a plain `tee`). And the shell-text rows are scoped to the tree:
 a text command naming no .NET source whose every path operand lands outside it (a quoted `sed`/`awk`/`grep` script, spaces and all, and a `2>/dev/null` are not operands) - `~/`, `$HOME`, a `$VAR` assigned earlier in the same command, each `for` word one at a time and a relative path after a literal `cd` - pipelines included - all count - is allowed, because the
 working directory is not a reason to refuse a file your solution does not contain. And **a batch is not denied whole for one
 covered command in it**: when a compound command mixes commands the server answers with commands it does
@@ -300,7 +300,7 @@ Git rows fire only when the directory the command actually addresses sits under 
 because the hook is installed user-wide, so `git -C ../notes status` is allowed. Plain `.css`, `.js`,
 `dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git mutation (`blame`,
 `add`, `commit`, `push`, and every `git tag` that creates, annotates or deletes) are allowed — nothing
-here replaces those. So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`,
+here replaces those. So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`, `git diff --output=sel.patch`,
 `git show <ref>:<path> > old.md`) unless the file is .NET source in the tree, a `git show <ref>:<path>` piped into `cmp`, a `sha*sum` or `git hash-object --stdin`, and a diff flag no tool
 serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`); `-w` routes to `ignoreWhitespace=true`
 and `-U<n>` to `diff_text unified=<n>`. `.git/` internals are never source, and on Windows a Git-Bash

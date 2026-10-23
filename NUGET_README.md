@@ -211,7 +211,7 @@ A denial is not only a prohibition. It returns `additionalContext` — the **com
 arguments filled in from the command it just denied** — which Claude Code places beside the tool result:
 `Call this instead: get_file_outline path="src/App/OrderService.cs"`. The call it names follows the
 **direction** as well as the file kind, so a shell redirect that creates a file answers
-`write_text path="..." force=true`, never an outline; and the shell-text rows are scoped to the tree, so
+`write_text path="..." force=true`, never an outline, and a shell edit of .NET source in the tree - `sed -i`, `perl -i`, `tee`, or a `python -c`/`node -e` script naming it - answers `edit_text ... edits=` (`write_text` for a plain `tee`); and the shell-text rows are scoped to the tree, so
 a text command naming no .NET source whose every path operand lands outside it (a quoted `sed`/`awk`/`grep` script, spaces and all, and a `2>/dev/null` are not operands) - `~/`, `$HOME`, a `$VAR` assigned earlier in the same command - a heredoc's opener line too - each `for` word one at a time and a relative path after a literal `cd`, pipelines included, all count - is allowed. And **a batch is not denied whole
 for one covered command in it**: when a compound command mixes commands the server answers with commands
 it does not, the hook returns `updatedInput` with the covered ones stripped and no `permissionDecision` at
@@ -242,7 +242,7 @@ call with the command's own arguments translated — `git log --oneline -1` answ
 Git rows fire only when the directory the command addresses sits under a `.sln`/`.slnx`/`.slnf`/`.csproj`,
 because the hook is installed user-wide. Plain `.css`, `.js`, `dotnet restore`/`pack`/`publish`/`run`, and
 git mutation (`blame`, `add`, `commit`, `push`, `tag` creation) are allowed — nothing here replaces those.
-So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`) unless the file is .NET source in
+So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`, `git diff --output=sel.patch`) unless the file is .NET source in
 the tree, and a diff flag no tool serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`); `-w`
 routes to `ignoreWhitespace=true` and `-U<n>` to `diff_text unified=<n>`. `.git/` internals are never source, and on Windows a Git-Bash `/tmp/...`
 or `/c/...` path is judged as the directory it names.
