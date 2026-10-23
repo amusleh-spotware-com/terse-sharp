@@ -2416,4 +2416,22 @@ public static class FileService
             ? string.Create(CultureInfo.InvariantCulture, $"NOTE oldText started inside the indentation of line {line} (the file indents it {anchor + columns} column(s), oldText {anchor}), so the match was widened to the whole line and newText re-indented by {columns} column(s)")
             : string.Create(CultureInfo.InvariantCulture, $"NOTE oldText started inside the indentation of line {line} (the file indents it {anchor + columns} column(s), oldText {anchor}), so the match was widened to the whole line; newText already carried the file's depth and landed as sent");
     }
+
+    public static async Task<Result<string>> WriteUnboundAsync(string path, string content, bool dryRun, bool force, bool verbose, CancellationToken cancellationToken)
+    {
+        var full = Path.GetFullPath(path);
+
+        if (!force)
+            return Result.Fail<string>(Errors.OutsideWrite(full));
+
+        var exists = File.Exists(full);
+        var before = exists ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
+        var adopted = LineEndings.Adopt(content, LineEndings.Dominant(exists ? before : content));
+        var (after, ending) = await FileEnding.KeptAsync(full, exists, before, adopted, cancellationToken).ConfigureAwait(false);
+
+        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
+            await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
+
+        return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, dryRun, verbose, full), ending));
+    }
 }

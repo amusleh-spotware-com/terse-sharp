@@ -206,6 +206,13 @@ bool verbose) =>
         if (Foreign(workspace, path) is { } foreign)
             return Task.FromResult(foreign.Render());
 
+        if (Unbound(path, options))
+        {
+            return context.RejectWrite() is { } rejection
+                ? Task.FromResult(rejection)
+                : ToolBoundary.RunAsync(() => UnwrappedAsync(FileService.WriteUnboundAsync(path, content, options.DryRun, options.Force, options.Verbose, cancellationToken)));
+        }
+
         return Guarded(workspace, path, async loaded => Raced(loaded, [path], options.IfUnchangedSince) is { } raced
             ? await raced.ConfigureAwait(false)
             : Previewed(
@@ -1533,4 +1540,7 @@ context.RejectWrite() is { } rejection
             "stage=true writes ONE path's content= to the index, or with ref= resets its index entry - not both, and not beside files=, delete= or retryWith=",
             "pass path= with content= to stage that text, or path= with ref=HEAD to unstage it").Render()),
     };
+
+    private bool Unbound(string path, WriteOptions options) =>
+        options.IfUnchangedSince is null && !context.Registry.All().Any() && Unhoused(path);
 }

@@ -47,8 +47,8 @@ public sealed class RejectedEditsTests
         var held = RejectedEdits.Recall(last["retryWith=".Length..]);
 
         Assert.NotNull(held);
-        Assert.Equal(new[] { "a.cs", "b.cs" }, held!.Targets);
-        Assert.Equal(new[] { "class A;", "class B;" }, held.Payloads);
+        Assert.Equal(["a.cs", "b.cs"], held!.Targets);
+        Assert.Equal(["class A;", "class B;"], held.Payloads);
     }
 
     [Fact]
