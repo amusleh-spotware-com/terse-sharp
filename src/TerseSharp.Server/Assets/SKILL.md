@@ -624,7 +624,7 @@ inside a larger repository never reports a file outside it. On a tree shared wit
 a directory contributing more than five **untracked** files folds into one
 `.research/**  +? -?  ?  x40 untracked` row - tracked files stay one per line and the count still counts
 every file. **A folded row opens**: the fold key is the first segment BELOW the `path=` scope, so
-`changed_files(path: ".research")` descends into it until the files are listed. And `changed_files(path: "src")` is the difference between reading your own change set and reading
+`changed_files(path: ".research")` descends into it until the files are listed. And `changed_files(paths: ["src", "tests"])` reads your own change set, not
 everybody's, and `changed_files(exclude: ".research/**")` drops the folders a positive pathspec
 cannot leave out. `diff_symbols` tags a hunk `EXACT` only when it sits
 inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.

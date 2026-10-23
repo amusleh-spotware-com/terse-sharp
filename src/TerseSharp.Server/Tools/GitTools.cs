@@ -14,7 +14,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     private const string UntrackedOnDisk = "D (untracked on disk)";
 
     [McpServerTool(Name = "changed_files", ReadOnly = true)]
-    [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec the way diff_symbols and diff_text do, and exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed. A byte-identical repeat with no watcher event and no git state change since replays the previous listing plus an UNCHANGED marker instead of re-shelling to git.")]
+    [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec, and paths=[...] to up to 10, OR-ed, in ONE listing. Replaces one call per path. exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed. A byte-identical repeat with no watcher event and no git state change since replays the previous listing plus an UNCHANGED marker instead of re-shelling to git.")]
     public Task<string> ChangedFiles(
         [Description("Commit, branch or range to compare against, e.g. main or HEAD~3. Empty compares the working tree against HEAD.")] string? baseRef = null,
         [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
@@ -25,17 +25,34 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         [Description("List what is STAGED - the index against HEAD, or against baseRef. Untracked files are never listed. Default false.")] bool staged = false,
         [Description("Include files git does not track. Default true; false answers tracked changes only, which is what git status --untracked-files=no asks.")] bool untracked = true,
         [Description("Ignore whitespace, git diff -w: a file whose only change is whitespace or line endings is not listed. Default false.")] bool ignoreWhitespace = false,
-        CancellationToken cancellationToken = default) => root is { Length: > 0 }
-    ? OutsideAsync(root, full => ListAsync(full, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), full, new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken))
-    : context.WithRootAsync(
-        workspace,
-        early => ListAsync(early, baseRef is { Length: > 0 } ? baseRef : null, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken),
-        () => context.WithWorkingWorkspaceAsync(
-            workspace,
-            path,
-            loaded => baseRef is { Length: > 0 }
-                ? ListAsync(loaded.Root, baseRef, path, exclude, NavigationTools.Cap(maxResults, 200), null, new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken)
-                : ListMemoizedAsync(loaded, path, exclude, NavigationTools.Cap(maxResults, 200), new ChangeScope(staged, untracked, ignoreWhitespace), maxResults > 0, cancellationToken)));
+        [Description("Several paths or pathspecs listed in one answer, at most 10, OR-ed. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
+        CancellationToken cancellationToken = default)
+    {
+        var combined = paths is { Length: > 0 } || path is { Length: > 0 }
+            ? PluralPaths.Combine(path, paths, "paths")
+            : Result.Ok(ImmutableArray<string>.Empty);
+
+        if (!combined.IsOk)
+            return Task.FromResult(combined.Error!.Render());
+
+        var scoped = combined.Value;
+        var hint = path ?? (scoped.IsDefaultOrEmpty ? null : scoped[0]);
+        var cap = NavigationTools.Cap(maxResults, 200);
+        var scope = new ChangeScope(staged, untracked, ignoreWhitespace);
+        var chosen = maxResults > 0;
+
+        return root is { Length: > 0 }
+            ? OutsideAsync(root, full => ListAsync(full, baseRef, scoped, exclude, cap, full, scope, chosen, cancellationToken))
+            : context.WithRootAsync(
+                workspace,
+                early => ListAsync(early, baseRef is { Length: > 0 } ? baseRef : null, scoped, exclude, cap, null, scope, chosen, cancellationToken),
+                () => context.WithWorkingWorkspaceAsync(
+                    workspace,
+                    hint,
+                    loaded => baseRef is { Length: > 0 }
+                        ? ListAsync(loaded.Root, baseRef, scoped, exclude, cap, null, scope, chosen, cancellationToken)
+                        : ListMemoizedAsync(loaded, scoped, exclude, cap, scope, chosen, cancellationToken)));
+    }
 
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
     [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
@@ -102,7 +119,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     private async Task<string> ListAsync(
             string root,
             string? baseRef,
-            string? path,
+            IReadOnlyList<string> paths,
             string? exclude,
             int maxResults,
             string? outside,
@@ -110,7 +127,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             bool chosen,
             CancellationToken cancellationToken)
     {
-        var listing = await ListTimedAsync(root, baseRef, path, exclude, maxResults, outside, scope, chosen, cancellationToken).ConfigureAwait(false);
+        var listing = await ListTimedAsync(root, baseRef, paths, exclude, maxResults, outside, scope, chosen, cancellationToken).ConfigureAwait(false);
 
         return listing.Timing.Appended(listing.Text, listings.SlowAfter);
     }
@@ -118,7 +135,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     private static async Task<Listing> ListTimedAsync(
         string root,
         string? baseRef,
-        string? path,
+        IReadOnlyList<string> paths,
         string? exclude,
         int maxResults,
         string? outside,
@@ -128,25 +145,22 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     {
         var command = scope.Command;
         var started = Stopwatch.GetTimestamp();
-        var numstat = await GitRunner.ReadAsync(root, Arguments([.. command, "--numstat"], baseRef, path), cancellationToken).ConfigureAwait(false);
+        var numstat = await GitRunner.ReadAsync(root, Arguments([.. command, "--numstat"], baseRef, paths), cancellationToken).ConfigureAwait(false);
         var numstatDone = Stopwatch.GetTimestamp();
-        var status = numstat.IsOk ? await GitRunner.ReadAsync(root, Arguments([.. command, "--name-status"], baseRef, path), cancellationToken).ConfigureAwait(false) : numstat;
+        var status = numstat.IsOk ? await GitRunner.ReadAsync(root, Arguments([.. command, "--name-status"], baseRef, paths), cancellationToken).ConfigureAwait(false) : numstat;
         var statusDone = Stopwatch.GetTimestamp();
-        var untracked = status.IsOk ? await UntrackedAsync(root, baseRef, path, scope, cancellationToken).ConfigureAwait(false) : status;
+        var untracked = status.IsOk ? await UntrackedAsync(root, baseRef, paths, scope, cancellationToken).ConfigureAwait(false) : status;
         var timing = new GitTiming(TimeSpan.Zero, Stopwatch.GetElapsedTime(started, numstatDone), Stopwatch.GetElapsedTime(numstatDone, statusDone), Stopwatch.GetElapsedTime(statusDone));
 
         return untracked.IsOk
-            ? new Listing(await RenderAsync(numstat.Value!, status.Value!, untracked.Value!, exclude, path, maxResults, outside, scope.Staged ? null : Steer(baseRef, path), chosen, new ListingRoot(root, baseRef?.Contains("..", StringComparison.Ordinal) is not true), cancellationToken).ConfigureAwait(false), timing)
+            ? new Listing(await RenderAsync(numstat.Value!, status.Value!, untracked.Value!, exclude, paths, maxResults, outside, scope.Staged ? null : Steer(baseRef, paths), chosen, new ListingRoot(root, baseRef?.Contains("..", StringComparison.Ordinal) is not true), cancellationToken).ConfigureAwait(false), timing)
             : new Listing(untracked.Error!.Render(), default);
     }
 
-    private static async Task<Result<string>> UntrackedAsync(string root, string? baseRef, string? path, ChangeScope scope, CancellationToken cancellationToken) =>
+    private static async Task<Result<string>> UntrackedAsync(string root, string? baseRef, IReadOnlyList<string> paths, ChangeScope scope, CancellationToken cancellationToken) =>
         baseRef is { Length: > 0 } || scope.Staged || !scope.Untracked
             ? Result.Ok(string.Empty)
-            : await GitRunner.ReadAsync(
-                root,
-                ["--no-optional-locks", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "--", path is { Length: > 0 } pathspec ? pathspec : "."],
-                cancellationToken).ConfigureAwait(false);
+            : await GitRunner.ReadAsync(root, [.. OthersCommand, .. (paths.Count is 0 ? WholeTree : paths)], cancellationToken).ConfigureAwait(false);
 
     private readonly record struct Listing(string Text, GitTiming Timing);
 
@@ -166,7 +180,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
                 string nameStatus,
                 string untracked,
                 string? exclude,
-                string? path,
+                IReadOnlyList<string> paths,
                 int maxResults,
                 string? outside,
                 string? steer,
@@ -175,7 +189,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
                 CancellationToken cancellationToken)
     {
         var excluded = Excluded(exclude);
-        var listed = Lines(Tracked(numstat, nameStatus, excluded, root), untracked, excluded, path);
+        var listed = Lines(Tracked(numstat, nameStatus, excluded, root), untracked, excluded, paths);
 
         await CountUntrackedAsync(root.Path, listed.Rows, listed.Tracked, cancellationToken).ConfigureAwait(false);
 
@@ -189,7 +203,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             "files",
             "path=, exclude=, baseRef= or maxResults=");
 
-        if (listed.Files is 0 && Unmatched(root.Path, path) is { } unmatched)
+        if (listed.Files is 0 && FirstUnmatched(root.Path, paths) is { } unmatched)
             response.Note(unmatched);
 
         if (listed.Tracked > 0 && listed.Files > listed.Tracked)
@@ -348,12 +362,12 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
     private readonly record struct ListingRoot(string Path, bool LabelsUntracked);
 
-    private static Listed Lines(List<string> rows, string untracked, FileGlob? exclude, string? path)
+    private static Listed Lines(List<string> rows, string untracked, FileGlob? exclude, IReadOnlyList<string> paths)
     {
         var tracked = rows.Count;
         var kept = Kept(untracked, exclude);
 
-        Untracked(kept, rows, path);
+        Untracked(kept, rows, paths);
 
         return new Listed(rows, tracked + kept.Count, tracked);
     }
@@ -580,15 +594,12 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         return kept;
     }
 
-    private static void Untracked(List<string> kept, List<string> rows, string? path)
+    private static void Untracked(List<string> kept, List<string> rows, IReadOnlyList<string> paths)
     {
-        var raw = Scope(path);
-        var buffer = raw.Length <= 256 ? stackalloc char[256] : new char[raw.Length];
-        var scope = Normalized(raw, buffer);
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var byDirectory = counts.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        Fold(kept, Tally(kept, scope, byDirectory), byDirectory, rows);
+        Fold(kept, Tally(kept, Scopes(paths), byDirectory), byDirectory, rows);
     }
 
     private static ReadOnlySpan<char> TopDirectory(ReadOnlySpan<char> path, ReadOnlySpan<char> scope)
@@ -722,15 +733,15 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         };
     }
 
-    private static string Steer(string? baseRef, string? path)
+    private static string Steer(string? baseRef, IReadOnlyList<string> paths)
     {
         var arguments = new StringBuilder("next: diff_symbols");
 
         if (baseRef is { Length: > 0 } reference)
             arguments.Append(" baseRef=\"").Append(reference).Append('"');
 
-        if (path is { Length: > 0 } pathspec)
-            arguments.Append(" path=\"").Append(pathspec).Append('"');
+        for (var index = 0; index < paths.Count; index++)
+            arguments.Append(index is 0 ? " path=\"" : ", then path=\"").Append(paths[index]).Append('"');
 
         return arguments.Append(" - maps each hunk onto the declaration that contains it").ToString();
     }
@@ -805,7 +816,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
     private async Task<string> ListMemoizedAsync(
         LoadedWorkspace loaded,
-        string? path,
+        IReadOnlyList<string> paths,
         string? exclude,
         int maxResults,
         ChangeScope scope,
@@ -815,12 +826,12 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         var started = Stopwatch.GetTimestamp();
         var stamp = await GitStampAsync(loaded, cancellationToken).ConfigureAwait(false);
         var stamped = Stopwatch.GetElapsedTime(started);
-        var key = string.Join('\u0001', loaded.Root, path, exclude, maxResults.ToString(CultureInfo.InvariantCulture), scope.ToString(), capped.ToString());
+        var key = string.Join('\u0001', loaded.Root, string.Join('\u0002', paths), exclude, maxResults.ToString(CultureInfo.InvariantCulture), scope.ToString(), capped.ToString());
 
         if (stamp is not null && listings.Replay(key, stamp, started) is { } replay)
             return replay;
 
-        var listing = await ListTimedAsync(loaded.Root, null, path, exclude, maxResults, null, scope, capped, cancellationToken).ConfigureAwait(false);
+        var listing = await ListTimedAsync(loaded.Root, null, paths, exclude, maxResults, null, scope, capped, cancellationToken).ConfigureAwait(false);
 
         if (stamp is not null && !listing.Text.StartsWith("ERROR", StringComparison.Ordinal))
             listings.Remember(key, stamp, listing.Text, started);
@@ -1016,14 +1027,14 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
     private static int[] Tally(
             List<string> kept,
-            ReadOnlySpan<char> scope,
+            string[] scopes,
             Dictionary<string, int>.AlternateLookup<ReadOnlySpan<char>> byDirectory)
     {
         var lengths = new int[kept.Count];
 
         for (var index = 0; index < lengths.Length; index++)
         {
-            var directory = TopDirectory(kept[index], scope);
+            var directory = TopDirectory(kept[index], Nearest(kept[index], scopes));
 
             lengths[index] = directory.Length;
 
@@ -1258,5 +1269,48 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         var target = line[prefix.Length..].Trim();
 
         return target.IsEmpty ? null : Path.GetFullPath(Path.IsPathRooted(target) ? new string(target) : Path.Join(relativeTo, target));
+    }
+
+    private static readonly string[] OthersCommand = ["--no-optional-locks", "-c", "core.quotePath=false", "ls-files", "--others", "--exclude-standard", "--"];
+    private static readonly string[] WholeTree = ["."];
+
+    private static string[] Scopes(IReadOnlyList<string> paths)
+    {
+        var scopes = new string[paths.Count];
+        Span<char> buffer = stackalloc char[256];
+
+        for (var index = 0; index < scopes.Length; index++)
+        {
+            var raw = Scope(paths[index]);
+            var target = raw.Length <= buffer.Length ? buffer : new char[raw.Length];
+
+            scopes[index] = new string(Normalized(raw, target));
+        }
+
+        return scopes;
+    }
+
+    private static ReadOnlySpan<char> Nearest(ReadOnlySpan<char> file, string[] scopes)
+    {
+        var nearest = ReadOnlySpan<char>.Empty;
+
+        foreach (var scope in scopes)
+        {
+            if (scope.Length > nearest.Length && Below(file, scope) > 0)
+                nearest = scope;
+        }
+
+        return nearest;
+    }
+
+    private static string? FirstUnmatched(string root, IReadOnlyList<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            if (Unmatched(root, path) is { } warning)
+                return warning;
+        }
+
+        return null;
     }
 }

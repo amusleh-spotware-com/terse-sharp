@@ -972,6 +972,38 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
 
         Assert.StartsWith("ABSENT  Later.cs at HEAD - ", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ChangedFiles_WithPaths_ListsEveryPathspecOrEdAndFoldsEachUntrackedDirectoryBelowItsOwnScope()
+    {
+        var fixture = TerseServerFixture.FixtureRoot;
+        var fold = Path.Combine(fixture, "terse-paths-fold", "inner");
+
+        try
+        {
+            Directory.CreateDirectory(fold);
+
+            for (var index = 1; index <= 6; index++)
+                await File.WriteAllTextAsync(Path.Combine(fold, string.Create(CultureInfo.InvariantCulture, $"f{index}.txt")), "x\n", TestContext.Current.CancellationToken);
+
+            await File.WriteAllTextAsync(Path.Combine(fixture, "terse-paths-other.txt"), "x\n", TestContext.Current.CancellationToken);
+
+            var one = await server.CallAsync("changed_files", new() { ["paths"] = new[] { "terse-paths-other.txt" } });
+            var two = await server.CallAsync("changed_files", new() { ["paths"] = new[] { "terse-paths-other.txt", "terse-paths-fold" } });
+
+            Assert.Contains("terse-paths-other.txt", one, StringComparison.Ordinal);
+            Assert.DoesNotContain("terse-paths-fold", one, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", two, StringComparison.Ordinal);
+            Assert.Contains("terse-paths-other.txt", two, StringComparison.Ordinal);
+            Assert.Contains("terse-paths-fold/inner/**", two, StringComparison.Ordinal);
+            Assert.Contains("x6 untracked", two, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(Path.Combine(fixture, "terse-paths-fold"), recursive: true);
+            File.Delete(Path.Combine(fixture, "terse-paths-other.txt"));
+        }
+    }
 }
 
 internal static class DiffSymbolProbe

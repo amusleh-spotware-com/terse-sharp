@@ -173,7 +173,7 @@ public sealed class ParameterAliasesTests
     }
 
     [Fact]
-    public void Apply_BindsAOneEntryChangedFilesPathsToPath_AndLeavesALongerListForTheRefusal()
+    public void Apply_LeavesChangedFilesPathsForTheToolThatDeclaresIt()
     {
         var one = Arguments("""{"paths": ["src"]}""");
         var two = Arguments("""{"paths": ["src", "tests"]}""");
@@ -181,8 +181,8 @@ public sealed class ParameterAliasesTests
         ParameterAliases.Apply("changed_files", one);
         ParameterAliases.Apply("changed_files", two);
 
-        Assert.Equal("src", one["path"].GetString());
-        Assert.False(one.ContainsKey("paths"));
+        Assert.Equal(1, one["paths"].GetArrayLength());
+        Assert.False(one.ContainsKey("path"));
         Assert.Equal(2, two["paths"].GetArrayLength());
         Assert.False(two.ContainsKey("path"));
     }
@@ -200,6 +200,7 @@ public sealed class ParameterAliasesTests
         Assert.Equal(Path.Join(root, "a.md"), read["path"]!.GetValue<string>());
         Assert.False(read.ContainsKey("root"));
         Assert.False(changed["untracked"]!.GetValue<bool>());
-        Assert.Equal("src", changed["path"]!.GetValue<string>());
+        Assert.Equal("src", changed["paths"]![0]!.GetValue<string>());
+        Assert.False(changed.ContainsKey("path"));
     }
 }

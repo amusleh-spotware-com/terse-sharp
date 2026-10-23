@@ -9,7 +9,6 @@ internal enum AliasShape
 {
     Renamed,
     Inverted,
-    Single,
     Rooted,
 }
 
@@ -37,7 +36,6 @@ internal static class ParameterAliases
         new("read_text", "limit", "maxLines"),
         new("read_text", "root", "path", Shape: AliasShape.Rooted),
         new("changed_files", "tracked", "untracked", Shape: AliasShape.Inverted),
-        new("changed_files", "paths", "path", Shape: AliasShape.Single),
         new("search_text", "-C", "context"),
         new("search_text", "-A", "context"),
         new("search_text", "-B", "context"),
@@ -107,8 +105,6 @@ internal static class ParameterAliases
     {
         (AliasShape.Inverted, _, JsonValueKind.True or JsonValueKind.False) => Flag(value.ValueKind is JsonValueKind.False),
         (AliasShape.Inverted, _, _) => null,
-        (AliasShape.Single, _, JsonValueKind.Array) when value.GetArrayLength() is 1 && Text(value[0]) is not null => value[0],
-        (AliasShape.Single, _, _) => null,
         (_, null, _) => value,
         (_, { } values, JsonValueKind.String) when values.TryGetValue(value.GetString()!, out var flag) => Flag(flag),
         _ => null,
@@ -119,8 +115,6 @@ internal static class ParameterAliases
         (_, _, null) => null,
         (AliasShape.Inverted, _, JsonValue flag) when flag.TryGetValue<bool>(out var on) => JsonValue.Create(!on),
         (AliasShape.Inverted, _, _) => null,
-        (AliasShape.Single, _, JsonArray { Count: 1 } list) when Text(list[0]) is { } only => JsonValue.Create(only),
-        (AliasShape.Single, _, _) => null,
         (_, null, _) => value,
         (_, { } values, JsonValue text) when text.TryGetValue<string>(out var mode) && values.TryGetValue(mode, out var flag) => JsonValue.Create(flag),
         _ => null,

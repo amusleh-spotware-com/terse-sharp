@@ -498,7 +498,7 @@ nothing.
 | **Razor / Blazor** | `razor_outline` · `razor_component` · `razor_find` · `razor_bindings` · `razor_codebehind` · `razor_validate` · `razor_set_attribute` · `razor_add_element` · `razor_remove_element` · `razor_set_directive` |
 | **Localization** (`.resx`/`.resw`) | `resx_files` · `resx_get` · `resx_find` · `resx_usages` · `resx_set` · `resx_remove` · `resx_rename` · `resx_validate` |
 | **Files** — replaces `Glob`/`ls`/`cat` | `read_text` · `write_text` · `edit_text` · `find_files` · `search_text` · `search_regex` |
-| **Git** — replaces `git status`/`git diff`/`git diff --cached`/`git log`/`git tag --list`/`git ls-remote --tags` | `changed_files` (`staged=true`, `untracked=false`) · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list, `remote=true` to merge origin's) |
+| **Git** — replaces `git status`/`git diff`/`git diff --cached`/`git log`/`git tag --list`/`git ls-remote --tags` | `changed_files` (`staged=true`, `untracked=false`, `paths=`) · `diff_symbols` · `diff_text` · `history` (`tags=true` for the tag list, `remote=true` to merge origin's) |
 | **Build & test** — replaces `dotnet build`/`test` | `build` · `run_tests` · `rerun_failed` · `list_tests` |
 
 <details>

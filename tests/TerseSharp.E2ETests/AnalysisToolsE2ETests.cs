@@ -740,6 +740,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
 
         Assert.DoesNotContain("ERROR", aliased, StringComparison.Ordinal);
         Assert.Contains("files", aliased, StringComparison.Ordinal);
-        Assert.Contains("unrecognized paths", two, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", two, StringComparison.Ordinal);
+        Assert.Contains("files", two, StringComparison.Ordinal);
     }
 }
