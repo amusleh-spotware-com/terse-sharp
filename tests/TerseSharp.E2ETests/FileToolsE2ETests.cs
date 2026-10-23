@@ -2059,6 +2059,73 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task WriteText_GivingAMethodATrailingOptionalParameter_ReportsNoDroppedDeclaration()
+    {
+        const string Resigned = """
+            namespace Fixture.Trading;
+
+            public sealed class OrderService
+            {
+                private readonly IOrderRepository repository;
+
+                public OrderService(IOrderRepository repository) => this.repository = repository;
+
+                public int PendingCount => repository.PendingCount;
+
+                public bool Submit(Order order) => repository.Submit(order);
+
+                public bool SubmitTwice(Order order) => Submit(order) && Submit(order);
+
+                public int Unused(int seed = 0) => 7 + seed;
+
+                private int NeverCalled() => 42;
+            }
+            """;
+
+        var text = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["content"] = Resigned,
+            ["force"] = true,
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("+    public int Unused(int seed = 0) => 7 + seed;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("drops", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_RestoringACSharpFileFromARef_DoesNotWarnAboutTheDeclarationsTheRestoreRemoves()
+    {
+        const string Target = "src/Fixture.Trading/OrderService.cs";
+        var full = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
+        var stamp = File.GetLastWriteTimeUtc(full);
+        var original = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var added = await server.CallAsync("write_text", new()
+            {
+                ["path"] = Target,
+                ["content"] = original.Replace("    private int NeverCalled() => 42;", "    private int NeverCalled() => 42;\n\n    public int Added() => 1;", StringComparison.Ordinal),
+                ["force"] = true,
+            });
+
+            var restored = await server.CallAsync("write_text", new() { ["path"] = Target, ["ref"] = "HEAD" });
+
+            Assert.DoesNotContain("ERROR", added, StringComparison.Ordinal);
+            Assert.Contains("changedLines=", restored, StringComparison.Ordinal);
+            Assert.DoesNotContain("drops", restored, StringComparison.Ordinal);
+            Assert.DoesNotContain("Added()", await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Target, ["ref"] = "HEAD" });
+            File.SetLastWriteTimeUtc(full, stamp);
+        }
+    }
+
+    [Fact]
     public async Task ReadText_OnAFileAnotherProcessHoldsOpenForWriting_ReadsItInsteadOfRefusing()
     {
         const string Relative = "terse-held-open-probe.log";

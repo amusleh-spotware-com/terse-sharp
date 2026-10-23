@@ -1004,8 +1004,8 @@ context.RejectWrite() is { } rejection
                 "pass allowEmpty=true to restore it empty, or delete=true to remove it").Render();
         }
 
-        return NavigationTools.Unwrap(await FileService.WriteTextAsync(
-            loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, overwrite: true, cancellationToken).ConfigureAwait(false));
+        return NavigationTools.Unwrap(await FileService.RestoreTextAsync(
+            loaded, path, shown.Value!, options.DryRun, options.Force, options.AllowErrors, options.Verbose, options.AllowPolicy, cancellationToken).ConfigureAwait(false));
     }
 
     private static string Unrestorable(TerseError error, string relative, string reference) => RefRead.IsAbsent(error)

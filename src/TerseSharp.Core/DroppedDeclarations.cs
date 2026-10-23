@@ -13,8 +13,11 @@ internal static class DroppedDeclarations
         if (before.Length is 0 || !SourceFile.IsCSharp(path))
             return null;
 
+        var held = Declared(before).Distinct(StringComparer.Ordinal).ToArray();
         var kept = new HashSet<string>(Declared(after), StringComparer.Ordinal);
-        var dropped = Declared(before).Where(name => !kept.Contains(name)).Distinct(StringComparer.Ordinal).ToArray();
+        var removed = Array.FindAll(held, name => !kept.Contains(name));
+        var added = kept.Except(held, StringComparer.Ordinal).ToArray();
+        var dropped = Array.FindAll(removed, name => Overloads(removed, name) > Overloads(added, name));
 
         return dropped.Length is 0
             ? null
@@ -24,6 +27,23 @@ internal static class DroppedDeclarations
     }
 
     public static string Warned(string text, string? warning) => warning is null ? text : text + "\n" + warning;
+
+    private static int Overloads(string[] names, string name)
+    {
+        var stem = Stem(name);
+        var count = 0;
+
+        foreach (var other in names)
+        {
+            if (Stem(other).SequenceEqual(stem))
+                count++;
+        }
+
+        return count;
+    }
+
+    private static ReadOnlySpan<char> Stem(string name) =>
+        name.IndexOf('(', StringComparison.Ordinal) is var open and >= 0 ? name.AsSpan(0, open) : name.AsSpan();
 
     private static string Named(string[] dropped) => dropped.Length > MaxNamed
         ? string.Join(", ", dropped.Take(MaxNamed)) + string.Create(CultureInfo.InvariantCulture, $" and {dropped.Length - MaxNamed} more")

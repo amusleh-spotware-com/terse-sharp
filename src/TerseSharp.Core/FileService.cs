@@ -32,7 +32,7 @@ public static class FileService
             : Result.Fail<string>(await MissingDocument.ReadAsync(workspace, label, cancellationToken).ConfigureAwait(false));
     }
 
-    public static async Task<Result<string>> WriteTextAsync(
+    public static Task<Result<string>> WriteTextAsync(
             LoadedWorkspace workspace,
             string path,
             string content,
@@ -42,22 +42,39 @@ public static class FileService
             bool verbose,
             bool allowPolicy,
             bool overwrite,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken) =>
+        TextWrittenAsync(workspace, path, content, new(dryRun, force, allowErrors, verbose, allowPolicy, overwrite, Restored: false), cancellationToken);
+
+    public static Task<Result<string>> RestoreTextAsync(
+            LoadedWorkspace workspace,
+            string path,
+            string content,
+            bool dryRun,
+            bool force,
+            bool allowErrors,
+            bool verbose,
+            bool allowPolicy,
+            CancellationToken cancellationToken) =>
+        TextWrittenAsync(workspace, path, content, new(dryRun, force, allowErrors, verbose, allowPolicy, Overwrite: true, Restored: true), cancellationToken);
+
+    private static async Task<Result<string>> TextWrittenAsync(LoadedWorkspace workspace, string path, string content, TextWrite write, CancellationToken cancellationToken)
     {
-        var resolved = Writable(workspace, path, force);
+        var resolved = Writable(workspace, path, write.Force);
 
         if (!resolved.IsOk)
             return Result.Fail<string>(resolved.Error!);
 
         var full = resolved.Value!;
 
-        if (SourceFile.Reject(workspace, path, full, force) is { } refusal)
+        if (SourceFile.Reject(workspace, path, full, write.Force) is { } refusal)
             return refusal;
 
         return workspace.Contains(full)
-            ? await InsideAsync(workspace, path, full, content, dryRun, allowErrors, verbose, allowPolicy, overwrite, cancellationToken).ConfigureAwait(false)
-            : await OutsideWriteAsync(workspace, full, content, dryRun, verbose, cancellationToken).ConfigureAwait(false);
+            ? await InsideAsync(workspace, path, full, content, write, cancellationToken).ConfigureAwait(false)
+            : await OutsideWriteAsync(workspace, full, content, write.DryRun, write.Verbose, cancellationToken).ConfigureAwait(false);
     }
+
+    private readonly record struct TextWrite(bool DryRun, bool Force, bool AllowErrors, bool Verbose, bool AllowPolicy, bool Overwrite, bool Restored);
 
     public static async Task<Result<string>> EditTextAsync(
         LoadedWorkspace workspace,
@@ -1419,28 +1436,24 @@ public static class FileService
                 string path,
                 string full,
                 string content,
-                bool dryRun,
-                bool allowErrors,
-                bool verbose,
-                bool allowPolicy,
-                bool overwrite,
+                TextWrite write,
                 CancellationToken cancellationToken)
     {
         var (before, after, ending) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
 
-        if (!overwrite && ReplacedContent.Measure(before, after) is { Unrelated: true } overlap)
+        if (!write.Overwrite && ReplacedContent.Measure(before, after) is { Unrelated: true } overlap)
             return Result.Fail<string>(ReplacedContent.Refusal(path, overlap));
 
-        var dropped = DroppedDeclarations.Warning(path, before, after);
-        var quiet = !dryRun && !verbose;
+        var dropped = write.Restored ? null : DroppedDeclarations.Warning(path, before, after);
+        var quiet = !write.DryRun && !write.Verbose;
 
-        if (await GatedAsync(workspace, path, full, after, dryRun, allowErrors, verbose, allowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
+        if (await GatedAsync(workspace, path, full, after, write.DryRun, write.AllowErrors, write.Verbose, write.AllowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
             return gated.IsOk ? Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(gated.Value!, dropped), before, after, quiet), ending)) : gated;
 
-        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
+        if (!write.DryRun && !string.Equals(before, after, StringComparison.Ordinal))
             await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
 
-        return Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, dryRun, verbose), dropped), before, after, quiet), ending));
+        return Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, write.DryRun, write.Verbose), dropped), before, after, quiet), ending));
     }
 
     private static async Task<Result<string>> OutsideWriteAsync(
