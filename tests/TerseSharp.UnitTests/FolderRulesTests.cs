@@ -72,6 +72,7 @@ public sealed class FolderRulesTests : IDisposable
     public async Task PreToolUse_ForAWriteBelowRulesAReadAlreadyShowed_AllowsIt()
     {
         await HookAsync(Read());
+        await EndBatchAsync();
 
         Assert.Null(await HookAsync(Write()));
     }
@@ -405,6 +406,20 @@ public sealed class FolderRulesTests : IDisposable
         Assert.Equal("deny", sibling!["permissionDecision"]!.GetValue<string>());
         Assert.Contains("FOO RULES", sibling["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Null(retry);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteSiblingOfTheReadThatInjectedTheRules_DeniesItWithTheRulesUntilTheBatchEnds()
+    {
+        var injected = Context(await HookAsync(Read()));
+        var sibling = await HookAsync(Write());
+        await EndBatchAsync();
+        var next = await HookAsync(Write());
+
+        Assert.Contains("FOO RULES", injected, StringComparison.Ordinal);
+        Assert.Equal("deny", sibling?["permissionDecision"]?.GetValue<string>());
+        Assert.Contains("FOO RULES", sibling!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Null(next);
     }
 
     [Fact]

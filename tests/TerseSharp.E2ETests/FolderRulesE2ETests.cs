@@ -24,6 +24,7 @@ public sealed class FolderRulesE2ETests : IDisposable
     public async Task GuardFolderRules_InjectsANestedClaudeMdAfterATerseRead_AndDoesNotStopAWriteBelowIt()
     {
         var injected = await GuardAsync(Payload("PostToolUse", "mcp__terse-sharp__get_file_outline", "tests/Unit/OrderTests.cs"));
+        await GuardAsync(new JsonObject { ["hook_event_name"] = "PostToolBatch", ["session_id"] = "e2e-session", ["cwd"] = Repository, ["tool_calls"] = new JsonArray() }, "--post-batch");
         var write = await GuardAsync(Payload("PreToolUse", "mcp__terse-sharp__write_text", "tests/Unit/NewTests.cs"));
 
         var output = JsonNode.Parse(injected)!["hookSpecificOutput"]!;

@@ -150,7 +150,7 @@ public static class FolderRules
 
     private static List<RuleSection> Shown(FolderRuleLedger ledger, Reply reply, List<RuleSection> planned)
     {
-        var claimed = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost, reply.Hold);
+        var claimed = ledger.Claim([.. planned.Select(section => section.Rule)], reply.ShowUnrecorded, reply.ShowLost, hold: true);
         var shown = planned.FindAll(section => claimed.Contains(section.Rule));
 
         foreach (var section in shown)
