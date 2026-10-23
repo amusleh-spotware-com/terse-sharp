@@ -12,7 +12,7 @@ public sealed class LastTestRunTests
     {
         var lastRun = new LastTestRun();
 
-        Assert.False(lastRun.Memory.Covers(Root));
+        Assert.False(lastRun.Recall(Root).Covers(Root));
     }
 
     [Fact]
@@ -22,10 +22,10 @@ public sealed class LastTestRunTests
 
         lastRun.Remember(Root, "Fixture.Trading.Tests.csproj", ["Ns.Tests.One", "Ns.Tests.Two"]);
 
-        Assert.Equal(Root, lastRun.Memory.WorkspaceRoot);
-        Assert.Equal("Fixture.Trading.Tests.csproj", lastRun.Memory.Target);
-        Assert.Equal(["Ns.Tests.One", "Ns.Tests.Two"], lastRun.Memory.FailedTests);
-        Assert.True(lastRun.Memory.Covers(Root));
+        Assert.Equal(Root, lastRun.Recall(Root).WorkspaceRoot);
+        Assert.Equal("Fixture.Trading.Tests.csproj", lastRun.Recall(Root).Target);
+        Assert.Equal(["Ns.Tests.One", "Ns.Tests.Two"], lastRun.Recall(Root).FailedTests);
+        Assert.True(lastRun.Recall(Root).Covers(Root));
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public sealed class LastTestRunTests
 
         lastRun.Remember(Root, "one.csproj", ["Ns.Tests.One"]);
 
-        Assert.False(lastRun.Memory.Covers("C:\\other"));
+        Assert.False(lastRun.Recall(Root).Covers("C:\\other"));
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public sealed class LastTestRunTests
 
         lastRun.Remember(Root, "one.csproj", ["Ns.Tests.One"]);
 
-        Assert.False(lastRun.Memory.Covers("C:\\repository"));
+        Assert.False(lastRun.Recall(Root).Covers("C:\\repository"));
     }
 
     [Fact]
@@ -56,8 +56,8 @@ public sealed class LastTestRunTests
         lastRun.Remember(Root, "first.csproj", ["Ns.Tests.One"]);
         lastRun.Remember(Root, "second.csproj", [], passedTests: ["Ns.Tests.One"]);
 
-        Assert.Equal("second.csproj", lastRun.Memory.Target);
-        Assert.False(lastRun.Memory.Covers(Root));
+        Assert.Equal("second.csproj", lastRun.Recall(Root).Target);
+        Assert.False(lastRun.Recall(Root).Covers(Root));
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class LastTestRunTests
 
         lastRun.Remember(Root, "big.csproj", Enumerable.Range(0, 500).Select(index => "Ns.Tests.Case" + index.ToString(CultureInfo.InvariantCulture)));
 
-        Assert.Equal(200, lastRun.Memory.FailedTests.Length);
+        Assert.Equal(200, lastRun.Recall(Root).FailedTests.Length);
     }
 
     [Fact]
@@ -78,8 +78,8 @@ public sealed class LastTestRunTests
         lastRun.Remember(Root, "all.slnx", ["Ns.Tests.One"]);
         lastRun.Remember(Root, "all.slnx", []);
 
-        Assert.Equal(["Ns.Tests.One"], lastRun.Memory.FailedTests);
-        Assert.True(lastRun.Memory.Covers(Root));
+        Assert.Equal(["Ns.Tests.One"], lastRun.Recall(Root).FailedTests);
+        Assert.True(lastRun.Recall(Root).Covers(Root));
     }
 
     [Fact]
@@ -199,4 +199,40 @@ public sealed class LastTestRunTests
     [InlineData(null, false, 0, false)]
     public void Whole_IsTrueOnlyForAnUnfilteredSingleTargetRunThatReportedTests(string? filter, bool subset, int total, bool expected) =>
         Assert.Equal(expected, TestRunMemory.Whole(filter, subset ? ["a.csproj"] : default, total));
+
+    [Fact]
+    public void Remember_ARunInAnotherSolution_KeepsTheFirstSolutionsFailuresForItsRerun()
+    {
+        var lastRun = new LastTestRun();
+
+        lastRun.Remember(Root, "all.slnx", ["Ns.Tests.One", "Ns.Tests.Two"], solutionPath: "C:\\repo\\all.slnx");
+        lastRun.Remember("C:\\worktree", "all.slnx", [], passedTests: ["Ns.Tests.Other"], solutionPath: "C:\\worktree\\all.slnx");
+
+        Assert.Equal(["Ns.Tests.One", "Ns.Tests.Two"], lastRun.Recall("C:\\repo\\all.slnx").FailedTests);
+        Assert.True(lastRun.Recall("C:\\repo\\all.slnx").Covers(Root));
+    }
+
+    [Fact]
+    public void Elsewhere_ForASolutionWithNothingRemembered_NamesTheSolutionsThatHoldFailures()
+    {
+        var lastRun = new LastTestRun();
+
+        lastRun.Remember(Root, "all.slnx", ["Ns.Tests.One"], solutionPath: "C:\\repo\\all.slnx");
+
+        Assert.False(lastRun.Recall("C:\\worktree\\all.slnx").Covers("C:\\worktree"));
+        Assert.Equal(["C:\\repo\\all.slnx (1)"], lastRun.Elsewhere("C:\\worktree\\all.slnx"));
+    }
+
+    [Fact]
+    public void Remember_MoreSolutionsThanTheCap_ForgetsTheOldestOnly()
+    {
+        var lastRun = new LastTestRun();
+
+        for (var index = 0; index <= 16; index++)
+            lastRun.Remember(Root, "all.slnx", ["Ns.Tests.One"], solutionPath: "C:\\s" + index.ToString(CultureInfo.InvariantCulture));
+
+        Assert.False(lastRun.Recall("C:\\s0").Covers(Root));
+        Assert.True(lastRun.Recall("C:\\s16").Covers(Root));
+        Assert.Equal(15, lastRun.Elsewhere("C:\\s16").Length);
+    }
 }

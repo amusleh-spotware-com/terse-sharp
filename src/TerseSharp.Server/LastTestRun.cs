@@ -50,16 +50,65 @@ public sealed class LastTestRun
 {
     private const int MaxRememberedTests = 200;
 
-    private TestRunMemory memory = new(string.Empty, string.Empty, []);
+    private const int MaxRememberedSolutions = 16;
+
+    private static readonly TestRunMemory Nothing = new(string.Empty, string.Empty, []);
+
+    private readonly Dictionary<string, (TestRunMemory Memory, long Order)> runs = new(StringComparer.FromComparison(PathBoundary.Comparison));
+    private long order;
     private readonly Lock gate = new();
 
-    public TestRunMemory Memory => Volatile.Read(ref memory);
+    public TestRunMemory Recall(string solutionPath)
+    {
+        lock (gate)
+            return runs.TryGetValue(solutionPath, out var remembered) ? remembered.Memory : Nothing;
+    }
 
-    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests, BuildScope scope = default, IEnumerable<string>? passedTests = null, bool unfiltered = false)
+    public ImmutableArray<string> Elsewhere(string solutionPath)
+    {
+        lock (gate)
+        {
+            var others = ImmutableArray.CreateBuilder<string>(runs.Count);
+
+            foreach (var (path, remembered) in runs)
+            {
+                if (!path.Equals(solutionPath, PathBoundary.Comparison) && !remembered.Memory.FailedTests.IsDefaultOrEmpty)
+                    others.Add(string.Create(CultureInfo.InvariantCulture, $"{path} ({remembered.Memory.FailedTests.Length})"));
+            }
+
+            return others.ToImmutable();
+        }
+    }
+
+    public void Remember(string workspaceRoot, string target, IEnumerable<string> failedTests, BuildScope scope = default, IEnumerable<string>? passedTests = null, bool unfiltered = false, string? solutionPath = null)
     {
         var run = new TestRunMemory(workspaceRoot, target, [.. failedTests.Take(MaxRememberedTests)], scope, unfiltered);
 
+        var key = solutionPath ?? workspaceRoot;
+
         lock (gate)
-            Volatile.Write(ref memory, Volatile.Read(ref memory).After(run, passedTests ?? [], MaxRememberedTests));
+        {
+            var previous = runs.TryGetValue(key, out var remembered) ? remembered.Memory : Nothing;
+
+            runs[key] = (previous.After(run, passedTests ?? [], MaxRememberedTests), ++order);
+            Evict();
+        }
+    }
+
+    private void Evict()
+    {
+        if (runs.Count <= MaxRememberedSolutions)
+            return;
+
+        var oldest = string.Empty;
+        var first = long.MaxValue;
+
+        foreach (var (path, remembered) in runs)
+        {
+            if (remembered.Order < first)
+                (oldest, first) = (path, remembered.Order);
+        }
+
+        runs.Remove(oldest);
     }
 }

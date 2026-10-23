@@ -214,12 +214,12 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             if (SelfBuilt(target, !noBuild && configuration is not { Length: > 0 }) is { } refused)
                 return Task.FromResult(refused);
 
-            var memory = lastRun.Memory;
+            var memory = lastRun.Recall(target.SolutionPath);
 
             if (!memory.Covers(target.Root))
             {
                 return Task.FromResult(Errors.Invalid(
-                    "no failing test is remembered for this workspace",
+                    Unremembered(lastRun.Elsewhere(target.SolutionPath)),
                     "call run_tests in this workspace first; a remembered failure is forgotten only once a later run passes it").Render());
             }
 
@@ -398,7 +398,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 result.Report.Failures.Select(failure => failure.Name),
                 request.Scope,
                 result.Report.PassedTests.Select(test => test.Name),
-                TestRunMemory.Whole(request.Filter, request.Targets, result.Report.Total));
+                TestRunMemory.Whole(request.Filter, request.Targets, result.Report.Total),
+                solutionPath: workspace.SolutionPath);
 
             return new LockedRun(result.Response, result.Locked);
         }, cancellationToken);
@@ -832,4 +833,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         context.WithTargetAsync(workspace, project, target => ActiveRuns.CancelAsync(target.SolutionPath, cancellationToken), cancellationToken: cancellationToken);
 
     internal static ImmutableArray<string> Entries(string? test, string?[]? tests) => Names(test, tests) is { Length: > 1 } names ? [.. names] : [];
+
+    private static string Unremembered(ImmutableArray<string> elsewhere) => elsewhere.IsDefaultOrEmpty
+        ? "no failing test is remembered for this workspace"
+        : string.Create(CultureInfo.InvariantCulture, $"no failing test is remembered for this workspace; failures are remembered for {string.Join(", ", elsewhere)} - pass workspace= to replay them there");
 }
