@@ -165,4 +165,66 @@ public sealed class MultiTargetE2ETests : IAsyncLifetime
     private static string[] Records(string text) =>
         [.. text.Split('\n').Where(line => line.Contains("Caller.cs", StringComparison.Ordinal))];
 
+    [Fact]
+    public async Task WriteText_AddingCodeForEachTargetFrameworkApart_IsVisibleToEveryCompilationWithoutAReload()
+    {
+        const string SplitNumbers = "namespace Multi.Core;\n\npublic static class Numbers\n{\n    public static int Doubled(int value) => value * 2;\n\n#if NET10_0_OR_GREATER\n    public static int Modern() => 2;\n#else\n    public static int Legacy() => 3;\n#endif\n}\n";
+        var path = Path.Combine(Root, "src", "Multi.Core", "Numbers.cs");
+        var before = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(path);
+
+        try
+        {
+            var written = await server.CallAsync("write_text", new() { ["path"] = path, ["content"] = SplitNumbers, ["overwrite"] = true }, TestContext.Current.CancellationToken);
+            var sources = await server.CallAsync("get_symbol_source", new() { ["symbolIds"] = new[] { "Numbers.Modern", "Numbers.Legacy" } }, TestContext.Current.CancellationToken);
+            var deleted = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "Numbers.Modern" }, TestContext.Current.CancellationToken);
+            var after = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", written, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOT_RESOLVED", sources, StringComparison.Ordinal);
+            Assert.DoesNotContain("SymbolNotFound", deleted, StringComparison.Ordinal);
+            Assert.DoesNotContain("Modern", after, StringComparison.Ordinal);
+            Assert.Contains("Legacy", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, before, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(path, stamp);
+            await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(Root, "MultiTargetSolution.slnx"), ["reload"] = true }, TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task EditText_AddingCodeForEachTargetFrameworkApart_IsVisibleToEveryCompilationWithoutAReload()
+    {
+        const string Baseline = "namespace Multi.Core;\n\npublic static class Numbers\n{\n    public static int Doubled(int value) => value * 2;\n}\n";
+        var path = Path.Combine(Root, "src", "Multi.Core", "Numbers.cs");
+        var before = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(path);
+
+        try
+        {
+            await File.WriteAllTextAsync(path, Baseline, TestContext.Current.CancellationToken);
+            await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(Root, "MultiTargetSolution.slnx"), ["reload"] = true }, TestContext.Current.CancellationToken);
+
+            var edited = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = path,
+                ["oldText"] = "    public static int Doubled(int value) => value * 2;\n",
+                ["newText"] = "    public static int Doubled(int value) => value * 2;\n\n#if NET10_0_OR_GREATER\n    public static int Modern() => 2;\n#else\n    public static int Legacy() => 3;\n#endif\n",
+            }, TestContext.Current.CancellationToken);
+            var sources = await server.CallAsync("get_symbol_source", new() { ["symbolIds"] = new[] { "Numbers.Modern", "Numbers.Legacy" } }, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", edited, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOT_RESOLVED", sources, StringComparison.Ordinal);
+            Assert.Contains("=> 2", sources, StringComparison.Ordinal);
+            Assert.Contains("=> 3", sources, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, before, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(path, stamp);
+            await server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(Root, "MultiTargetSolution.slnx"), ["reload"] = true }, TestContext.Current.CancellationToken);
+        }
+    }
 }

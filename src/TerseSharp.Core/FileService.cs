@@ -524,7 +524,7 @@ public static class FileService
 
         var options = new EditOptions("write_text", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy);
 
-        return await EditGate.ApplyAsync(workspace, staged.Updated, [staged.Id], options, cancellationToken).ConfigureAwait(false);
+        return await EditGate.ApplyAsync(workspace, staged.Updated, staged.Ids, options, cancellationToken).ConfigureAwait(false);
     }
 
     private static Result<string> Readable(LoadedWorkspace workspace, string path) =>
@@ -890,7 +890,7 @@ public static class FileService
         foreach (var entry in documents)
         {
             updated = await StagedIntoAsync(workspace, updated, entry, cancellationToken).ConfigureAwait(false);
-            ids.Add(entry.Document!);
+            ids.AddRange(entry.IsNew ? [entry.Document!] : LinkedIds(workspace.Solution, entry.Document!));
         }
 
         return await EditGate.ApplyAsync(workspace, updated, ids, options, cancellationToken).ConfigureAwait(false);
@@ -1036,7 +1036,7 @@ public static class FileService
 
     private readonly record struct StagedWrite(
         Microsoft.CodeAnalysis.Solution Updated,
-        Microsoft.CodeAnalysis.DocumentId Id);
+        Microsoft.CodeAnalysis.DocumentId[] Ids);
 
     private static async Task<StagedWrite?> StagedAsync(
         LoadedWorkspace workspace,
@@ -1050,9 +1050,9 @@ public static class FileService
 
         var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
         var encoding = Preamble(existing.Encoding, document.FilePath!);
-        var updated = workspace.Solution.WithDocumentText(document.Id, SourceText.From(content, encoding));
+        var updated = WithLinkedText(workspace.Solution, document.Id, SourceText.From(content, encoding));
 
-        return new StagedWrite(updated, document.Id);
+        return new StagedWrite(updated, [.. LinkedIds(workspace.Solution, document.Id)]);
     }
 
     private static StagedWrite? Introduced(LoadedWorkspace workspace, string full, string content)
@@ -1063,7 +1063,7 @@ public static class FileService
         var id = Microsoft.CodeAnalysis.DocumentId.CreateNewId(project.Id);
         var text = SourceText.From(content, AtomicWrite.EncodingOf(full));
 
-        return new StagedWrite(DocumentPlacement.Add(workspace.Solution, id, full, text), id);
+        return new StagedWrite(DocumentPlacement.Add(workspace.Solution, id, full, text), [id]);
     }
 
     public static Microsoft.CodeAnalysis.Project? CompilingProject(LoadedWorkspace workspace, string full) =>
@@ -1095,7 +1095,7 @@ public static class FileService
         var existing = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
         var encoding = Preamble(existing.Encoding, document.FilePath!);
 
-        return updated.WithDocumentText(entry.Document!, SourceText.From(entry.After, encoding));
+        return WithLinkedText(updated, entry.Document!, SourceText.From(entry.After, encoding));
     }
 
     private static PendingWrite Pending(LoadedWorkspace workspace, string path, string full, string before, string after)
@@ -2433,5 +2433,16 @@ public static class FileService
             await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
 
         return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, dryRun, verbose, full), ending));
+    }
+
+    private static System.Collections.Immutable.ImmutableArray<Microsoft.CodeAnalysis.DocumentId> LinkedIds(Microsoft.CodeAnalysis.Solution solution, Microsoft.CodeAnalysis.DocumentId id) =>
+        solution.GetDocumentIdsWithFilePath(solution.GetDocument(id)!.FilePath);
+
+    private static Microsoft.CodeAnalysis.Solution WithLinkedText(Microsoft.CodeAnalysis.Solution solution, Microsoft.CodeAnalysis.DocumentId id, SourceText text)
+    {
+        foreach (var linked in LinkedIds(solution, id))
+            solution = solution.WithDocumentText(linked, text, Microsoft.CodeAnalysis.PreservationMode.PreserveIdentity);
+
+        return solution;
     }
 }
