@@ -844,7 +844,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         if (sync.State is not WatchState.Active || sync.Gaps > 0 || sync.PendingCount > 0)
             return null;
 
-        if (GitDirectory(loaded.Root) is not { } git)
+        if (await GitLayoutAsync(loaded.Root, cancellationToken).ConfigureAwait(false) is not { } git)
             return null;
 
         var stamp = new StringBuilder(160);
@@ -855,32 +855,14 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             .Append('#')
             .Append(sync.Stirred.ToString(CultureInfo.InvariantCulture));
 
-        StatInto(stamp, Path.Combine(git, "index"));
-        StatInto(stamp, Path.Combine(git, "HEAD"));
-        StatInto(stamp, Path.Combine(git, "packed-refs"));
+        StatInto(stamp, Path.Combine(git.Own, "index"));
+        StatInto(stamp, Path.Combine(git.Own, "HEAD"));
+        StatInto(stamp, Path.Combine(git.Common, "packed-refs"));
 
-        if (await HeadTargetAsync(git, cancellationToken).ConfigureAwait(false) is { } head)
-            StatInto(stamp, Path.Combine(git, head));
+        if (await HeadTargetAsync(git.Own, cancellationToken).ConfigureAwait(false) is { } head)
+            StatInto(stamp, Path.Combine(git.Common, head));
 
         return stamp.ToString();
-    }
-
-    private static string? GitDirectory(string root)
-    {
-        for (var current = root; current is { Length: > 0 };)
-        {
-            var candidate = Path.Combine(current, ".git");
-
-            if (Directory.Exists(candidate))
-                return candidate;
-
-            if (File.Exists(candidate))
-                return null;
-
-            current = Path.GetDirectoryName(current) ?? string.Empty;
-        }
-
-        return null;
     }
 
     private static async Task<string?> HeadTargetAsync(string git, CancellationToken cancellationToken)
@@ -1222,5 +1204,59 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         return skipped is 0
             ? diffs.ToString()
             : diffs.Append(CultureInfo.InvariantCulture, $"{skipped} more untracked file(s) not shown - narrow path= to read them\n").ToString();
+    }
+
+    internal readonly record struct GitLayout(string Own, string Common);
+
+    internal static async Task<GitLayout?> GitLayoutAsync(string root, CancellationToken cancellationToken)
+    {
+        for (var current = root; current is { Length: > 0 };)
+        {
+            var candidate = Path.Combine(current, ".git");
+
+            if (Directory.Exists(candidate))
+                return new GitLayout(candidate, candidate);
+
+            if (File.Exists(candidate))
+                return await LinkedAsync(current, candidate, cancellationToken).ConfigureAwait(false);
+
+            current = Path.GetDirectoryName(current) ?? string.Empty;
+        }
+
+        return null;
+    }
+
+    private static async Task<GitLayout?> LinkedAsync(string directory, string file, CancellationToken cancellationToken)
+    {
+        if (Pointed(directory, await ContentAsync(file, cancellationToken).ConfigureAwait(false), "gitdir:") is not { } own || !Directory.Exists(own))
+            return null;
+
+        var common = Pointed(own, await ContentAsync(Path.Combine(own, "commondir"), cancellationToken).ConfigureAwait(false), string.Empty) ?? own;
+
+        return Directory.Exists(common) ? new GitLayout(own, common) : null;
+    }
+
+    private static async Task<string?> ContentAsync(string path, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static string? Pointed(string relativeTo, string? content, string prefix)
+    {
+        var line = content.AsSpan().Trim();
+
+        if (!line.StartsWith(prefix, StringComparison.Ordinal))
+            return null;
+
+        var target = line[prefix.Length..].Trim();
+
+        return target.IsEmpty ? null : Path.GetFullPath(Path.IsPathRooted(target) ? new string(target) : Path.Join(relativeTo, target));
     }
 }
