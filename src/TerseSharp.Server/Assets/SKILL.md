@@ -903,7 +903,7 @@ all at `warn`, `chainedReferences` off, so **nothing rejects until you ask**:
 `ERROR PolicyViolation` naming each rule, the declaration, measured against allowed, and a `fix:` line.
 
 **Only what the edit INTRODUCES counts** - a violation already in the file does not block you, so never
-"fix" unrelated members to get an edit through. A finding is keyed by rule, path and declaration, not
+"fix" unrelated members to get an edit through. A finding is counted per rule, path and member, not
 by its measured value, so neither improving nor worsening an already-violating member registers.
 
 Fourteen rules, `TERSE100`-`TERSE113`: cognitive complexity, method statements, methods per type,

@@ -164,6 +164,61 @@ public sealed class PolicyGateTests
         Assert.DoesNotContain("TERSE105", result.Value!, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Introduced_ForASignatureWidenedOnAMemberThatAlreadyViolated_ChargesNothing()
+    {
+        PolicyFinding[] before = [Finding("6 parameters", 10)];
+        PolicyFinding[] after = [Finding("7 parameters", 10)];
+
+        Assert.Empty(PolicyGate.Introduced(before, after));
+    }
+
+    [Fact]
+    public void Introduced_ForANewOverloadThatViolatesBesideAnExistingViolator_ChargesTheNewOverloadOnly()
+    {
+        PolicyFinding[] before = [Finding("8 parameters", 20)];
+        PolicyFinding[] after = [Finding("6 parameters", 10), Finding("8 parameters", 22)];
+
+        var introduced = Assert.Single(PolicyGate.Introduced(before, after));
+
+        Assert.Equal(10, introduced.Line);
+        Assert.Equal("6 parameters", introduced.Measured);
+    }
+
+    [Fact]
+    public void Introduced_ForTwoViolatingOverloadsWidenedTogether_ChargesNeither()
+    {
+        PolicyFinding[] before = [Finding("6 parameters", 10), Finding("8 parameters", 20)];
+        PolicyFinding[] after = [Finding("7 parameters", 10), Finding("9 parameters", 20)];
+
+        Assert.Empty(PolicyGate.Introduced(before, after));
+    }
+
+    [Fact]
+    public async Task ApplyAsync_ForANewOverloadThatViolatesBesideAPreExistingViolator_ChargesTheNewOverload()
+    {
+        using var workspace = await TemporaryWorkspace.OpenAsync(TestContext.Current.CancellationToken);
+
+        await ConfigureAsync(workspace, """{"policy":{"action":"reject","rules":{"parameterCount":{"action":"reject","limit":5}}}}""");
+        Assert.True((await AddAsync(
+            workspace,
+            "public int Distribute(int first, int second, int third, int fourth, int fifth, int sixth) => first + second + third + fourth + fifth + sixth;",
+            allowPolicy: true)).IsOk);
+
+        var result = await AddAsync(
+            workspace,
+            "public int Distribute(int first, int second, int third, int fourth, int fifth, int sixth, int seventh) => first + second + third + fourth + fifth + sixth + seventh;",
+            allowPolicy: false);
+
+        Assert.False(result.IsOk);
+        Assert.Equal(TerseErrorCode.PolicyViolation, result.Error!.Code);
+        Assert.Contains("TERSE104", result.Error.Message, StringComparison.Ordinal);
+        Assert.Contains("7 parameters exceeds 5", result.Error.Message, StringComparison.Ordinal);
+    }
+
+    private static PolicyFinding Finding(string measured, int line) =>
+        new(PolicyRule.ParameterCount, PolicyAction.Warn, "src/Plumbing.cs", line, 5, "Plumbing.Write", measured, "5");
+
     private static async Task ConfigureAsync(TemporaryWorkspace workspace, string json)
     {
         PolicyCache.Forget();
