@@ -103,7 +103,7 @@ public static class StaleBinaries
 
         foreach (var project in solution.Projects)
         {
-            if (roots.Count is 0 || Named(roots, project.FilePath))
+            if (roots.Count is 0 || Named(roots, project.FilePath) || Named(roots, project.OutputFilePath))
                 targets.Add(project);
         }
 

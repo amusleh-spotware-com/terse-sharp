@@ -91,7 +91,7 @@ public static class EditGate
         if (report.Unresolved.Length > 0)
             Unresolved(response, report, dryRun);
 
-        if (report.Pending.Length > 0)
+        if (report.Pending.Length > 0 && report.NewErrors.Length is 0)
             Deferred(response, report, dryRun);
 
         if (report.NewErrors.Length > 0)

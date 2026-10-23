@@ -860,7 +860,7 @@ public static class ToolGuard
 
     private static bool Rewrites(string name, string[] command) =>
         name.Equals("sed", StringComparison.OrdinalIgnoreCase)
-            && Array.Exists(command, token => token.StartsWith("-i", StringComparison.Ordinal) || token.Equals("--in-place", StringComparison.Ordinal));
+            && Array.Exists(command, token => token.StartsWith("-i", StringComparison.Ordinal) || token.StartsWith("--in-place", StringComparison.Ordinal));
 
     private static GuardVerdict Denial(Stage stage, string? cwd, bool compound, string unfenceable = "")
     {
@@ -2800,6 +2800,19 @@ public static class ToolGuard
         return null;
     }
 
+    private static readonly string[] ScriptWriteMarkers = ["'w'", "\"w\"", "'a'", "\"a\"", "'wb'", "\"wb\"", "write", "Write", "appendFile", "unlink", "remove(", "rename"];
+
+    private static bool ScriptWrites(string script)
+    {
+        foreach (var marker in ScriptWriteMarkers)
+        {
+            if (script.Contains(marker, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
+    }
+
     private static string? EditedSource(string segment, string? cwd)
     {
         var command = Command(segment);
@@ -2810,8 +2823,8 @@ public static class ToolGuard
             "sed" when Rewrites("sed", command) => SourceOperand(command, cwd, false),
             "perl" when Array.Exists(command, PerlInPlace) => SourceOperand(command, cwd, true),
             "tee" => SourceOperand(command, cwd, true),
-            "python" or "python3" or "py" => ScriptSource(command, "-c", cwd),
-            "node" => ScriptSource(command, "-e", cwd) ?? ScriptSource(command, "--eval", cwd),
+            "python" or "python3" or "py" when ScriptWrites(segment) => ScriptSource(command, "-c", cwd),
+            "node" when ScriptWrites(segment) => ScriptSource(command, "-e", cwd) ?? ScriptSource(command, "--eval", cwd),
             _ => null,
         };
     }

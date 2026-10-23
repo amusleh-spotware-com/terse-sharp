@@ -2802,4 +2802,23 @@ public sealed class ToolGuardTests
         Assert.Contains("python3 - <<'EOF'\nimport os\nfor n in range(3): print(n)\nEOF", verdict.Routing, StringComparison.Ordinal);
         Assert.DoesNotContain("  |  import os", verdict.Routing, StringComparison.Ordinal);
     }
+
+    [Theory]
+    [InlineData("python3 -c \"print(open('src/TerseSharp.Core/OutlineService.cs').read()[:200])\"")]
+    [InlineData("node -e \"console.log(require('fs').readFileSync('src/TerseSharp.Core/OutlineService.cs','utf8'))\"")]
+    public void Inspect_ForAScriptThatOnlyReadsInTreeSource_IsNeverRoutedToAWriteTool(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.DoesNotContain("EDITS", verdict.Reason ?? string.Empty, StringComparison.Ordinal);
+        Assert.False(verdict.Routing?.StartsWith("edit_text", StringComparison.Ordinal) ?? false);
+        Assert.False(verdict.Routing?.StartsWith("write_text", StringComparison.Ordinal) ?? false);
+    }
+
+    [Fact]
+    public void Inspect_ForAnInPlaceSedWithABackupSuffix_RoutesToEditTextNotARead() =>
+        Assert.StartsWith(
+            "edit_text path=\"src/TerseSharp.Core/OutlineService.cs\"",
+            ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "sed --in-place=.bak 's/a/b/' src/TerseSharp.Core/OutlineService.cs" }, Fixtures.RepositoryRoot).Routing,
+            StringComparison.Ordinal);
 }

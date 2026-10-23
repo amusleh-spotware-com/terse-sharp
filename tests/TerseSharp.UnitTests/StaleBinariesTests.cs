@@ -61,4 +61,25 @@ public sealed class StaleBinariesTests
             documents: [DocumentInfo.Create(DocumentId.CreateNewId(id), "Source.cs", filePath: source)],
             projectReferences: references);
     }
+
+    [Fact]
+    public void Detect_WithARootNamedByItsOutputAssembly_StillProbesThatProject()
+    {
+        var root = Directory.CreateTempSubdirectory("terse-stale-");
+
+        try
+        {
+            var tests = Project(root, "Direct.Tests", stale: true);
+            using var workspace = new AdhocWorkspace();
+            var solution = workspace.AddSolution(SolutionInfo.Create(SolutionId.CreateNewId(), VersionStamp.Default, projects: [tests]));
+
+            var scoped = StaleBinaries.Detect(solution, [tests.OutputFilePath!]);
+
+            Assert.Equal(tests.FilePath, Assert.Single(scoped).ProjectPath);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
 }
