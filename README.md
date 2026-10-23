@@ -127,7 +127,7 @@ that merely shortens a response, and both beat a faster server.
 | one read per file | `read_text paths=[…]` — up to 10 files, one answer |
 | one ranged read per anchor in the same file | `read_text ranges=["42", "101-102"]` — discontinuous ranges, one answer |
 | one edit call per site | `edit_text edits=[…]` — 25 edits across files, one write |
-| re-sending a previewed or rolled-back write | `write_text retryWith=r3` — the payload is held, the retry sends none |
+| re-sending a previewed, rolled-back or force-refused write | `write_text retryWith=r3` — the payload is held, the retry sends none |
 | edit, build, find you broke a caller, edit again | `replace_symbol symbolIds=[…]` — the member and its callers land in **one** compile gate |
 | grep the test tree and guess what to run | `find_usages impact=true tests=true` — ready-made `run_tests test=` arguments |
 | one search per glob | `search_text paths=["src/**/*.cs", "**/*.md"]` — globs OR-ed into one file set, one answer |

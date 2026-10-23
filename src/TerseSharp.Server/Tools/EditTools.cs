@@ -453,15 +453,16 @@ public sealed class EditTools(ToolContext context)
         : held is { Count: > 0 } ? [.. held] : null;
 
     private static string Rejected(TerseError error, Carry carry, string root) =>
-            carry.Tool is { Length: > 0 } tool && Holdable(carry, error.Code) && Worth(carry)
+            carry.Tool is { Length: > 0 } tool && Holdable(carry, error) && Worth(carry)
                 ? error.Render() + "\n" + RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0) + "\nretryWith=" + RejectedEdits.Remember(
                     root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement, carry.Edits)
                 : error.Render();
 
-    private static bool Holdable(Carry carry, TerseErrorCode code) => carry switch
+    private static bool Holdable(Carry carry, TerseError error) => carry switch
     {
-        { Tool: "edit_text" } or { Tool: "write_text", Targets.Length: > 1 } => code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation,
-        _ => code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol or TerseErrorCode.InvalidArgument,
+        { Tool: "write_text", Targets.Length: > 1 } when FileService.IsUnforced(error) => true,
+        { Tool: "edit_text" } or { Tool: "write_text", Targets.Length: > 1 } => error.Code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation,
+        _ => error.Code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol or TerseErrorCode.InvalidArgument,
     };
 
     private static string[] Corrected(string[]? supplied, IReadOnlyList<string> held) =>

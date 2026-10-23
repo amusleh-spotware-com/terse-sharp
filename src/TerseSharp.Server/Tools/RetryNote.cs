@@ -37,8 +37,10 @@ internal static class RetryNote
 
     private static string WriteText(TerseErrorCode code, int payloads) => (code, payloads) switch
     {
+        (TerseErrorCode.InvalidArgument, > 1) => "every file of the batch is held, so the retry is the token plus force=true and nothing else",
         (_, > 1) => "every file of the batch is held, so the retry names the token - with usings= or allowErrors=true - instead of re-sending them",
         (TerseErrorCode.CompileRegression, _) => "the rejected content and its usings= are held, so the retry names the token plus force=true instead of re-sending the file - a content= you pass replaces the held one",
+        (TerseErrorCode.InvalidArgument, _) => "the content is held, so the retry is the token plus the flag the remedy names - force=true or overwrite=true - or a corrected path=, and nothing else",
         _ => "the content is held, so the retry is the token plus a corrected path= and nothing else",
     };
 }

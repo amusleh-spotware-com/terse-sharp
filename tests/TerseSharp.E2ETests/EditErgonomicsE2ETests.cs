@@ -1875,4 +1875,39 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Fact]
+    public async Task WriteText_ForABatchOfNewCSharpFilesWithoutForce_HoldsTheBatchSoTheRetryIsTheTokenPlusForce()
+    {
+        const string First = "src/Fixture.Trading/HeldForceProbe.cs";
+        const string Second = "src/Fixture.Trading/HeldForceProbeTwo.cs";
+        var refused = await server.CallAsync("write_text", new()
+        {
+            ["files"] = new List<Dictionary<string, object?>>
+            {
+                new() { ["path"] = First, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class HeldForceProbe;\n" },
+                new() { ["path"] = Second, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class HeldForceProbeTwo;\n" },
+            },
+        });
+
+        try
+        {
+            var last = refused.TrimEnd().Split('\n')[^1];
+
+            Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+            Assert.StartsWith("retryWith=r", last, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(TerseServerFixture.FixtureRoot, First)));
+
+            var applied = await server.CallAsync("write_text", new() { ["retryWith"] = last["retryWith=".Length..], ["force"] = true });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("public sealed class HeldForceProbe;", await File.ReadAllTextAsync(Path.Combine(TerseServerFixture.FixtureRoot, First), TestContext.Current.CancellationToken), StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(TerseServerFixture.FixtureRoot, Second)));
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = First, ["delete"] = true, ["force"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Second, ["delete"] = true, ["force"] = true });
+        }
+    }
 }

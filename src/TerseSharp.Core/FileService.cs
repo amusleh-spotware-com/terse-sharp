@@ -6,6 +6,11 @@ namespace TerseSharp.Core;
 
 public static class FileService
 {
+    public const string UnforcedRefusal = "C# file(s) no project compiles yet are written only with force: ";
+
+    public static bool IsUnforced(TerseError error) =>
+        error.Code is TerseErrorCode.InvalidArgument && error.Message.StartsWith(UnforcedRefusal, StringComparison.Ordinal);
+
     private const string CondensedMarker = "condensed=true - blank lines dropped, a number shown only after a gap; verbose=true numbers every line";
     public const int MaxResponseCharacters = 128 * 1024;
 
@@ -2267,7 +2272,7 @@ public static class FileService
         return guarded.Count is 0
             ? null
             : Errors.Invalid(
-                "C# file(s) no project compiles yet are written only with force: " + string.Join(", ", guarded),
+                UnforcedRefusal + string.Join(", ", guarded),
                 "pass force=true for the whole batch, or force on each C# entry - files=[{path, content, force: true}] - so the write stays compile-gated the way replace_symbol is");
     }
 
