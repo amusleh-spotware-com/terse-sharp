@@ -1178,4 +1178,27 @@ public sealed class DotnetRunnerTests
 
         Assert.Equal("\nWARNING the build timed out after 2013 ms; remedy: raise timeoutSeconds - it was 2, the maximum is 3600", text);
     }
+
+    [Fact]
+    public void IsQuietBuild_OnlyForAGreenDrainedRunThatIsNotVerbose()
+    {
+        var warnings = DotnetRunner.Diagnostics(WarningLine);
+
+        Assert.True(DotnetRunner.IsQuietBuild(new ProcessRun(0, WarningLine, 10), warnings, verbose: false));
+        Assert.False(DotnetRunner.IsQuietBuild(new ProcessRun(0, WarningLine, 10), warnings, verbose: true));
+        Assert.False(DotnetRunner.IsQuietBuild(new ProcessRun(1, WarningLine, 10), warnings, verbose: false));
+        Assert.False(DotnetRunner.IsQuietBuild(new ProcessRun(0, WarningLine, 10, Drained: false), warnings, verbose: false));
+        Assert.False(DotnetRunner.IsQuietBuild(new ProcessRun(0, ErrorLine, 10), DotnetRunner.Diagnostics(ErrorLine), verbose: false));
+    }
+
+    [Fact]
+    public void EntryNote_ForAnEntryThatRanNothingInARunThatStopped_LeavesTheCauseToTheStopLine()
+    {
+        var report = ScopedReport([new("Core.Tests", 2, 0, 0, 2, 40)]) with { EntryRuns = [0] };
+        var request = Searching(2) with { Entries = ["Ns.Tests.Crashed"] };
+
+        Assert.Contains("ran 0 tests - check the name", DotnetRunner.EntryNote(report, request), StringComparison.Ordinal);
+        Assert.Equal(string.Empty, DotnetRunner.EntryNote(report, request, interrupted: true));
+        Assert.DoesNotContain("ran 0 tests", DotnetRunner.RenderTest(new ProcessRun(0, string.Empty, 2000), report, request, "C:/repo", interrupted: true), StringComparison.Ordinal);
+    }
 }

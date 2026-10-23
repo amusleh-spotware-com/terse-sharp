@@ -7,17 +7,18 @@ public readonly record struct StaleBinary(string ProjectPath, string OutputPath,
 
 public static class StaleBinaries
 {
-    public static ImmutableArray<StaleBinary> Detect(Solution solution)
+    public static ImmutableArray<StaleBinary> Detect(Solution solution, IReadOnlyCollection<string> roots)
     {
+        var graph = solution.GetProjectDependencyGraph();
+        var targets = Targets(solution, roots);
         var own = new Dictionary<ProjectId, StaleBinary?>(solution.ProjectIds.Count);
 
-        foreach (var project in solution.Projects)
-            own[project.Id] = Behind(project, NewestInput(project));
+        foreach (var project in targets)
+            Probe(solution, graph, project.Id, own);
 
-        var graph = solution.GetProjectDependencyGraph();
-        var stale = ImmutableArray.CreateBuilder<StaleBinary>();
+        var stale = ImmutableArray.CreateBuilder<StaleBinary>(targets.Count);
 
-        foreach (var project in solution.Projects)
+        foreach (var project in targets)
         {
             if (Staleness(solution, project, graph, own) is { } binary)
                 stale.Add(binary);
@@ -94,5 +95,43 @@ public static class StaleBinaries
         var fresh = File.GetLastWriteTimeUtc(built);
 
         return fresh > copied ? new StaleBinary(projectPath, copy, built, fresh - copied) : null;
+    }
+
+    private static List<Project> Targets(Solution solution, IReadOnlyCollection<string> roots)
+    {
+        var targets = new List<Project>(roots.Count is 0 ? solution.ProjectIds.Count : roots.Count);
+
+        foreach (var project in solution.Projects)
+        {
+            if (roots.Count is 0 || Named(roots, project.FilePath))
+                targets.Add(project);
+        }
+
+        return targets;
+    }
+
+    private static bool Named(IReadOnlyCollection<string> roots, string? path)
+    {
+        foreach (var root in roots)
+        {
+            if (string.Equals(root, path, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static void Probe(Solution solution, ProjectDependencyGraph graph, ProjectId id, Dictionary<ProjectId, StaleBinary?> own)
+    {
+        Own(solution, id, own);
+
+        foreach (var dependency in graph.GetProjectsThatThisProjectTransitivelyDependsOn(id))
+            Own(solution, dependency, own);
+    }
+
+    private static void Own(Solution solution, ProjectId id, Dictionary<ProjectId, StaleBinary?> own)
+    {
+        if (!own.ContainsKey(id) && solution.GetProject(id) is { } project)
+            own[id] = Behind(project, NewestInput(project));
     }
 }

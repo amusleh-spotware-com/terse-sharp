@@ -31,8 +31,11 @@ public static partial class DotnetRunner
     {
         var target = project ?? workspace.SolutionPath;
         var run = await BuiltAsync(workspace, target, scope, timeout, cancellationToken).ConfigureAwait(false);
-        var split = await ChangedSplitAsync(workspace.Root, Diagnostics(run.Output).Warnings, cancellationToken).ConfigureAwait(false);
-        var rendered = RenderBuild(target, workspace.Root, run, verbose, split);
+        var diagnostics = Diagnostics(run.Output);
+        var split = IsQuietBuild(run, diagnostics, verbose)
+            ? await ChangedSplitAsync(workspace.Root, diagnostics.Warnings, cancellationToken).ConfigureAwait(false)
+            : string.Empty;
+        var rendered = Rendered(target, workspace.Root, run, diagnostics, verbose, split);
 
         return new BuildRun(run.TimedOut ? rendered + BuildDeadline(run, timeout) : rendered, Locked(run));
     }
@@ -185,36 +188,8 @@ public static partial class DotnetRunner
         return request.RunSettings.IsDefaultOrEmpty ? scoped : [.. scoped, "--", .. request.RunSettings];
     }
 
-    internal static string RenderBuild(string target, string root, ProcessRun run, bool verbose, string split = "")
-    {
-        var diagnostics = Diagnostics(run.Output);
-
-        if (!verbose && run.ExitCode is 0 && run.Drained && diagnostics.Errors.Length is 0)
-            return QuietBuild(run, diagnostics.Warnings.Length, split);
-
-        var shown = Shown(diagnostics, verbose);
-        var response = new ResponseBuilder("build", target).Verbose(verbose);
-
-        response.Summary(shown.Length, Parsed(diagnostics), "diagnostics");
-        response.Note(string.Create(CultureInfo.InvariantCulture, $"exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}"));
-
-        if (verbose || run.ExitCode is not 0 || !run.Drained)
-            AppendCommand(response, run);
-
-        if (verbose)
-            AppendOutputs(response, run, root, target);
-
-        AppendLockWarning(response, run);
-        AppendDrainWarning(response, run);
-        AppendHiddenWarnings(response, diagnostics, shown.Length);
-
-        foreach (var diagnostic in shown)
-            response.Line(Relative(diagnostic, root));
-
-        AppendTail(response, run, diagnostics.Errors.Length, root);
-
-        return response.ToString();
-    }
+    internal static string RenderBuild(string target, string root, ProcessRun run, bool verbose, string split = "") =>
+        Rendered(target, root, run, Diagnostics(run.Output), verbose, split);
 
     internal static string Relative(string line, string root) => root is { Length: > 0 }
         ? line.Replace(root + Path.DirectorySeparatorChar, string.Empty, StringComparison.OrdinalIgnoreCase)
@@ -229,13 +204,13 @@ public static partial class DotnetRunner
         response.Note("remedy: see the NOTE below; the operation is retried automatically when one workspace is loaded");
     }
 
-    internal static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request, string root)
+    internal static string RenderTest(ProcessRun run, TestRunReport report, TestRunRequest request, string root, bool interrupted = false)
     {
         if (report.Total is 0 && run.ExitCode is not 0)
             return RenderNoResults(request.Target, run, request.Verbose, root, request.Timeout, request.NoBuild);
 
         if (IsGreen(run, report) && !request.WantsDetail)
-            return QuietTest(report, run, request.Target) + EntryNote(report, request) + ScopeNote(report, request);
+            return QuietTest(report, run, request.Target) + EntryNote(report, request, interrupted) + ScopeNote(report, request);
 
         var shown = Math.Min(report.Failures.Length, MaxFailures);
         var response = new ResponseBuilder("run_tests", request.Target).Verbose(request.Verbose);
@@ -252,7 +227,7 @@ public static partial class DotnetRunner
         AppendTimings(response, report, request);
         AppendRerun(response, report);
 
-        return response.ToString() + EntryNote(report, request) + ScopeNote(report, request);
+        return response.ToString() + EntryNote(report, request, interrupted) + ScopeNote(report, request);
     }
 
     internal static string ScopeNote(TestRunReport report, TestRunRequest request)
@@ -895,8 +870,8 @@ public static partial class DotnetRunner
         var report = Report(results, workspace.Root, request.Entries);
         var notes = request.Verbose ? await NotesAsync(results, cancellationToken).ConfigureAwait(false) : [];
         var hung = await HangSequence.ActiveAsync(results, cancellationToken).ConfigureAwait(false);
-        var response = Noted(RenderTest(run, report, request, workspace.Root), notes) + StaleNote(workspace, request);
         var stopped = run.TimedOut || hung.Length is not 0;
+        var response = Noted(RenderTest(run, report, request, workspace.Root, stopped || missing.Count is not 0), notes) + StaleNote(workspace, request);
         var verdict = await VerdictAsync(workspace.Root, Building(request, prepared, run, report), cancellationToken).ConfigureAwait(false);
 
         return new TestRunResult(
@@ -1268,18 +1243,23 @@ public static partial class DotnetRunner
             : string.Empty;
     }
 
-    private static string[] BuiltWarnings(TestRunRequest request, ProcessRun run, TestRunReport report) =>
-        Built(request, run, report) is null ? [] : Diagnostics(run.Output).Warnings;
-
     private static async Task<string?> VerdictAsync(string root, (string? Verdict, string[] Warnings) building, CancellationToken cancellationToken) =>
         building.Verdict is null
             ? null
             : building.Verdict + await ChangedSplitAsync(root, building.Warnings, cancellationToken).ConfigureAwait(false);
 
-    private static (string? Verdict, string[] Warnings) Building(TestRunRequest request, PreparedBuild prepared, ProcessRun run, TestRunReport report) =>
-        prepared.Verdict is { } verdict
-            ? (verdict, prepared.Warnings ?? [])
-            : (Built(request, run, report), BuiltWarnings(request, run, report));
+    private static (string? Verdict, string[] Warnings) Building(TestRunRequest request, PreparedBuild prepared, ProcessRun run, TestRunReport report)
+    {
+        if (prepared.Verdict is { } verdict)
+            return (verdict, prepared.Warnings ?? []);
+
+        if (request.NoBuild || report.Total is 0)
+            return (null, []);
+
+        var diagnostics = Diagnostics(run.Output);
+
+        return diagnostics.Errors.Length is 0 ? (BuildVerdict(diagnostics.Warnings.Length), diagnostics.Warnings) : (null, []);
+    }
 
     private static string Verdicted(string? verdict, string response)
     {
@@ -1289,16 +1269,6 @@ public static partial class DotnetRunner
         var end = response.IndexOf('\n', StringComparison.Ordinal);
 
         return end < 0 ? response + verdict : response[..end] + verdict + response[end..];
-    }
-
-    private static string? Built(TestRunRequest request, ProcessRun run, TestRunReport report)
-    {
-        if (request.NoBuild || report.Total is 0)
-            return null;
-
-        var diagnostics = Diagnostics(run.Output);
-
-        return diagnostics.Errors.Length is 0 ? BuildVerdict(diagnostics.Warnings.Length) : null;
     }
 
     private const long SlowMillisecondsPerTest = 5000;
@@ -1352,9 +1322,9 @@ public static partial class DotnetRunner
     private static bool Unindented(string output, string line) =>
         output.StartsWith(line, StringComparison.Ordinal) || output.Contains(string.Concat("\n", line), StringComparison.Ordinal);
 
-    internal static string EntryNote(TestRunReport report, TestRunRequest request)
+    internal static string EntryNote(TestRunReport report, TestRunRequest request, bool interrupted = false)
     {
-        if (report.Total is 0 || request.Entries.IsDefaultOrEmpty || report.EntryRuns.Length != request.Entries.Length)
+        if (interrupted || report.Total is 0 || request.Entries.IsDefaultOrEmpty || report.EntryRuns.Length != request.Entries.Length)
             return string.Empty;
 
         var note = new StringBuilder();
@@ -1403,6 +1373,38 @@ public static partial class DotnetRunner
     private static string Behind(TimeSpan behind) => behind.TotalMinutes >= 1
         ? string.Create(CultureInfo.InvariantCulture, $"{(int)behind.TotalMinutes}m")
         : string.Create(CultureInfo.InvariantCulture, $"{Math.Max(1, (int)behind.TotalSeconds)}s");
+
+    internal static bool IsQuietBuild(ProcessRun run, BuildDiagnostics diagnostics, bool verbose) =>
+        !verbose && run.ExitCode is 0 && run.Drained && diagnostics.Errors.Length is 0;
+
+    private static string Rendered(string target, string root, ProcessRun run, BuildDiagnostics diagnostics, bool verbose, string split)
+    {
+        if (IsQuietBuild(run, diagnostics, verbose))
+            return QuietBuild(run, diagnostics.Warnings.Length, split);
+
+        var shown = Shown(diagnostics, verbose);
+        var response = new ResponseBuilder("build", target).Verbose(verbose);
+
+        response.Summary(shown.Length, Parsed(diagnostics), "diagnostics");
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"exitCode={run.ExitCode} elapsedMs={run.ElapsedMilliseconds}"));
+
+        if (verbose || run.ExitCode is not 0 || !run.Drained)
+            AppendCommand(response, run);
+
+        if (verbose)
+            AppendOutputs(response, run, root, target);
+
+        AppendLockWarning(response, run);
+        AppendDrainWarning(response, run);
+        AppendHiddenWarnings(response, diagnostics, shown.Length);
+
+        foreach (var diagnostic in shown)
+            response.Line(Relative(diagnostic, root));
+
+        AppendTail(response, run, diagnostics.Errors.Length, root);
+
+        return response.ToString();
+    }
 }
 
 internal sealed record ProcessRun(

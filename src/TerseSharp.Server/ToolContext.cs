@@ -232,7 +232,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             var target = await TargetAsync(workspace, pathHint, changed, tests, cancellationToken).ConfigureAwait(false);
 
             if (binaries && target.IsOk)
-                target = Result.Ok(target.Value with { Stale = Stale(workspace, pathHint) });
+                target = Result.Ok(target.Value with { Stale = await StaleAsync(workspace, pathHint, target.Value, cancellationToken).ConfigureAwait(false) });
 
             return target.IsOk
                 ? await SpawnedAsync(target.Value!, spawns, pathHint, action, cancellationToken).ConfigureAwait(false)
@@ -277,7 +277,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         return Result.Ok(Described(lease.Workspace, changed, tests));
     }
 
-    private ImmutableArray<StaleBinary> Stale(string? workspace, string? pathHint)
+    private async Task<ImmutableArray<StaleBinary>> StaleAsync(string? workspace, string? pathHint, WorkspaceTarget target, CancellationToken cancellationToken)
     {
         var resolved = Registry.Resolve(workspace, pathHint);
 
@@ -286,7 +286,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
         using var lease = resolved.Value!;
 
-        return StaleBinaries.Detect(lease.Workspace.Solution);
+        return await Task.Run(() => StaleBinaries.Detect(lease.Workspace.Solution, StaleRoots(lease.Workspace, pathHint, target)), cancellationToken).ConfigureAwait(false);
     }
 
     private static WorkspaceTarget Described(LoadedWorkspace loaded, bool changed, bool tests = false) => new(
@@ -656,6 +656,11 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
     private static string QueuedNote(QueuedPhases phases, ActiveRun run) =>
             string.Create(CultureInfo.InvariantCulture, $"NOTE queued {phases.QueuedMs}ms before this call ran (load={phases.LoadMs}ms resolve={phases.ResolveMs}ms sync={phases.SyncMs}ms reload={phases.ReloadMs}ms; ran={phases.RanMs}ms), while {run.Tool} was in flight on this solution for {(long)ActiveRuns.Age(run).TotalSeconds}s");
+
+    private static ImmutableArray<string> StaleRoots(LoadedWorkspace loaded, string? pathHint, WorkspaceTarget target) =>
+        pathHint is { Length: > 0 } && target.ResolveProject(pathHint) is { IsOk: true, Value: { } project }
+            ? [project]
+            : TestProjectsOf(loaded) is { IsDefaultOrEmpty: false } tests ? tests : [];
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);
