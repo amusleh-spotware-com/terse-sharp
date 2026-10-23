@@ -2686,4 +2686,19 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
         return int.Parse(line.AsSpan(tool.Length + 1), CultureInfo.InvariantCulture);
     }
+
+    [Fact]
+    public async Task WorkspaceStatus_WithGuards_JudgesEveryCommandInOneCallOneLineEachInInputOrder()
+    {
+        var answer = await server.CallAsync("workspace_status", new() { ["guards"] = new[] { "grep -rn Submit src/Fixture.Trading/OrderService.cs", "git commit -m \"probe\"" } });
+        var refused = await server.CallAsync("workspace_status", new() { ["guards"] = Enumerable.Repeat("git status", 11).ToArray() });
+        var verdicts = answer.Split('\n').Select(line => line.TrimEnd('\r')).Where(line => line.StartsWith("DENIED  ", StringComparison.Ordinal) || line.StartsWith("ALLOWED  ", StringComparison.Ordinal)).ToArray();
+
+        Assert.Equal(2, verdicts.Length);
+        Assert.StartsWith("DENIED  grep -rn Submit src/Fixture.Trading/OrderService.cs", verdicts[0], StringComparison.Ordinal);
+        Assert.StartsWith("ALLOWED  git commit -m \"probe\"", verdicts[1], StringComparison.Ordinal);
+        Assert.DoesNotContain("reason:", answer, StringComparison.Ordinal);
+        Assert.DoesNotContain("documents=", answer, StringComparison.Ordinal);
+        Assert.Contains("at most 10", refused, StringComparison.Ordinal);
+    }
 }

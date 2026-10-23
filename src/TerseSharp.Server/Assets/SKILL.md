@@ -27,7 +27,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 |---|---|---|
 | **Workspace** | — | `workspace_status` |
 | **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` |
-| **Workspace** | running a command to find out whether the guard allows it | `workspace_status(guard: "<command>")` — the verdict, the reason and the replacing call, executing nothing |
+| **Workspace** | running a command to find out whether the guard allows it | `workspace_status(guards: ["<command>", ...])` — each verdict and replacing call, executing nothing |
 | **Workspace** | what one tool's schema costs | `workspace_status(tools: true)` — one line per tool, tokens descending |
 | **Workspace** | globbing for `*.sln` | `load_workspace(path, discover: true)` |
 | **Workspace** | — | `load_workspace` |

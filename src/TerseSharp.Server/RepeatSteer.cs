@@ -34,6 +34,7 @@ public static class RepeatSteer
         ["cleanup"] = "paths",
         ["gate"] = "paths",
         ["delete_symbol"] = "symbolIds",
+        ["workspace_status"] = "guards",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();
@@ -106,7 +107,7 @@ public static class RepeatSteer
 
     private static string? Repeated(string tool, int count, string[] seen, int captured, string mode)
     {
-        if (count != Threshold || !Plural.TryGetValue(tool, out var plural))
+        if (count != Threshold || !Plural.TryGetValue(tool, out var plural) || (captured != count && SingularOnly.AsSpan().Contains(tool)))
             return null;
 
         if (RowMove(tool, mode))
@@ -121,6 +122,7 @@ public static class RepeatSteer
     }
 
     private const int MaxBatch = 10;
+    private static readonly string[] SingularOnly = ["workspace_status"];
 
     public static void Forget() => Reset();
 
@@ -175,6 +177,7 @@ public static class RepeatSteer
         ["get_type_outline"] = "symbolId",
         ["analyze"] = "path",
         ["format"] = "path",
+        ["workspace_status"] = "guard",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static string? Argument(CallToolRequestParams parameters, string tool)

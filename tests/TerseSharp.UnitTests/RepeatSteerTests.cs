@@ -383,6 +383,20 @@ public sealed class RepeatSteerTests
 
         return new ModelContextProtocol.Protocol.CallToolRequestParams { Name = "edit_text", Arguments = arguments };
     }
+
+    [Fact]
+    public void Steer_ForTwoGuardProbes_NamesTheGuardsBatch_AndForTwoPlainStatusCalls_SaysNothing()
+    {
+        RepeatSteer.Forget();
+        RepeatSteer.Steer("workspace_status");
+        var plain = RepeatSteer.Steer("workspace_status");
+        RepeatSteer.Forget();
+        RepeatSteer.Steer("workspace_status", value: "ls src");
+        var probes = RepeatSteer.Steer("workspace_status", value: "git commit");
+
+        Assert.Null(plain);
+        Assert.Equal("2 workspace_status calls in a row - these are ONE call: guards=[\"ls src\", \"git commit\"]", probes);
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

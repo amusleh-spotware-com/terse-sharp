@@ -122,19 +122,20 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
     }
 
     [McpServerTool(Name = "workspace_status", ReadOnly = true)]
-    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round, and - in a workspace that declares [McpServerTool] methods - estimates each one's schema from the working tree's own [Description] text (HEURISTIC), naming every tool that differs from the running server or passes the 1024-token cap. guard=\"<command>\" answers what the PreToolUse guard would do with that shell command, executing NOTHING.")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round, and - in a workspace that declares [McpServerTool] methods - estimates each one's schema from the working tree's own [Description] text (HEURISTIC), naming every tool that differs from the running server or passes the 1024-token cap. guard=\"<command>\" answers what the PreToolUse guard would do with that shell command, executing NOTHING; pass guards=[...] to judge up to 10 commands in ONE call. Replaces one call per command: one ALLOWED or DENIED line each, in input order, with the call that replaces it.")]
     public Task<string> WorkspaceStatus(
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
             [Description("Price every advertised tool's whole schema - name, description and parameters - one line per tool in tokens, descending, plus a working-tree estimate for tools whose source differs or passes the cap. Default false.")] bool tools = false,
             [Description("A shell command to judge against the PreToolUse guard, e.g. \"grep -rn TODO src\". Answers ALLOWED or DENIED with the reason and the call that replaces it, and NOTHING is executed - which is the only way to triage a destructive command. Answered alone, in the workspace's own directory.")] string? guard = null,
-            CancellationToken cancellationToken = default) => guard is { Length: > 0 } judged && context.LoadingRoot(workspace) is { } loading
-    ? Task.FromResult(GuardAnswer(judged, loading))
+            [Description("Several shell commands judged in ONE call, at most 10, one ALLOWED or DENIED line each in input order with the call that replaces it; verbose=true adds each reason. Combines with guard, taken first; a blank or 11th entry is refused by name. NOTHING is executed.")] string?[]? guards = null,
+            CancellationToken cancellationToken = default) => Judging(guard, guards) && context.LoadingRoot(workspace) is { } loading
+    ? Task.FromResult(Judged(guard, guards, loading, verbose))
     : context.WithWorkspaceAsync(
         workspace,
         null,
-        async loaded => guard is { Length: > 0 } command
-            ? GuardAnswer(command, loaded.Root)
+        async loaded => Judging(guard, guards)
+            ? Judged(guard, guards, loaded.Root, verbose)
             : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await context.AdvertisedAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
         cancellationToken: cancellationToken);
 
@@ -538,6 +539,55 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
             response.Line("rewrite: " + rewrite);
 
         return response.ToString();
+    }
+
+    private const int MaxGuards = 10;
+
+    private static bool Judging(string? guard, string?[]? guards) => guard is { Length: > 0 } || guards is { Length: > 0 };
+
+    private static string Judged(string? guard, string?[]? guards, string root, bool verbose) => guards is { Length: > 0 } batch
+        ? GuardsRefusal(guard, batch) ?? GuardsAnswer(guard, batch, root, verbose)
+        : GuardAnswer(guard ?? string.Empty, root);
+
+    private static string? GuardsRefusal(string? guard, string?[] guards) =>
+        (guards.Length + (guard is { Length: > 0 } ? 1 : 0), Array.FindIndex(guards, string.IsNullOrWhiteSpace)) switch
+        {
+            ( > MaxGuards and var total, _) => Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"guards carried {total} commands counting guard=, at most {MaxGuards} are judged in one call"),
+                string.Create(CultureInfo.InvariantCulture, $"send at most {MaxGuards} per call")).Render(),
+            (_, >= 0 and var blank) => Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"guards entry {blank + 1} is blank"),
+                "pass each shell command as its own non-empty entry").Render(),
+            _ => null,
+        };
+
+    private static string GuardsAnswer(string? guard, string?[] guards, string root, bool verbose)
+    {
+        var response = new ResponseBuilder("workspace_status", "guards");
+
+        if (guard is { Length: > 0 })
+            Judge(response, guard, root, verbose);
+
+        foreach (var command in guards)
+            Judge(response, command ?? string.Empty, root, verbose);
+
+        return response.ToString();
+    }
+
+    private static void Judge(ResponseBuilder response, string command, string root, bool verbose)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        response.Line(string.Concat(
+            verdict.Denied ? "DENIED  " : "ALLOWED  ",
+            command,
+            verdict.Routing is { Length: > 0 } ? "  call: " : null,
+            verdict.Routing,
+            verdict.Rewrite is { Length: > 0 } ? "  rewrite: " : null,
+            verdict.Rewrite));
+
+        if (verbose && verdict.Reason is { Length: > 0 } reason)
+            response.Line("  reason: " + reason);
     }
 
     private static void AppendUnresolvedAnalyzers(ResponseBuilder response, UnresolvedAnalyzers analyzers, string root)
