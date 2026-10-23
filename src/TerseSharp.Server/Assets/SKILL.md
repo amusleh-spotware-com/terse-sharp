@@ -311,7 +311,7 @@ merely what you can see. `workspace_status` prints `tools=core - N advertised` u
 `surface=<n> tools <t> tokens`.
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold`, and the first semantic call that realizes them appends
-`compilations=realized in Nms (once per load, not per call)` — a one-off, not the per-call cost of the tool that paid it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation; one that waited over 2 s while a build or test held the solution ends `NOTE queued Nms`, naming it.
+`compilations=realized in Nms (once per load, not per call)` — a one-off, not the per-call cost of the tool that paid it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation; a call held over 2 s by a build or test ends `NOTE queued Nms (load= resolve= sync= reload=; ran=)`.
 **Compilations are given back once the server has served no call for 60 minutes** (`--idle-minutes`,
 `TERSE_IDLE_MINUTES`, `.terse.json` `workspace.idleMinutes`; `0` off; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes

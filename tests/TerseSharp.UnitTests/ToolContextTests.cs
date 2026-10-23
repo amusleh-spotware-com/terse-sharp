@@ -401,7 +401,7 @@ public sealed class ToolContextTests
     {
         var holder = new ActiveRun("run_tests", "", Stopwatch.GetTimestamp());
 
-        var answer = ToolContext.Queued("3 symbols", TimeSpan.FromMilliseconds(1999), holder);
+        var answer = ToolContext.Queued("3 symbols", new QueuedPhases(0, 0, 1999, 0, 0), holder);
 
         Assert.Equal("3 symbols", answer);
     }
@@ -411,15 +411,15 @@ public sealed class ToolContextTests
     {
         var holder = new ActiveRun("run_tests", "", Stopwatch.GetTimestamp() - (Stopwatch.Frequency * 38));
 
-        var answer = ToolContext.Queued("3 symbols", TimeSpan.FromMilliseconds(4200), holder);
+        var answer = ToolContext.Queued("3 symbols", new QueuedPhases(5, 1, 4100, 94, 350), holder);
 
-        Assert.Equal("3 symbols\nNOTE queued 4200ms before this call ran, while run_tests was in flight on this solution for 38s", answer);
+        Assert.Equal("3 symbols\nNOTE queued 4200ms before this call ran (load=5ms resolve=1ms sync=4100ms reload=94ms; ran=350ms), while run_tests was in flight on this solution for 38s", answer);
     }
 
     [Fact]
     public void Queued_WithNothingInFlight_LeavesTheAnswerAloneBecauseTheLoadIsReportedElsewhere()
     {
-        var answer = ToolContext.Queued("3 symbols", TimeSpan.FromMilliseconds(2500), null);
+        var answer = ToolContext.Queued("3 symbols", new QueuedPhases(0, 0, 2500, 0, 0), null);
 
         Assert.Equal("3 symbols", answer);
     }
@@ -427,7 +427,7 @@ public sealed class ToolContextTests
     [Fact]
     public void Queued_ForARefusal_NeverAppendsANote()
     {
-        var answer = ToolContext.Queued("ERROR SymbolNotFound: x", TimeSpan.FromSeconds(9), null);
+        var answer = ToolContext.Queued("ERROR SymbolNotFound: x", new QueuedPhases(0, 0, 9000, 0, 0), new ActiveRun("build", "", Stopwatch.GetTimestamp()));
 
         Assert.Equal("ERROR SymbolNotFound: x", answer);
     }
@@ -437,6 +437,42 @@ public sealed class ToolContextTests
     [InlineData("3 diagnostics\nNOTE queued 4200ms before this call ran, while build was in flight on this solution for 9s\nnext: gate", "3 diagnostics\nnext: gate")]
     [InlineData("3 diagnostics\nnext: gate", "3 diagnostics\nnext: gate")]
     public void Unqueued_DropsOnlyTheQueuedLine_SoAReplayNeverRepeatsAWaitThatIsOver(string answer, string remembered) => Assert.Equal(remembered, ToolContext.Unqueued(answer));
+
+    [Fact]
+    public void Queued_ForAShortWaitBeforeALongCall_LeavesTheAnswerAloneBecauseTheCallsOwnRunIsNotQueueing()
+    {
+        var holder = new ActiveRun("run_tests", "", Stopwatch.GetTimestamp());
+
+        var answer = ToolContext.Queued("3 symbols", new QueuedPhases(0, 0, 1000, 0, 9000), holder);
+
+        Assert.Equal("3 symbols", answer);
+    }
+
+    [Fact]
+    public void Phases_SplitTheWaitAtEveryMark_AndCountTheCallItselfAfterTheLast()
+    {
+        var millisecond = Stopwatch.Frequency / 1000;
+        var start = Stopwatch.GetTimestamp();
+        var marks = new QueueMarks(start, start + (5 * millisecond), start + (6 * millisecond), start + (4106 * millisecond), start + (4200 * millisecond));
+
+        var phases = marks.Phases(start + (4550 * millisecond));
+
+        Assert.Equal(new QueuedPhases(5, 1, 4100, 94, 350), phases);
+        Assert.Equal(4200, phases.QueuedMs);
+    }
+
+    [Fact]
+    public void Unsynced_ForACallThatNeverSyncs_ChargesNothingToSyncOrReload()
+    {
+        var millisecond = Stopwatch.Frequency / 1000;
+        var start = Stopwatch.GetTimestamp() - (3000 * millisecond);
+        var marks = QueueMarks.Unsynced(start, start + (2000 * millisecond));
+
+        var phases = marks.Phases(marks.Reloaded);
+
+        Assert.Equal((2000L, 0L, 0L, 0L), (phases.LoadMs, phases.SyncMs, phases.ReloadMs, phases.RanMs));
+        Assert.InRange(phases.ResolveMs, 1000L, 60_000L);
+    }
 
     [Fact]
     public async Task ReadsAndListings_WhileThePreloadIsRunning_AnswerWithoutWaitingAndAsTheLoadedWorkspaceWould()
