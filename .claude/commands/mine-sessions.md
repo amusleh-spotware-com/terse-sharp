@@ -1939,7 +1939,7 @@ existing row is **not** a new row:
   `search_text query="mine-sessions" glob="IMPROVEMENTS.md"`, compute the counter the row names
   (extend the M2 script when no section prints it), and strengthen the row with the number, or
   close it to the archive as not reproduced when the corpus shows the waste is not there. At the time
-  of writing: `I813` (rejections whose correction an earlier session of the same repo already made),
+  of writing:
   `I814` (runs of 3+ red `run_tests`/`rerun_failed` with an unchanged failed set and writes between),
   `I815` (`Bash` calls running `perl -pi`, `python -c`, `tee` or `node -e` on a .NET path), `I816`
   (tools no session of a repo called in its last 10 sessions), `I817` (`cache_creation_input_tokens`
