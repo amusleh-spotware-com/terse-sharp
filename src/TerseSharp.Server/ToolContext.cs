@@ -94,6 +94,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             using var lease = resolved.Value!;
             var holder = ActiveRuns.Holding(lease.Workspace.SolutionPath);
 
+            lease.Workspace.MarkRead();
+
             if (guard?.Invoke(lease.Workspace) is { } refused)
                 return refused;
 
@@ -138,6 +140,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
             using var lease = resolved.Value!;
             var holder = ActiveRuns.Holding(lease.Workspace.SolutionPath);
+
+            lease.Workspace.MarkRead();
             var answer = semantic
                 ? await AttributedAsync(lease.Workspace, () => action(lease.Workspace)).ConfigureAwait(false)
                 : await action(lease.Workspace).ConfigureAwait(false);
@@ -164,6 +168,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             using var lease = resolved.Value!;
             var holder = ActiveRuns.Holding(lease.Workspace.SolutionPath);
 
+            lease.Workspace.MarkRead();
+
             return Queued(await action(lease.Workspace).ConfigureAwait(false), marks.Phases(Stopwatch.GetTimestamp()), holder);
         }).ConfigureAwait(false);
     }
@@ -185,6 +191,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
             using var lease = resolved.Value!;
             var holder = ActiveRuns.Holding(lease.Workspace.SolutionPath);
+
+            lease.Workspace.MarkRead();
             var answer = await action(lease.Workspace).ConfigureAwait(false);
             var housed = HousedBy(workspace, pathHint, lease.Workspace) is { } note ? answer + "\n" + note : answer;
 

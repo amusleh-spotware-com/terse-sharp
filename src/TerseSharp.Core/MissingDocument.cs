@@ -6,6 +6,9 @@ public static class MissingDocument
 {
     public static async Task<TerseError> ReadAsync(LoadedWorkspace workspace, string path, CancellationToken cancellationToken)
     {
+        if (await ElsewhereAsync(workspace, path, cancellationToken).ConfigureAwait(false) is { } owner)
+            return Errors.OutsideLoadedSolution(path, owner, workspace.SolutionPath);
+
         var declaring = await DeclaringFileAsync(workspace, path, cancellationToken).ConfigureAwait(false);
 
         return declaring is null ? Errors.DocumentNotFound(path) : Errors.DocumentNotFound(path, declaring);
@@ -61,4 +64,13 @@ public static class MissingDocument
     }
 
     private const int TypeCap = 8;
+
+    private static async Task<SiblingOwner?> ElsewhereAsync(LoadedWorkspace workspace, string path, CancellationToken cancellationToken)
+    {
+        var full = Path.GetFullPath(Path.Combine(workspace.Root, path));
+
+        return File.Exists(full)
+            ? await SiblingSolutions.OwnerAsync(workspace, full, cancellationToken).ConfigureAwait(false)
+            : null;
+    }
 }

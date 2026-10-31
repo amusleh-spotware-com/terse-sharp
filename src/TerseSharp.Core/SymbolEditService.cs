@@ -577,7 +577,7 @@ public static class SymbolEditService
     private static SyntaxNode[] Rewritten(MemberDeclarationSyntax[] members, SyntaxNode original) =>
     [
         LayoutKept(members[0], original).WithTriviaFrom(original),
-        .. members.Skip(1).Select(member => (SyntaxNode)Separated(member, NeedsBlankLine(member))),
+        .. members.Skip(1).Select(member => (SyntaxNode)Separated(member, blankLineBefore: true)),
     ];
 
     private static MemberDeclarationSyntax LayoutKept(MemberDeclarationSyntax sent, SyntaxNode original) =>
@@ -621,9 +621,6 @@ public static class SymbolEditService
             SyntaxFactory.ParseStatement(text) is BlockSyntax parsed && !parsed.ContainsDiagnostics
                 ? WithBody(node, parsed)
                 : null;
-
-    private static bool NeedsBlankLine(MemberDeclarationSyntax member) =>
-            !member.GetLeadingTrivia().Any(SyntaxKind.EndOfLineTrivia);
 
     public static async Task<Result<string>> AddToFileAsync(
         LoadedWorkspace workspace,
@@ -1453,13 +1450,14 @@ public static class SymbolEditService
     private static TerseError? Misnamed(ISymbol symbol, IReadOnlyList<SyntaxNode> nodes)
     {
         string? declared = null;
+        var leaf = symbol.Name[(symbol.Name.LastIndexOf('.') + 1)..];
 
         foreach (var node in nodes)
         {
             if (DeclaredName(node) is not { } name)
                 return null;
 
-            if (string.Equals(name, symbol.Name, StringComparison.Ordinal))
+            if (string.Equals(name, symbol.Name, StringComparison.Ordinal) || string.Equals(name, leaf, StringComparison.Ordinal))
                 return null;
 
             declared ??= name;

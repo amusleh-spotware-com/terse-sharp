@@ -49,6 +49,28 @@ public sealed class MultiTargetE2ETests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetTypeOutline_OfATypeWithAMemberUnderAnInactiveIf_NamesItAndTheFrameworkItAnswered()
+    {
+        var path = Path.Combine(Root, "src", "Multi.Core", "Gated.cs");
+        const string Gated = "namespace Multi.Core;\n\npublic static class Gated\n{\n    public static int Always() => 1;\n#if NET\n    public static int OnlyModern() => 2;\n#else\n    public static int OnlyLegacy() => 3;\n#endif\n}\n";
+
+        await server.CallAsync("write_text", new() { ["path"] = path, ["content"] = Gated, ["force"] = true }, TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "Multi.Core.Gated", ["contains"] = "Only" }, TestContext.Current.CancellationToken);
+
+            Assert.Contains("1 member(s) under an inactive #if not shown (this outline answers for NET", text, StringComparison.Ordinal);
+            Assert.Contains("OnlyModern", text, StringComparison.Ordinal);
+            Assert.Contains("OnlyLegacy", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = path, ["delete"] = true, ["force"] = true }, TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task ResxUsages_OverAMultiTargetedProject_ReportsOneRecordPerSourcePosition()
     {
         var text = await server.CallAsync(

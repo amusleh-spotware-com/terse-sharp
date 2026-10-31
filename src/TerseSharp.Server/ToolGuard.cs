@@ -126,9 +126,11 @@ public static class ToolGuard
 
     private static readonly GuardVerdict Allowed = new(false, string.Empty);
 
-    private static GuardVerdict OnPath(string tool, string? path) => path is not null && Covered(path)
-            ? new GuardVerdict(true, Reason(tool, path), PathRouting(tool, path), Replacement(tool, path))
-            : Allowed;
+    private static GuardVerdict OnPath(string tool, string? path) => path is not null && Served(tool, path)
+        ? new GuardVerdict(true, Reason(tool, path), PathRouting(tool, path), Replacement(tool, path))
+        : Allowed;
+
+    private static bool Served(string tool, string path) => Covered(path) && (tool is "Glob" or "Read" || !Untreed(path));
 
     private static GuardVerdict OnGrep(JsonObject input)
     {
@@ -1427,7 +1429,7 @@ public static class ToolGuard
     {
         var segment = stage.Text;
 
-        if (Replaced(segment, cwd) is { } subcommand && !Digested(subcommand, stage.Sink))
+        if (Replaced(segment, cwd) is { } subcommand && !Digested(subcommand, stage.Feeds))
         {
             return new GuardVerdict(
                 true,
@@ -1864,7 +1866,7 @@ public static class ToolGuard
         return text.IndexOfAny('|', '>') < 0 && (end < 0 ? text : text[..end]) is "echo" or "printf" or "true" or ":";
     }
 
-    private readonly record struct Stage(string Text, bool Fed, string? Sink = null, bool Adrift = false);
+    private readonly record struct Stage(string Text, bool Fed, string[]? Feeds = null, bool Adrift = false);
 
     private static Stage[] Stages(string command)
     {
@@ -2236,7 +2238,7 @@ public static class ToolGuard
             fed = false;
         }
 
-        detached.Add(new Stage(stage.Text[start..], fed, stage.Sink));
+        detached.Add(new Stage(stage.Text[start..], fed, stage.Feeds));
     }
 
     private static bool Followable(string command)
@@ -2534,10 +2536,10 @@ public static class ToolGuard
 
     private static Stage[] Plumbed(List<Stage> stages)
     {
-        for (var index = 0; index + 1 < stages.Count; index++)
+        for (var index = stages.Count - 2; index >= 0; index--)
         {
-            if (stages[index + 1].Fed)
-                stages[index] = stages[index] with { Sink = stages[index + 1].Text };
+            if (stages[index + 1] is { Fed: true } next)
+                stages[index] = stages[index] with { Feeds = [next.Text, .. next.Feeds ?? []] };
         }
 
         return [.. stages];
@@ -2545,8 +2547,23 @@ public static class ToolGuard
 
     private static readonly string[] ByteDigests = ["cksum", "b2sum", "md5sum", "shasum", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum"];
 
-    private static bool Digested(string subcommand, string? sink) =>
-            subcommand is "show-file" && sink is not null && Digests(Command(sink));
+    private static bool Digested(string subcommand, string[]? feeds)
+    {
+        if (subcommand is not "show-file" || feeds is null)
+            return false;
+
+        var digest = Array.FindIndex(feeds, feed => Digests(Command(feed)));
+
+        return digest >= 0 && Array.TrueForAll(feeds[..digest], IsStdoutFilter);
+    }
+
+    private static readonly string[] StdoutFilters = ["sed", "tr", "cut", "sort", "uniq", "iconv", "dos2unix", "unix2dos"];
+
+    private static bool IsStdoutFilter(string stage) =>
+        Command(stage) is [var driver, ..] && StdoutFilters.Contains(Driver(driver), StringComparer.Ordinal) && WritesNoWhereElse(stage);
+
+    private static bool WritesNoWhereElse(string stage) =>
+        !stage.Contains('>', StringComparison.Ordinal) && !stage.Contains("/dev/", StringComparison.Ordinal);
 
     private static bool Digests(string[] tokens) => tokens switch
     {
@@ -2909,9 +2926,36 @@ public static class ToolGuard
         if (WriteTarget(segment) is { Length: > 0 } written && TreeRelative(written, cwd) is var target)
             return new GuardVerdict(true, ShellWriteReason(trimmed, target) + Priced + Nothing(compound, unfenceable), ShellWriteRouting(target), ShellWriter(target));
 
-        var reason = Covered(trimmed) ? Reason("Bash", trimmed) : InTree(trimmed);
+        var reason = Covered(trimmed) ? Reason("Bash", trimmed) : InTree(trimmed) + Unassigned(segment);
 
         return new GuardVerdict(true, reason + Priced + Nothing(compound, unfenceable), BashRouting(trimmed), Replacement(TextKind(segment), trimmed));
+    }
+
+    private static bool Untreed(string path)
+    {
+        if (!Path.IsPathFullyQualified(path) || Path.GetDirectoryName(path) is not { Length: > 0 } directory || !Directory.Exists(directory))
+            return false;
+
+        return Marker(directory) is null;
+    }
+
+    internal const string UnassignedMarker = "is not assigned in this command";
+
+    internal static bool Unjudged(GuardVerdict verdict) => verdict.Reason?.Contains(UnassignedMarker, StringComparison.Ordinal) is true;
+
+    private static string Unassigned(string segment) => Command(segment).Skip(1).FirstOrDefault(IsUnassigned) is { } variable
+        ? string.Create(CultureInfo.InvariantCulture, $" '{variable}' {UnassignedMarker}, so where it points cannot be judged and it counts as inside the tree; pass the literal path, which is allowed when it resolves outside the tree.")
+        : string.Empty;
+
+    private static bool IsUnassigned(string operand)
+    {
+        if (operand.AsSpan().Trim('"') is not ['$', .. var rest] || Path.IsPathFullyQualified(Expanded(operand)))
+            return false;
+
+        var end = rest.IndexOfAny('/', '\\');
+        var name = end < 0 ? rest : rest[..end];
+
+        return IsName(name is ['{', .. var inner, '}'] ? inner : name);
     }
 
     private static ReadOnlySpan<char> Operands(string segment)

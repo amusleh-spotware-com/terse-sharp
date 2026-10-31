@@ -184,7 +184,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
     }
 
     [McpServerTool(Name = "gate")]
-    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict. paths= gates several files, directories or globs as ONE verdict. Replaces one call per scope. baseRef=HEAD keeps only the findings on lines this working tree changed against that ref and writes only the files it changed, which makes the verdict mean this task rather than this repository; over the changed-file default it is baseRef=HEAD on a git tree unless baseRef=\"\" is passed, and a narrowed verdict ends preExisting=N counting what it folded. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
+    [Description("Run the end-of-task quality gate in the order this project mandates - analyze at info severity, format, cleanup fix=all, analyze again - over the files changed since the workspace loaded, and answer one verdict line instead of four calls. A clean run is 'clean  analyzed=N fixed=M remaining=0', where analyzed is how many documents were in scope, so a clean verdict can never be mistaken for a gate that ran over nothing; anything else keeps the diagnostics that are still unfixed. A scope matching no document answers an error naming it, never a verdict. paths= gates several files, directories or globs as ONE verdict. Replaces one call per scope. baseRef=HEAD keeps only the findings on lines this working tree changed against that ref and fixes only those lines, which makes the verdict mean this task rather than this repository; with no baseRef it is HEAD on a git tree for path=, paths= and the changed-file default alike, baseRef=\"\" or solution=true gates whole files, and a narrowed verdict ends preExisting=N counting what it folded. dryRun=true verifies instead of writing, solution=true gates every document, and verbose=true adds each step's own report.")]
     public Task<string> Gate(
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty gates the files modified since the workspace loaded.")] string? path = null,
             [Description("Gate every document instead of only the files modified since the workspace loaded. Ignored when path is passed. Default false.")] bool solution = false,
@@ -192,7 +192,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
             [Description("Add each step's own report under the verdict line. Default false.")] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Documents gate's changed-file default. Ignored beside path= or solution=; false is refused otherwise.")] bool? changed = null,
-            [Description("Report only findings on a line the working tree added or changed against this git ref, e.g. HEAD. A file git does not track counts whole. Omitted over the changed-file default it is HEAD on a git tree; an empty string reports every finding in scope.")] string? baseRef = null,
+            [Description("Report only findings on a line the working tree added or changed against this git ref, e.g. HEAD. A file git does not track counts whole. Omitted it is HEAD on a git tree, path= and paths= included, unless solution=true; an empty string reports every finding in scope.")] string? baseRef = null,
             [Description("Several scopes gated as ONE verdict, each a file, a directory or a glob, at most 10. Combines with path, which is taken first; an entry matching no document is refused by name.")] string?[]? paths = null,
             CancellationToken cancellationToken = default) =>
             RejectedChanged(changed, path ?? FirstScope(paths), solution) is { } rejected
@@ -200,7 +200,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
                 : replay.ReplayedAsync(
                 "gate",
                 ReplayGate.Key("gate", path, solution.ToString(), dryRun.ToString(), verbose.ToString(), baseRef, Defaulted(baseRef), workspace, paths is null ? null : string.Join('\n', paths)),
-                !dryRun || baseRef is { Length: > 0 } || (baseRef is null && path is null && paths is null && !solution),
+                !dryRun || NarrowedByGit(baseRef, GitDefaulted(path, paths, solution)),
                 () => Guarded(workspace, path ?? FirstScope(paths), async Task<Result<string>> (loaded) =>
                 {
                     var (Scope, Refusal) = GateScope(loaded, path, paths);
@@ -209,7 +209,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
                         return Result.Fail<string>(refused);
 
                     var changedScope = Scope is null && !solution;
-                    var (Touched, Error) = await ScopedTouchedAsync(loaded.Root, baseRef, changedScope, cancellationToken).ConfigureAwait(false);
+                    var (Touched, Error) = await ScopedTouchedAsync(loaded.Root, baseRef, Scope is not null || !solution, cancellationToken).ConfigureAwait(false);
 
                     return Error is { } failure
                         ? Result.Fail<string>(failure)
@@ -364,6 +364,10 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
     }
 
     private static string Defaulted(string? baseRef) => baseRef is null ? "defaulted" : "explicit";
+
+    private static bool NarrowedByGit(string? baseRef, bool defaulted) => baseRef is { Length: > 0 } || (baseRef is null && defaulted);
+
+    private static bool GitDefaulted(string? path, string?[]? paths, bool solution) => path is not null || paths is not null || !solution;
 
     private static string Narrowing(string? baseRef, TouchedLines? touched) =>
         baseRef ?? (touched is null ? string.Empty : DefaultBaseRef);

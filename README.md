@@ -301,7 +301,7 @@ because the hook is installed user-wide, so `git -C ../notes status` is allowed.
 `dotnet restore`/`pack`/`publish`/`run`, `git ls-files` with any option, and git mutation (`blame`,
 `add`, `commit`, `push`, and every `git tag` that creates, annotates or deletes) are allowed — nothing
 here replaces those. So is a git read whose stdout goes to a file (`git diff -U0 > sel.patch`, `git diff --output=sel.patch`,
-`git show <ref>:<path> > old.md`) unless the file is .NET source in the tree, a `git show <ref>:<path>` piped into `cmp`, a `sha*sum` or `git hash-object --stdin`, and a diff flag no tool
+`git show <ref>:<path> > old.md`) unless the file is .NET source in the tree, a `git show <ref>:<path>` piped - through stdin filters too - into `cmp`, a `sha*sum` or `git hash-object --stdin`, a built-in `Write`/`Edit` of a `.cs` whose directory sits in no .NET tree, and a diff flag no tool
 serves (`-b`, `--ignore-cr-at-eol`, `--check`, `--word-diff`); `-w` routes to `ignoreWhitespace=true`
 and `-U<n>` to `diff_text unified=<n>`. `.git/` internals are never source, and on Windows a Git-Bash
 `/tmp/…` or `/c/…` path is judged as the directory it names. A denied command also tells the agent not

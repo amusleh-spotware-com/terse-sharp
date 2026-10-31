@@ -7,7 +7,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
 {
     [McpServerTool(Name = "load_workspace")]
-    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, a directory to load the one solution directly in it, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see - and it is also the way to re-run a load this process has already answered, because an identical load with nothing written and no watcher event since replays that answer instead of paying for it again. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it. It also warns when the PreToolUse guard or the skill is not installed.")]
+    [Description("Load a .sln/.slnx/.slnf/.csproj into memory. Call once per solution; every other tool needs it. Pass no path to auto-discover from the current directory, a directory to load the one solution directly in it, or discover=true to list what a directory contains without loading it. External edits are picked up automatically, so reload=true is only for a change the server cannot see - and it is also the way to re-run a load this process has already answered, because an identical load with nothing written and no watcher event since replays that answer instead of paying for it again. On a multi-targeted solution, targetFramework picks the framework every semantic tool answers from; loading the same solution under a different framework replaces the first, and replace=true unloads every OTHER loaded solution once this one loads, so later calls need no workspace=. A load ends with compilations=cold when nothing is realized yet, and the first semantic call that realizes them reports how long that took, so the one-off cost is attributed to the call that paid it. It also warns when the PreToolUse guard or the skill is not installed.")]
     public Task<string> LoadWorkspace(
         [Description("Path to the solution or project, or a directory holding exactly one - a .slnx or .sln beside its own .slnf counts as one. Empty = discover upwards from the working directory.")] string? path = null,
         [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared. It always runs, so it is also the escape from a replayed answer.")] bool reload = false,
@@ -15,10 +15,11 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
         [Description("List the MSBuild messages the load reported, not just their count. Default false.")] bool verbose = false,
         [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
         [Description("Max candidates when discover=true (100).")] int maxResults = 0,
+        [Description("Unload every other loaded solution after this one loads. Default false keeps them.")] bool replace = false,
         CancellationToken cancellationToken = default) =>
         replay.ReplayedAsync(
             "load_workspace",
-            ReplayGate.Key("load_workspace", path, targetFramework, verbose.ToString(), discover.ToString(), maxResults.ToString(CultureInfo.InvariantCulture)),
+            ReplayGate.Key("load_workspace", path, targetFramework, verbose.ToString(), discover.ToString(), maxResults.ToString(CultureInfo.InvariantCulture), replace.ToString()),
             reload,
             () => ToolBoundary.RunAsync(async () =>
             {
@@ -37,13 +38,33 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
                     ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
                     : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
 
-                var rendered = AssetBanner.Appended(Render(context.Registry, result, verbose));
+                var rendered = AssetBanner.Appended(Render(context.Registry, result, verbose) + Replaced(replace, result));
 
                 await context.AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
 
                 return rendered;
             }),
             cancellationToken);
+
+    private string Replaced(bool replace, WorkspaceLoadResult result)
+    {
+        if (!replace)
+            return string.Empty;
+
+        if (result.ProjectCount is 0)
+            return "\nreplace=true - nothing unloaded, because this load produced no project";
+
+        var others = context.Registry.All()
+            .Select(workspace => workspace.SolutionPath)
+            .Where(path => !string.Equals(Path.GetFullPath(path), Path.GetFullPath(result.SolutionPath), PathBoundary.Comparison))
+            .ToArray();
+
+        var unloaded = others.Where(path => context.Registry.Unload(path)).Select(Path.GetFileName).ToArray();
+
+        return unloaded.Length is 0
+            ? "\nreplace=true - no other workspace was loaded"
+            : "\nreplace=true - unloaded " + string.Join(", ", unloaded);
+    }
 
     [McpServerTool(Name = "list_workspaces", ReadOnly = true)]
     [Description("List loaded workspaces with their git branch and worktree, so you can disambiguate several checkouts of one repo. The solution path is absolute here, because it is what unload_workspace takes.")]
@@ -58,7 +79,12 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
         response.Summary(all.Count, all.Count, "workspaces");
 
         foreach (var workspace in all)
+        {
             response.Line(Describe(workspace, relative: false));
+
+            if (await SiblingSolutions.WarningAsync(workspace, CancellationToken.None).ConfigureAwait(false) is { } subset)
+                response.Line("  " + subset);
+        }
 
         if (all.Count is 0 && context.PreloadFailure is { } failure)
             response.Note("the startup preload failed: " + failure);
@@ -177,6 +203,9 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
 
         if (WorkspaceDivergence.Describe(divergence, verbose) is { } diverged)
             response.Note(diverged);
+
+        if (await SiblingSolutions.WarningAsync(workspace, cancellationToken).ConfigureAwait(false) is { } subset)
+            response.Note(subset);
 
         await AppendRazorAsync(response, workspace, verbose, cancellationToken).ConfigureAwait(false);
         AppendMappedAnalyzers(response, workspace, verbose);
@@ -586,7 +615,7 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
             verdict.Rewrite is { Length: > 0 } ? "  rewrite: " : null,
             verdict.Rewrite));
 
-        if (verbose && verdict.Reason is { Length: > 0 } reason)
+        if ((verbose || ToolGuard.Unjudged(verdict)) && verdict.Reason is { Length: > 0 } reason)
             response.Line("  reason: " + reason);
     }
 

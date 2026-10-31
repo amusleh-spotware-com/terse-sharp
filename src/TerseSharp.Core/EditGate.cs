@@ -32,7 +32,7 @@ public static class EditGate
             return Result.Fail<string>(failure);
 
         if (!await workspace.TryApplyAsync(adopted, changed, cancellationToken).ConfigureAwait(false))
-            return Result.Fail<string>(Errors.EditConflict("the workspace rejected the change"));
+            return Result.Fail<string>(Rejection(workspace));
 
         foreach (var written in diff)
             EditPulse.Bump(written.Path);
@@ -793,4 +793,9 @@ public static class EditGate
         && UnrestoredProjects.IsUnrestored(project)
             ? string.Create(CultureInfo.InvariantCulture, $"restore=missing - {Path.GetFileName(project.AsSpan())} has no obj/project.assets.json, so its package types and generated global usings do not resolve; build once, then load_workspace reload=true and retry")
             : null;
+
+    private static TerseError Rejection(LoadedWorkspace workspace) =>
+        workspace.TakeOvertaken() is { Length: > 0 } overtaken
+            ? Errors.Overtaken([.. overtaken.Select(path => PositionFormat.Relative(path, workspace.Root))])
+            : Errors.EditConflict("the workspace rejected the change");
 }

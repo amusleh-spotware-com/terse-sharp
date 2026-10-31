@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Rename;
 
 namespace TerseSharp.Core;
@@ -170,6 +171,48 @@ public static class RenameService
     private static string Lingering(string path, int line, string carrier, string oldName) => string.Create(
         CultureInfo.InvariantCulture,
         $"{path}:{line}  HEURISTIC  {carrier}  {oldName}  NOT rewritten, a match inside a {carrier} is not decidable");
+
+    public static async Task<Result<string>> RenameWithFileAsync(
+        LoadedWorkspace workspace,
+        ISymbol symbol,
+        string newName,
+        EditOptions options,
+        CancellationToken cancellationToken)
+    {
+        var renamed = await RenameAsync(workspace, symbol, newName, options, cancellationToken).ConfigureAwait(false);
+
+        if (!renamed.IsOk)
+            return renamed;
+
+        if (symbol is not INamedTypeSymbol type || !NamesItsFile(type))
+            return Result.Ok(renamed.Value + "\nrenameFile=true renamed no file: only a top-level type whose file is named after it moves");
+
+        if (options.DryRun)
+            return Result.Ok(renamed.Value + string.Create(CultureInfo.InvariantCulture, $"\nrenameFile=true renames {type.Name}.cs to {newName}.cs once the rename is applied"));
+
+        var moved = await RenamedTypeAsync(workspace, type, newName, cancellationToken).ConfigureAwait(false) is { } current
+            ? await RefactorService.MoveTypeToFileAsync(workspace, current, options, cancellationToken).ConfigureAwait(false)
+            : Result.Fail<string>(Errors.SymbolNotFound(newName, []));
+
+        return moved.IsOk
+            ? Result.Ok(renamed.Value + "\n" + moved.Value)
+            : Result.Ok(renamed.Value + "\nrenameFile=true did not rename the file: " + moved.Error?.Message);
+    }
+
+    private static bool NamesItsFile(INamedTypeSymbol type) =>
+        type.ContainingType is null
+        && type.Locations.FirstOrDefault(location => location.IsInSource)?.SourceTree?.FilePath is { Length: > 0 } path
+        && Path.GetFileNameWithoutExtension(path.AsSpan()).Equals(type.Name, StringComparison.Ordinal);
+
+    private static async Task<INamedTypeSymbol?> RenamedTypeAsync(LoadedWorkspace workspace, INamedTypeSymbol type, string newName, CancellationToken cancellationToken)
+    {
+        var declared = await SymbolFinder.FindSourceDeclarationsAsync(workspace.Solution, newName, ignoreCase: false, SymbolFilter.Type, cancellationToken).ConfigureAwait(false);
+
+        return declared.OfType<INamedTypeSymbol>().FirstOrDefault(candidate =>
+            candidate.Arity == type.Arity
+            && candidate.ContainingType is null
+            && string.Equals(candidate.ContainingNamespace.ToDisplayString(), type.ContainingNamespace.ToDisplayString(), StringComparison.Ordinal));
+    }
 }
 
 internal static class SyntaxFacts

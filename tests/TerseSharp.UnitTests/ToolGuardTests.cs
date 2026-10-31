@@ -252,7 +252,7 @@ public sealed class ToolGuardTests
     }
 
     private static string MissingSourcePath() =>
-        Path.Combine(Path.GetTempPath(), "terse-guard-" + Guid.NewGuid().ToString("N") + ".cs");
+        Path.Combine(Fixtures.RepositoryRoot, "src", "terse-guard-" + Guid.NewGuid().ToString("N") + ".cs");
 
     [Fact]
     public void Inspect_ForAGlobOverXaml_NamesTheXamlToolsBeforeFindFiles()
@@ -1295,6 +1295,8 @@ public sealed class ToolGuardTests
     [InlineData("git show HEAD:src/Foo.cs | cmp - src/Foo.cs")]
     [InlineData("git show HEAD:src/Foo.cs | sha256sum")]
     [InlineData("git show HEAD:src/Foo.cs | git hash-object --stdin")]
+    [InlineData("git show HEAD:src/Foo.cs | sed 's/a/b/' | git hash-object -w --stdin")]
+    [InlineData("git show HEAD:src/Foo.cs | tr -d '\\r' | sha256sum")]
     [InlineData("F=src/Foo.cs; git show \"stash@{0}^3:$F\" | cmp - \"$F\" && rm \"$F\"")]
     public void Guard_ForARevisionReadPipedIntoAByteComparison_AllowsIt(string command)
     {
@@ -1305,6 +1307,9 @@ public sealed class ToolGuardTests
 
     [Theory]
     [InlineData("git show HEAD:src/Foo.cs | head -5")]
+    [InlineData("git show HEAD:src/Foo.cs | sed 's/a/b/' | head -5")]
+    [InlineData("git show HEAD:src/Foo.cs | tee /dev/stderr | sha256sum")]
+    [InlineData("git show HEAD:src/Foo.cs | awk '{print > \"/dev/stderr\"}' | md5sum")]
     [InlineData("git show HEAD:src/Foo.cs | cmp -l - src/Foo.cs")]
     [InlineData("git show HEAD:src/Foo.cs | cmp --verbose - src/Foo.cs")]
     [InlineData("git show HEAD:src/Foo.cs | git hash-object -w src/Foo.cs")]
@@ -1312,6 +1317,50 @@ public sealed class ToolGuardTests
     public void Guard_ForARevisionReadThatStillReachesTheScreen_KeepsDenyingIt(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+    }
+
+    [Fact]
+    public void Guard_ForATextReadOfAVariableThisCommandNeverAssigns_DeniesItNamingTheVariable()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "ls -la \"$T\"" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Contains("'$T' is not assigned in this command", verdict.Reason, StringComparison.Ordinal);
+        Assert.True(ToolGuard.Unjudged(verdict));
+    }
+
+    [Fact]
+    public void Guard_ForATextReadOfALiteralPathInsideTheTree_DeniesItWithoutAnUnassignedNote()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "ls -la src" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.False(ToolGuard.Unjudged(verdict));
+    }
+
+    [Fact]
+    public void Guard_ForAWriteOfACSharpFileWhoseDirectorySitsInNoDotNetTree_AllowsIt()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-untreed-");
+
+        try
+        {
+            var verdict = ToolGuard.Inspect("Write", new JsonObject { ["file_path"] = Path.Combine(directory.FullName, "Blob.cs") });
+
+            Assert.False(verdict.Denied, verdict.Reason);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Guard_ForAWriteOfACSharpFileInsideADotNetTree_KeepsDenyingIt()
+    {
+        var verdict = ToolGuard.Inspect("Write", new JsonObject { ["file_path"] = Path.Combine(Fixtures.RepositoryRoot, "src", "TerseSharp.Core", "Blob.cs") });
 
         Assert.True(verdict.Denied);
     }

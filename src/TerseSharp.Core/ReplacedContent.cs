@@ -10,10 +10,15 @@ public static class ReplacedContent
         ? default
         : Counted(before, Hashed(after));
 
+    private const string Unrelated = "so it would replace an unrelated file";
+
+    public static bool IsRefusal(TerseError error) =>
+        error.Code is TerseErrorCode.InvalidArgument && error.Message.EndsWith(Unrelated, StringComparison.Ordinal);
+
     public static TerseError Refusal(string path, Overlap overlap) => Errors.Invalid(
         string.Create(
             CultureInfo.InvariantCulture,
-            $"{path} already exists and this write keeps {overlap.Kept} of its {overlap.Significant} content lines, so it would replace an unrelated file"),
+            $"{path} already exists and this write keeps {overlap.Kept} of its {overlap.Significant} content lines, {Unrelated}"),
         "check what the path holds with get_file_outline or read_text and write the new file to another path; to replace it deliberately pass overwrite=true - dryRun=true overwrite=true previews the diff, and write_text ref=HEAD restores a tracked file");
 
     public static string Marked(string text, string before, string after, bool quiet) =>

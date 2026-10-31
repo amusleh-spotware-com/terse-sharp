@@ -199,9 +199,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         CancellationToken cancellationToken = default) =>
         Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
             ? Task.FromResult(clash)
-            : context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => impact
+            : context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => SiblingSolutions.NotedAsync(loaded, impact
             ? ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
-            : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken), cancellationToken);
+            : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
     [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered. symbol= and name= are aliases for query=; an empty query lists every registration, and a call carrying none of the three is refused naming all three.")]
@@ -239,7 +239,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
             ? Task.FromResult(clash)
             : context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) =>
-            ReferenceService.FindImplementationsAsync(loaded, resolved, Cap(maxResults, 100), cancellationToken), cancellationToken);
+            SiblingSolutions.NotedAsync(loaded, ReferenceService.FindImplementationsAsync(loaded, resolved, Cap(maxResults, 100), cancellationToken), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "get_diagnostics", ReadOnly = true)]
     [Description("Compiler diagnostics from the Roslyn compilation, deduplicated. Use instead of parsing dotnet build output. Does not yet run the project's analyzers - use build for those - but applies their DiagnosticSuppressors, as the compiler does. A line folds every position sharing an id and a message, and when it folded any the answer also counts occurrences=N errors=N warnings=N - comparable to an edit's errors= counter when the two cover the same projects. baseRef=HEAD keeps only the diagnostics on lines this working tree ADDED or CHANGED against that ref and folds the rest to one pre-existing count, so a convergence read shows your own errors and not the repository's; a baseRef call always runs.")]
@@ -280,7 +280,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             string? path,
             CancellationToken cancellationToken)
     {
-        var scoped = ScopedFile(workspace, path);
+        var scoped = await ScopedFileAsync(workspace, path, cancellationToken).ConfigureAwait(false);
 
         if (!scoped.IsOk)
             return scoped.Error!.Render();
@@ -444,11 +444,11 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
     private static bool NamesAType(string? kind) => string.IsNullOrWhiteSpace(kind) || TypeKinds.Contains(kind);
 
-    private static Result<string?> ScopedFile(LoadedWorkspace workspace, string? path) => path is { Length: > 0 }
-            ? DocumentLookup.Find(workspace, path) is { } document
-                ? Result.Ok<string?>(document.FilePath)
-                : Result.Fail<string?>(Errors.DocumentNotFound(path))
-            : Result.Ok<string?>(null);
+    private static async Task<Result<string?>> ScopedFileAsync(LoadedWorkspace workspace, string? path, CancellationToken cancellationToken) => path is { Length: > 0 }
+        ? DocumentLookup.Find(workspace, path) is { } document
+            ? Result.Ok<string?>(document.FilePath)
+            : Result.Fail<string?>(await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false))
+        : Result.Ok<string?>(null);
 
     private const string FellBack = "NOTE path= declared no match - the whole solution was searched";
 
@@ -513,7 +513,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
     private static async Task<string> SearchManyAsync(LoadedWorkspace workspace, ImmutableArray<string> queries, SymbolQuery shape, CancellationToken cancellationToken)
     {
-        var scoped = ScopedFile(workspace, shape.Path);
+        var scoped = await ScopedFileAsync(workspace, shape.Path, cancellationToken).ConfigureAwait(false);
 
         if (!scoped.IsOk)
             return scoped.Error!.Render();

@@ -262,7 +262,7 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "rename_symbol")]
-    [Description("Rename a symbol across the whole solution, including interface implementations, overrides and XML doc crefs. Use instead of a find-and-replace sweep. A successful rename answers in one line per changed file - plus every XAML or Razor site it could NOT rewrite; pass verbose=true for the diff.")]
+    [Description("Rename a symbol across the whole solution, including interface implementations, overrides and XML doc crefs. Use instead of a find-and-replace sweep; renameFile=true also renames a type's Old.cs to New.cs. A successful rename answers in one line per changed file - plus every XAML or Razor site it could NOT rewrite; pass verbose=true for the diff.")]
     public Task<string> RenameSymbol(
             [Description("Symbol id to rename.")] string? symbolId = null,
             [Description("New identifier.")] string newName = "",
@@ -271,11 +271,18 @@ public sealed class EditTools(ToolContext context)
             [Description(VerboseHelp)] bool verbose = false,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Alias for symbolId.")] string? symbol = null,
+            [Description("Also rename the file of a top-level type whose file is named after it, Old.cs to New.cs, as move_type_to_file would. Default false.")] bool renameFile = false,
             CancellationToken cancellationToken = default) =>
             Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
                 ? Task.FromResult(clash)
-                : Supplied(workspace, symbolId ?? symbol, newName, "newName", (loaded, resolved) => RenameService.RenameAsync(
-                loaded, resolved, newName, Options("rename_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy), cancellationToken), cancellationToken);
+                : Supplied(workspace, symbolId ?? symbol, newName, "newName", (loaded, resolved) =>
+                {
+                    var options = Options("rename_symbol", dryRun, allowErrors: false, verbose, allowPolicy: allowPolicy);
+
+                    return renameFile
+                        ? RenameService.RenameWithFileAsync(loaded, resolved, newName, options, cancellationToken)
+                        : RenameService.RenameAsync(loaded, resolved, newName, options, cancellationToken);
+                }, cancellationToken);
 
     private static EditOptions Options(string tool, bool dryRun, bool allowErrors, bool verbose, string[]? usings = null, string[]? add = null, string? addTo = null, bool rename = false, bool allowPolicy = false, MemberPlacement? placement = null) =>
             new(tool, dryRun, allowErrors, verbose, usings is null ? default : [.. usings], add is null ? default : [.. add], addTo, rename, allowPolicy, placement);
@@ -460,7 +467,7 @@ public sealed class EditTools(ToolContext context)
 
     private static bool Holdable(Carry carry, TerseError error) => carry switch
     {
-        { Tool: "write_text", Targets.Length: > 1 } when FileService.IsUnforced(error) => true,
+        { Tool: "write_text", Targets.Length: > 1 } when FileService.IsUnforced(error) || ReplacedContent.IsRefusal(error) => true,
         { Tool: "edit_text" } or { Tool: "write_text", Targets.Length: > 1 } => error.Code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation,
         _ => error.Code is TerseErrorCode.CompileRegression or TerseErrorCode.PolicyViolation or TerseErrorCode.SymbolNotFound or TerseErrorCode.AmbiguousSymbol or TerseErrorCode.InvalidArgument,
     };

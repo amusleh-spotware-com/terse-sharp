@@ -100,6 +100,11 @@ public static class Errors
         message,
         "re-read the target and retry");
 
+    public static TerseError Overtaken(string[] paths) => new(
+        TerseErrorCode.EditConflict,
+        string.Create(CultureInfo.InvariantCulture, $"{string.Join(", ", paths)} changed after this call read it - another edit or an external write landed first, and nothing was written, so that change is kept"),
+        "re-run this call so it reads the current text; edits of one file issued in parallel must be sent one after the other");
+
     public static TerseError Invalid(string message, string remedy) =>
         new(TerseErrorCode.InvalidArgument, message, remedy);
 
@@ -141,6 +146,11 @@ public static class Errors
         TerseErrorCode.DocumentNotFound,
         string.Create(CultureInfo.InvariantCulture, $"'{path}' is not a document in the loaded workspace"),
         remedy);
+
+    public static TerseError OutsideLoadedSolution(string path, SiblingOwner owner, string loadedPath) => new(
+        TerseErrorCode.DocumentNotFound,
+        string.Create(CultureInfo.InvariantCulture, $"'{path}' exists on disk but is not a document of the loaded {Path.GetFileName(loadedPath)}: it belongs to {owner.Project}, which {Path.GetFileName(owner.SolutionPath)} beside it holds"),
+        string.Create(CultureInfo.InvariantCulture, $"load_workspace path={Path.GetFileName(owner.SolutionPath)} replace=true serves it, or keep both loaded and pass workspace= on every call"));
 
     internal static string QuotedList(IReadOnlyList<string> names) =>
             string.Join(", ", names.Select(name => "\"" + name + "\""));

@@ -153,7 +153,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         const string Path = "src/Fixture.Trading/OrderService.cs";
 
         var analyzed = await server.CallAsync("analyze", new() { ["path"] = Path, ["minSeverity"] = "info" });
-        var gated = await server.CallAsync("gate", new() { ["path"] = Path, ["dryRun"] = true, ["verbose"] = true });
+        var gated = await server.CallAsync("gate", new() { ["path"] = Path, ["dryRun"] = true, ["verbose"] = true, ["baseRef"] = "" });
 
         Assert.Contains("format:", gated, StringComparison.Ordinal);
         Assert.Contains("cleanup:", gated, StringComparison.Ordinal);
@@ -236,7 +236,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     public async Task Gate_AnalyzedCountsTheDocumentsInScope_NotTheDiagnosticsItFound()
     {
         var clean = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["dryRun"] = true });
-        var findings = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["dryRun"] = true });
+        var findings = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["dryRun"] = true, ["baseRef"] = "" });
         var glob = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading/*.cs", ["dryRun"] = true });
 
         Assert.Equal(1, Analyzed(clean));
@@ -567,6 +567,34 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task Gate_OverAPathWithNoBaseRef_FixesOnlyTheLinesTheWorkingTreeChanged_AndBaseRefEmptyFixesTheWholeFile()
+    {
+        const string Sample = "src/Fixture.Trading/StyleSample.cs";
+        var full = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "StyleSample.cs");
+        var original = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(full);
+        var edited = original.Replace("quantity * 3", "quantity * 4", StringComparison.Ordinal);
+
+        await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = edited, ["force"] = true });
+
+        try
+        {
+            var defaulted = await server.CallAsync("gate", new() { ["path"] = Sample });
+            var kept = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+            var whole = await server.CallAsync("gate", new() { ["path"] = Sample, ["baseRef"] = "", ["dryRun"] = true, ["verbose"] = true });
+
+            Assert.Contains("public List<int> Quantities { get; } = new List<int>();", kept, StringComparison.Ordinal);
+            Assert.Contains("preExisting=", defaulted, StringComparison.Ordinal);
+            Assert.Contains("Quantities", whole, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = original, ["force"] = true });
+            File.SetLastWriteTimeUtc(full, stamp);
+        }
+    }
+
+    [Fact]
     public async Task Gate_OverTheChangedFilesWithNoBaseRef_FoldsWhatTheWorkingTreeDidNotChange_AndBaseRefEmptyOptsOut()
     {
         var full = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderService.cs");
@@ -623,7 +651,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task Gate_OverSeveralPaths_AnswersOneVerdictOverTheirUnion()
     {
-        var pair = await server.CallAsync("gate", new() { ["paths"] = new[] { "src/Fixture.Trading/Order.cs", "src/Fixture.Trading/OrderService.cs" }, ["dryRun"] = true });
+        var pair = await server.CallAsync("gate", new() { ["paths"] = new[] { "src/Fixture.Trading/Order.cs", "src/Fixture.Trading/OrderService.cs" }, ["dryRun"] = true, ["baseRef"] = "" });
         var directory = await server.CallAsync("gate", new() { ["path"] = "src/Fixture.Trading", ["dryRun"] = true });
         var overlapping = await server.CallAsync("gate", new() { ["paths"] = new[] { "src/Fixture.Trading/Order.cs", "src/Fixture.Trading" }, ["dryRun"] = true });
 

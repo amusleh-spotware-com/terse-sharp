@@ -458,7 +458,10 @@ public static class FileService
 
     public readonly record struct ReadRequest(LineRange Range, bool Headings, string? Section, bool Verbose = false, int Tail = 0, bool Bytes = false, long Length = 0, IReadOnlyList<string>? Columns = null, int Occurrence = 0, int MaxLevel = 0, bool Tokens = false, int Characters = 0, int CellChars = 0, bool Stamp = false, long Ticks = 0);
 
-    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false, bool AllowErrors = false, IReadOnlyList<string>? Usings = null);
+    public readonly record struct EditRequest(string OldText, string NewText, string? Section, bool DryRun, bool Force, bool Verbose, int Occurrence = 0, string? Place = null, string? ToPath = null, string? Row = null, int Context = 0, bool ReplaceAll = false, bool AllowErrors = false, IReadOnlyList<string>? Usings = null)
+    {
+        public IReadOnlyDictionary<string, HashSet<string>>? Unneeded { get; init; }
+    }
 
     public readonly record struct LineRange(int Start, int End, int MaxLines, int MaxChars = DefaultResponseCharacters, IReadOnlyList<LineSpan>? Spans = null)
     {
@@ -821,6 +824,24 @@ public static class FileService
         EditRequest request,
         CancellationToken cancellationToken)
     {
+        var (rewrites, pending) = await RewritesAsync(workspace, groups, request, cancellationToken).ConfigureAwait(false);
+
+        if (groups.Count > 1 && await UnneededAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false) is { Count: > 0 } unneeded)
+            (rewrites, pending) = await RewritesAsync(workspace, groups, request with { Unneeded = unneeded }, cancellationToken).ConfigureAwait(false);
+
+        var gated = await CompileGatedAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false);
+
+        return gated is { IsOk: false }
+            ? gated.Value
+            : Result.Ok(await AnsweredAsync(workspace, rewrites, gated is null ? [] : pending, gated, cancellationToken).ConfigureAwait(false));
+    }
+
+    private static async Task<(List<(string Path, Result<BatchEdit> Rewrite)> Rewrites, List<PendingWrite> Pending)> RewritesAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<TextEditGroup> groups,
+        EditRequest request,
+        CancellationToken cancellationToken)
+    {
         var rewrites = new List<(string Path, Result<BatchEdit> Rewrite)>(groups.Count);
         var pending = new List<PendingWrite>(groups.Count);
 
@@ -834,11 +855,17 @@ public static class FileService
             rewrites.Add((group.Path, rewrite));
         }
 
-        var gated = await CompileGatedAsync(workspace, pending, request, cancellationToken).ConfigureAwait(false);
+        return (rewrites, pending);
+    }
 
-        return gated is { IsOk: false }
-            ? gated.Value
-            : Result.Ok(await AnsweredAsync(workspace, rewrites, gated is null ? [] : pending, gated, cancellationToken).ConfigureAwait(false));
+    private static async Task<IReadOnlyDictionary<string, HashSet<string>>> UnneededAsync(LoadedWorkspace workspace, List<PendingWrite> pending, EditRequest request, CancellationToken cancellationToken)
+    {
+        if (request.Usings is not { Count: > 0 } usings)
+            return new Dictionary<string, HashSet<string>>(0);
+
+        PrunedText[] texts = [.. pending.Select(Pruned).OfType<PrunedText>()];
+
+        return await UsingPruning.UnneededAsync(workspace.Solution, texts, usings, cancellationToken).ConfigureAwait(false);
     }
 
     public readonly record struct FileWrite(string Path, string Content, bool Force = false);
@@ -2255,7 +2282,15 @@ public static class FileService
     }
 
     private static string Imported(string path, string after, EditRequest request) =>
-        request.Usings is { Count: > 0 } usings && SourceFile.IsCSharp(path) ? WriteRetry.WithUsings(after, usings) : after;
+        request.Usings is { Count: > 0 } usings && SourceFile.IsCSharp(path) ? WriteRetry.WithUsings(after, Needed(usings, request, path)) : after;
+
+    private static IReadOnlyList<string> Needed(IReadOnlyList<string> usings, EditRequest request, string path) =>
+        request.Unneeded is { } unneeded && unneeded.TryGetValue(path, out var dropped)
+            ? [.. usings.Where(name => !dropped.Contains(name))]
+            : usings;
+
+    private static PrunedText? Pruned(PendingWrite write) =>
+        write is { IsNew: false, Document: { } document } && SourceFile.IsCSharp(write.Path) ? new PrunedText(document, write.Path, write.After) : null;
 
     private static bool Uncompiled(LoadedWorkspace workspace, string path) => SourceFile.IsCSharp(path) && DocumentLookup.Find(workspace, path) is null;
 

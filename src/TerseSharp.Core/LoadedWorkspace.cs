@@ -13,6 +13,7 @@ public sealed class LoadedWorkspace : IDisposable
     private readonly List<HistoryEntry> history = [];
     private readonly Lock historyGate = new();
     private readonly Lock leaseGate = new();
+    private readonly WriteLedger writes = new();
     private readonly WorkspaceWatcher watcher;
     private readonly Lazy<string> lineEnding;
 
@@ -137,6 +138,16 @@ public sealed class LoadedWorkspace : IDisposable
 
         return new WorkspaceLease(this);
     }
+
+    public void MarkRead() => writes.MarkRead(this);
+
+    public string[] TakeOvertaken() => WriteLedger.TakeOvertaken(this);
+
+    private static IEnumerable<string> ChangedPaths(Solution before, Solution after) =>
+        after.GetChanges(before)
+            .GetProjectChanges()
+            .SelectMany(change => change.GetChangedDocuments().Select(id => after.GetDocument(id)?.FilePath))
+            .OfType<string>();
 
     public async Task<bool> TryApplyAsync(
         Solution solution,
@@ -266,12 +277,13 @@ public sealed class LoadedWorkspace : IDisposable
     {
         lock (historyGate)
         {
-            if (!Applied(rebased))
+            if (writes.Overtaken(this, entry.Paths).Length > 0 || !Applied(rebased))
                 return false;
 
             Record(entry);
 
             Solution = forked;
+            writes.Wrote(this, entry.Paths);
 
             return true;
         }
@@ -313,6 +325,7 @@ public sealed class LoadedWorkspace : IDisposable
                 return "the workspace refused the revert";
 
             Solution = restored;
+            writes.Wrote(this, entry.Paths);
 
             if (history.Count > 0 && ReferenceEquals(history[^1], entry))
                 history.RemoveAt(history.Count - 1);
@@ -781,10 +794,13 @@ public sealed class LoadedWorkspace : IDisposable
 
         lock (historyGate)
         {
+            var previous = Solution;
+
             if (!Applied(rebased, current))
                 return false;
 
             Solution = solution;
+            writes.Wrote(this, ChangedPaths(previous, solution));
 
             return true;
         }

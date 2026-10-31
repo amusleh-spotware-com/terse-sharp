@@ -122,7 +122,7 @@ client already carries those, so this table is the job-to-tool map and nothing e
 | **Edit code** | placing a member instead of letting it land last | `add_member(typeSymbolId, declaration, before: "Submit")` — also `after:`, and `position: "first"` / `"afterFields"` / `"last"`; the anchor takes any spelling of the parameter list |
 | **Edit code** | removing several members | `delete_symbol(symbolIds: [...])` — one gated edit; a file left declaring nothing is deleted |
 | **Edit code** | an interface member and every implementation, or an enum value and its use | `add_member(typeSymbolIds: [...], declarations: [...])` — ONE gated edit |
-| **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow |
+| **Edit code** | find-and-replace a name | `rename_symbol(symbolId, newName)` — interfaces, overrides, doc crefs and XAML follow; `renameFile: true` renames `Old.cs` too |
 | **Edit code** | reverting an edit you regret | `undo_last_change` |
 | **Refactor** | hand-writing an interface from a class | `extract_interface(symbolId)` |
 | **Refactor** | cut-and-paste between files, un-nesting a type | `move_type_to_file` (a file's only type moves the file whole) · `move_type_to_namespace` (a nested type id lifts it to namespace level in its own file) |
@@ -251,7 +251,7 @@ raising a number you chose; the steer returns as soon as you drop the argument.
 `diff_text` — **all three take `staged=true`**, and all three take
 `baseRef=`, so `main`, `HEAD~3` and a range work, and the paths come back workspace-relative and
 re-usable as arguments. A bare `git ls-files` is served by `find_files tracked=true`. A diff of a path
-that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, as does one piped into `cmp` or a `sha*sum`, and so does a diff flag no tool serves (`-b`, `--check`). Running them in
+that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `changed_files` and `diff_text`, `-U<n>` is `diff_text unified=<n>`. A git read whose stdout goes to a FILE (`git diff -U0 > x.patch`, `git show <ref>:<path> > f`) runs, as does one piped - through stdin filters too - into `cmp`, a `sha*sum` or `git hash-object --stdin`, and so does a diff flag no tool serves (`-b`, `--check`). Running them in
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then a literal earlier `cd`, even one not created yet, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, `git log -1 --stat` is `history commit=`, and
@@ -298,20 +298,18 @@ A silent drop is the breach, even when the reason would have been valid.
 **Four solutions stay loaded at once**, the least recently used being unloaded beyond that; a
 workspace that vanished from `list_workspaces` was evicted, not lost, and the next call naming it
 reloads it. The user can change the limit with `terse serve --max-workspaces N` or
-`TERSE_MAX_WORKSPACES` — worth telling them when a big solution is making the server heavy, because a
-loaded workspace costs roughly 3 GB on a 148-project tree.
+`TERSE_MAX_WORKSPACES` — worth telling them: a loaded 148-project tree costs roughly 3 GB.
 **The advertised surface is derived from what the solution holds** — no `.xaml`/`.axaml` hides the 13
 `xaml_*` tools, no `.razor`/`.cshtml` the 10 `razor_*`, no `.resx`/`.resw` the 8 `resx_*`: 55 tools instead of 86 on a plain C# solution. Loading a
 second solution that does hold them adds those families through
 `notifications/tools/list_changed`, and a listed family is never withdrawn; `--tools all` (or `TERSE_TOOLS=all`) advertises everything and
-`--tools core` narrows to about twenty. A hidden tool still answers when called by name — but an
-agent can only call what its client lists, so a narrowed surface narrows what you can reach, not
-merely what you can see. `workspace_status` prints `tools=core - N advertised` under a profile and
+`--tools core` narrows to about twenty. A hidden tool still answers by name, but an
+agent calls only what its client lists. `workspace_status` prints `tools=core - N advertised` under a profile and
 `tools=<families> hidden` when the workspace narrowed it; `verbose=true` adds
 `surface=<n> tools <t> tokens`.
 **A freshly loaded workspace has no compilations yet**, so `load_workspace` ends with
 `compilations=cold`, and the first semantic call that realizes them appends
-`compilations=realized in Nms (once per load, not per call)` — a one-off, not the per-call cost of the tool that paid it. A call compiling only part of the solution says `(K more of T projects, C compiled now)`, so a slow call with no note did not pay for compilation; a call held over 2 s by a build or test ends `NOTE queued Nms (load= resolve= sync= reload=; ran=)`.
+`compilations=realized in Nms (once per load, not per call)`. A call compiling only part of the solution says `(K more of T projects, C compiled now)`; a call held over 2 s by a build or test ends `NOTE queued Nms (load= resolve= sync= reload=; ran=)`.
 **Compilations are given back once the server has served no call for 60 minutes** (`--idle-minutes`,
 `TERSE_IDLE_MINUTES`, `.terse.json` `workspace.idleMinutes`; `0` off; `load_workspace` says so), and past 60 % of available memory (never below 2 GB) so does every OTHER workspace idle a minute;
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
@@ -319,9 +317,9 @@ what it needs, then warms the rest in the background. While the startup load run
 text, file and git tools already answer. On a **multi-targeted** solution pass
 `load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
 be invisible to `find_usages` with every gate green; whatever was chosen is printed as
-`targetFramework=`. A `WARNING config-mapping` line names a project the solution builds at another Configuration|Platform: its warnaserror and nowarn severities are re-read at that configuration.
+`targetFramework=`; an outline names members an inactive `#if` hides. `WARNING subset` names a sibling solution with projects this one lacks (`find_usages` adds `NOTE incomplete`); `load_workspace replace=true` swaps to it. A `WARNING config-mapping` line names a project the solution builds at another Configuration|Platform: its warnaserror and nowarn severities are re-read at that configuration.
 Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory
-really does come back; it costs about a second, so the unload-and-retry `build`/`run_tests` perform on a locked output skips it. It is skipped - `the workspace was NOT unloaded` - when every named holder is another live process, since unloading cannot release it.
+really does come back; it costs about a second, so the unload-and-retry `build`/`run_tests` perform on a locked output skips it. It is skipped - `the workspace was NOT unloaded` - when every named holder is another live process.
 
 **The analyzers a solution builds from source
 no longer block your own build**: every analyzer and source-generator assembly is loaded from a
@@ -451,7 +449,7 @@ clean verdict is never a gate that ran over nothing; a scope matching no documen
 naming it instead of a verdict. It condenses to that single line
 only when every step was genuinely quiet, so a `VERIFY_FAILED`, an `UNFIXED`, a rolled-back step or a
 file the run rewrote is always shown. Under `dryRun=true` a tree that **would** change answers
-`FAILED`, which is what a pre-push check is for. Under `baseRef=` it writes only files the tree changed. **Its changed-file default is `baseRef=HEAD`** on a git tree, ending `preExisting=N`; `baseRef=""` lists every finding. `paths=[...]` gates several scopes as ONE verdict. `dryRun=true` makes both write steps verify instead of write, so
+`FAILED`, which is what a pre-push check is for. Under `baseRef=` it writes only files the tree changed. **Its default is `baseRef=HEAD`** on a git tree, `path=`/`paths=` included, ending `preExisting=N`; `baseRef=""` or `solution=true` gates whole files. `paths=[...]` gates several scopes as ONE verdict. `dryRun=true` makes both write steps verify instead of write, so
 nothing is modified; `verbose=true` adds each step's own report. It never replaces reading `build`
 before `run_tests`: those two stay separate on purpose, because a test result read before its build is
 the previous binary's.
@@ -566,7 +564,7 @@ compile-gated edit — so a set of members that reference each other needs no de
 `add_member` take `usings: ["System.Collections.Immutable"]`, added to the file's using block —
 sorted System-first, one already present ignored — inside the **same** compile-gated write as the
 declaration. That is the answer to a `CS0246` rollback: pass the namespace instead of paying a
-rejected edit, an `edit_text force=true` on the file header and a `retryWith`. A multi-file batch lands
+rejected edit, an `edit_text force=true` on the file header and a `retryWith`. A multi-file batch - `edit_text edits=` too - lands
 each entry only where it is needed.
 
 **`replace_symbol` also edits several files as one compile-gated edit.** Pass `symbolIds` and

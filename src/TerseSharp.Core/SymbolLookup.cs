@@ -177,15 +177,17 @@ public static class SymbolLookup
             return null;
 
         if (DocumentLookup.Find(workspace, path) is not { } document)
-            return Result.Fail<ISymbol>(Errors.DocumentNotFound(path));
+            return Result.Fail<ISymbol>(await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false));
 
         var declared = await SymbolFinder
             .FindSourceDeclarationsAsync(document.Project, SymbolReference.Searched(query), ignoreCase: false, cancellationToken)
             .ConfigureAwait(false);
 
-        return Scoped(text, [.. SymbolReference.Expanded(declared, query)
+        ISymbol[] matches = [.. SymbolReference.Expanded(declared, query)
         .Where(symbol => DeclaredIn(symbol, document.FilePath) && SymbolReference.Matches(symbol, query))
-        .DistinctBy(Describe, StringComparer.Ordinal)]);
+        .DistinctBy(Describe, StringComparer.Ordinal)];
+
+        return Scoped(text, matches.Length > 0 ? matches : await ExplicitInFileAsync(document, query, cancellationToken).ConfigureAwait(false));
     }
 
     private static Result<ISymbol>? Scoped(string text, ISymbol[] matches) => matches switch
@@ -467,7 +469,28 @@ public static class SymbolLookup
 
         return declared.Length > 0
             ? declared
-            : type.GetMembers().Where(symbol => IsExplicitImplementation(symbol) && string.Equals(SimpleName(symbol), member, StringComparison.Ordinal));
+            : type.GetMembers().Where(symbol => IsExplicitImplementation(symbol) && ExplicitlyNamed(symbol, member));
+    }
+
+    private static bool ExplicitlyNamed(ISymbol symbol, string member) =>
+        string.Equals(SimpleName(symbol), member, StringComparison.Ordinal)
+        || string.Equals(symbol.Name, member.Replace('#', '.'), StringComparison.Ordinal);
+
+    private static async Task<ISymbol[]> ExplicitInFileAsync(Document document, SymbolQuery query, CancellationToken cancellationToken)
+    {
+        if (await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false) is not { } root
+            || await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false) is not { } model)
+        {
+            return [];
+        }
+
+        return [.. root.DescendantNodes()
+        .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.BaseTypeDeclarationSyntax>()
+        .Select(declaration => model.GetDeclaredSymbol(declaration, cancellationToken))
+        .OfType<INamedTypeSymbol>()
+        .SelectMany(type => type.GetMembers().Where(symbol => IsExplicitImplementation(symbol) && ExplicitlyNamed(symbol, query.Member)))
+        .Where(symbol => SymbolReference.Matches(symbol, query))
+        .DistinctBy(Describe, StringComparer.Ordinal)];
     }
 
     private static string[] MetadataNames(INamedTypeSymbol type, string member) => member switch

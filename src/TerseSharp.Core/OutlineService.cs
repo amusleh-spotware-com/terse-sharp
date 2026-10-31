@@ -139,11 +139,14 @@ public static class OutlineService
             $"{Reference(symbol, format.Ids, Never)}  {SymbolFormat.Kind(symbol)} {SymbolFormat.Accessibility(symbol)}  :{PositionFormat.LineRange(declaration)}"));
 
         var total = Countable(declaration);
+        var tally = format is { Collapse: false } or { All: true } or { Contains.Length: > 0 } || total <= MaxListedMembers
+            ? Listed(response, declaration, model, format, references, total)
+            : Grouped(response, symbol, total);
 
-        if (!format.Collapse || format.All || format.Contains is { Length: > 0 } || total <= MaxListedMembers)
-            return Listed(response, declaration, model, format, references, total);
+        if (InactiveMembers.Note(declaration, model, format.Contains) is { } inactive)
+            response.Line(inactive);
 
-        return Grouped(response, symbol, total);
+        return tally;
     }
 
     private static readonly IReadOnlySet<string> Never = new HashSet<string>(StringComparer.Ordinal);

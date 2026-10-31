@@ -97,6 +97,71 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task RenameSymbol_WithRenameFile_RenamesTheTypeAndTheFileNamedAfterIt()
+    {
+        var directory = System.IO.Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading");
+        var original = System.IO.Path.Combine(directory, "TwinBravo.cs");
+        var renamed = System.IO.Path.Combine(directory, "TwinCharlie.cs");
+        var stamp = File.GetLastWriteTimeUtc(original);
+        var preview = await server.CallAsync("rename_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TwinBravo", ["newName"] = "TwinCharlie", ["renameFile"] = true, ["dryRun"] = true });
+
+        try
+        {
+            var text = await server.CallAsync("rename_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TwinBravo", ["newName"] = "TwinCharlie", ["renameFile"] = true });
+
+            Assert.Contains("renameFile=true renames TwinBravo.cs to TwinCharlie.cs", preview, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+            Assert.True(File.Exists(renamed), text);
+            Assert.False(File.Exists(original), text);
+            Assert.Contains("public sealed class TwinCharlie", await File.ReadAllTextAsync(renamed, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("rename_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TwinCharlie", ["newName"] = "TwinBravo", ["renameFile"] = true });
+            File.SetLastWriteTimeUtc(original, stamp);
+        }
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_ForAnExplicitImplementationNamedByItsHashSpelling_ResolvesIt()
+    {
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolId"] = "Awkward.Fixture#Trading#IHandler#Handle" });
+
+        Assert.Contains("int IHandler.Handle(int value) => seed - value;", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOT_RESOLVED", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_PairingAnExplicitImplementationWithItsOwnDeclaration_IsNotRefusedAsMisnamed()
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolIds"] = new[] { "M:Fixture.Trading.Awkward.Fixture#Trading#IHandler#Handle(System.Int32)~System.Int32", "Awkward.Ordinary" },
+            ["declarations"] = new[] { "int IHandler.Handle(int value) => seed + value;", "public int Ordinary(int value) => value + 1;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("+    int IHandler.Handle(int value) => seed + value;", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("public int Ordinary(int value)\n{\n    return value;\n}\n\nprivate int Extra()\n{\n    return 0;\n}")]
+    [InlineData("public int Ordinary(int value)\n{\n    return value;\n}\nprivate int Extra()\n{\n    return 0;\n}")]
+    public async Task ReplaceSymbol_WithTwoMembersInOneDeclaration_SeparatesThemByOneBlankLine(string declaration)
+    {
+        var text = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "Awkward.Ordinary",
+            ["declaration"] = declaration,
+            ["dryRun"] = true,
+            ["verbose"] = true,
+        });
+
+        Assert.Matches(@"\+    \}\r?\n\+\r?\n\+    private int Extra\(\)", text);
+    }
+
+    [Fact]
     public async Task AddMember_WithDryRun_ShowsTheInsertedMember()
     {
         var text = await server.CallAsync("add_member", new()

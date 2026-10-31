@@ -245,6 +245,65 @@ public sealed class AnchoredBatchE2ETests(TerseServerFixture server)
         Assert.Equal(2, text.Split("+using System.Text;").Length - 1);
     }
 
+    [Fact]
+    public async Task EditText_AcrossFilesWithUsings_LandsEachUsingOnlyInTheFilesThatNeedIt()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["edits"] = new object[]
+            {
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/TwinAlpha.cs", ["oldText"] = "public int Count() => 1;", ["newText"] = "public int Count() => new StringBuilder(\"a\").Length;" },
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/TwinBravo.cs", ["oldText"] = "public int Count() => 1;", ["newText"] = "public int Count() => 2;" },
+            },
+            ["usings"] = new[] { "System.Text" },
+            ["dryRun"] = true,
+        });
+
+        var bravo = text[text.IndexOf("TwinBravo.cs", StringComparison.Ordinal)..];
+
+        Assert.Equal(1, text.Split("+using System.Text;").Length - 1);
+        Assert.DoesNotContain("+using System.Text;", bravo, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EditText_AcrossFilesWithAUsingNoFileNeeds_StillLandsItInEveryFile()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["edits"] = new object[]
+            {
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/TwinAlpha.cs", ["oldText"] = "public int Count() => 1;", ["newText"] = "public int Count() => 3;" },
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/TwinBravo.cs", ["oldText"] = "public int Count() => 1;", ["newText"] = "public int Count() => 2;" },
+            },
+            ["usings"] = new[] { "System.Text" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Equal(2, text.Split("+using System.Text;").Length - 1);
+    }
+
+    [Fact]
+    public async Task EditText_AcrossFilesWithAUsingForATypeTheSameBatchAdds_LandsItInTheFileThatUsesThatType()
+    {
+        var text = await server.CallAsync("edit_text", new()
+        {
+            ["edits"] = new object[]
+            {
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/Beta/DuplicatedName.cs", ["oldText"] = "public sealed class DuplicatedName;", ["newText"] = "public sealed class DuplicatedName;\n\npublic sealed class FreshBeta;" },
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/TwinAlpha.cs", ["oldText"] = "public int Count() => 1;", ["newText"] = "public int Count() => new FreshBeta() is null ? 0 : 1;" },
+                new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/TwinBravo.cs", ["oldText"] = "public int Count() => 1;", ["newText"] = "public int Count() => 2;" },
+            },
+            ["usings"] = new[] { "Fixture.Trading.Beta" },
+            ["dryRun"] = true,
+        });
+
+        var alpha = text[text.IndexOf("TwinAlpha.cs", StringComparison.Ordinal)..text.IndexOf("TwinBravo.cs", StringComparison.Ordinal)];
+
+        Assert.DoesNotContain("rolled back", text, StringComparison.Ordinal);
+        Assert.Equal(1, text.Split("+using Fixture.Trading.Beta;").Length - 1);
+        Assert.Contains("+using Fixture.Trading.Beta;", alpha, StringComparison.Ordinal);
+    }
+
     private static int InsertedAt(string diff)
     {
         var hunk = diff.AsSpan(diff.IndexOf("@@ -", StringComparison.Ordinal));

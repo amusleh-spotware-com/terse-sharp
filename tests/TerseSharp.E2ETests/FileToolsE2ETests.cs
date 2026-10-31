@@ -2365,6 +2365,37 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task WriteText_AFilesBatchRefusedForOverwritingAnUnrelatedFile_HoldsTheBatchSoTheRetryIsATokenAndOverwrite()
+    {
+        const string Kept = "terse-overwrite-token-kept.md";
+        const string Replaced = "terse-overwrite-token-replaced.md";
+
+        await server.CallAsync("write_text", new() { ["path"] = Replaced, ["content"] = "# Plan\n\nalpha step\nbeta step\ngamma step\ndelta step\n" });
+        try
+        {
+            var files = new object[]
+            {
+                new Dictionary<string, object> { ["path"] = Kept, ["content"] = "# Kept\n\nfresh file\n" },
+                new Dictionary<string, object> { ["path"] = Replaced, ["content"] = "# Plan\n\nsomething else entirely\n" },
+            };
+            var refused = await server.CallAsync("write_text", new() { ["files"] = files });
+            var token = refused[(refused.LastIndexOf("retryWith=", StringComparison.Ordinal) + "retryWith=".Length)..].Trim();
+            var replayed = await server.CallAsync("write_text", new() { ["retryWith"] = token, ["overwrite"] = true });
+            var written = await server.CallAsync("read_text", new() { ["path"] = Replaced });
+
+            Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+            Assert.Matches("^r[0-9]+$", token);
+            Assert.DoesNotContain("ERROR", replayed, StringComparison.Ordinal);
+            Assert.Contains("something else entirely", written, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Replaced, ["delete"] = true });
+            await server.CallAsync("write_text", new() { ["path"] = Kept, ["delete"] = true });
+        }
+    }
+
+    [Fact]
     public async Task SearchText_WithGlobAndADifferentPath_IsRefusedNamingBothInsteadOfDroppingThePath()
     {
         var text = await server.CallAsync("search_text", new()
