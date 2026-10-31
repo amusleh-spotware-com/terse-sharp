@@ -7,6 +7,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+
+## [0.81.0] - 2026-10-31
 ### Added
 
 - **`load_workspace replace=true` unloads every other loaded solution once this one loads**, so a session that loaded the wrong sibling first no longer needs `workspace=` on every later call. The answer ends `replace=true - unloaded <names>`. Covered by `LoadWorkspace_WithReplace_UnloadsTheSubsetSoTheWiderSolutionAnswersAlone`.
@@ -7835,7 +7837,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.80.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.81.0...HEAD
+[0.81.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.81.0
 [0.80.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.80.0
 [0.79.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.79.0
 [0.78.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.78.0
