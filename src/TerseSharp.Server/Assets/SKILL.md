@@ -415,7 +415,7 @@ edit, climb only as high as the edit reaches:
 | 4 | `run_tests` over the whole solution | 85 s+, p99 **16 min** | ONCE, at the end of the task |
 | — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
 
-A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call - the payload is repeated verbatim with a `NOTE <tool> UNCHANGED` line under it, and `reload=true` (or `sinceLast=true`, or any different argument) re-runs. A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `rerun_failed`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` (or what the file watcher saw change on disk) - the answer you already have. Banned: a full-suite run between two edits of one
+A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call - the payload is repeated verbatim with a `NOTE <tool> UNCHANGED` line under it, and `reload=true` (or `sinceLast=true`, or any different argument) re-runs. A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` (or what the file watcher saw change on disk) - the answer you already have. Banned: a full-suite run between two edits of one
 slice · re-issuing an identical `build` or `run_tests` with nothing written since - a repeat of a call that already answered GREEN (`run_tests PASSED`, `build ok`), with no edit and no watcher event on any loaded workspace since, answers `run_tests UNCHANGED` / `build UNCHANGED` naming the previous verdict and its age instead of running, and `force=true` opts out; a repeat that re-runs anyway ends `NOTE re-ran: stamp moved <what> a->b`. `rerun_failed` is never memoized and always runs, because the failure list it replays is not named by any of its arguments · a
 run to "confirm" one that already passed · reading a test result before the build result.
 
@@ -656,7 +656,7 @@ it has at most ten members, so the *next* read is member-scoped. A line-ranged r
 workspace is read as text unchanged. `read_text` also accepts an **absolute path outside every
 workspace root**, tagged `outside-workspace`, so comparing a file against another repo needs no second
 `load_workspace` and no `workspace=` even with several loaded; every writer still refuses to leave the
-workspace. It clips at **40 960** characters unless `maxChars` says otherwise (ceiling 131 072): the
+workspace. It clips at **40 960** characters unless `maxChars` says otherwise (ceiling 47 104): the
 default is set so a whole-file read stays inline in your client rather than being spilled to a file
 that answers nothing, and the clip always names `next: startLine=`. A file whose bytes open with a
 Unicode byte order mark - UTF-16 LE or BE, UTF-32, UTF-8 - is decoded and served, not refused as

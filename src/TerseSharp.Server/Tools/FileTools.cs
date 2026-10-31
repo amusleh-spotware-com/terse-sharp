@@ -16,7 +16,7 @@ public sealed class FileTools(ToolContext context)
                 [Description("Discontinuous ranges of one file, at most 20, each \"42\" or \"101-102\"; refused beside every other range or markdown view.")] string?[]? ranges = null,
                 [Description("\"40-200\" or \"42\": startLine/endLine as one value.")] string? lines = null,
                 [Description("Maximum lines returned, default 2000; the response is truncated, never refused. With headings=true it bounds the SECTIONS listed.")] int maxLines = 0,
-                [Description("Maximum characters of file text, default 40960 at most 131072; one budget shared across a paths= batch.")] int maxChars = 0,
+                [Description("Maximum characters of file text, default 40960 at most 47104; one budget shared across a paths= batch.")] int maxChars = 0,
                 [Description("Return the last N lines instead of a range, the way tail -n does. Overrides startLine and endLine.")] int tail = 0,
                 [Description("End the answer with the file's byte length as bytes=N, once per paths= entry. Default false.")] bool bytes = false,
                 [Description("End the answer with the whole file's token cost as tokens=N, whatever range was read. Default false.")] bool tokens = false,
@@ -793,32 +793,27 @@ context.RejectWrite() is { } rejection
     {
         var rendered = new List<string>(paths.Length);
         var remaining = request.Range.Budget;
-        var clipped = string.Empty;
 
-        foreach (var path in paths)
+        for (var index = 0; index < paths.Length; index++)
         {
             var scoped = request with { Range = request.Range with { MaxChars = Math.Max(1, remaining) } };
-            var answer = await ReadOneAsync(path, scoped, whole, workspace, cancellationToken).ConfigureAwait(false);
+            var answer = await ReadOneAsync(paths[index], scoped, whole, workspace, cancellationToken).ConfigureAwait(false);
 
-            rendered.Add(Entry(path, answer));
+            rendered.Add(Entry(paths[index], answer));
             remaining -= answer.Length;
 
-            if (remaining > 0 || rendered.Count == paths.Length)
-                continue;
-
-            clipped = path;
-
-            break;
+            if (remaining <= 0 && index < paths.Length - 1)
+                return Batched(rendered, paths.Length, paths[index], ImmutableArray.Create(paths, index + 1, paths.Length - index - 1));
         }
 
-        return Batched(rendered, paths.Length, clipped);
+        return Batched(rendered, paths.Length, string.Empty, []);
     }
 
     private static string Entry(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)
     ? string.Create(CultureInfo.InvariantCulture, $"{(answer.Contains("DocumentNotFound", StringComparison.Ordinal) ? "NOT_FOUND" : "FAILED")} {path}\n{answer}")
     : string.Create(CultureInfo.InvariantCulture, $"{path}\n{answer}");
 
-    private static string Batched(List<string> rendered, int requested, string clipped)
+    private static string Batched(List<string> rendered, int requested, string clipped, ImmutableArray<string> unread)
     {
         var response = new ResponseBuilder("read_text", string.Empty);
 
@@ -831,7 +826,7 @@ context.RejectWrite() is { } rejection
         {
             response.Note(string.Create(
                 CultureInfo.InvariantCulture,
-                $"the shared maxChars budget ran out at {clipped} - raise maxChars, or read the rest in a second call"));
+                $"the shared maxChars budget ran out at {clipped} - paths=[\"{string.Join("\", \"", unread)}\"] reads the rest in a second call"));
         }
 
         return response.ToString();
@@ -1034,7 +1029,7 @@ context.RejectWrite() is { } rejection
         {
             return Errors.Invalid(
                 "row= and rows= move markdown table rows and cannot be combined with a top-level oldText or section",
-                "send the move as path=, row= or rows=, toPath= and optionally newText= - edits= entries naming OTHER files may ride along").Render();
+                "send the move as path=, row= or rows=, toPath= and optionally newText= - edits= entries naming path= or OTHER files may ride along").Render();
         }
 
         if (Batched(request, rows) is { IsOk: false } refused)
@@ -1045,14 +1040,15 @@ context.RejectWrite() is { } rejection
         if (!side.IsOk)
             return side.Error!.Render();
 
+        var (own, others) = BySource(loaded.Root, path, side.Value!);
         var moved = NavigationTools.Unwrap(rows is { Length: > 0 } batch
-            ? await FileService.MoveRowsAsync(loaded, path, toPath, batch, request, cancellationToken).ConfigureAwait(false)
-            : await FileService.MoveRowAsync(loaded, path, toPath, request, cancellationToken).ConfigureAwait(false));
+            ? await FileService.MoveRowsAsync(loaded, path, toPath, batch, own, request, cancellationToken).ConfigureAwait(false)
+            : await FileService.MoveRowAsync(loaded, path, toPath, own, request, cancellationToken).ConfigureAwait(false));
 
-        if (side.Value is not { Count: > 0 } groups || moved.StartsWith("ERROR", StringComparison.Ordinal))
+        if (others is not { Count: > 0 } || moved.StartsWith("ERROR", StringComparison.Ordinal))
             return moved;
 
-        var edited = await FileService.EditTextGroupedAsync(loaded, groups, WithoutMove(request), cancellationToken).ConfigureAwait(false);
+        var edited = await FileService.EditTextGroupedAsync(loaded, others, WithoutMove(request), cancellationToken).ConfigureAwait(false);
 
         return moved + "\n" + NavigationTools.Unwrap(edited);
     }
@@ -1327,11 +1323,11 @@ context.RejectWrite() is { } rejection
         if (pathless >= 0)
         {
             return Result.Fail<List<FileService.TextEditGroup>>(Errors.Invalid(
-                string.Create(CultureInfo.InvariantCulture, $"edits[{pathless}] carries no path, and beside row= or rows= every edits entry must name ANOTHER file"),
+                string.Create(CultureInfo.InvariantCulture, $"edits[{pathless}] carries no path, and beside row= or rows= every edits entry must name its own file"),
                 "give the entry its own path=, or send it as a separate edit_text call"));
         }
 
-        var moved = Array.FindIndex(edits, entry => SamePath(root, entry.Path!, path) || SamePath(root, entry.Path!, toPath));
+        var moved = Array.FindIndex(edits, entry => SamePath(root, entry.Path!, toPath));
 
         if (moved >= 0)
         {
@@ -1433,7 +1429,7 @@ context.RejectWrite() is { } rejection
     private static bool UnforcedWrite(bool forced, string? path, FileService.FileWrite[]? files) =>
         !forced && (SourceFile.IsCSharp(path.AsSpan()) || Array.Exists(files ?? [], file => !file.Force && SourceFile.IsCSharp(file.Path)));
 
-    private static bool Lands(string preview) =>
+    internal static bool Lands(string preview) =>
         !preview.Contains("would be rolled back", StringComparison.Ordinal) && !preview.StartsWith("0 files changed", StringComparison.Ordinal);
 
     private static FileService.FileWrite[] Replays(RejectedEdit held, IReadOnlyList<string> usings)
@@ -1543,4 +1539,7 @@ context.RejectWrite() is { } rejection
 
     private bool Unbound(string path, WriteOptions options) =>
         options.IfUnchangedSince is null && !context.Registry.All().Any() && Unhoused(path);
+
+    private static (IReadOnlyList<FileService.TextEdit> Own, List<FileService.TextEditGroup> Others) BySource(string root, string path, List<FileService.TextEditGroup> groups) =>
+        (groups.Find(group => SamePath(root, group.Path, path)).Edits ?? [], groups.FindAll(group => !SamePath(root, group.Path, path)));
 }

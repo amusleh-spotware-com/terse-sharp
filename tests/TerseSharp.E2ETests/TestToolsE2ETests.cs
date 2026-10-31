@@ -539,6 +539,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("failed=3", first, StringComparison.Ordinal);
         Assert.Contains("failed=3", second, StringComparison.Ordinal);
         Assert.DoesNotContain("UNCHANGED", second, StringComparison.Ordinal);
+        Assert.DoesNotContain("repeat #", second, StringComparison.Ordinal);
     }
 
     [Fact]

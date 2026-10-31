@@ -179,7 +179,9 @@ internal sealed class FolderRuleLedger(string home, string session)
 
         foreach (var rule in rules)
         {
-            Touch(Marker(rule));
+            var marker = Marker(rule);
+            Hold(marker);
+            Touch(marker);
             Unmark(rule);
         }
     }

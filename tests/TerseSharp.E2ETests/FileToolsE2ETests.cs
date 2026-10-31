@@ -2939,4 +2939,51 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
         }
     }
+
+    [Fact]
+    public async Task ReadText_WhenARangesReadIsClipped_ContinuesWithTheRangesStillUnread()
+    {
+        const string Probe = "terse-ranges-probe.txt";
+        var content = string.Join("\n", Enumerable.Range(1, 400).Select(index => "body line " + index.ToString(CultureInfo.InvariantCulture)));
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = content });
+
+        try
+        {
+            var clipped = await server.CallAsync("read_text", new() { ["path"] = Probe, ["ranges"] = new[] { "1-100", "300-400" }, ["maxChars"] = 300 });
+
+            Assert.Contains("next: ranges=[\"", clipped, StringComparison.Ordinal);
+            Assert.Contains("\"300-400\"]", clipped, StringComparison.Ordinal);
+            Assert.DoesNotContain("next: startLine=", clipped, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task WriteText_OverAReadOnlyFile_AnswersReadOnlyNamingTheFileAndLeavesItUntouched()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-readonly-");
+        var path = Path.Combine(directory.FullName, "Notes.md");
+        await File.WriteAllTextAsync(path, "before\n", TestContext.Current.CancellationToken);
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+
+        try
+        {
+            var text = await server.CallAsync("write_text", new() { ["path"] = path, ["content"] = "after\n", ["force"] = true });
+
+            Assert.StartsWith("ERROR ReadOnly: ", text, StringComparison.Ordinal);
+            Assert.Contains("Notes.md' is read-only", text, StringComparison.Ordinal);
+            Assert.Contains("remedy: clear the mark only if the file is meant to be edited", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
+            Assert.Equal("before\n", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+            directory.Delete(recursive: true);
+        }
+    }
 }

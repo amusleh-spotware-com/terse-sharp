@@ -203,4 +203,36 @@ public sealed class ParameterAliasesTests
         Assert.Equal("src", changed["paths"]![0]!.GetValue<string>());
         Assert.False(changed.ContainsKey("path"));
     }
+
+    [Theory]
+    [InlineData("get_type_outline", "symbols", "symbolIds")]
+    [InlineData("get_symbol", "symbols", "symbolIds")]
+    [InlineData("get_symbol_source", "symbols", "symbolIds")]
+    [InlineData("add_member", "symbolIds", "typeSymbolIds")]
+    [InlineData("find_files", "paths", "globs")]
+    [InlineData("search_text", "globs", "paths")]
+    [InlineData("search_regex", "globs", "paths")]
+    public void Apply_BindsASiblingToolsBatchSpelling_ToThisToolsOwnBatchParameter(string tool, string alias, string canonical)
+    {
+        var arguments = Arguments(string.Concat("{\"", alias, "\": [\"a\", \"b\"]}"));
+        string[] expected = ["a", "b"];
+
+        ParameterAliases.Apply(tool, arguments);
+
+        Assert.False(arguments.ContainsKey(alias));
+        Assert.Equal(expected, arguments[canonical].EnumerateArray().Select(entry => entry.GetString()!).ToArray());
+    }
+
+    [Theory]
+    [InlineData("diff_text", """{"context": 3}""", "unified", "3")]
+    [InlineData("replace_symbol", """{"newSource": "void M() { }"}""", "declaration", "\"void M() { }\"")]
+    public void Apply_BindsAnObservedScalarSpelling_ToTheParameterOfTheSameMeaning(string tool, string json, string canonical, string expected)
+    {
+        var arguments = Arguments(json);
+
+        ParameterAliases.Apply(tool, arguments);
+
+        Assert.Single(arguments);
+        Assert.Equal(expected, arguments[canonical].GetRawText());
+    }
 }

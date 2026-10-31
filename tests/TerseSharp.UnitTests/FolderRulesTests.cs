@@ -167,8 +167,10 @@ public sealed class FolderRulesTests : IDisposable
     public async Task PostToolUse_ForParallelCallsBelowTheSameRules_InjectsThemExactlyOnce()
     {
         var answers = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => HookAsync(Read())));
+        var injected = answers.OfType<JsonObject>().Select(Context).ToArray();
 
-        Assert.Single(answers, answer => answer is not null);
+        Assert.Single(injected, context => context.Contains("UNIT RULES", StringComparison.Ordinal));
+        Assert.Single(injected, context => context.Contains("FOO RULES", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -420,6 +422,39 @@ public sealed class FolderRulesTests : IDisposable
         Assert.Equal("deny", sibling?["permissionDecision"]?.GetValue<string>());
         Assert.Contains("FOO RULES", sibling!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Null(next);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteSiblingOfAReadTextOfItsRuleFile_DeniesItWithTheRulesUntilTheBatchEnds()
+    {
+        var read = Call("PostToolUse", "mcp__terse-sharp__read_text", new() { ["path"] = Path.Combine(Repository, "UnitTests", "CLAUDE.md"), ["verbose"] = true });
+
+        await HookAsync(read);
+        var sibling = await HookAsync(WriteBesideUnitRules());
+        await EndBatchAsync();
+        var next = await HookAsync(WriteBesideUnitRules());
+
+        Assert.Equal("deny", sibling?["permissionDecision"]?.GetValue<string>());
+        Assert.Contains("UNIT RULES", sibling!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Null(next);
+    }
+
+    private static JsonObject WriteBesideUnitRules() =>
+        Call("PreToolUse", "mcp__terse-sharp__write_text", new() { ["path"] = "UnitTests/NewTests.cs", ["content"] = "class NewTests;", ["force"] = true });
+
+    [Fact]
+    public async Task PostToolUse_ForASiblingThatClaimsTheInnerRuleWhileAnotherCallHoldsTheOuter_InjectsEachRuleOnceAcrossTheTwo()
+    {
+        var outer = Path.Combine(Repository, "UnitTests", "CLAUDE.md");
+
+        var holder = new FolderRuleLedger(Home, "s1").Claim([outer], showUnrecorded: true, hold: true);
+        var sibling = Context(await HookAsync(Read()));
+        var rest = new FolderRuleLedger(Home, "s1").Claim([FooRules], showUnrecorded: true, hold: true);
+
+        Assert.Equal([outer], holder);
+        Assert.Contains("FOO RULES", sibling, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNIT RULES", sibling, StringComparison.Ordinal);
+        Assert.Empty(rest);
     }
 
     [Fact]

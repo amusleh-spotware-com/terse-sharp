@@ -482,7 +482,7 @@ public static class SymbolEditService
 
     private static TypeDeclarationSyntax Appended(TypeDeclarationSyntax type, IReadOnlyList<MemberDeclarationSyntax> members, int index)
     {
-        var updated = type;
+        var updated = Opened(type);
         var at = index;
 
         foreach (var member in members)
@@ -493,6 +493,26 @@ public static class SymbolEditService
 
         return updated.WithCloseBraceToken(OnItsOwnLine(updated.CloseBraceToken));
     }
+
+    private static TypeDeclarationSyntax Opened(TypeDeclarationSyntax type) =>
+        type.OpenBraceToken.IsKind(SyntaxKind.OpenBraceToken) || !type.SemicolonToken.IsKind(SyntaxKind.SemicolonToken)
+            ? type
+            : type
+                .WithSemicolonToken(default)
+                .WithOpenBraceToken(Brace(SyntaxKind.OpenBraceToken, type.SemicolonToken.LeadingTrivia.Add(SyntaxFactory.ElasticCarriageReturnLineFeed).Add(Indentation(type)), SyntaxFactory.TriviaList(SyntaxFactory.ElasticCarriageReturnLineFeed)))
+                .WithCloseBraceToken(Brace(SyntaxKind.CloseBraceToken, SyntaxFactory.TriviaList(Indentation(type)), type.SemicolonToken.TrailingTrivia));
+
+    private static SyntaxToken Brace(SyntaxKind kind, SyntaxTriviaList leading, SyntaxTriviaList trailing) =>
+        SyntaxFactory.Token(leading, kind, trailing).WithAdditionalAnnotations(Formatter.Annotation);
+
+    private static SyntaxTrivia Indentation(TypeDeclarationSyntax type) =>
+        type.GetLeadingTrivia() is { Count: > 0 } leading && EndsIndented(leading)
+            ? leading[^1]
+            : SyntaxFactory.ElasticMarker;
+
+    private static bool EndsIndented(SyntaxTriviaList leading) =>
+        leading[^1].IsKind(SyntaxKind.WhitespaceTrivia)
+        && (leading.Count is 1 || leading[^2].IsKind(SyntaxKind.EndOfLineTrivia));
 
     private static SyntaxToken OnItsOwnLine(SyntaxToken closeBrace) =>
         StartsALine(closeBrace)

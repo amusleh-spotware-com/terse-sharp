@@ -277,44 +277,48 @@ public static class RefactorService
     public static async Task<Result<string>> ChangeSignatureAsync(
         LoadedWorkspace workspace,
         ISymbol symbol,
-        string parameters,
+        SignatureText text,
         EditOptions options,
         CancellationToken cancellationToken)
     {
         var reference = symbol.DeclaringSyntaxReferences.FirstOrDefault();
         var node = reference is null ? null : await reference.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
 
-        if (node is not MethodDeclarationSyntax method)
+        if (node is not MethodDeclarationSyntax method || symbol is not IMethodSymbol target)
             return Result.Fail<string>(Errors.Invalid("the symbol is not a method", "pass a method symbol id"));
 
-        var parsed = SyntaxFactory.ParseParameterList("(" + parameters + ")");
+        var parsed = SyntaxFactory.ParseParameterList("(" + text.Parameters + ")");
 
         if (parsed.ContainsDiagnostics)
             return Result.Fail<string>(Errors.Invalid("the parameter list did not parse", "pass e.g. 'int count, string name'"));
 
-        var document = workspace.Solution.GetDocument(node.SyntaxTree);
+        var values = ArgumentValues.Parse(text.Arguments, parsed, target);
 
-        return document is null
-            ? Result.Fail<string>(Errors.DocumentNotFound(node.SyntaxTree.FilePath))
-            : await SwapAsync(workspace, document, method, method.WithParameterList(parsed), options, cancellationToken).ConfigureAwait(false);
+        return (values.Error, workspace.Solution.GetDocument(node.SyntaxTree)) switch
+        {
+            ({ } error, _) => Result.Fail<string>(error),
+            (_, { } document) => await SignatureChangedAsync(
+                workspace,
+                new SignatureTarget(document, method, target),
+                new SignatureChange([.. target.Parameters.Select(parameter => parameter.Name)], ParameterLayout.Kept(method.ParameterList, parsed), values.Value!),
+                options,
+                cancellationToken).ConfigureAwait(false),
+            _ => Result.Fail<string>(Errors.DocumentNotFound(node.SyntaxTree.FilePath)),
+        };
     }
 
-    private static async Task<Result<string>> SwapAsync(
+    private static async Task<Result<string>> SignatureChangedAsync(
         LoadedWorkspace workspace,
-        Document document,
-        SyntaxNode original,
-        SyntaxNode replacement,
+        SignatureTarget target,
+        SignatureChange change,
         EditOptions options,
         CancellationToken cancellationToken)
     {
-        var root = await document.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+        var rewrite = await CallSiteRewriter.RewrittenAsync(workspace.Solution, target, change, cancellationToken).ConfigureAwait(false);
 
-        if (root is null)
-            return Result.Fail<string>(Errors.DocumentNotFound(document.FilePath ?? document.Name));
-
-        var updated = workspace.Solution.WithDocumentSyntaxRoot(document.Id, root.ReplaceNode(original, replacement));
-
-        return await EditGate.ApplyAsync(workspace, updated, [document.Id], options, cancellationToken).ConfigureAwait(false);
+        return rewrite.Unplaced.Count > 0
+            ? Result.Fail<string>(Unplaceable(workspace.Root, rewrite.Unplaced))
+            : await EditGate.ApplyAsync(workspace, rewrite.Solution, rewrite.Changed, options, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<Result<string>> CreateSiblingAsync(
@@ -429,4 +433,16 @@ public static class RefactorService
         declaration.DescendantTokens().Any(token =>
             token.Kind() is SyntaxKind.StringLiteralToken or SyntaxKind.MultiLineRawStringLiteralToken or SyntaxKind.InterpolatedStringTextToken
             && token.Text.Contains('\n', StringComparison.Ordinal));
+
+    private static TerseError Unplaceable(string root, IReadOnlyList<Location> sites)
+    {
+        string[] named = [.. sites.Select(site => CallSite(root, site)).Distinct(StringComparer.Ordinal)];
+
+        return Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"{named.Length} call(s) cannot be rewritten by parameter name, so nothing was changed: {string.Join(", ", named.Take(10))}"),
+            "a call through an interface or base member, a method group, an expanded params call or a renamed parameter cannot be mapped by name, and it could still compile with its values moved - pass arguments= for a renamed parameter, or change the declaration and those calls together in one replace_symbol symbolIds= batch");
+    }
+
+    private static string CallSite(string root, Location site) =>
+        string.Create(CultureInfo.InvariantCulture, $"{PositionFormat.Relative(root, site.GetLineSpan().Path)}:{site.GetLineSpan().StartLinePosition.Line + 1}");
 }

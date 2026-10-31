@@ -692,4 +692,129 @@ public sealed class ChangedTestSelectionE2ETests
 
         return string.Join("\n", result.Content.OfType<TextContentBlock>().Select(block => block.Text));
     }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_ABodyOnlyEditWithADependentProject_GatesTheEditedProjectOnlyAndSaysSo()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var edit = await CallAsync(server, "replace_symbol_body", new()
+            {
+                ["symbolId"] = "M:Selection.Core.Adder.Add(System.Int32,System.Int32)",
+                ["body"] = "=> right + left;",
+                ["dryRun"] = true,
+            });
+
+            Assert.DoesNotContain("ERROR", edit, StringComparison.Ordinal);
+            Assert.Contains("right + left", edit, StringComparison.Ordinal);
+            Assert.Contains("gate=project", edit, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_ASignatureChangeWithADependentProject_StillGatesTheDependentAndNamesItsError()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var edit = await CallAsync(server, "replace_symbol", new()
+            {
+                ["symbolId"] = "M:Selection.Core.Adder.Add(System.Int32,System.Int32)",
+                ["declaration"] = "public static long Add(long left, long right) => left + right;",
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("would be rolled back", edit, StringComparison.Ordinal);
+            Assert.Contains("CS0266", edit, StringComparison.Ordinal);
+            Assert.Contains("AdderProbe.cs", edit, StringComparison.Ordinal);
+            Assert.DoesNotContain("gate=project", edit, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_ABodyOnlyEditThatBreaksTheEditedProject_IsStillRolledBack()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var edit = await CallAsync(server, "replace_symbol_body", new()
+            {
+                ["symbolId"] = "M:Selection.Core.Adder.Add(System.Int32,System.Int32)",
+                ["body"] = "=> left + missing;",
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("would be rolled back", edit, StringComparison.Ordinal);
+            Assert.Contains("CS0103", edit, StringComparison.Ordinal);
+            Assert.Contains("Adder.cs", edit, StringComparison.Ordinal);
+            Assert.Contains("gate=project", edit, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_ABodyOnlyEditInAProjectNothingDependsOn_DoesNotSayGateProject()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var edit = await CallAsync(server, "replace_symbol_body", new()
+            {
+                ["symbolId"] = "M:Selection.CoreTests.AdderProbe.Twice(System.Int32)",
+                ["body"] = "=> Adder.Add(value, value) + 0;",
+                ["dryRun"] = true,
+            });
+
+            Assert.Contains("+ 0", edit, StringComparison.Ordinal);
+            Assert.DoesNotContain("would be rolled back", edit, StringComparison.Ordinal);
+            Assert.DoesNotContain("gate=project", edit, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_ABodyOnlyEditApplied_AnswersTheCondensedLineWithGateProject()
+    {
+        var before = await File.ReadAllTextAsync(AdderPath, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(AdderPath);
+        var server = await StartAsync();
+
+        try
+        {
+            var edit = await CallAsync(server, "replace_symbol_body", new()
+            {
+                ["symbolId"] = "M:Selection.Core.Adder.Add(System.Int32,System.Int32)",
+                ["body"] = "=> right + left;",
+            });
+
+            Assert.Contains("changedLines=1", edit, StringComparison.Ordinal);
+            Assert.Contains("gate=project", edit, StringComparison.Ordinal);
+            Assert.DoesNotContain("---", edit, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
+            await File.WriteAllTextAsync(AdderPath, before, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(AdderPath, stamp);
+        }
+    }
 }

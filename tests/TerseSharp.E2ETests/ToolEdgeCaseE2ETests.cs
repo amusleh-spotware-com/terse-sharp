@@ -465,7 +465,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
     }
 
     [Theory]
-    [InlineData("search_text", "globs", "glob")]
+    [InlineData("search_text", "globe", "glob")]
     [InlineData("find_registrations", "symbolId", "symbol")]
     [InlineData("edit_text", "find", "oldText")]
     [InlineData("list_tests", "filter", "contains")]

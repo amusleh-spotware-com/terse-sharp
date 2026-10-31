@@ -64,7 +64,7 @@ public static class RepeatSteer
 
     private static readonly FrozenDictionary<string, string[]> PerEntryOnly = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
-        ["read_text"] = ["startLine", "endLine", "tail", "section"],
+        ["read_text"] = ["startLine", "endLine", "lines", "ranges", "tail", "section", "occurrence", "ref"],
         ["write_text"] = ["delete", "recursive", "ref"],
     }.ToFrozenDictionary(StringComparer.Ordinal);
 

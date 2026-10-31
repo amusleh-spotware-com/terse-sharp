@@ -195,4 +195,26 @@ public sealed class UnifiedDiffTests
     [Fact]
     public void Around_WithNoContextAsked_ReturnsNothing() =>
         Assert.Equal(string.Empty, UnifiedDiff.Around("a\nb", "a\nc", 0, 200), StringComparer.Ordinal);
+
+    [Fact]
+    public void Report_ForABlockMovedFromTheMiddleOfALargeFileToItsEnd_CountsTheMoveNotEveryLineBetween()
+    {
+        var lines = Enumerable.Range(0, 3000).Select(index => "line " + index.ToString(CultureInfo.InvariantCulture)).ToList();
+        var moved = lines.GetRange(1500, 10);
+        var edited = new List<string>(lines);
+
+        edited.RemoveRange(1500, 10);
+        edited.InsertRange(edited.Count - 1, moved);
+        edited[5] = "line 5 changed";
+
+        var before = string.Join('\n', lines);
+        var after = string.Join('\n', edited);
+        var report = UnifiedDiff.Report("big.cs", before, after);
+        var hunks = report.Text.Split('\n').Where(line => line.StartsWith("@@", StringComparison.Ordinal)).ToArray();
+
+        Assert.Equal(21, report.ChangedLines);
+        Assert.Equal(21, UnifiedDiff.ChangedLines(before, after));
+        Assert.Equal(["@@ -6,1 +6,1 @@", "@@ -1501,10 +1501,0 @@", "@@ -3000,0 +2990,10 @@"], hunks);
+        Assert.DoesNotContain("-line 2000", report.Text, StringComparison.Ordinal);
+    }
 }

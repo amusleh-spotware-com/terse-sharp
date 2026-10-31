@@ -499,4 +499,82 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
 
     private static string Advertisement(McpClientTool tool) =>
         tool.Name + (tool.Description ?? string.Empty) + tool.JsonSchema.ToString();
+
+    private static bool NamesArray(JsonElement type) =>
+        type.ValueKind is JsonValueKind.String && string.Equals(type.GetString(), "array", StringComparison.Ordinal);
+
+    private static bool IsBatch(JsonElement property) =>
+        property.ValueKind is JsonValueKind.Object
+        && property.TryGetProperty("type", out var type)
+        && DeclaresArray(type);
+
+    private static HashSet<string> BatchParameters(McpClientTool tool)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        if (tool.ProtocolTool.InputSchema.TryGetProperty("properties", out var properties)
+            && properties.ValueKind is JsonValueKind.Object)
+        {
+            foreach (var property in properties.EnumerateObject())
+            {
+                if (IsBatch(property.Value))
+                    names.Add(property.Name);
+            }
+        }
+
+        return names;
+    }
+
+    private static string Pair(string tool, string parameter) => string.Concat(tool, " ", parameter);
+
+    private static (SortedSet<string> Gaps, int Shared) SiblingBatchGaps(IList<McpClientTool> surface)
+    {
+        var aliased = ParameterAliases.All.Select(alias => Pair(alias.Tool, alias.Alias)).ToHashSet(StringComparer.Ordinal);
+        var gaps = new SortedSet<string>(StringComparer.Ordinal);
+        var shared = 0;
+
+        foreach (var group in surface.GroupBy(tool => ToolGroups.Of(tool.Name) ?? tool.Name, StringComparer.Ordinal))
+        {
+            foreach (var parameter in group.SelectMany(BatchParameters).CountBy(name => name, StringComparer.Ordinal).Where(count => count.Value >= 2).Select(count => count.Key))
+            {
+                shared++;
+                gaps.UnionWith(group.Where(tool => !Parameters(tool).Contains(parameter)).Select(tool => Pair(tool.Name, parameter)).Where(gap => !aliased.Contains(gap)));
+            }
+        }
+
+        return (gaps, shared);
+    }
+
+    [Fact]
+    public async Task EveryBatchParameterTwoToolsOfAGroupDeclare_IsDeclaredAliasedOrExemptOnEveryOtherToolOfThatGroup()
+    {
+        var surface = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
+        var (gaps, shared) = SiblingBatchGaps(surface);
+        var exempt = ToolCensus.SiblingParameterExempt.Select(entry => Pair(entry.Tool, entry.Parameter)).ToHashSet(StringComparer.Ordinal);
+        var unexplained = gaps.Where(gap => !exempt.Contains(gap)).ToArray();
+        var stale = exempt.Where(entry => !gaps.Contains(entry)).Order(StringComparer.Ordinal).ToArray();
+
+        Assert.True(shared >= 8, string.Create(CultureInfo.InvariantCulture, $"the census found only {shared} batch parameters shared inside a group"));
+        Assert.True(unexplained.Length is 0, "a sibling tool declares it, this tool neither declares nor aliases it, and no exemption says why: " + string.Join(", ", unexplained));
+        Assert.True(stale.Length is 0, "exempt but no longer a gap - delete the exemption: " + string.Join(", ", stale));
+        Assert.Equal(exempt.Count, ToolCensus.SiblingParameterExempt.Length);
+        Assert.All(ToolCensus.SiblingParameterExempt, entry => Assert.True(entry.Reason.Length >= 40, Pair(entry.Tool, entry.Parameter) + " is exempt without a written reason"));
+        Assert.True(
+            ToolCensus.SiblingParameterExempt.Length <= ToolCensus.MaxSiblingParameterExemptions,
+            string.Create(CultureInfo.InvariantCulture, $"the sibling-parameter exemption set is a ratchet: {ToolCensus.SiblingParameterExempt.Length} > {ToolCensus.MaxSiblingParameterExemptions}"));
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_GivenTheSymbolsSpellingOfItsBatch_OutlinesTheNamedType()
+    {
+        string[] names = ["OrderService"];
+
+        var answer = await server.CallAsync("get_type_outline", new() { ["symbols"] = names });
+
+        Assert.DoesNotContain("ERROR", answer, StringComparison.Ordinal);
+        Assert.Contains("OrderService.Submit", answer, StringComparison.Ordinal);
+    }
+
+    private static bool DeclaresArray(JsonElement type) =>
+        NamesArray(type) || (type.ValueKind is JsonValueKind.Array && type.EnumerateArray().Any(NamesArray));
 }

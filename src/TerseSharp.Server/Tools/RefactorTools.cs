@@ -54,10 +54,11 @@ public sealed class RefactorTools(ToolContext context)
             loaded, resolved, targetNamespace, Options("move_type_to_namespace", dryRun, verbose, allowPolicy), cancellationToken), cancellationToken, typesOnly: true);
 
     [McpServerTool(Name = "change_signature")]
-    [Description("Replace a method's parameter list. The compile gate reports every call site the change breaks, so run it with dryRun first. A successful change answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Replace a method's parameter list and rewrite every call by parameter name: a kept parameter keeps the caller's argument, a removed one drops it, an added one takes its value from arguments=. The list keeps its line layout. The compile gate reports any call still broken, so run it with dryRun first. A successful change answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> ChangeSignature(
         [Description("Symbol id of the method.")] string? symbolId = null,
         [Description("New parameter list without the parentheses, e.g. 'int count, string name'.")] string parameters = "",
+        [Description("Value every caller passes for an added parameter, as named arguments, e.g. 'retries: 3, label: \"x\"'. Each name must be a parameter the new list adds; empty leaves such a caller to the compile gate.")] string arguments = "",
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Apply even when call sites stop compiling. Default false.")] bool allowErrors = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
@@ -68,7 +69,7 @@ public sealed class RefactorTools(ToolContext context)
         Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
             ? Task.FromResult(clash)
             : Guarded(workspace, symbolId ?? symbol, (loaded, resolved) => RefactorService.ChangeSignatureAsync(
-            loaded, resolved, parameters, new EditOptions("change_signature", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy), cancellationToken), cancellationToken);
+            loaded, resolved, new SignatureText(parameters, arguments), new EditOptions("change_signature", dryRun, allowErrors, verbose, AllowPolicy: allowPolicy), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "undo_last_change")]
     [Description("Revert the most recent mutation applied by this server. Keeps the last 10 snapshots.")]

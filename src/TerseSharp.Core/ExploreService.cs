@@ -35,6 +35,7 @@ public static class ExploreService
         ISymbol symbol,
         int maxResults,
         bool tests,
+        Task<string> history,
         CancellationToken cancellationToken)
     {
         var reach = await ReachAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
@@ -51,6 +52,9 @@ public static class ExploreService
             Reaching(response, await TestClassesAsync(workspace, reach.Locations, cancellationToken).ConfigureAwait(false));
 
         foreach (var line in records.Capped(maxResults))
+            response.Line(line);
+
+        foreach (var line in CoChanged(workspace.Root, symbol, reach.Locations, await history.ConfigureAwait(false)))
             response.Line(line);
 
         return response.ToString();
@@ -200,4 +204,11 @@ public static class ExploreService
 
         return trimmed.EndsWith("Attribute", StringComparison.Ordinal) ? trimmed[..^9] : trimmed;
     }
+
+    private static IReadOnlyList<string> CoChanged(string root, ISymbol symbol, IReadOnlyList<ReferenceLocation> locations, string log) => log.Length is 0
+        ? []
+        : CoChange.Lines(
+            log,
+            symbol.Locations.Where(location => location.IsInSource).Select(location => PositionFormat.Relative(root, location.SourceTree!.FilePath)),
+            locations.Select(location => PositionFormat.Relative(root, location.Location.GetLineSpan().Path)));
 }

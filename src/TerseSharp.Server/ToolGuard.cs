@@ -2817,19 +2817,136 @@ public static class ToolGuard
         return null;
     }
 
-    private static readonly string[] ScriptWriteMarkers = [",'w'", ", 'w'", ",'wb'", ", 'wb'", ",'a'", ", 'a'", ",'ab'", ", 'ab'", ",\"w\"", ", \"w\"", ",\"a\"", ", \"a\"", "mode='w", "mode=\"w", "mode='a", "mode=\"a", ".write(", ".write_text(", ".write_bytes(", "writeFile", "appendFile", "copyFile", "shutil.", "os.replace(", "os.rename(", "os.remove(", "os.unlink(", ".unlink(", ".rename(", "fs.rm", "fs.cp"];
+    private static readonly SearchValues<string> ScriptWriteMarkers = SearchValues.Create([".write_text(", ".write_bytes(", ".writelines(", "writeFile", "appendFile", "copyFile", "createWriteStream(", ".renameSync(", ".unlinkSync(", ".rmSync(", ".rmdirSync(", ".rmdir(", ".rm(", ".cpSync(", ".cp(", ".truncate(", ".truncateSync(", "shutil.copy", "shutil.move(", "shutil.rmtree(", "os.replace(", "os.remove(", ".unlink(", ".rename(", "O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC"], StringComparison.Ordinal);
 
     private static bool ScriptWrites(string segment)
     {
-        var script = segment.Replace("stdout.write(", string.Empty, StringComparison.Ordinal).Replace("stderr.write(", string.Empty, StringComparison.Ordinal);
+        var script = segment.AsSpan();
 
-        foreach (var marker in ScriptWriteMarkers)
+        return script.ContainsAny(ScriptWriteMarkers) || WritesThroughStream(script) || CallWrites(script);
+    }
+
+    private static readonly SearchValues<char> ModeLetters = SearchValues.Create("rwxabtsU+");
+    private static readonly SearchValues<char> WriteModeLetters = SearchValues.Create("wxa+");
+
+    private static bool CallWrites(ReadOnlySpan<char> script) => OpensForWrite(script, "open(") || OpensForWrite(script, "openSync(") || ReplacesPath(script);
+
+    private static bool WritesThroughStream(ReadOnlySpan<char> script)
+    {
+        var offset = 0;
+
+        while (script[offset..].IndexOf(".write(", StringComparison.Ordinal) is var at and >= 0)
         {
-            if (script.Contains(marker, StringComparison.Ordinal))
+            var before = script[..(offset + at)];
+
+            if (!before.EndsWith("stdout", StringComparison.Ordinal) && !before.EndsWith("stderr", StringComparison.Ordinal))
+                return true;
+
+            offset += at + ".write(".Length;
+        }
+
+        return false;
+    }
+
+    private static bool StartsCall(ReadOnlySpan<char> before) => before.IsEmpty || !NameChars.Contains(before[^1]);
+
+    private static bool OpensForWrite(ReadOnlySpan<char> script, string name)
+    {
+        var offset = 0;
+
+        while (script[offset..].IndexOf(name, StringComparison.Ordinal) is var at and >= 0)
+        {
+            var before = script[..(offset + at)];
+            offset += at + name.Length;
+
+            if (StartsCall(before) && OpensWithWriteMode(script[offset..], before.EndsWith('.')))
                 return true;
         }
 
         return false;
+    }
+
+    private static bool OpensWithWriteMode(ReadOnlySpan<char> call, bool method)
+    {
+        for (var index = 0; index < 4; index++)
+        {
+            var argument = ScriptArgument(call, index);
+            var positional = index == 1 || (index == 0 && method);
+
+            if (IsWriteMode(ModeValue(argument)) || (positional && IsWriteMode(argument)))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsPathArgument(ReadOnlySpan<char> argument) => !argument.IsWhiteSpace() && !argument.Contains('=');
+
+    private static bool ReplacesPath(ReadOnlySpan<char> script)
+    {
+        var offset = 0;
+
+        while (script[offset..].IndexOf(".replace(", StringComparison.Ordinal) is var at and >= 0)
+        {
+            offset += at + ".replace(".Length;
+            var call = script[offset..];
+            var end = ScriptArgumentEnd(call);
+
+            if (call[end..] is [')', ..] && IsPathArgument(call[..end]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static ReadOnlySpan<char> ModeValue(ReadOnlySpan<char> argument) =>
+        argument.StartsWith("mode", StringComparison.Ordinal) && argument[4..].TrimStart() is ['=', .. var value] ? value.TrimStart() : [];
+
+    private static bool IsWriteModeText(ReadOnlySpan<char> mode) =>
+        mode.Length is >= 1 and <= 4 && !mode.ContainsAnyExcept(ModeLetters) && mode.ContainsAny(WriteModeLetters);
+
+    private static bool IsWriteMode(ReadOnlySpan<char> literal) =>
+        literal is ['\'' or '"' or '`', .. var mode, var close] && close == literal[0] && IsWriteModeText(mode);
+
+    private static ReadOnlySpan<char> ScriptArgument(ReadOnlySpan<char> call, int index)
+    {
+        var rest = call;
+
+        for (var skipped = 0; skipped < index; skipped++)
+        {
+            var end = ScriptArgumentEnd(rest);
+
+            if (rest[end..] is not [',', ..])
+                return [];
+
+            rest = rest[(end + 1)..];
+        }
+
+        return rest[..ScriptArgumentEnd(rest)].Trim();
+    }
+
+    private static int ScriptArgumentEnd(ReadOnlySpan<char> call)
+    {
+        var (depth, quote) = (0, '\0');
+
+        for (var at = 0; at < call.Length; at++)
+        {
+            var current = call[at];
+
+            if (quote == '\0' && depth == 0 && current is ',' or ')' or ']' or '}')
+                return at;
+
+            (depth, quote) = (quote, current) switch
+            {
+                ('\0', '\'' or '"' or '`') => (depth, current),
+                ('\0', '(' or '[' or '{') => (depth + 1, quote),
+                ('\0', ')' or ']' or '}') => (depth - 1, quote),
+                _ when current == quote => (depth, '\0'),
+                _ => (depth, quote),
+            };
+        }
+
+        return call.Length;
     }
 
     private static string? EditedSource(string segment, string? cwd)

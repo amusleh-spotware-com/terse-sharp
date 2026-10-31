@@ -154,7 +154,7 @@ An agent that writes code it cannot verify is a liability. TerseSharp holds the 
 verifies *before* it reports success.
 
 - 🛡️ **Compile-gated edits.** Every C#, Razor and refactoring edit is applied, re-analyzed, and **rolled
-  back if it introduces a compile error** — in the changed projects *and* every project that transitively
+  back if it introduces a compile error** — in the changed projects *and*, unless the edit only touched member bodies (`gate=project`), every project that transitively
   depends on them. The agent never gets to say "done" over a red tree. `undo_last_change` reverses the
   last one; `allowErrors=true` is the explicit opt-out.
 - 🧭 **Semantic, never textual.** Real references, not string matches — every record tagged `EXACT` or

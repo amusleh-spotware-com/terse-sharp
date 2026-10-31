@@ -2701,4 +2701,17 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("documents=", answer, StringComparison.Ordinal);
         Assert.Contains("at most 10", refused, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_WithSeveralPaths_NamesThePathsTheBudgetDidNotReach()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "wide-lines.json", "package.json" },
+            ["maxChars"] = 200,
+        });
+
+        Assert.Contains("the shared maxChars budget ran out at wide-lines.json - paths=[\"package.json\"] reads the rest in a second call", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("raise maxChars, or read the rest", text, StringComparison.Ordinal);
+    }
 }

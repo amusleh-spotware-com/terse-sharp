@@ -6,6 +6,8 @@ public static class UnifiedDiff
 {
     private const long MaxAlignmentCells = 2_000_000;
 
+    private const int MaxSplitDepth = 24;
+
     public static string Between(string path, string before, string after) => Report(path, before, after).Text;
 
     public static DiffReport Report(string path, string before, string after)
@@ -50,19 +52,48 @@ public static class UnifiedDiff
         }
     }
 
-    private static List<Block> Blocks(string[] before, string[] after)
+    private static List<Block> Blocks(ReadOnlySpan<string> before, ReadOnlySpan<string> after)
     {
         var prefix = CommonPrefix(before, after);
         var suffix = CommonSuffix(before, after, prefix);
-        var beforeMiddle = before[prefix..(before.Length - suffix)];
-        var afterMiddle = after[prefix..(after.Length - suffix)];
+        var blocks = new List<Block>();
 
-        return beforeMiddle.Length is 0 && afterMiddle.Length is 0
-            ? []
-            : Aligned(beforeMiddle, afterMiddle, prefix, prefix, MaxSplitDepth);
+        Aligned(
+            blocks,
+            before[prefix..(before.Length - suffix)],
+            after[prefix..(after.Length - suffix)],
+            new Frame(new Position(prefix, prefix), MaxSplitDepth));
+
+        return blocks;
     }
 
-    private static List<Step> Script(string[] before, string[] after, int[,] alignment)
+    private static void Aligned(List<Block> blocks, ReadOnlySpan<string> before, ReadOnlySpan<string> after, Frame frame)
+    {
+        if (before.IsEmpty && after.IsEmpty)
+            return;
+
+        if ((long)before.Length * after.Length <= MaxAlignmentCells)
+            Grouped(blocks, Script(before, after, Alignment(before, after)), frame.Start);
+        else if (frame.Depth is 0 || Anchors(before, after) is not { Length: > 0 } anchors)
+            blocks.Add(new Block(frame.Start.Before, before.Length, frame.Start.After, after.Length));
+        else
+            Spanned(blocks, before, after, frame, anchors);
+    }
+
+    private static void Spanned(List<Block> blocks, ReadOnlySpan<string> before, ReadOnlySpan<string> after, Frame frame, Anchored[] anchors)
+    {
+        var at = new Position(0, 0);
+
+        foreach (var anchor in anchors)
+        {
+            Aligned(blocks, before[at.Before..anchor.Before], after[at.After..anchor.After], frame.Inner(at));
+            at = new(anchor.Before + 1, anchor.After + 1);
+        }
+
+        Aligned(blocks, before[at.Before..], after[at.After..], frame.Inner(at));
+    }
+
+    private static List<Step> Script(ReadOnlySpan<string> before, ReadOnlySpan<string> after, int[,] alignment)
     {
         var steps = new List<Step>(before.Length + after.Length);
 
@@ -78,22 +109,21 @@ public static class UnifiedDiff
         return steps;
     }
 
-    private static Move Next(string[] before, string[] after, int[,] alignment, int i, int j) =>
+    private static Move Next(ReadOnlySpan<string> before, ReadOnlySpan<string> after, int[,] alignment, int i, int j) =>
         Matches(before, after, i, j) ? new(Step.Keep, 1, 1)
         : TakesAdd(before, after, alignment, i, j) ? new(Step.Add, 0, 1)
         : new(Step.Remove, 1, 0);
 
-    private static bool Matches(string[] before, string[] after, int i, int j) =>
+    private static bool Matches(ReadOnlySpan<string> before, ReadOnlySpan<string> after, int i, int j) =>
         i < before.Length && j < after.Length && string.Equals(before[i], after[j], StringComparison.Ordinal);
 
-    private static bool TakesAdd(string[] before, string[] after, int[,] alignment, int i, int j) =>
+    private static bool TakesAdd(ReadOnlySpan<string> before, ReadOnlySpan<string> after, int[,] alignment, int i, int j) =>
         j < after.Length && (i == before.Length || alignment[i, j + 1] >= alignment[i + 1, j]);
 
-    private static List<Block> Grouped(List<Step> steps, int beforeOffset, int afterOffset)
+    private static void Grouped(List<Block> blocks, List<Step> steps, Position origin)
     {
-        var blocks = new List<Block>();
-        var start = new Position(beforeOffset, afterOffset);
-        var at = start;
+        var start = origin;
+        var at = origin;
 
         foreach (var step in steps)
         {
@@ -108,8 +138,6 @@ public static class UnifiedDiff
 
         if (at != start)
             blocks.Add(Span(start, at));
-
-        return blocks;
     }
 
     private static Block Span(Position start, Position end) => new(
@@ -118,7 +146,7 @@ public static class UnifiedDiff
         start.After,
         end.After - start.After);
 
-    private static int[,] Alignment(string[] before, string[] after)
+    private static int[,] Alignment(ReadOnlySpan<string> before, ReadOnlySpan<string> after)
     {
         var lengths = new int[before.Length + 1, after.Length + 1];
 
@@ -135,7 +163,7 @@ public static class UnifiedDiff
         return lengths;
     }
 
-    private static int CommonPrefix(string[] before, string[] after)
+    private static int CommonPrefix(ReadOnlySpan<string> before, ReadOnlySpan<string> after)
     {
         var limit = Math.Min(before.Length, after.Length);
         var index = 0;
@@ -146,7 +174,7 @@ public static class UnifiedDiff
         return index;
     }
 
-    private static int CommonSuffix(string[] before, string[] after, int prefix)
+    private static int CommonSuffix(ReadOnlySpan<string> before, ReadOnlySpan<string> after, int prefix)
     {
         var limit = Math.Min(before.Length, after.Length) - prefix;
         var index = 0;
@@ -183,21 +211,14 @@ public static class UnifiedDiff
         };
     }
 
-    private const int MaxSplitDepth = 24;
+    private readonly record struct Frame(Position Start, int Depth)
+    {
+        public Frame Inner(Position offset) => new(new(Start.Before + offset.Before, Start.After + offset.After), Depth - 1);
+    }
 
     private readonly record struct Anchored(int Before, int After);
 
-    private static Dictionary<string, int> Counts(string[] lines)
-    {
-        var counts = new Dictionary<string, int>(lines.Length, StringComparer.Ordinal);
-
-        foreach (var line in lines)
-            counts[line] = counts.GetValueOrDefault(line) + 1;
-
-        return counts;
-    }
-
-    private static Dictionary<string, int> Once(string[] lines)
+    private static Dictionary<string, int> Once(ReadOnlySpan<string> lines)
     {
         var index = new Dictionary<string, int>(lines.Length, StringComparer.Ordinal);
 
@@ -210,46 +231,65 @@ public static class UnifiedDiff
         return index;
     }
 
-    private static Anchored? Anchor(string[] before, string[] after)
+    private static List<Anchored> Pairs(ReadOnlySpan<string> before, ReadOnlySpan<string> after)
     {
-        var counts = Counts(before);
-        var once = Once(after);
-        var middle = before.Length / 2;
-        var distance = int.MaxValue;
-        Anchored? best = null;
+        var inBefore = Once(before);
+        var inAfter = Once(after);
+        var pairs = new List<Anchored>(Math.Min(inBefore.Count, inAfter.Count));
 
         for (var index = 0; index < before.Length; index++)
         {
-            var at = once.GetValueOrDefault(before[index], -1);
-            var gap = Math.Abs(index - middle);
-
-            if (at < 0 || gap >= distance || counts.GetValueOrDefault(before[index]) is not 1)
-                continue;
-
-            (distance, best) = (gap, new Anchored(index, at));
+            if (inBefore[before[index]] == index && inAfter.GetValueOrDefault(before[index], -1) is >= 0 and var at)
+                pairs.Add(new Anchored(index, at));
         }
 
-        return best;
+        return pairs;
     }
 
-    private static List<Block> Aligned(string[] before, string[] after, int beforeStart, int afterStart, int depth)
+    private static Anchored[] Anchors(ReadOnlySpan<string> before, ReadOnlySpan<string> after)
     {
-        if ((long)before.Length * after.Length <= MaxAlignmentCells)
-            return Grouped(Script(before, after, Alignment(before, after)), beforeStart, afterStart);
+        var pairs = Pairs(before, after);
+        var tails = new int[pairs.Count];
+        var previous = new int[pairs.Count];
+        var length = 0;
 
-        if (depth is 0 || Anchor(before, after) is not { } anchor)
-            return [new Block(beforeStart, before.Length, afterStart, after.Length)];
+        for (var index = 0; index < pairs.Count; index++)
+        {
+            var slot = Slot(pairs, tails, length, pairs[index].After);
 
-        var head = Aligned(before[..anchor.Before], after[..anchor.After], beforeStart, afterStart, depth - 1);
+            previous[index] = slot is 0 ? -1 : tails[slot - 1];
+            tails[slot] = index;
+            length = Math.Max(length, slot + 1);
+        }
 
-        head.AddRange(Aligned(
-            before[(anchor.Before + 1)..],
-            after[(anchor.After + 1)..],
-            beforeStart + anchor.Before + 1,
-            afterStart + anchor.After + 1,
-            depth - 1));
+        return length is 0 ? [] : Chain(pairs, previous, tails[length - 1], length);
+    }
 
-        return head;
+    private static int Slot(List<Anchored> pairs, int[] tails, int length, int after)
+    {
+        var (low, high) = (0, length);
+
+        while (low < high)
+        {
+            var middle = (low + high) >>> 1;
+            (low, high) = pairs[tails[middle]].After < after ? (middle + 1, high) : (low, middle);
+        }
+
+        return low;
+    }
+
+    private static Anchored[] Chain(List<Anchored> pairs, int[] previous, int last, int length)
+    {
+        var chain = new Anchored[length];
+        var at = last;
+
+        for (var index = length - 1; index >= 0; index--)
+        {
+            chain[index] = pairs[at];
+            at = previous[at];
+        }
+
+        return chain;
     }
 
     public static string Around(string before, string after, int context, int maxLines)

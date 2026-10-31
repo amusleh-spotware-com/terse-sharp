@@ -41,7 +41,7 @@ public sealed class EditTools(ToolContext context)
         return Supplied(workspace, target, text, "body", (loaded, resolved) => SymbolEditService.ReplaceBodyAsync(
                 loaded, resolved, text, Options("replace_symbol_body", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy), cancellationToken),
                 cancellationToken,
-                new Carry("replace_symbol_body", [target ?? string.Empty], [text], Usings: imports),
+                new Carry("replace_symbol_body", [target ?? string.Empty], [text], Usings: imports, Preview: dryRun),
                 held?.Root,
                 path: path);
     }
@@ -132,7 +132,7 @@ public sealed class EditTools(ToolContext context)
         return Supplied(workspace, target, text, "declaration", (loaded, resolved) => SymbolEditService.ReplaceDeclarationAsync(
             loaded, resolved, text, options, cancellationToken),
             cancellationToken,
-            new Carry("replace_symbol", [target ?? string.Empty], [text], helpers, container, imports, options.Rename, options.Placement),
+            new Carry("replace_symbol", [target ?? string.Empty], [text], helpers, container, imports, options.Rename, options.Placement, Preview: options.DryRun),
             held?.Root,
             path: path);
     }
@@ -153,7 +153,7 @@ public sealed class EditTools(ToolContext context)
                 [Description(RetryHelp)] string? retryWith = null,
                 [Description("Alias for declaration; entries join into the one edit - or, beside typeSymbolIds, one per id in order.")] string[]? declarations = null,
                 [Description("Type or enum ids to add to together, paired positionally with declarations and applied as ONE compile-gated edit across their files. Not with declaration= or path=.")] string[]? typeSymbolIds = null,
-                [Description("Member of this type to land the new members ABOVE, by short name or documentation id. Not with after= or position=, and not held by a retryWith token.")] string? before = null,
+                [Description("Member of this type to land the new members ABOVE, by short name or documentation id. Not with after= or position=; a retryWith token holds it.")] string? before = null,
                 [Description("Member of this type to land the new members BELOW, addressed as before= is. Not with before= or position=.")] string? after = null,
                 [Description("Coarse slot instead of an anchor: first, afterFields (after the last field) or last. Default last. Not with before= or after=.")] string? position = null,
                 CancellationToken cancellationToken = default)
@@ -172,7 +172,7 @@ public sealed class EditTools(ToolContext context)
             return Task.FromResult(Unknown(token, "add_member"));
 
         var imports = Kept(usings, held?.Usings);
-        var options = Options("add_member", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy, placement: placement.Value);
+        var options = Options("add_member", dryRun, allowErrors, verbose, imports, allowPolicy: allowPolicy, placement: placement.Value ?? held?.Placement);
         var ids = PairedIds(typeSymbolIds, held);
 
         if (ids.Length > 0)
@@ -210,7 +210,7 @@ public sealed class EditTools(ToolContext context)
             (_, { Length: > 0 } file) when declaration is { Length: > 0 } => AddToFile(workspace, file, declaration, options, cancellationToken, heldRoot, usings),
             (_, { Length: > 0 }) => Task.FromResult(Errors.Blank("declaration").Render()),
             _ => Supplied(workspace, typeSymbolId, declaration, "declaration", (loaded, resolved) => SymbolEditService.AddMemberAsync(
-                loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration], Usings: usings), heldRoot, typesOnly: true),
+                loaded, resolved, declaration, options, cancellationToken), cancellationToken, new Carry("add_member", [typeSymbolId ?? string.Empty, string.Empty], [declaration], Usings: usings, Placement: options.Placement, Preview: options.DryRun), heldRoot, typesOnly: true),
         };
 
     private Task<string> AddToFile(
@@ -223,7 +223,7 @@ public sealed class EditTools(ToolContext context)
         string[]? usings = null)
     {
         var rejection = context.RejectWrite();
-        var carry = new Carry("add_member", [string.Empty, path], [declaration], Usings: usings);
+        var carry = new Carry("add_member", [string.Empty, path], [declaration], Usings: usings, Preview: options.DryRun);
 
         return rejection is not null
             ? Task.FromResult(rejection)
@@ -361,7 +361,7 @@ public sealed class EditTools(ToolContext context)
         string[]? usings = null)
     {
         var rejection = context.RejectWrite();
-        var carry = new Carry("replace_symbol", symbolIds, declarations, add, addTo, usings, options.Rename, options.Placement);
+        var carry = new Carry("replace_symbol", symbolIds, declarations, add, addTo, usings, options.Rename, options.Placement, Preview: options.DryRun);
 
         return rejection is not null
             ? Task.FromResult(rejection)
@@ -373,7 +373,7 @@ public sealed class EditTools(ToolContext context)
                 cancellationToken: cancellationToken);
     }
 
-    private const string RetryHelp = "Token from a previous rejection, e.g. r3, printed alone on its LAST line. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; anything passed again - symbolId, the corrected text, usings= - OUTRANKS the held value; allowErrors=true may ride beside it.";
+    private const string RetryHelp = "Token from a rejection or a landing dryRun, e.g. r3, printed alone on its LAST line. It holds the rejected declaration with its add= and usings=, so the retry names the token instead of re-sending them; anything passed again - symbolId, the corrected text, usings= - OUTRANKS the held value; allowErrors=true may ride beside it.";
 
     internal readonly record struct Carry(
         string? Tool,
@@ -384,10 +384,19 @@ public sealed class EditTools(ToolContext context)
         string[]? Usings = null,
         bool Rename = false,
         MemberPlacement? Placement = null,
-        FileService.TextEdit[]? Edits = null);
+        FileService.TextEdit[]? Edits = null,
+        bool Preview = false);
 
     internal static string Carried(Result<string> result, Carry carry, string root) =>
-        result.IsOk ? result.Value! : Rejected(result.Error!, carry, root);
+        result.IsOk ? Previewed(result.Value!, carry, root) : Rejected(result.Error!, carry, root);
+
+    private static string Previewed(string preview, Carry carry, string root) =>
+            carry is { Preview: true, Tool: { Length: > 0 } tool } && Worth(carry) && FileTools.Lands(preview)
+                ? preview + "\nretryWith=" + Remember(tool, carry, root) + " applies this preview"
+                : preview;
+
+    private static string Remember(string tool, Carry carry, string root) => RejectedEdits.Remember(
+            root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement, carry.Edits);
 
     internal static string? Elsewhere(string? held, string root) => held is { Length: > 0 } origin && !PathBoundary.SameFile(origin, root)
         ? Errors.Invalid(
@@ -461,8 +470,7 @@ public sealed class EditTools(ToolContext context)
 
     private static string Rejected(TerseError error, Carry carry, string root) =>
             carry.Tool is { Length: > 0 } tool && Holdable(carry, error) && Worth(carry)
-                ? error.Render() + "\n" + RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0) + "\nretryWith=" + RejectedEdits.Remember(
-                    root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement, carry.Edits)
+                ? error.Render() + "\n" + RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0) + "\nretryWith=" + Remember(tool, carry, root)
                 : error.Render();
 
     private static bool Holdable(Carry carry, TerseError error) => carry switch
@@ -658,7 +666,7 @@ public sealed class EditTools(ToolContext context)
             string[]? usings = null)
     {
         var rejection = context.RejectWrite();
-        var carry = new Carry("add_member", typeSymbolIds, declarations, Usings: usings);
+        var carry = new Carry("add_member", typeSymbolIds, declarations, Usings: usings, Placement: options.Placement, Preview: options.DryRun);
 
         return rejection is not null
             ? Task.FromResult(rejection)

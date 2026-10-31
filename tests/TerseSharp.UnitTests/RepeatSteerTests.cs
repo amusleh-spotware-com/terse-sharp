@@ -397,6 +397,59 @@ public sealed class RepeatSteerTests
         Assert.Null(plain);
         Assert.Equal("2 workspace_status calls in a row - these are ONE call: guards=[\"ls src\", \"git commit\"]", probes);
     }
+
+    [Fact]
+    public void Steer_ForARefReadAfterARangedRefRead_SaysNothingBecausePathsCannotCarryEitherPerEntry()
+    {
+        RepeatSteer.Forget();
+
+        var ranged = SteerFor(ReadTextCall(("path", "\"A.md\""), ("ref", "\"v0.10.0\""), ("lines", "\"1-2\"")));
+        var atRef = SteerFor(ReadTextCall(("path", "\"B.md\""), ("ref", "\"main\"")));
+
+        Assert.Null(ranged);
+        Assert.Null(atRef);
+    }
+
+    [Fact]
+    public void Steer_ForARangesReadThenALinesRead_SaysNothingBecauseEachRangeBelongsToItsOwnFile()
+    {
+        RepeatSteer.Forget();
+
+        var discontinuous = SteerFor(ReadTextCall(("path", "\"SKILL.md\""), ("ranges", "[\"418-422\", \"596-601\"]")));
+        var lined = SteerFor(ReadTextCall(("path", "\"CHANGELOG.md\""), ("lines", "\"1-40\"")));
+
+        Assert.Null(discontinuous);
+        Assert.Null(lined);
+    }
+
+    [Fact]
+    public void Unbatchable_ClassifiesEveryParameterReadTextDeclares()
+    {
+        string[] expressibleInPaths = ["path", "paths", "maxLines", "maxChars", "bytes", "tokens", "stamp", "headings", "maxLevel", "columns", "cellChars", "verbose", "workspace"];
+        var declared = typeof(TerseSharp.Server.Tools.FileTools).GetMethod(nameof(TerseSharp.Server.Tools.FileTools.ReadText))!
+            .GetParameters()
+            .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
+            .Select(parameter => parameter.Name!)
+            .ToArray();
+
+        var unclassified = declared
+            .Where(name => RepeatSteer.Unbatchable(ReadTextCall(("path", "\"a.md\""), (name, "1")), "read_text") == expressibleInPaths.Contains(name))
+            .ToArray();
+
+        Assert.NotEmpty(declared);
+        Assert.All(expressibleInPaths, name => Assert.Contains(name, declared));
+        Assert.Empty(unclassified);
+    }
+
+    private static ModelContextProtocol.Protocol.CallToolRequestParams ReadTextCall(params (string Name, string Json)[] arguments)
+    {
+        var map = new Dictionary<string, System.Text.Json.JsonElement>(arguments.Length, StringComparer.Ordinal);
+
+        foreach (var (name, json) in arguments)
+            map[name] = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
+
+        return new ModelContextProtocol.Protocol.CallToolRequestParams { Name = "read_text", Arguments = map };
+    }
 }
 
 [CollectionDefinition(nameof(RepeatSteerCollection), DisableParallelization = true)]

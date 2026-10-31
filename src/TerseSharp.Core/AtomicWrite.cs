@@ -16,6 +16,8 @@ public static class AtomicWrite
 
     private static async Task PersistAsync(string path, string content, bool workspaceDocument, CancellationToken cancellationToken)
     {
+        RefuseReadOnly(path);
+
         var temporary = path + ".terse-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ".tmp";
 
         EnsureDirectory(path);
@@ -76,6 +78,8 @@ public static class AtomicWrite
 
     public static async Task BytesAsync(string path, byte[] content, CancellationToken cancellationToken = default)
     {
+        RefuseReadOnly(path);
+
         var temporary = path + ".terse-" + Environment.ProcessId.ToString(CultureInfo.InvariantCulture) + ".bytes.tmp";
 
         EnsureDirectory(path);
@@ -114,8 +118,21 @@ public static class AtomicWrite
             {
                 await BackoffAsync(attempt, cancellationToken).ConfigureAwait(false);
             }
+            catch (UnauthorizedAccessException denied)
+            {
+                throw new WriteDeniedException(path, IsReadOnly(path), denied);
+            }
         }
     }
+
+    private static void RefuseReadOnly(string path)
+    {
+        if (IsReadOnly(path))
+            throw new WriteDeniedException(path, readOnly: true, innerException: null);
+    }
+
+    private static bool IsReadOnly(string path) =>
+        File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReadOnly) != 0;
 
     public static Task TextAsync(string path, string content, CancellationToken cancellationToken = default) =>
         PersistAsync(path, content, workspaceDocument: true, cancellationToken);

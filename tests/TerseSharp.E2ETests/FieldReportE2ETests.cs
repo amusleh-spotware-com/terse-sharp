@@ -607,4 +607,36 @@ public sealed class FieldReportE2ETests(TerseServerFixture server)
             File.Delete(own);
         }
     }
+
+    [Fact]
+    public async Task FindUsages_WithImpact_AppendsTheFilesGitHistoryCoChangedWithTheDeclaringFile_AfterTheExactOnes()
+    {
+        await using var solution = await TerseTempSolution.StartAsync(watch: false, Token, CoChangedAsync);
+
+        var text = await solution.CallAsync("find_usages", new() { ["symbolId"] = "OrderService.Submit", ["impact"] = true });
+        var lines = text.ReplaceLineEndings("\n").Split('\n');
+        var coChanged = lines.Where(line => line.Contains("  HEURISTIC  co-changed  ", StringComparison.Ordinal)).ToArray();
+
+        Assert.Equal(
+            [Path.Join("src", "Fixture.Trading", "OrderBook.cs") + "  HEURISTIC  co-changed  commits=3", Path.Join("src", "Fixture.Trading", "Gateway.cs") + "  HEURISTIC  co-changed  commits=2"],
+            coChanged);
+        Assert.Contains("2 affected files", text, StringComparison.Ordinal);
+        Assert.True(Array.FindLastIndex(lines, line => line.Contains("  EXACT  ", StringComparison.Ordinal)) < Array.IndexOf(lines, coChanged[0]));
+    }
+
+    private static async Task CoChangedAsync(string root)
+    {
+        await CommittedAsync(root);
+        await TouchedAsync(root, "first co-change", "OrderService.cs", "OrderBook.cs", "Gateway.cs");
+        await TouchedAsync(root, "second co-change", "OrderService.cs", "OrderBook.cs");
+        await TouchedAsync(root, "unrelated change", "Gateway.cs", "Reconciler.cs");
+    }
+
+    private static async Task TouchedAsync(string root, string message, params string[] names)
+    {
+        foreach (var name in names)
+            await File.AppendAllTextAsync(Path.Combine(root, "src", "Fixture.Trading", name), "\n", Token);
+
+        await ScratchRepository.CommitAllAsync(root, message);
+    }
 }

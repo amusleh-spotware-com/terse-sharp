@@ -4,6 +4,8 @@ internal sealed record ToolProbe(string Tool, Dictionary<string, object?> Argume
 
 internal sealed record ToolExemption(string Tool, string Reason);
 
+internal sealed record ToolParameterExemption(string Tool, string Parameter, string Reason);
+
 internal sealed record ToolVerdict(string Tool, string Prefix, Dictionary<string, object?> Arguments, string Reason);
 
 internal sealed record ToolBudget(string Tool, int Tokens, string Reason);
@@ -351,6 +353,42 @@ internal static class ToolCensus
     public static int Schema(string tool) =>
         Array.Find(SchemaOverrides, budget => string.Equals(budget.Tool, tool, StringComparison.Ordinal))?.Tokens
         ?? SchemaTokenCap;
+
+    public const int MaxSiblingParameterExemptions = 30;
+
+    public static ToolParameterExemption[] SiblingParameterExempt =>
+        [
+            new("search_symbols", "symbolIds", "searches by name with queries= for a batch; a list of symbol ids is not a search, so no parameter of it means symbolIds"),
+            new("get_file_outline", "symbolIds", "outlines files addressed by path; an id batch belongs to get_type_outline, which already declares symbolIds"),
+            new("find_usages", "symbolIds", "takes one symbolId; a batch of reference lists needs a real symbolIds parameter with its own per-id grouping, never an alias (I833)"),
+            new("find_registrations", "symbolIds", "filters registrations by one query text rather than by symbol id; a batch of ids has no parameter of the same meaning"),
+            new("list_endpoints", "symbolIds", "lists every HTTP route of the workspace and takes no symbol at all, so there is nothing a symbolIds batch could bind to"),
+            new("find_implementations", "symbolIds", "takes one symbolId; a batch of implementation lists needs a real symbolIds parameter, never an alias"),
+            new("get_diagnostics", "symbolIds", "scopes by file path and severity, never by symbol, so a symbolIds batch has no parameter of the same meaning"),
+            new("delete_symbol", "usings", "a deletion adds no code, so there is no namespace it could need and usings= has nothing to bind to"),
+            new("rename_symbol", "usings", "a rename rewrites identifiers only and adds no code that could need a namespace, so usings= has nothing to bind to"),
+            new("replace_symbol_body", "symbolIds", "takes one body for one member; a batch needs ids paired with bodies, which is a real parameter pair - replace_symbol symbolIds= already serves it"),
+            new("rename_symbol", "symbolIds", "one newName per call; a batch rename needs one new name per id, which is a real parameter pair rather than an alias"),
+            new("replace_symbol_body", "declarations", "edits a body, not a declaration; a declarations batch is replace_symbol's shape and would change what the edit means"),
+            new("delete_symbol", "declarations", "a deletion carries no declaration text, so declarations= has nothing to bind to here"),
+            new("rename_symbol", "declarations", "a rename carries a new name, never a declaration, so declarations= has no parameter of the same meaning"),
+            new("clean", "properties", "clean passes no MSBuild global properties today; forwarding them needs a real parameter on the clean command, not an alias"),
+            new("build", "tests", "build compiles and selects no tests; a test-name batch belongs to run_tests and has no meaning on a build"),
+            new("clean", "tests", "clean deletes build output and selects no tests, so a test-name batch has no meaning on it"),
+            new("list_tests", "tests", "list_tests narrows by one contains= substring; an exact test-name batch needs a real parameter, not an alias onto a substring filter"),
+            new("write_text", "paths", "a writer needs content per path; files= carries path and content together, so a bare path list has no write meaning"),
+            new("edit_text", "paths", "every edits= entry carries its own path and anchor, so a bare list of paths names no edit to apply"),
+            new("read_text", "usings", "a read adds no code, so there is no namespace it could need and usings= has nothing to bind to"),
+            new("find_files", "usings", "a file listing adds no code, so there is no namespace it could need and usings= has nothing to bind to"),
+            new("search_text", "usings", "a text search adds no code, so there is no namespace it could need and usings= has nothing to bind to"),
+            new("search_regex", "usings", "a regex search adds no code, so there is no namespace it could need and usings= has nothing to bind to"),
+            new("read_text", "queries", "reads by path and line range; a batch of search literals is search_text's queries= and means nothing on a read"),
+            new("write_text", "queries", "a writer searches nothing, so a queries batch has no parameter of the same meaning here"),
+            new("edit_text", "queries", "edits are anchored by oldText per edits= entry; a bare list of queries names no replacement to make"),
+            new("find_files", "queries", "find_files matches file names by glob; a batch of content literals is a misrouted search_text call, and rebinding it to globs would answer a different question"),
+            new("diff_symbols", "paths", "takes one path; mapping hunks for several pathspecs needs a real paths parameter on the git invocation, never an alias (I833)"),
+            new("history", "paths", "takes one path for git log; several pathspecs need a real paths parameter, not an alias onto a single path"),
+        ];
 }
 
 internal sealed record ToolPair(string First, string Second, string Reason);

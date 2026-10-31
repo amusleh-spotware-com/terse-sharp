@@ -285,6 +285,16 @@ public static class Errors
             string.Create(CultureInfo.InvariantCulture, $"'{path}' is held open by another process that shares no read access, so no read can open it"),
             "retry once that process closes it - no read_text argument helps, tail= included, because every read opens the file the same way; find_files stamps=true still answers its size and last-write time");
 
+    public static TerseError WriteDenied(string path, bool readOnly) => readOnly
+        ? new(
+            TerseErrorCode.ReadOnly,
+            string.Create(CultureInfo.InvariantCulture, $"'{path}' is read-only - the read-only attribute on Windows, no write permission for this user elsewhere - so no write replaces it"),
+            "clear the mark only if the file is meant to be edited - attrib -r on Windows, chmod u+w elsewhere - then repeat the call; a read-only file is often deliberate (a source-control checkout, a generated or vendored file), and no argument of this call writes through it")
+        : new(
+            TerseErrorCode.FileLocked,
+            string.Create(CultureInfo.InvariantCulture, $"'{path}' could not be replaced: access was denied on every retry - another process holds it open without delete sharing (an editor, an indexer, an antivirus scan), or this user may not write its directory"),
+            "retry once that process closes it - no argument of this call helps, because every attempt replaces the file the same way; no holder is named, because only build's MSBuild output says who holds a file");
+
     private const int SharingViolationResult = unchecked((int)0x80070020);
     private const int LockViolationResult = unchecked((int)0x80070021);
 

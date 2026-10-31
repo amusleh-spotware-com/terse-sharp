@@ -2873,4 +2873,45 @@ public sealed class ToolGuardTests
             "edit_text path=\"src/TerseSharp.Core/OutlineService.cs\"",
             ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "sed --in-place=.bak 's/a/b/' src/TerseSharp.Core/OutlineService.cs" }, Fixtures.RepositoryRoot).Routing,
             StringComparison.Ordinal);
+
+    [Theory]
+    [InlineData("python -c \"f=open('src/TerseSharp.Core/OutlineService.cs','w+'); f.close()\"")]
+    [InlineData("python -c \"print('x', file=open('src/TerseSharp.Core/OutlineService.cs','wt'))\"")]
+    [InlineData("python -c \"open('src/TerseSharp.Core/OutlineService.cs','r+').close()\"")]
+    [InlineData("python -c \"open('src/TerseSharp.Core/OutlineService.cs','x')\"")]
+    [InlineData("python -c \"open('src/TerseSharp.Core/OutlineService.cs', encoding='utf8', mode='a')\"")]
+    [InlineData("python -c \"from pathlib import Path; Path('src/TerseSharp.Core/OutlineService.cs').open('w')\"")]
+    [InlineData("python -c \"from pathlib import Path; Path('src/TerseSharp.Core/OutlineService.cs').replace('/tmp/x.txt')\"")]
+    [InlineData("python -c \"import shutil; shutil.move('src/TerseSharp.Core/OutlineService.cs','/tmp/x.txt')\"")]
+    [InlineData("node -e \"require('fs').renameSync('src/TerseSharp.Core/OutlineService.cs','/tmp/x.txt')\"")]
+    [InlineData("node -e \"require('fs').createWriteStream('src/TerseSharp.Core/OutlineService.cs').end('x')\"")]
+    [InlineData("node -e \"require('fs').rmSync('src/TerseSharp.Core/OutlineService.cs')\"")]
+    [InlineData("node -e \"require('fs').unlinkSync('src/TerseSharp.Core/OutlineService.cs')\"")]
+    [InlineData("node -e \"require('fs').openSync('src/TerseSharp.Core/OutlineService.cs','w')\"")]
+    [InlineData("node -e \"require('fs').promises.rm('src/TerseSharp.Core/OutlineService.cs')\"")]
+    public void Inspect_ForAScriptWriteByOpenModeOrAWriteCall_DeniesItAndRoutesToAWriteTool(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Matches("^(edit_text|write_text) path=\"src/TerseSharp.Core/OutlineService.cs\"", verdict.Routing);
+    }
+
+    [Theory]
+    [InlineData("python3 -c \"print(open('src/TerseSharp.Core/OutlineService.cs').read().replace('b','a'))\"")]
+    [InlineData("python3 -c \"import shutil; print(shutil.which('dotnet'), open('src/TerseSharp.Core/OutlineService.cs').read())\"")]
+    [InlineData("python3 -c \"print(open('src/TerseSharp.Core/OutlineService.cs', 'r', encoding='utf8').read())\"")]
+    [InlineData("python3 -c \"print(open('src/TerseSharp.Core/OutlineService.cs','rb').read()[:9])\"")]
+    [InlineData("python3 -c \"import datetime; print(datetime.date.today().replace(year=2020), open('src/TerseSharp.Core/OutlineService.cs').read())\"")]
+    [InlineData("python3 -c \"from pathlib import Path; print(Path('src/TerseSharp.Core/OutlineService.cs').open().read())\"")]
+    [InlineData("node -e \"console.log(require('fs').readFileSync('src/TerseSharp.Core/OutlineService.cs','utf8').replace('a','b'))\"")]
+    [InlineData("node -e \"const fd=require('fs').openSync('src/TerseSharp.Core/OutlineService.cs','r'); console.log(fd)\"")]
+    public void Inspect_ForAScriptThatReadsWithAModeOrAStringReplace_IsNeverRoutedToAWriteTool(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.DoesNotContain("EDITS", verdict.Reason ?? string.Empty, StringComparison.Ordinal);
+        Assert.False(verdict.Routing?.StartsWith("edit_text", StringComparison.Ordinal) ?? false);
+        Assert.False(verdict.Routing?.StartsWith("write_text", StringComparison.Ordinal) ?? false);
+    }
 }

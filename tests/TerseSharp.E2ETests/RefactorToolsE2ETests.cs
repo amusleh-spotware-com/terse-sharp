@@ -289,4 +289,66 @@ public sealed class RefactorToolsE2ETests(TerseServerFixture server)
         Assert.Contains("+namespace Fixture.Routing", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Fixture.Routing ;", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ChangeSignature_AddingAParameterWithAnArgument_RewritesEveryCallerInTheDryRun()
+    {
+        var text = await server.CallAsync("change_signature", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+            ["parameters"] = "Order order, int attempts",
+            ["arguments"] = "attempts: 1",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("public bool Submit(Order order, int attempts) => repository.Submit(order);", text, StringComparison.Ordinal);
+        Assert.Contains("Submit(order, 1) && Submit(order, 1)", text, StringComparison.Ordinal);
+        Assert.Contains("service.Submit(order, 1)", text, StringComparison.Ordinal);
+        Assert.Matches(@"errors=\d+ \(\+0\)", text);
+        Assert.DoesNotContain("would be rolled back", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangeSignature_WithAnArgumentForAKeptParameter_IsRefused()
+    {
+        var text = await server.CallAsync("change_signature", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)",
+            ["parameters"] = "Order order",
+            ["arguments"] = "order: null",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("does not name a parameter the new list adds", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangeSignature_OnAnExpressionBodiedMethod_KeepsTheSpaceBeforeTheArrow()
+    {
+        var text = await server.CallAsync("change_signature", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.OrderService.Unused",
+            ["parameters"] = "int factor",
+            ["dryRun"] = true,
+        });
+
+        Assert.Matches(@"public int Unused\(int factor\) (=>|\{)", text);
+    }
+
+    [Fact]
+    public async Task ChangeSignature_OnAnImplementationCalledThroughItsInterface_RefusesAndNamesTheCallItCannotRewrite()
+    {
+        var text = await server.CallAsync("change_signature", new()
+        {
+            ["symbolId"] = "M:Fixture.Trading.InMemoryOrderRepository.Submit(Fixture.Trading.Order)",
+            ["parameters"] = "Order order, int attempts",
+            ["arguments"] = "attempts: 1",
+            ["dryRun"] = true,
+        });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("cannot be rewritten by parameter name, so nothing was changed", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.cs:", text, StringComparison.Ordinal);
+    }
 }

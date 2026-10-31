@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Text;
@@ -80,6 +81,9 @@ public static class EditGate
         if (Describe(report, verbose) is { Length: > 0 } counters)
             response.Note(counters);
 
+        if (report.Narrowed)
+            response.Note("gate=project");
+
         foreach (var warning in report.NewWarnings.Take(MaxNewWarnings))
             response.Note("WARNING introduced  " + warning);
 
@@ -159,7 +163,9 @@ public static class EditGate
                 EditOptions options,
                 CancellationToken cancellationToken)
     {
-        var projects = Affected(before, changed);
+        var dependents = Affected(before, changed);
+        var narrowed = await NarrowedAsync(before, after, changed, cancellationToken).ConfigureAwait(false);
+        var projects = narrowed ?? dependents;
         var baseline = await TallyAsync(before, projects, root, cancellationToken).ConfigureAwait(false);
         var current = await TallyAsync(after, projects, root, cancellationToken).ConfigureAwait(false);
         var appeared = current.Errors.Where(entry => Appeared(baseline.Errors, entry)).Select(entry => entry.Key).ToArray();
@@ -183,7 +189,8 @@ public static class EditGate
             [.. current.Warnings.Where(entry => Appeared(baseline.Warnings, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
             [.. current.Infos.Where(entry => Appeared(baseline.Infos, entry)).Select(entry => entry.Key).Order(StringComparer.Ordinal)],
             [.. pending.Take(10)],
-            RestoreHint(after, changed, root, regressions));
+            RestoreHint(after, changed, root, regressions),
+            narrowed is not null && narrowed.Length < dependents.Length);
     }
 
     internal static bool Unresolvable(string key, HashSet<string> arrived, Dictionary<string, int> baseline) =>
@@ -293,17 +300,18 @@ public static class EditGate
     }
 
     private sealed record GateReport(
-                    string[] NewErrors,
-                    string[] Unresolved,
-                    int Errors,
-                    int ErrorDelta,
-                    int Warnings,
-                    int WarningDelta,
-                    RollbackHints Hints,
-                    string[] NewWarnings,
-                    string[] NewInfos,
-                    string[] Pending,
-                    string? Restore = null);
+        string[] NewErrors,
+        string[] Unresolved,
+        int Errors,
+        int ErrorDelta,
+        int Warnings,
+        int WarningDelta,
+        RollbackHints Hints,
+        string[] NewWarnings,
+        string[] NewInfos,
+        string[] Pending,
+        string? Restore = null,
+        bool Narrowed = false);
 
     private readonly record struct Tally(
         Dictionary<string, int> Errors,
@@ -798,4 +806,66 @@ public static class EditGate
         workspace.TakeOvertaken() is { Length: > 0 } overtaken
             ? Errors.Overtaken([.. overtaken.Select(path => PositionFormat.Relative(path, workspace.Root))])
             : Errors.EditConflict("the workspace rejected the change");
+
+    internal static bool BodyOnly(SyntaxNode before, SyntaxNode after) =>
+        SyntaxFactory.AreEquivalent(before, after, topLevel: true) && !DeclaresStruct(after) && SameNullableContext(before, after);
+
+    private static bool DeclaresStruct(SyntaxNode root) => root
+        .DescendantNodes(static node => node is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax)
+        .Any(static node => node.IsKind(SyntaxKind.StructDeclaration) || node.IsKind(SyntaxKind.RecordStructDeclaration));
+
+    private static async Task<bool> SameShapeAsync(Document? before, Document? after, CancellationToken cancellationToken)
+    {
+        if (before is not { Project.Language: LanguageNames.CSharp } || after is null)
+            return false;
+
+        var beforeRoot = await before.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+        var afterRoot = await after.GetSyntaxRootAsync(cancellationToken).ConfigureAwait(false);
+
+        return beforeRoot is not null && afterRoot is not null && BodyOnly(beforeRoot, afterRoot);
+    }
+
+    private static async Task<bool> GeneratedSameShapeAsync(Project? before, Project? after, CancellationToken cancellationToken)
+    {
+        if (before is null || after is null)
+            return false;
+
+        var previous = await before.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false);
+        var matched = 0;
+
+        foreach (var document in await after.GetSourceGeneratedDocumentsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (!await SameShapeAsync(await before.GetSourceGeneratedDocumentAsync(document.Id, cancellationToken).ConfigureAwait(false), document, cancellationToken).ConfigureAwait(false))
+                return false;
+
+            matched++;
+        }
+
+        return matched == previous.Count();
+    }
+
+    private static async Task<ProjectId[]?> NarrowedAsync(Solution before, Solution after, IReadOnlyList<DocumentId> changed, CancellationToken cancellationToken)
+    {
+        foreach (var id in changed)
+        {
+            if (!await SameShapeAsync(before.GetDocument(id), after.GetDocument(id), cancellationToken).ConfigureAwait(false))
+                return null;
+        }
+
+        ProjectId[] projects = [.. changed.Select(static id => id.ProjectId).Distinct()];
+
+        foreach (var projectId in projects)
+        {
+            if (!await GeneratedSameShapeAsync(before.GetProject(projectId), after.GetProject(projectId), cancellationToken).ConfigureAwait(false))
+                return null;
+        }
+
+        return projects;
+    }
+
+    private static bool SameNullableContext(SyntaxNode before, SyntaxNode after) =>
+        NullableDirectives(before).SequenceEqual(NullableDirectives(after), StringComparer.Ordinal);
+
+    private static IEnumerable<string> NullableDirectives(SyntaxNode root) =>
+        root.DescendantTrivia(descendIntoTrivia: true).Where(static trivia => trivia.IsKind(SyntaxKind.NullableDirectiveTrivia)).Select(static trivia => trivia.ToString());
 }

@@ -636,4 +636,28 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
 
         Assert.True(batched.Length <= first.Length + second.Length, string.Create(CultureInfo.InvariantCulture, $"batched {batched.Length} chars > {first.Length + second.Length}"));
     }
+
+    [Fact]
+    public async Task ReadText_WithMaxCharsAboveTheCeiling_AnswersUnderTheClientInlineLimit()
+    {
+        const string Probe = "terse-ceiling-probe.txt";
+        var content = string.Join("\n", Enumerable.Range(0, 3000).Select(index => "line " + index.ToString(CultureInfo.InvariantCulture) + " " + new string('x', 40)));
+
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = content });
+
+        try
+        {
+            var verbose = await server.CallAsync("read_text", new() { ["path"] = Probe, ["maxChars"] = 131072, ["verbose"] = true });
+            var condensed = await server.CallAsync("read_text", new() { ["path"] = Probe, ["maxChars"] = 131072 });
+
+            Assert.True(verbose.Length < 50_000, string.Create(CultureInfo.InvariantCulture, $"{verbose.Length} characters for a verbose read at the ceiling"));
+            Assert.True(condensed.Length < 50_000, string.Create(CultureInfo.InvariantCulture, $"{condensed.Length} characters for a condensed read at the ceiling"));
+            Assert.Contains("next: startLine=", verbose, StringComparison.Ordinal);
+            Assert.Contains("maxChars stops at 47104", verbose, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }

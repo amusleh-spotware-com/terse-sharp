@@ -17,7 +17,7 @@ internal static class RefRead
         var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
 
         if (!shown.IsOk)
-            return Failed(shown.Error!, relative, reference);
+            return Failed(shown.Error!, workspace.Root, relative, reference);
 
         var label = relative + "@" + reference;
         var text = shown.Value!;
@@ -44,7 +44,7 @@ internal static class RefRead
         var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
 
         if (!shown.IsOk)
-            return Failed(shown.Error!, relative, reference);
+            return Failed(shown.Error!, workspace.Root, relative, reference);
 
         var outline = NavigationTools.Unwrap(OutlineService.FromText(
             relative + "@" + reference,
@@ -67,9 +67,9 @@ internal static class RefRead
             error.Code == TerseErrorCode.InvalidArgument
             && error.Message.Contains("exists on disk, but not in", StringComparison.Ordinal);
 
-    private static string Failed(TerseError error, string relative, string reference) => IsAbsent(error)
+    private static string Failed(TerseError error, string root, string relative, string reference) => IsAbsent(error)
         ? string.Create(CultureInfo.InvariantCulture, $"ABSENT  {relative} at {reference} - the working tree holds it and that revision does not, so it was added after {reference}")
-        : error.Render();
+        : Unread(error, root, relative, reference);
 
     public static TerseError Batched(string parameter) => Errors.Invalid(
         "ref= reads one file at a git ref and cannot be combined with " + parameter,
@@ -116,7 +116,7 @@ internal static class RefRead
         var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
 
         if (!shown.IsOk)
-            return Failed(shown.Error!, relative, reference);
+            return Failed(shown.Error!, workspace.Root, relative, reference);
 
         var source = await SourceService.FromTextAsync(
             workspace.Root,
@@ -138,6 +138,25 @@ internal static class RefRead
         DocumentLookup.Find(workspace, path)?.Project.MetadataReferences
         ?? workspace.Solution.Projects.FirstOrDefault()?.MetadataReferences
         ?? [];
+
+    private const string RefRemedy = "check that ref= names a commit, branch or tag this repository holds";
+
+    internal static bool IsMissing(TerseError error) =>
+        error.Code == TerseErrorCode.InvalidArgument
+        && error.Message.Contains("does not exist in", StringComparison.Ordinal);
+
+    private static string Unread(TerseError error, string root, string relative, string reference) => error switch
+    {
+        _ when IsMissing(error) => Missing(root, relative, reference),
+        { Code: TerseErrorCode.InvalidArgument } => new TerseError(error.Code, error.Message, RefRemedy).Render(),
+        _ => error.Render(),
+    };
+
+    private static string Missing(string root, string relative, string reference) => NearestPaths.Around(root, relative) switch
+    {
+        [] => string.Create(CultureInfo.InvariantCulture, $"ABSENT  {relative} at {reference} and not in the working tree - no file beside it shares its extension; find_files glob=\"**/{Path.GetFileName(relative)}\" searches the whole tree"),
+        var nearest => string.Create(CultureInfo.InvariantCulture, $"ABSENT  {relative} at {reference} and not in the working tree - nearest: {string.Join("  ", nearest)}"),
+    };
 }
 
 internal readonly record struct OutlineOptions(bool Signatures, string Ids, bool Usings, bool ParameterNames, string? Contains, bool All = false);

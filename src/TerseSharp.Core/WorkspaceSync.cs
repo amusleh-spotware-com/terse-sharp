@@ -359,7 +359,18 @@ public sealed class WorkspaceSync(string root, WorkspaceGenerations seed) : IDis
         }
 
         changed.Add(document.FilePath!);
-        return document.Project.Solution.WithDocumentText(document.Id, text);
+
+        return Twinned(document, text);
+    }
+
+    private static Solution Twinned(Document document, SourceText text)
+    {
+        var solution = document.Project.Solution;
+
+        foreach (var twin in solution.GetDocumentIdsWithFilePath(document.FilePath))
+            solution = solution.WithDocumentText(twin, text);
+
+        return solution;
     }
     private Solution Absent(Solution solution, string path, FileStamp stamp) =>
         stamp != FileStamp.Missing && Attributable(solution, path) ? Rebuild(solution) : solution;

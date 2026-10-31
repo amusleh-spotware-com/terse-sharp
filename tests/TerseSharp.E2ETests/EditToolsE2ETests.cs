@@ -176,6 +176,54 @@ public sealed class EditToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
+    public async Task AddMember_OnABodilessPositionalRecord_OpensABlockBodyAroundTheNewMember()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.Order",
+            ["declaration"] = "public int Probe => 1;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("rolled back", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Volume) public", text, StringComparison.Ordinal);
+        Assert.Matches(@"\+public sealed record Order\(string Symbol, decimal Volume\)\r?\n\+\{\r?\n\+    public int Probe => 1;\r?\n\+\}", text);
+    }
+
+    [Fact]
+    public async Task AddMember_OnABodilessClass_OpensABlockBodyAroundTheNewMember()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "T:Fixture.Trading.Alpha.DuplicatedName",
+            ["declaration"] = "public int Probe => 1;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("rolled back", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("DuplicatedName public", text, StringComparison.Ordinal);
+        Assert.Matches(@"\+public sealed class DuplicatedName\r?\n\+\{\r?\n\+    public int Probe => 1;\r?\n\+\}", text);
+    }
+
+    [Fact]
+    public async Task AddMember_WithTypeSymbolIdsNamingTwoBodilessTypes_OpensABlockBodyInEach()
+    {
+        var text = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "T:Fixture.Trading.Order", "T:Fixture.Trading.Alpha.DuplicatedName" },
+            ["declarations"] = new[] { "public int Probe => 1;", "public int Probe => 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("errors=0 (+0)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("rolled back", text, StringComparison.Ordinal);
+        Assert.Matches(@"\+public sealed record Order\(string Symbol, decimal Volume\)\r?\n\+\{\r?\n\+    public int Probe => 1;\r?\n\+\}", text);
+        Assert.Matches(@"\+public sealed class DuplicatedName\r?\n\+\{\r?\n\+    public int Probe => 2;\r?\n\+\}", text);
+    }
+
+    [Fact]
     public async Task ReplaceSymbol_WithSeveralMembers_ReplacesTheTargetWithAllOfThem()
     {
         var text = await server.CallAsync("replace_symbol", new()
@@ -1808,5 +1856,124 @@ public sealed class RegionTail
             File.SetLastWriteTimeUtc(props, propsStamp);
             await server.CallAsync("load_workspace", new() { ["path"] = solution, ["reload"] = true });
         }
+    }
+
+    private static string PreviewToken(string preview)
+    {
+        var line = preview.Split('\n').Select(entry => entry.TrimEnd('\r')).Single(entry => entry.StartsWith("retryWith=r", StringComparison.Ordinal));
+
+        Assert.EndsWith(" applies this preview", line, StringComparison.Ordinal);
+
+        return line["retryWith=".Length..line.IndexOf(' ', StringComparison.Ordinal)];
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_ADryRunThatWouldLand_HoldsItSoTheTokenAppliesThePreview()
+    {
+        var stamp = File.GetLastWriteTimeUtc(OrderServicePath);
+
+        try
+        {
+            var preview = await server.CallAsync("replace_symbol_body", new()
+            {
+                ["symbolId"] = "OrderService.Submit",
+                ["body"] = "=> order is not null && repository.Submit(order)",
+                ["dryRun"] = true,
+            });
+            var token = PreviewToken(preview);
+
+            Assert.DoesNotContain("order is not null", await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("replace_symbol_body", new() { ["retryWith"] = token });
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("=> order is not null && repository.Submit(order);", await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("replace_symbol_body", new() { ["symbolId"] = "OrderService.Submit", ["body"] = "=> repository.Submit(order)" });
+            File.SetLastWriteTimeUtc(OrderServicePath, stamp);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_ADryRunOfABatchThatWouldLand_HoldsItSoTheTokenAppliesThePreview()
+    {
+        var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(OrderServicePath);
+
+        try
+        {
+            var preview = await server.CallAsync("replace_symbol", new()
+            {
+                ["symbolIds"] = new[] { "OrderService.Submit" },
+                ["declarations"] = new[] { "public bool Submit(Order order) => Accepted(order) && repository.Submit(order);" },
+                ["add"] = new[] { "private static bool Accepted(Order order) => order is not null;" },
+                ["dryRun"] = true,
+            });
+            var token = PreviewToken(preview);
+
+            Assert.DoesNotContain("Accepted(order)", await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("replace_symbol", new() { ["retryWith"] = token });
+            var text = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.Contains("=> Accepted(order) && repository.Submit(order);", text, StringComparison.Ordinal);
+            Assert.Contains("private static bool Accepted(Order order) => order is not null;", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = OrderServicePath, ["content"] = before, ["overwrite"] = true });
+            File.SetLastWriteTimeUtc(OrderServicePath, stamp);
+        }
+    }
+
+    [Fact]
+    public async Task AddMember_ADryRunThatWouldLand_HoldsItSoTheTokenAppliesThePreviewAtItsPlacement()
+    {
+        var before = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(OrderServicePath);
+
+        try
+        {
+            var preview = await server.CallAsync("add_member", new()
+            {
+                ["typeSymbolId"] = "OrderService",
+                ["declaration"] = "public int PreviewProbe() => 1;",
+                ["position"] = "first",
+                ["dryRun"] = true,
+            });
+            var token = PreviewToken(preview);
+
+            Assert.DoesNotContain("PreviewProbe", await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken), StringComparison.Ordinal);
+
+            var applied = await server.CallAsync("add_member", new() { ["retryWith"] = token });
+            var text = await File.ReadAllTextAsync(OrderServicePath, TestContext.Current.CancellationToken);
+
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+            Assert.True(
+                text.IndexOf("PreviewProbe", StringComparison.Ordinal) is > 0 and var probe && probe < text.IndexOf("public bool Submit", StringComparison.Ordinal),
+                "the replay did not land the member where the preview placed it: " + text);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = OrderServicePath, ["content"] = before, ["overwrite"] = true });
+            File.SetLastWriteTimeUtc(OrderServicePath, stamp);
+        }
+    }
+
+    [Fact]
+    public async Task ReplaceSymbolBody_ADryRunThatWouldBeRolledBack_HoldsNoToken()
+    {
+        var preview = await server.CallAsync("replace_symbol_body", new()
+        {
+            ["symbolId"] = "OrderService.Submit",
+            ["body"] = "=> NoSuchHelper(order)",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("applies this preview", preview, StringComparison.Ordinal);
     }
 }

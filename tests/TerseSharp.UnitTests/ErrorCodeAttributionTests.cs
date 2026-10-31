@@ -105,4 +105,24 @@ public sealed class ErrorCodeAttributionTests
 
         Assert.False(RefRead.IsAbsent(read.Error!));
     }
+
+    [Fact]
+    public void Boundary_AWriteDeniedOverAReadOnlyFile_AnswersReadOnlyNamingTheFile()
+    {
+        var text = ToolBoundary.Run(() => throw new WriteDeniedException("C:/repo/Notes.md", readOnly: true, innerException: null));
+
+        Assert.StartsWith("ERROR ReadOnly: 'C:/repo/Notes.md' is read-only", text, StringComparison.Ordinal);
+        Assert.Contains("remedy: clear the mark only if the file is meant to be edited", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Boundary_AWriteDeniedOverAWritableFile_AnswersFileLockedRatherThanAnArgumentError()
+    {
+        var text = ToolBoundary.Run(() => throw new WriteDeniedException("C:/repo/Notes.md", readOnly: false, new UnauthorizedAccessException("Access to the path is denied.")));
+
+        Assert.StartsWith("ERROR FileLocked: 'C:/repo/Notes.md' could not be replaced", text, StringComparison.Ordinal);
+        Assert.Contains("remedy: retry once that process closes it", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("InvalidArgument", text, StringComparison.Ordinal);
+    }
 }

@@ -119,4 +119,20 @@ public sealed class IdenticalCallTests
 
     private static CallToolResult Result(string text) =>
         new() { Content = [new TextContentBlock { Text = text }] };
+
+    [Fact]
+    public void Note_ForARepeatedRerunFailed_AnswersNothingBecauseNoArgumentNamesTheFailuresItReplays()
+    {
+        IdenticalCall.Forget();
+        var parameters = Parameters("rerun_failed", ("timeoutSeconds", "600"));
+        var result = Result("run_tests PASSED  passed=3");
+
+        IdenticalCall.Note("rerun_failed", parameters, result);
+
+        Assert.Null(IdenticalCall.Note("rerun_failed", parameters, result));
+    }
+
+    [Fact]
+    public void Watched_IsExactlyTheBuildAndTestToolsWhoseArgumentsNameWhatTheyRun() =>
+        Assert.Equal<string>(["build", "clean", "list_tests", "run_tests"], IdenticalCall.Watched.Order(StringComparer.Ordinal));
 }

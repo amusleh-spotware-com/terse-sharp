@@ -12,7 +12,7 @@ public static class FileService
         error.Code is TerseErrorCode.InvalidArgument && error.Message.StartsWith(UnforcedRefusal, StringComparison.Ordinal);
 
     private const string CondensedMarker = "condensed=true - blank lines dropped, a number shown only after a gap; verbose=true numbers every line";
-    public const int MaxResponseCharacters = 128 * 1024;
+    public const int MaxResponseCharacters = 46 * 1024;
 
     public const int DefaultResponseCharacters = 40 * 1024;
 
@@ -346,14 +346,14 @@ public static class FileService
         foreach (var line in selection.Lines)
             response.Line(line);
 
-        AppendContinuation(response, path, selection);
+        AppendContinuation(response, path, selection, range);
         AppendSections(response, path, text, request, selection);
         AppendOutlinePrice(response, path, text, request, selection);
         AppendMemberBatch(response, path, text, selection);
 
         return response.ToString();
     }
-    private static void AppendContinuation(ResponseBuilder response, string path, LineSelection selection)
+    private static void AppendContinuation(ResponseBuilder response, string path, LineSelection selection, LineRange range)
     {
         if (selection.CutLine is not 0)
         {
@@ -365,19 +365,12 @@ public static class FileService
         if (selection.NextLine is 0)
             return;
 
-        response.Note(string.Create(
-            CultureInfo.InvariantCulture,
-            $"next: startLine={selection.NextLine} (total={selection.TotalLines})"));
+        response.Note(Resumed(selection, range));
 
-        if (SourceFile.IsCSharp(Located(path)))
-            response.Note(string.Create(CultureInfo.InvariantCulture, $"outline: get_file_outline path={Located(path)}"));
+        if (range.Budget >= MaxResponseCharacters && selection.Lines.Count < range.MaxLines)
+            response.Note(CeilingNote);
 
-        if (DocumentOutline.IsMarkdown(Located(path)))
-        {
-            response.Note(string.Create(
-                CultureInfo.InvariantCulture,
-                $"outline: read_text path={Located(path)} headings=true, then section=\"## Heading\" - paging costs one call per page, the heading map costs one"));
-        }
+        AppendOutlineSteer(response, path);
     }
 
     private static ReadOnlySpan<char> Located(string label) => IsOutside(label)
@@ -428,8 +421,10 @@ public static class FileService
             if (Dropped(line, format))
                 continue;
 
-            lines.Add(Emit(number, emitted, budget, format.Verbose || number != previous + 1));
-            budget -= Math.Min(emitted.Length, budget);
+            var rendered = Emit(number, emitted, budget, format.Verbose || number != previous + 1);
+
+            lines.Add(rendered);
+            budget -= Math.Min(rendered.Length + 1, budget);
             previous = number;
         }
 
@@ -917,7 +912,7 @@ public static class FileService
         foreach (var entry in documents)
         {
             updated = await StagedIntoAsync(workspace, updated, entry, cancellationToken).ConfigureAwait(false);
-            ids.AddRange(entry.IsNew ? [entry.Document!] : LinkedIds(workspace.Solution, entry.Document!));
+            ids.AddRange(entry.IsNew ? updated.GetDocumentIdsWithFilePath(entry.Full) : LinkedIds(workspace.Solution, entry.Document!));
         }
 
         return await EditGate.ApplyAsync(workspace, updated, ids, options, cancellationToken).ConfigureAwait(false);
@@ -1090,7 +1085,9 @@ public static class FileService
         var id = Microsoft.CodeAnalysis.DocumentId.CreateNewId(project.Id);
         var text = SourceText.From(content, AtomicWrite.EncodingOf(full));
 
-        return new StagedWrite(DocumentPlacement.Add(workspace.Solution, id, full, text), [id]);
+        var added = AddedToTwins(workspace.Solution, id, full, text);
+
+        return new StagedWrite(added, [.. added.GetDocumentIdsWithFilePath(full)]);
     }
 
     public static Microsoft.CodeAnalysis.Project? CompilingProject(LoadedWorkspace workspace, string full) =>
@@ -1115,7 +1112,7 @@ public static class FileService
         {
             var added = SourceText.From(entry.After, AtomicWrite.EncodingOf(entry.Full));
 
-            return DocumentPlacement.Add(updated, entry.Document!, entry.Full, added);
+            return AddedToTwins(updated, entry.Document!, entry.Full, added);
         }
 
         var document = workspace.Solution.GetDocument(entry.Document)!;
@@ -1432,9 +1429,10 @@ public static class FileService
         LoadedWorkspace workspace,
         string path,
         string toPath,
+        IReadOnlyList<TextEdit> sourceEdits,
         EditRequest request,
         CancellationToken cancellationToken) =>
-        MoveRowsAsync(workspace, path, toPath, [new TextRow(request.Row!, request.NewText)], request, cancellationToken);
+        MoveRowsAsync(workspace, path, toPath, [new TextRow(request.Row!, request.NewText)], sourceEdits, request, cancellationToken);
 
     private static Result<string> Writable(LoadedWorkspace workspace, string path, bool force)
     {
@@ -1564,6 +1562,7 @@ public static class FileService
         string path,
         string toPath,
         IReadOnlyList<TextRow> rows,
+        IReadOnlyList<TextEdit> sourceEdits,
         EditRequest request,
         CancellationToken cancellationToken)
     {
@@ -1574,10 +1573,15 @@ public static class FileService
 
         var moved = Fold(pair.Value.Source, pair.Value.Destination, rows);
 
-        return moved.IsOk
+        if (!moved.IsOk)
+            return Result.Fail<string>(moved.Error!);
+
+        var source = SourceEdited(path, pair.Value.Source, moved.Value.Source, sourceEdits, request);
+
+        return source.IsOk
             ? await WriteTextManyAsync(
                 workspace,
-                [new FileWrite(path, moved.Value.Source), new FileWrite(toPath, moved.Value.Destination)],
+                [new FileWrite(path, source.Value!), new FileWrite(toPath, moved.Value.Destination)],
                 request.DryRun,
                 force: false,
                 allowErrors: false,
@@ -1585,7 +1589,7 @@ public static class FileService
                 allowPolicy: false,
                 overwrite: true,
                 cancellationToken).ConfigureAwait(false)
-            : Result.Fail<string>(moved.Error!);
+            : Result.Fail<string>(source.Error!);
     }
 
     private static Result<(string Source, string Destination)> Fold(string source, string destination, IReadOnlyList<TextRow> rows)
@@ -2479,5 +2483,91 @@ public static class FileService
             solution = solution.WithDocumentText(linked, text, Microsoft.CodeAnalysis.PreservationMode.PreserveIdentity);
 
         return solution;
+    }
+
+    private static List<Microsoft.CodeAnalysis.ProjectId> Twins(Microsoft.CodeAnalysis.Solution solution, Microsoft.CodeAnalysis.ProjectId id)
+    {
+        var path = solution.GetProject(id)?.FilePath;
+
+        return path is null
+            ? [id]
+            : [.. solution.Projects.Where(project => PathBoundary.Comparer.Equals(project.FilePath, path)).Select(project => project.Id)];
+    }
+
+    private static Microsoft.CodeAnalysis.Solution AddedToTwins(Microsoft.CodeAnalysis.Solution solution, Microsoft.CodeAnalysis.DocumentId id, string full, SourceText text)
+    {
+        foreach (var twin in Twins(solution, id.ProjectId))
+            solution = DocumentPlacement.Add(solution, twin == id.ProjectId ? id : Microsoft.CodeAnalysis.DocumentId.CreateNewId(twin), full, text);
+
+        return solution;
+    }
+
+    private static Result<string> SourceEdited(string path, string before, string moved, IReadOnlyList<TextEdit> edits, EditRequest request)
+    {
+        if (edits.Count is 0)
+            return Result.Ok(moved);
+
+        var (after, failed, _) = Rewritten(moved, edits, request, []);
+
+        if (failed.Count is 0)
+            return Result.Ok(after);
+
+        return Result.Fail<string>(RemovedAnchor(before, moved, edits) is { } removed
+            ? Errors.Invalid(string.Create(CultureInfo.InvariantCulture, $"the edits entry anchored on '{removed}' targets text the row move removes from '{path}', so nothing was moved"), "fold the change into that row's newText=, or anchor the entry on text the move leaves in place")
+            : Errors.Invalid(string.Create(CultureInfo.InvariantCulture, $"an edits entry on '{path}' did not apply to the text the row move leaves, so nothing was moved: {string.Join("; ", failed)}"), "anchor every edits entry on that file on text outside the moved rows"));
+    }
+
+    private static string? RemovedAnchor(string before, string moved, IReadOnlyList<TextEdit> edits)
+    {
+        foreach (var edit in edits)
+        {
+            if (edit.OldText is { Length: > 0 } anchor && before.Contains(anchor, StringComparison.Ordinal) && !moved.Contains(anchor, StringComparison.Ordinal))
+                return anchor;
+        }
+
+        return null;
+    }
+
+    private static readonly string CeilingNote = string.Create(
+        CultureInfo.InvariantCulture,
+        $"maxChars stops at {MaxResponseCharacters}: a client saves a longer answer to a file it cannot read inline, so continue from next: instead of raising it");
+
+    private static string Resumed(LineSelection selection, LineRange range) => range.Spans is { Count: > 0 } spans
+        ? string.Create(CultureInfo.InvariantCulture, $"next: ranges={Remaining(spans, selection.NextLine)} (total={selection.TotalLines})")
+        : string.Create(CultureInfo.InvariantCulture, $"next: startLine={selection.NextLine} (total={selection.TotalLines})");
+
+    private static string Remaining(IReadOnlyList<LineSpan> spans, int next)
+    {
+        var builder = new StringBuilder("[");
+
+        foreach (var span in spans)
+        {
+            if (span.End < next)
+                continue;
+
+            var start = Math.Max(span.Start, next);
+
+            builder.Append(builder.Length > 1 ? ", \"" : "\"").Append(start.ToString(CultureInfo.InvariantCulture));
+
+            if (span.End > start)
+                builder.Append('-').Append(span.End.ToString(CultureInfo.InvariantCulture));
+
+            builder.Append('"');
+        }
+
+        return builder.Append(']').ToString();
+    }
+
+    private static void AppendOutlineSteer(ResponseBuilder response, string path)
+    {
+        if (SourceFile.IsCSharp(Located(path)))
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"outline: get_file_outline path={Located(path)}"));
+
+        if (DocumentOutline.IsMarkdown(Located(path)))
+        {
+            response.Note(string.Create(
+                CultureInfo.InvariantCulture,
+                $"outline: read_text path={Located(path)} headings=true, then section=\"## Heading\" - paging costs one call per page, the heading map costs one"));
+        }
     }
 }

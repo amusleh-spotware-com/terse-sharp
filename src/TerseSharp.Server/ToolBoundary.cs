@@ -58,6 +58,7 @@ public static class ToolBoundary
 
     private static string Describe(Exception exception) => exception switch
     {
+        WriteDeniedException denied => Errors.WriteDenied(denied.FilePath, denied.ReadOnly).Render(),
         IOException locked when Errors.IsSharingViolation(locked) => Errors.Locked(locked).Render(),
         _ => Errors.Invalid(
             string.Create(CultureInfo.InvariantCulture, $"{exception.GetType().Name}: {exception.Message}"),

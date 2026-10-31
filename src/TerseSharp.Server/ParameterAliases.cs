@@ -26,24 +26,33 @@ internal static class ParameterAliases
     public static ImmutableArray<ParameterAlias> All { get; } =
     [
         new("get_type_outline", "typeName", "symbol"),
+        new("get_type_outline", "symbols", "symbolIds"),
+        new("get_symbol", "symbols", "symbolIds"),
+        new("get_symbol_source", "symbols", "symbolIds"),
         new("load_workspace", "name", "path"),
         new("add_member", "code", "declaration"),
         new("add_member", "content", "declaration"),
+        new("add_member", "symbolIds", "typeSymbolIds"),
         new("replace_symbol", "code", "declaration"),
         new("replace_symbol", "content", "declaration"),
+        new("replace_symbol", "newSource", "declaration"),
         new("list_projects", "contains", "filter"),
         new("read_text", "offset", "startLine"),
         new("read_text", "limit", "maxLines"),
         new("read_text", "root", "path", Shape: AliasShape.Rooted),
         new("changed_files", "tracked", "untracked", Shape: AliasShape.Inverted),
+        new("diff_text", "context", "unified"),
+        new("find_files", "paths", "globs"),
         new("search_text", "-C", "context"),
         new("search_text", "-A", "context"),
         new("search_text", "-B", "context"),
         new("search_text", "output_mode", "countOnly", OutputModes),
+        new("search_text", "globs", "paths"),
         new("search_regex", "-C", "context"),
         new("search_regex", "-A", "context"),
         new("search_regex", "-B", "context"),
         new("search_regex", "output_mode", "countOnly", OutputModes),
+        new("search_regex", "globs", "paths"),
     ];
 
     private static readonly FrozenDictionary<string, ParameterAlias[]> ByTool = All

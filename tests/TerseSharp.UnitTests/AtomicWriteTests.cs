@@ -85,4 +85,47 @@ public sealed class AtomicWriteTests : IDisposable
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task TextAsync_OverAReadOnlyFile_RefusesWithWriteDeniedAndLeavesTheFileUntouched()
+    {
+        var path = Path.Combine(directory.FullName, "readonly.txt");
+        await File.WriteAllTextAsync(path, "before", TestContext.Current.CancellationToken);
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+
+        try
+        {
+            var denied = await Assert.ThrowsAsync<WriteDeniedException>(() => AtomicWrite.TextAsync(path, "after", TestContext.Current.CancellationToken));
+
+            Assert.True(denied.ReadOnly);
+            Assert.Equal(path, denied.FilePath);
+            Assert.Equal("before", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+            Assert.Single(directory.GetFiles());
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+    }
+
+    [Fact]
+    public async Task BytesAsync_OverAReadOnlyFile_RefusesWithWriteDeniedAndLeavesTheFileUntouched()
+    {
+        var path = Path.Combine(directory.FullName, "readonly.bin");
+        await File.WriteAllBytesAsync(path, [1, 2, 3], TestContext.Current.CancellationToken);
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+
+        try
+        {
+            var denied = await Assert.ThrowsAsync<WriteDeniedException>(() => AtomicWrite.BytesAsync(path, [9], TestContext.Current.CancellationToken));
+
+            Assert.True(denied.ReadOnly);
+            Assert.Equal([1, 2, 3], await File.ReadAllBytesAsync(path, TestContext.Current.CancellationToken));
+            Assert.Single(directory.GetFiles());
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+    }
 }

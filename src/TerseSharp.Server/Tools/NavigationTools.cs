@@ -194,13 +194,13 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Max results (100, or 200 with impact=true). A cap you pass is taken as your bound; the default one is widened to twice it when that returns the list whole.")] int maxResults = 0,
         [Description("Also name the member each usage sits in, one line per member instead of per file (default false).")] bool containers = false,
         [Description("Alias for symbolId.")] string? symbol = null,
-        [Description("Answer the blast radius instead of the reference list: referencing files, XAML sites and every project that would recompile. Default false.")] bool impact = false,
+        [Description("Answer the blast radius instead of the reference list: referencing files, XAML sites and every project that would recompile, then up to 5 files git history co-changed with the declaring file in 2+ of the last 200 commits, tagged HEURISTIC co-changed. Default false.")] bool impact = false,
         [Description("With impact=true, also list the test classes that reference this symbol, each as a ready run_tests test= argument. They are the DIRECT references only, so they narrow a run rather than replacing one. Default false.")] bool tests = false,
         CancellationToken cancellationToken = default) =>
         Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
             ? Task.FromResult(clash)
             : context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => SiblingSolutions.NotedAsync(loaded, impact
-            ? ExploreService.ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
+            ? ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
             : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken), cancellationToken), cancellationToken);
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
@@ -584,4 +584,18 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
                 response.Note(string.Create(CultureInfo.InvariantCulture, $"NOTE q{index + 1} '{queries[index]}': path= declared no match - the whole solution was searched"));
         }
     }
+
+    private static Task<string> ImpactAsync(LoadedWorkspace loaded, ISymbol resolved, int maxResults, bool tests, CancellationToken cancellationToken) =>
+        ExploreService.ImpactAsync(loaded, resolved, maxResults, tests, CoChangeLogAsync(loaded.Root, Declaring(loaded.Root, resolved), cancellationToken), cancellationToken);
+
+    private static async Task<string> CoChangeLogAsync(string root, string[] declaring, CancellationToken cancellationToken)
+    {
+        if (declaring.Length is 0)
+            return string.Empty;
+
+        return await GitRunner.ReadAsync(root, CoChange.LogArguments(declaring), cancellationToken).ConfigureAwait(false) is { IsOk: true, Value: { } log } ? log : string.Empty;
+    }
+
+    private static string[] Declaring(string root, ISymbol symbol) =>
+        [.. symbol.Locations.Where(location => location.IsInSource).Select(location => PositionFormat.Relative(root, location.SourceTree!.FilePath).Replace('\\', '/')).Distinct(StringComparer.Ordinal)];
 }

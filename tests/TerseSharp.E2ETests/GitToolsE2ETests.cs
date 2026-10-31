@@ -1004,6 +1004,35 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             File.Delete(Path.Combine(fixture, "terse-paths-other.txt"));
         }
     }
+
+    [Fact]
+    public async Task ReadText_AtARefOnAPathNeitherSideHolds_AnswersAbsentWithTheNearestPaths()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderServiceGone.cs",
+            ["ref"] = "HEAD",
+        });
+
+        Assert.StartsWith("ABSENT  ", text, StringComparison.Ordinal);
+        Assert.Contains("at HEAD and not in the working tree - nearest: " + Path.Combine("src", "Fixture.Trading", "OrderService.cs"), text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("baseRef", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_AtARefThatDoesNotExist_NamesRefInTheRemedyNotBaseRef()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "no-such-ref-anywhere",
+        });
+
+        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("remedy: check that ref= names", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("baseRef", text, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe
