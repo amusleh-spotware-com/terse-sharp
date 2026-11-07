@@ -2994,7 +2994,9 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         {
             for (var round = 0; round < 10; round++)
             {
-                await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "alpha\nbeta\n" });
+                var reset = await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "alpha\nbeta\n", ["overwrite"] = true });
+
+                Assert.DoesNotContain("ERROR", reset, StringComparison.Ordinal);
 
                 var answers = await Task.WhenAll(
                     server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "alpha", ["newText"] = "ALPHA" }),
