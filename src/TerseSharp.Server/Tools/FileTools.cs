@@ -793,17 +793,17 @@ context.RejectWrite() is { } rejection
             remaining -= answer.Length;
 
             if (remaining <= 0 && index < paths.Length - 1)
-                return Batched(rendered, paths.Length, paths[index], ImmutableArray.Create(paths, index + 1, paths.Length - index - 1));
+                return Batched(rendered, paths.Length, paths[index], ImmutableArray.Create(paths, index + 1, paths.Length - index - 1), site.Reference);
         }
 
-        return Batched(rendered, paths.Length, string.Empty, []);
+        return Batched(rendered, paths.Length, string.Empty, [], site.Reference);
     }
 
     private static string Entry(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)
     ? string.Create(CultureInfo.InvariantCulture, $"{(answer.Contains("DocumentNotFound", StringComparison.Ordinal) ? "NOT_FOUND" : "FAILED")} {path}\n{answer}")
     : string.Create(CultureInfo.InvariantCulture, $"{path}\n{answer}");
 
-    private static string Batched(List<string> rendered, int requested, string clipped, ImmutableArray<string> unread)
+    private static string Batched(List<string> rendered, int requested, string clipped, ImmutableArray<string> unread, string? reference)
     {
         var response = new ResponseBuilder("read_text", string.Empty);
 
@@ -816,7 +816,7 @@ context.RejectWrite() is { } rejection
         {
             response.Note(string.Create(
                 CultureInfo.InvariantCulture,
-                $"the shared maxChars budget ran out at {clipped} - paths=[\"{string.Join("\", \"", unread)}\"] reads the rest in a second call"));
+                $"the shared maxChars budget ran out at {clipped} - paths=[\"{string.Join("\", \"", unread)}\"]{PluralPaths.Argument("ref", reference)} reads the rest in a second call"));
         }
 
         return response.ToString();

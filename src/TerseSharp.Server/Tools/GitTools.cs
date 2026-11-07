@@ -55,7 +55,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     }
 
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
-    [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. paths=[...] maps up to 10 pathspecs, OR-ed, in ONE answer. Replaces one call per path. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
+    [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. paths=[...] maps up to 10 pathspecs. Replaces one call per path. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
     public Task<string> DiffSymbols(
         [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD, so a staged change still maps - pass staged=true for the index alone against HEAD.")] string? baseRef = null,
         [Description("Map the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
@@ -63,7 +63,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         [Description("Max results (200).")] int maxResults = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Not supported here: mapping a hunk to a declaration needs the directory loaded. Pass it to changed_files or diff_text.")] string? root = null,
-        [Description("Several paths or pathspecs mapped in one answer, at most 10, OR-ed. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
+        [Description("Up to 10 pathspecs, OR-ed; path is taken first.")] string?[]? paths = null,
         CancellationToken cancellationToken = default)
     {
         if (root is { Length: > 0 })

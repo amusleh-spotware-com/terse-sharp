@@ -1378,4 +1378,12 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("\nPARTIAL 20 of 21 symbolIds answered, 20 per call", text, StringComparison.Ordinal);
         Assert.Contains("\nnext: get_symbol_source symbolIds=[\"OrderService.SubmitTwice\"]", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindUsages_WithSymbolIds_KeepsTheResolvedFromNameCaveatOfAnIdThatOnlyMatchedByName()
+    {
+        var text = await server.CallAsync("find_usages", new() { ["symbolIds"] = new[] { "M:Fixture.Trading.OrderService.Submit", "OrderService" } });
+
+        Assert.Contains("resolved from name: M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)", text, StringComparison.Ordinal);
+    }
 }

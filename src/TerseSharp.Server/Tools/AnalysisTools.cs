@@ -9,7 +9,7 @@ namespace TerseSharp.Server.Tools;
 public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
 {
     [McpServerTool(Name = "analyze", ReadOnly = true)]
-    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares and no enforced .terse.json policy rule emits is named NOT_ENABLED instead of answering a silent zero. baseRef=HEAD reports only the findings on lines this working tree ADDED or CHANGED against that ref - an untracked file counts whole - and folds the rest to one count, which is what makes the end-of-task verdict mean this task rather than this repository; a baseRef call always runs, because git state can move with nothing written. changed=true with no baseRef= is baseRef=HEAD on a git tree, so the end-of-task sweep reports what this task changed; baseRef=\"\" reports every finding in the changed files. A paths= batch that saturates the 10-path cap ends with next: analyze changed=true, which answers the same end-of-task sweep over every modified file in ONE call. Past 10 paths the first 10 are analyzed and next: names the rest. timeoutSeconds= bounds the pass: a project unfinished at the deadline is named PARTIAL, never reported clean, with next: analyze paths=[...] for it.")]
+    [Description("Compiler diagnostics, every analyzer the project references, and dead-code findings in one deduplicated list, down to info severity. Pass paths to analyze up to 10 files in ONE pass. Replaces one call per file, which is what the end-of-task sweep used to cost. Use instead of reading build output; catches unreferenced members, unused usings and style violations the build hides. Dead code is reported as TERSE001 in category DeadCode. Findings sharing an id, a severity and a message are folded onto one line carrying every position, and an id passed to ids= that no referenced analyzer declares and no enforced .terse.json policy rule emits is named NOT_ENABLED instead of answering a silent zero. baseRef=HEAD reports only the findings on lines this working tree ADDED or CHANGED against that ref - an untracked file counts whole - and folds the rest to one count, which is what makes the end-of-task verdict mean this task rather than this repository; a baseRef call always runs, because git state can move with nothing written. changed=true with no baseRef= is baseRef=HEAD on a git tree, so the end-of-task sweep reports what this task changed; baseRef=\"\" reports every finding in the changed files. A paths= batch that saturates the 10-path cap ends with next: analyze changed=true, which answers the same end-of-task sweep over every modified file in ONE call. What a call does not reach - past 10 paths, or past timeoutSeconds - is named PARTIAL with next:.")]
     public Task<string> Analyze(
             [Description("Scope to a file, a directory or a glob such as src/**/*.cs. Empty analyzes the whole solution.")] string? path = null,
             [Description("Minimum severity: error, warning, info, hidden. Default info.")] string? minSeverity = null,
@@ -22,8 +22,8 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
             [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
             [Description("Several files, directories or globs analyzed in one pass, at most 10; the rest are named in next:. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
             [Description("Report only findings on a line the working tree added or changed against this git ref, e.g. HEAD or main, folding the rest to one pre-existing count. A file git does not track counts whole. Omitted beside changed=true it is HEAD on a git tree; an empty string reports every finding in scope.")] string? baseRef = null,
-            [Description("Glob of files to drop after path=, paths= or changed=true selected them, e.g. tests/** or **/*.generated.cs. Alone it drops them from the whole solution.")] string? exclude = null,
-            [Description("Timeout seconds, 1-3600 (600). A project unfinished by then is named PARTIAL with next:, never reported clean.")] int timeoutSeconds = 600,
+            [Description("Glob of files to drop from the selection, e.g. tests/**.")] string? exclude = null,
+            [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         CancellationToken cancellationToken = default) => Aliases.Clash(new ParameterSpelling("minSeverity", minSeverity), new ParameterSpelling("severity", severity)) is { } clash ? Task.FromResult(clash) : replay.ReplayedAsync(
         "analyze",
         ReplayGate.Key("analyze", path, minSeverity, severity, ids, includeDeadCode.ToString(), maxResults.ToString(CultureInfo.InvariantCulture), changed.ToString(), paths is null ? null : string.Join(',', paths), baseRef, Defaulted(baseRef), workspace, exclude, timeoutSeconds.ToString(CultureInfo.InvariantCulture)),
@@ -33,7 +33,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
         path ?? First(paths),
         async loaded =>
             {
-                var spilled = Overflowed(paths);
+                var spilled = Overflowed(path, paths);
 
                 if (!spilled.IsOk)
                     return spilled.Error!.Render();
@@ -436,22 +436,24 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
         return scope.AsSpan().IndexOfAny(GlobCharacters) >= 0 ? relative : relative + "," + relative + "/**";
     }
 
-    private static Result<SpilledPaths> Overflowed(string?[]? paths)
+    private static Result<SpilledPaths> Overflowed(string? path, string?[]? paths)
     {
-        if (paths is not { Length: > MaxScopedPaths })
+        var room = MaxScopedPaths - (path is { Length: > 0 } ? 1 : 0);
+
+        if (paths is null || paths.Length <= room)
             return Result.Ok(new SpilledPaths(paths, []));
 
-        var overflow = new string[paths.Length - MaxScopedPaths];
+        var overflow = new string[paths.Length - room];
 
-        for (var index = MaxScopedPaths; index < paths.Length; index++)
+        for (var index = room; index < paths.Length; index++)
         {
             if (Refusable(paths[index]) is { } refusal)
                 return Result.Fail<SpilledPaths>(refusal);
 
-            overflow[index - MaxScopedPaths] = paths[index]!;
+            overflow[index - room] = paths[index]!;
         }
 
-        return Result.Ok(new SpilledPaths(paths[..MaxScopedPaths], overflow));
+        return Result.Ok(new SpilledPaths(paths[..room], overflow));
     }
 
     private readonly record struct SpilledPaths(string?[]? Taken, string[] Overflow);

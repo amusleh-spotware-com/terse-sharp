@@ -12,7 +12,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
     [McpServerTool(Name = "build")]
-    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. A repeat of a build that already answered ok, with nothing written since, answers build UNCHANGED naming the previous verdict and its age, and force=true re-runs it. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity; configuration, targetFramework and properties scope the build. projects=[...] builds up to 10 projects one after another, each under its own project line. Replaces one call per project.")]
+    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. A repeat of a build that already answered ok, with nothing written since, answers build UNCHANGED naming the previous verdict and its age, and force=true re-runs it. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity; configuration, targetFramework and properties scope the build. projects=[...] builds up to 10 in turn. Replaces one call per project.")]
     public Task<string> Build(
         [Description("Project path; empty builds the solution.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the .terse.json build default, else the SDK default, which is Debug.")] string? configuration = null,
@@ -22,7 +22,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Build even when this exact call already answered ok and nothing has been written since. Default false.")] bool force = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
-        [Description("Up to 10 projects, each a name or .csproj path, built one after another and each answered under its own project line; not with project=.")] string?[]? projects = null,
+        [Description("Up to 10 project names or paths, built in turn; not with project=.")] string?[]? projects = null,
         CancellationToken cancellationToken = default) => Replayable(
         "build",
         BuildGreen,
@@ -256,7 +256,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         wait: Seconds(timeoutSeconds));
 
     [McpServerTool(Name = "list_tests")]
-    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build, and projects=[...] lists up to 10 projects in ONE call, each under its own project line. Replaces one call per project.")]
+    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build; projects=[...] lists up to 10. Replaces one call per project.")]
     public Task<string> ListTests(
         [Description("Substring filter on the name.")] string? contains = null,
         [Description("Project name or path; empty lists every test project.")] string? project = null,
@@ -265,7 +265,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        [Description("Up to 10 test projects, each a name or .csproj path, listed one after another and each answered under its own project line; not with project=.")] string?[]? projects = null,
+        [Description("Up to 10 test project names or paths, listed in turn; not with project=.")] string?[]? projects = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, (target, stopping) =>
         {

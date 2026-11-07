@@ -880,4 +880,30 @@ public sealed class WorkspaceRegistryTests
         Assert.False(result.IsOk);
         Assert.Equal(TerseErrorCode.AmbiguousWorkspace, result.Error!.Code);
     }
+
+    [Fact]
+    public void OneCheckout_ForTwoCheckoutsInDifferentParentsThatShareADirectoryName_IsFalse()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "terse-checkouts-" + Guid.NewGuid().ToString("N"));
+        var first = Path.Combine(parent, "a", "wt");
+        var second = Path.Combine(parent, "b", "wt");
+
+        Directory.CreateDirectory(Path.Combine(first, ".git"));
+        Directory.CreateDirectory(Path.Combine(second, ".git"));
+
+        try
+        {
+            var top = GitContext.Detect(Path.Combine(first, "App.slnx"));
+            var below = GitContext.Detect(Path.Combine(second, "sub", "Tools.slnx"));
+            var sibling = GitContext.Detect(Path.Combine(first, "sub", "Other.slnx"));
+
+            Assert.Equal(top.WorktreeName, below.WorktreeName);
+            Assert.False(WorkspaceRegistry.OneCheckout([top, below]));
+            Assert.True(WorkspaceRegistry.OneCheckout([top, sibling]));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
 }

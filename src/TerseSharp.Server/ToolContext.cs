@@ -240,11 +240,12 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         {
             var target = await TargetAsync(workspace, pathHint, changed, tests, cancellationToken).ConfigureAwait(false);
 
-            if (binaries && target.IsOk)
-                target = Result.Ok(target.Value with { Stale = await StaleAsync(workspace, pathHint, target.Value, cancellationToken).ConfigureAwait(false) });
+            var run = binaries
+                ? async (entered, token) => await action(entered with { Stale = await StaleAsync(workspace, pathHint, entered, token).ConfigureAwait(false) }, token).ConfigureAwait(false)
+                : action;
 
             return target.IsOk
-                ? Noted(await SpawnedAsync(target.Value!, spawns, pathHint, action, wait, cancellationToken).ConfigureAwait(false), target.Value.Note)
+                ? Noted(await SpawnedAsync(target.Value!, spawns, pathHint, run, wait, cancellationToken).ConfigureAwait(false), target.Value.Note)
                 : target.Error!.Render();
         }).ConfigureAwait(false);
     }

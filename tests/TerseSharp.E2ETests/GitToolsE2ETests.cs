@@ -1112,6 +1112,20 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Single(text.Split('\n'), line => line.StartsWith("at HEAD - the ids above", StringComparison.Ordinal));
         Assert.StartsWith("ERROR", unaddressed, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReadText_AtARefWithPathsThatExhaustTheBudget_NamesTheRestWithTheSameRef()
+    {
+        var text = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/OrderService.cs", "src/Fixture.Trading/OrderRouter.cs" },
+            ["ref"] = "HEAD",
+            ["verbose"] = true,
+            ["maxChars"] = 200,
+        });
+
+        Assert.Contains("] ref=\"HEAD\" reads the rest in a second call", text, StringComparison.Ordinal);
+    }
 }
 
 internal static class DiffSymbolProbe

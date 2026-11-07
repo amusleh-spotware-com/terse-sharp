@@ -389,4 +389,14 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("projects= was passed together with project=", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Analyze_WithExcludeAlone_SaysTheSolutionPassWasScopedToDocuments()
+    {
+        var text = await server.CallAsync("analyze", new() { ["exclude"] = "**/no-such-dir/**", ["includeDeadCode"] = false, ["minSeverity"] = "error" });
+        var scoped = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Trading", ["exclude"] = "**/no-such-dir/**", ["includeDeadCode"] = false, ["minSeverity"] = "error" });
+
+        Assert.Contains("NOTE exclude= scopes this pass to the documents it keeps", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("NOTE exclude= scopes this pass", scoped, StringComparison.Ordinal);
+    }
 }

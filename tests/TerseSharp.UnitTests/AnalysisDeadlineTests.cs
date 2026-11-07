@@ -61,6 +61,8 @@ public sealed class AnalysisDeadlineTests
         var whole = await AnalyzeAsync(workspace, workspace.Files.OrderServicePath, includeDeadCode: false, sinceLast: true, timeout: null);
 
         Assert.DoesNotContain("this run is the baseline", partial, StringComparison.Ordinal);
+        Assert.Contains("no delta: this pass is PARTIAL", partial, StringComparison.Ordinal);
+        Assert.DoesNotContain("new diagnostics", partial, StringComparison.Ordinal);
         Assert.Contains("no previous analyze of this scope: this run is the baseline", whole, StringComparison.Ordinal);
     }
 

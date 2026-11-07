@@ -44,7 +44,7 @@ public static class AnalysisService
             ids,
             includeDeadCode,
             changed,
-            new Narrowed(touched, baseRef, all.Length - found.Length - split.Fileless.Count, split)) + PartialTrailer(value.Partial);
+            new Narrowed(touched, baseRef, all.Length - found.Length - split.Fileless.Count, split)) + ExcludedNote(path, changed, exclude) + PartialTrailer(value.Partial);
     }
 
     public static async Task<Result<GateFindings>> FindingsAsync(
@@ -213,7 +213,7 @@ public static class AnalysisService
         response.Summary(
             ResultCap.Shown(shown.Count, maxResults),
             shown.Count,
-            Unit(sinceLast, shown.Count),
+            Unit(sinceLast && !collected.Partial.IsPartial, shown.Count),
             "minSeverity=, ids= or path=");
         response.Note("engines=" + string.Join("+", Engines(collected.Analyzed, includeDeadCode)));
 
@@ -242,16 +242,8 @@ public static class AnalysisService
         if (changed)
             response.Note("gate runs this, format and cleanup fix=all as one call");
 
-        if (sinceLast && !collected.Partial.IsPartial)
-        {
-            response.Note(delta.Baseline
-                ? string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"no previous analyze of this scope: this run is the baseline, all {occurrences.Length} occurrence(s) are listed")
-                : string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"since the previous analyze of this scope: appeared={delta.Appeared.Count} fixed={delta.Fixed.Count} unchanged={delta.Unchanged} total={occurrences.Length} occurrence(s)"));
-        }
+        if (sinceLast)
+            response.Note(SinceLastNote(delta, occurrences.Length, collected.Partial.IsPartial));
 
         foreach (var line in shown.Capped(maxResults))
             response.Line(line);
@@ -468,6 +460,17 @@ public static class AnalysisService
 
         return string.Create(CultureInfo.InvariantCulture, $"\nPARTIAL {partial.Targets - unfinished.Projects.Length} of {partial.Targets} project(s) analyzed by the {seconds} s deadline - not analyzed, so absent from this answer: {string.Join(", ", unfinished.Projects)}{widened}{next}");
     }
+
+    private static string SinceLastNote(DiagnosticDelta delta, int occurrences, bool partial) => (partial, delta.Baseline) switch
+    {
+        (true, _) => string.Create(CultureInfo.InvariantCulture, $"no delta: this pass is PARTIAL, so all {occurrences} occurrence(s) are listed and none was compared with the previous analyze"),
+        (false, true) => string.Create(CultureInfo.InvariantCulture, $"no previous analyze of this scope: this run is the baseline, all {occurrences} occurrence(s) are listed"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"since the previous analyze of this scope: appeared={delta.Appeared.Count} fixed={delta.Fixed.Count} unchanged={delta.Unchanged} total={occurrences} occurrence(s)"),
+    };
+
+    private static string ExcludedNote(string? path, bool changed, string? exclude) => path is null && !changed && exclude is { Length: > 0 }
+        ? "\nNOTE exclude= scopes this pass to the documents it keeps, as path= does, so a diagnostic with no file (e.g. CS0006) or in a generated file is not reported - drop exclude= to see those"
+        : string.Empty;
 
     private static DiagnosticDelta Recorded(string scope, IReadOnlyList<string> occurrences, Partial partial) =>
         partial.IsPartial ? new DiagnosticDelta(occurrences, [], 0, Baseline: true) : DiagnosticHistory.Record(scope, occurrences);

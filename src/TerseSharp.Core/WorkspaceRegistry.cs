@@ -210,7 +210,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         {
             [var only] => Ok(only, semantic),
             [] => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Names(loaded), Unloaded([.. loaded.Select(workspace => workspace.Root)], hint))),
-            _ when AtWorktreeRoot(best, hint) is { } rooted => Rooted(rooted, best.Length, semantic),
+            _ when OneCheckout([.. best.Select(workspace => workspace.Git)]) && AtWorktreeRoot(best, hint) is { } rooted => Rooted(rooted, best.Length, semantic),
             _ => Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(best))),
         };
     }
@@ -558,4 +558,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
     internal static string WorktreeNote(LoadedWorkspace workspace, int tied) => string.Create(
         CultureInfo.InvariantCulture,
         $"workspace={Path.GetFileName(workspace.SolutionPath)} ({workspace.Git.WorktreeName}) - the worktree name matches {tied} loaded solutions and this one sits at its root; pass the solution file name for another");
+
+    internal static bool OneCheckout(GitContext[] gits) =>
+        gits is [{ Root: { } first }, ..] && Array.TrueForAll(gits, git => PathBoundary.SameFile(git.Root, first));
 }
