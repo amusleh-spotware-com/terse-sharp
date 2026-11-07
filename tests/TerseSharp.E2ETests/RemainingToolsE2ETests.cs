@@ -348,4 +348,45 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
         Assert.Contains("MissingHelperNobodyDeclares", broken, StringComparison.Ordinal);
         Assert.Equal(original, await File.ReadAllTextAsync(order, TestContext.Current.CancellationToken));
     }
+
+    [Fact]
+    public async Task Analyze_WithExclude_DropsTheFilesTheGlobNamesAndRefusesWhenItDropsEveryOne()
+    {
+        var whole = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Trading" });
+        var position = whole.Split('\n').SelectMany(line => line.Split(' ')).FirstOrDefault(word => word.Contains(".cs:", StringComparison.Ordinal));
+
+        Assert.NotNull(position);
+
+        var name = Path.GetFileName(position[..(position.IndexOf(".cs:", StringComparison.Ordinal) + ".cs".Length)]);
+        var narrowed = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Trading", ["exclude"] = "**/" + name });
+        var none = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Trading", ["exclude"] = "**" });
+
+        Assert.Contains(name, whole, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", narrowed, StringComparison.Ordinal);
+        Assert.DoesNotContain(name + ":", narrowed, StringComparison.Ordinal);
+        Assert.StartsWith("ERROR InvalidArgument", none, StringComparison.Ordinal);
+        Assert.Contains("exclude=** dropped every document", none, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Build_WithProjects_BuildsEachUnderItsOwnProjectLine()
+    {
+        var text = await server.CallAsync("build", new() { ["projects"] = new[] { "Fixture.Trading", "NoSuchProject" }, ["force"] = true });
+        var trading = text.IndexOf("Fixture.Trading\n", StringComparison.Ordinal);
+        var missing = text.IndexOf("NoSuchProject\n", StringComparison.Ordinal);
+
+        Assert.StartsWith("1/2 projects", text, StringComparison.Ordinal);
+        Assert.True(trading >= 0 && missing > trading, text);
+        Assert.StartsWith("build ok", text[(trading + "Fixture.Trading\n".Length)..], StringComparison.Ordinal);
+        Assert.StartsWith("ERROR", text[(missing + "NoSuchProject\n".Length)..], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Build_WithProjectAndProjects_IsRefusedRatherThanDroppingOne()
+    {
+        var text = await server.CallAsync("build", new() { ["project"] = "Fixture.Trading", ["projects"] = new[] { "Fixture.Trading" } });
+
+        Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.Contains("projects= was passed together with project=", text, StringComparison.Ordinal);
+    }
 }

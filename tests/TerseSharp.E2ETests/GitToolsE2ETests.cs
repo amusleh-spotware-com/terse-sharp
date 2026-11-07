@@ -1033,6 +1033,41 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         Assert.Contains("remedy: check that ref= names", text, StringComparison.Ordinal);
         Assert.DoesNotContain("baseRef", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task DiffSymbols_WithPaths_MapsEveryPathspecOrEdAndNothingOutsideThem()
+    {
+        const string Book = "src/Fixture.Trading/OrderBook.cs";
+        const string Router = "src/Fixture.Trading/OrderRouter.cs";
+        var book = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderBook.cs");
+        var router = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderRouter.cs");
+        var bookText = await File.ReadAllTextAsync(book, TestContext.Current.CancellationToken);
+        var routerText = await File.ReadAllTextAsync(router, TestContext.Current.CancellationToken);
+        var bookWritten = File.GetLastWriteTimeUtc(book);
+        var routerWritten = File.GetLastWriteTimeUtc(router);
+
+        try
+        {
+            await File.WriteAllTextAsync(book, bookText + "// terse-diff-symbols-paths\n", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(router, routerText + "// terse-diff-symbols-paths\n", TestContext.Current.CancellationToken);
+
+            var both = await server.CallAsync("diff_symbols", new() { ["paths"] = new[] { Book, Router } });
+            var one = await server.CallAsync("diff_symbols", new() { ["paths"] = new[] { Book } });
+
+            Assert.DoesNotContain("ERROR", both, StringComparison.Ordinal);
+            Assert.Contains("OrderBook.cs", both, StringComparison.Ordinal);
+            Assert.Contains("OrderRouter.cs", both, StringComparison.Ordinal);
+            Assert.Contains("OrderBook.cs", one, StringComparison.Ordinal);
+            Assert.DoesNotContain("OrderRouter.cs", one, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(book, bookText, TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(router, routerText, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(book, bookWritten);
+            File.SetLastWriteTimeUtc(router, routerWritten);
+        }
+    }
 }
 
 internal static class DiffSymbolProbe

@@ -212,6 +212,7 @@ public sealed class ParameterAliasesTests
     [InlineData("find_files", "paths", "globs")]
     [InlineData("search_text", "globs", "paths")]
     [InlineData("search_regex", "globs", "paths")]
+    [InlineData("search_regex", "patterns", "queries")]
     public void Apply_BindsASiblingToolsBatchSpelling_ToThisToolsOwnBatchParameter(string tool, string alias, string canonical)
     {
         var arguments = Arguments(string.Concat("{\"", alias, "\": [\"a\", \"b\"]}"));
@@ -226,6 +227,7 @@ public sealed class ParameterAliasesTests
     [Theory]
     [InlineData("diff_text", """{"context": 3}""", "unified", "3")]
     [InlineData("replace_symbol", """{"newSource": "void M() { }"}""", "declaration", "\"void M() { }\"")]
+    [InlineData("find_registrations", """{"service": "IOrderRepository"}""", "query", "\"IOrderRepository\"")]
     public void Apply_BindsAnObservedScalarSpelling_ToTheParameterOfTheSameMeaning(string tool, string json, string canonical, string expected)
     {
         var arguments = Arguments(json);

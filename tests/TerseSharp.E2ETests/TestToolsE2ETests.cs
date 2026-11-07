@@ -711,4 +711,14 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
         Assert.Contains("tests= entry 2 'Fixture.Trading.Tests.DeliberateOutcomesTests.NoSuchTestAnywhere' ran 0 tests", text, StringComparison.Ordinal);
         Assert.DoesNotContain("entry 1", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ListTests_WithProjects_ListsEachUnderItsOwnProjectLine()
+    {
+        var text = await server.CallAsync("list_tests", new() { ["projects"] = new[] { "Fixture.Trading.Tests", "NoSuchProject" } });
+
+        Assert.StartsWith("1/2 projects", text, StringComparison.Ordinal);
+        Assert.Contains("Fixture.Trading.Tests\n", text, StringComparison.Ordinal);
+        Assert.Contains("NoSuchProject\nERROR", text, StringComparison.Ordinal);
+    }
 }

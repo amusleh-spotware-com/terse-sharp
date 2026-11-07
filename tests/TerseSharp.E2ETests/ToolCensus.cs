@@ -360,7 +360,7 @@ internal static class ToolCensus
         [
             new("search_symbols", "symbolIds", "searches by name with queries= for a batch; a list of symbol ids is not a search, so no parameter of it means symbolIds"),
             new("get_file_outline", "symbolIds", "outlines files addressed by path; an id batch belongs to get_type_outline, which already declares symbolIds"),
-            new("find_usages", "symbolIds", "takes one symbolId; a batch of reference lists needs a real symbolIds parameter with its own per-id grouping, never an alias (I833)"),
+            new("clean", "projects", "clean deletes the bin and obj of one project or of the whole tree; sweeping several needs a real per-project clean with its own lock recovery, never an alias onto project="),
             new("find_registrations", "symbolIds", "filters registrations by one query text rather than by symbol id; a batch of ids has no parameter of the same meaning"),
             new("list_endpoints", "symbolIds", "lists every HTTP route of the workspace and takes no symbol at all, so there is nothing a symbolIds batch could bind to"),
             new("find_implementations", "symbolIds", "takes one symbolId; a batch of implementation lists needs a real symbolIds parameter, never an alias"),
@@ -386,7 +386,7 @@ internal static class ToolCensus
             new("write_text", "queries", "a writer searches nothing, so a queries batch has no parameter of the same meaning here"),
             new("edit_text", "queries", "edits are anchored by oldText per edits= entry; a bare list of queries names no replacement to make"),
             new("find_files", "queries", "find_files matches file names by glob; a batch of content literals is a misrouted search_text call, and rebinding it to globs would answer a different question"),
-            new("diff_symbols", "paths", "takes one path; mapping hunks for several pathspecs needs a real paths parameter on the git invocation, never an alias (I833)"),
+            new("rerun_failed", "projects", "replays the remembered failures, which already name the projects they ran in; a project batch would be a second selection beside tests=, which needs a real parameter, not an alias"),
             new("history", "paths", "takes one path for git log; several pathspecs need a real paths parameter, not an alias onto a single path"),
         ];
 }

@@ -35,6 +35,11 @@ public static class RepeatSteer
         ["gate"] = "paths",
         ["delete_symbol"] = "symbolIds",
         ["workspace_status"] = "guards",
+        ["build"] = "projects",
+        ["list_tests"] = "projects",
+        ["diff_symbols"] = "paths",
+        ["find_usages"] = "symbolIds",
+        ["xaml_validate"] = "paths",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();

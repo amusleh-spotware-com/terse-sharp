@@ -55,7 +55,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     }
 
     [McpServerTool(Name = "diff_symbols", ReadOnly = true)]
-    [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
+    [Description("Replaces Bash git diff. Maps every changed hunk onto the declaration that contains it and answers with symbol ids you can feed straight to get_symbol_source - EXACT when a hunk sits inside one declaration, HEURISTIC with the raw line range when it does not. Use this to decide what to review, then read only the bodies you need. paths=[...] maps up to 10 pathspecs, OR-ed, in ONE answer. Replaces one call per path. Unlike changed_files and diff_text it takes no root=: mapping a hunk to a declaration needs the Roslyn compilation, which only a loaded workspace has.")]
     public Task<string> DiffSymbols(
         [Description("Commit, branch or range to compare against. Empty compares the working tree against HEAD, so a staged change still maps - pass staged=true for the index alone against HEAD.")] string? baseRef = null,
         [Description("Map the INDEX instead of the working tree - git diff --cached. Default false.")] bool staged = false,
@@ -63,16 +63,31 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         [Description("Max results (200).")] int maxResults = 0,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Not supported here: mapping a hunk to a declaration needs the directory loaded. Pass it to changed_files or diff_text.")] string? root = null,
-        CancellationToken cancellationToken = default) =>
-        root is { Length: > 0 }
-            ? Task.FromResult(Errors.Invalid(
+        [Description("Several paths or pathspecs mapped in one answer, at most 10, OR-ed. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (root is { Length: > 0 })
+        {
+            return Task.FromResult(Errors.Invalid(
                 "diff_symbols cannot answer about a directory that is not loaded - mapping a hunk onto a declaration needs its Roslyn compilation",
-                "use changed_files root= or diff_text root= for an unloaded directory, or load_workspace it and drop root=").Render())
-            : context.WithWorkspaceAsync(
-                workspace,
-                path,
-                loaded => SymbolsAsync(loaded, baseRef, path, NavigationTools.Cap(maxResults, 200), staged, cancellationToken),
-                cancellationToken: cancellationToken);
+                "use changed_files root= or diff_text root= for an unloaded directory, or load_workspace it and drop root=").Render());
+        }
+
+        var combined = paths is { Length: > 0 } || path is { Length: > 0 }
+            ? PluralPaths.Combine(path, paths, "paths")
+            : Result.Ok(ImmutableArray<string>.Empty);
+
+        if (!combined.IsOk)
+            return Task.FromResult(combined.Error!.Render());
+
+        var scoped = combined.Value;
+
+        return context.WithWorkspaceAsync(
+            workspace,
+            path ?? (scoped.IsDefaultOrEmpty ? null : scoped[0]),
+            loaded => SymbolsAsync(loaded, baseRef, scoped, NavigationTools.Cap(maxResults, 200), staged, cancellationToken),
+            cancellationToken: cancellationToken);
+    }
 
     [McpServerTool(Name = "diff_text", ReadOnly = true)]
     [Description("Replaces Bash git diff. The raw unified diff, workspace-relative, for the hunk text a symbol read cannot show: whitespace, a non-.cs file, a pure deletion, and every hunk diff_symbols could only map HEURISTIC. Pass paths to diff up to 10 files in ONE call. Replaces one call per file: every entry is handed to the same git invocation as its own pathspec, so the answer is one unified diff already labelled per file. It costs about one line of response per changed line, so bound it: path= and paths= scope it and maxLines= caps it at 3000 by default. A clipped answer is labelled INCOMPLETE and names the skipLines= that returns the rest without re-paying the lines you already have. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace. diff_symbols first when the question is which declarations changed - it answers that in one line each.")]
@@ -232,7 +247,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     private static async Task<string> SymbolsAsync(
         LoadedWorkspace workspace,
         string? baseRef,
-        string? path,
+        IReadOnlyList<string> paths,
         int maxResults,
         bool staged,
         CancellationToken cancellationToken)
@@ -241,7 +256,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         var diff = await GitRunner.ReadAsync(
             workspace.Root,
-            Arguments(command, baseRef, path),
+            Arguments(command, baseRef, paths),
             cancellationToken).ConfigureAwait(false);
 
         return diff.IsOk

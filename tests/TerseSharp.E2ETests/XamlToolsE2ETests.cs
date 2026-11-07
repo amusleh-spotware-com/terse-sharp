@@ -428,4 +428,20 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
         Assert.Contains("matched no element", text, StringComparison.Ordinal);
         Assert.Contains("UserControl/Grid/Grid @4", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task XamlValidate_WithPaths_ValidatesEachFileUnderItsOwnPathLine()
+    {
+        const string Missing = "src/Fixture.Trading/Views/Missing.xaml";
+        var text = await server.CallAsync("xaml_validate", new() { ["paths"] = new[] { View, BoundView, Missing } });
+        var view = text.IndexOf(View + "\n", StringComparison.Ordinal);
+        var bound = text.IndexOf(BoundView + "\n", StringComparison.Ordinal);
+
+        Assert.StartsWith("3 files", text, StringComparison.Ordinal);
+        Assert.True(view >= 0 && bound > view, text);
+        Assert.Contains("MissingBrush", text[view..bound], StringComparison.Ordinal);
+        Assert.Contains("XAML001", text[view..bound], StringComparison.Ordinal);
+        Assert.Contains("0 issues", text[bound..], StringComparison.Ordinal);
+        Assert.Contains("NOT_FOUND " + Missing, text, StringComparison.Ordinal);
+    }
 }

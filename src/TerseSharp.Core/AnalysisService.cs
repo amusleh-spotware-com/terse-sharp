@@ -17,9 +17,10 @@ public static class AnalysisService
         bool changed,
         TouchedLines? touched = null,
         string baseRef = "",
+        string? exclude = null,
         CancellationToken cancellationToken = default)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ids, cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ids, exclude, cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
             return collected.Error!.Render();
@@ -54,7 +55,7 @@ public static class AnalysisService
         TouchedLines? touched,
         CancellationToken cancellationToken)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], null, cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
             return Result.Fail<GateFindings>(collected.Error!);
@@ -76,13 +77,19 @@ public static class AnalysisService
             bool includeDeadCode,
             bool changed,
             IReadOnlyList<string> ids,
+            string? exclude,
             CancellationToken cancellationToken)
     {
-        var unscoped = path is null && !changed;
-        var documents = unscoped ? [] : DocumentScope.Select(workspace, path, changed);
+        var unscoped = path is null && !changed && exclude is not { Length: > 0 };
+        var selected = unscoped ? [] : DocumentScope.Select(workspace, path, changed);
+
+        if (!unscoped && selected.Length is 0)
+            return Result.Fail<Collected>(Empty(path, changed));
+
+        var documents = Excluded(workspace, selected, exclude);
 
         if (!unscoped && documents.Length is 0)
-            return Result.Fail<Collected>(Empty(path, changed));
+            return Result.Fail<Collected>(AllExcluded(path, exclude!));
 
         var targets = Targets(workspace, documents, unscoped).ToArray();
         var scope = Scope(workspace, documents, unscoped);
@@ -332,6 +339,20 @@ public static class AnalysisService
                     .Where(diagnostic => Keep(diagnostic, collected.Scope, DiagnosticSeverity.Error, []) && !DiagnosticIds.MatchesAny(diagnostic.Id, ids))
                     .Distinct()],
                 touched).Length;
+
+    private static DocumentId[] Excluded(LoadedWorkspace workspace, DocumentId[] documents, string? exclude)
+    {
+        if (exclude is not { Length: > 0 } glob)
+            return documents;
+
+        var matcher = FileGlob.Compile(glob);
+
+        return [.. documents.Where(id => workspace.Solution.GetDocument(id)?.FilePath is not { } file || !matcher.MatchesFile(workspace.Root, file))];
+    }
+
+    private static TerseError AllExcluded(string? path, string exclude) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"exclude={exclude} dropped every document {path ?? "the solution"} selected, so nothing was analyzed"),
+        "narrow exclude= or widen path=");
 }
 
 public static class DiagnosticFormat

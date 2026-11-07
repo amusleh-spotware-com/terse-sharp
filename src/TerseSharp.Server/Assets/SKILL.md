@@ -53,7 +53,7 @@ tool returns, its parameters and its defaults live in the tool's own advertised 
 | **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` — an exact type name no source declares falls back to the referenced assemblies |
 | **Navigate** | a name the tests declare dozens of times | `search_symbols(query, scope: "src")` |
 | **Navigate** | a common name that buries the one declaration you meant | `search_symbols(query, path: "src/Trading/OrderBook.cs")` |
-| **Navigate** | `Grep` to find callers | `find_usages(symbolId)` |
+| **Navigate** | `Grep` to find callers | `find_usages(symbolId)` · `symbolIds=` |
 | **Navigate** | `Grep` for implementers | `find_implementations(symbolId)` |
 | **Navigate** | the outline → source → usages chain, when learning what a symbol IS | `get_symbol(symbolId, usages: true)` — ONE call |
 | **Navigate** | judging a rename before doing it | `find_usages(symbolId, impact: true)` |
@@ -139,10 +139,10 @@ tool returns, its parameters and its defaults live in the tool's own advertised 
 | **Git** | `Bash: git ls-remote --tags origin` | `history(tags: true, remote: true)` — every row tagged `local=yes\|no remote=yes\|no` |
 | **Git** | `Bash: git diff --cached` for its hunk text or its declarations | `diff_symbols(staged: true)` · `diff_text(staged: true)` |
 | **Git** | `Bash: git diff --cached --name-only` / `git status --untracked-files=no` | `changed_files(staged: true)` · `changed_files(untracked: false)` |
-| **Git** | `Bash: git status` / `git diff --stat` / `--numstat` / `--name-only` / `--name-status` | `changed_files` — the counts family routes here, not to `diff_symbols`; a byte-identical repeat with nothing moved replays as `UNCHANGED` |
-| **Git** | `Bash: git diff` to decide what to review | `diff_symbols` — hunks become symbol ids for `get_symbol_source` |
+| **Git** | `Bash: git status` / `git diff --stat` / `--numstat` / `--name-only` / `--name-status` | `changed_files` — the counts family routes here, not to `diff_symbols`; an unchanged repeat replays as `UNCHANGED` |
+| **Git** | `Bash: git diff` to decide what to review | `diff_symbols` (`paths=`) — hunks become ids for `get_symbol_source` |
 | **Git** | `Bash: git diff` for the hunk text itself | `diff_text(path: …)` — a clipped answer is `INCOMPLETE` and names the `skipLines=` that continues it |
-| **Build and test** | `Bash: dotnet build` / `msbuild` | `build` — a byte-identical repeat with nothing written since answers `build UNCHANGED` |
+| **Build and test** | `Bash: dotnet build` / `msbuild` | `build` (`projects=`) — an unchanged repeat answers `build UNCHANGED` |
 | **Build and test** | `Bash: dotnet build -c Release` | `build(configuration: "Release")` |
 | **Build and test** | `Bash: dotnet build -p:Name=Value` | `build(properties: ["Name=Value"])` |
 | **Build and test** | `Bash: dotnet test` / `vstest` | `run_tests` |
@@ -153,7 +153,7 @@ tool returns, its parameters and its defaults live in the tool's own advertised 
 | **Build and test** | re-verifying SOME of what broke | `rerun_failed(tests: [...], exclude: [...])` |
 | **Build and test** | `dotnet test --list-tests` | `list_tests(contains)` |
 | **Build and test** | `Bash: dotnet clean` | `clean` |
-| **Analyse** | one `analyze` call per touched file | `analyze(paths: [...])` |
+| **Analyse** | one `analyze` call per touched file | `analyze(paths: [...])` · `exclude=` |
 | **Analyse** | `dotnet format whitespace` / an IDE inspection | `analyze` — compiler + analyzers + dead code, down to `info` |
 | **Analyse** | running `analyze` → `format` → `cleanup` → `analyze` at the end of a task | `gate` — one verdict line |
 | **Analyse** | an end-of-task sweep buried in findings this task did not author | `analyze baseRef="HEAD"` · `gate baseRef="HEAD"` · `get_diagnostics baseRef="HEAD"` — only changed lines, plus every error; the rest is one count |
@@ -170,7 +170,7 @@ tool returns, its parameters and its defaults live in the tool's own advertised 
 | **XAML** | eyeballing a `{Binding}` | `xaml_bindings(path, validate: true)` |
 | **XAML** | `Read` a `.xaml.cs` to see what the markup wires | `xaml_codebehind(path)` |
 | **XAML** | "is this element translated" | `xaml_localization()` |
-| **XAML** | guessing whether the markup is sound | `xaml_validate()` |
+| **XAML** | guessing whether the markup is sound | `xaml_validate(paths: [...])` |
 | **XAML** | `Edit` a `.xaml` file | `xaml_set_property` · `xaml_add_element` · `xaml_remove_element` |
 | **Localization** | `Read` a `.resx`/`.resw` | `resx_get(path, cultures)` |
 | **Localization** | `Glob` for resource files | `resx_files()` |

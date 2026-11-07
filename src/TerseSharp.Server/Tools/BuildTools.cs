@@ -12,7 +12,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     private static readonly SearchValues<char> FilterSpecial = SearchValues.Create("\\()&|=!~");
 
     [McpServerTool(Name = "build")]
-    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. A repeat of a build that already answered ok, with nothing written since, answers build UNCHANGED naming the previous verdict and its age, and force=true re-runs it. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity; configuration, targetFramework and properties scope the build.")]
+    [Description("Replaces Bash dotnet build. A successful build answers in one line - warnings are counted, never listed - and a failed build lists error-severity diagnostics only. A repeat of a build that already answered ok, with nothing written since, answers build UNCHANGED naming the previous verdict and its age, and force=true re-runs it. Raw MSBuild output is never returned. Pass verbose=true for every diagnostic of every severity; configuration, targetFramework and properties scope the build. projects=[...] builds up to 10 projects one after another, each under its own project line. Replaces one call per project.")]
     public Task<string> Build(
         [Description("Project path; empty builds the solution.")] string? project = null,
         [Description("Build configuration, passed to dotnet as -c, e.g. Release. Empty uses the .terse.json build default, else the SDK default, which is Debug.")] string? configuration = null,
@@ -22,22 +22,23 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Build even when this exact call already answered ok and nothing has been written since. Default false.")] bool force = false,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
+        [Description("Up to 10 projects, each a name or .csproj path, built one after another and each answered under its own project line; not with project=.")] string?[]? projects = null,
         CancellationToken cancellationToken = default) => Replayable(
         "build",
         BuildGreen,
-        Key("build", [project, configuration, targetFramework, Joined(properties), Flag(verbose), workspace]),
+        Key("build", [project, configuration, targetFramework, Joined(properties), Flag(verbose), workspace, Joined(projects)]),
         force,
         WatchedRun.From(() => context.WithTargetAsync(workspace, project, (target, stopping) =>
         {
-            if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
+            if (SelfBuilt(target, projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
 
-            return DefaultedAsync(target, configuration, [project], chosen =>
+            return DefaultedAsync(target, configuration, projects is { Length: > 0 } ? projects : [project], chosen =>
             {
                 var scope = Scoped(chosen, targetFramework, properties);
 
                 return scope.IsOk
-                    ? Contained(target, project, resolved => BuildWithRecoveryAsync(
+                    ? Each(target, project, projects, "build", resolved => BuildWithRecoveryAsync(
                         target, resolved, scope.Value, verbose, Seconds(timeoutSeconds), stopping))
                     : Task.FromResult(scope.Error!.Render());
             }, stopping);
@@ -255,7 +256,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         wait: Seconds(timeoutSeconds));
 
     [McpServerTool(Name = "list_tests")]
-    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build.")]
+    [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build, and projects=[...] lists up to 10 projects in ONE call, each under its own project line. Replaces one call per project.")]
     public Task<string> ListTests(
         [Description("Substring filter on the name.")] string? contains = null,
         [Description("Project name or path; empty lists every test project.")] string? project = null,
@@ -264,18 +265,19 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("MSBuild properties, each Name=Value, passed as -p:Name=Value. Applied after configuration and targetFramework.")] string[]? properties = null,
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
+        [Description("Up to 10 test projects, each a name or .csproj path, listed one after another and each answered under its own project line; not with project=.")] string?[]? projects = null,
         CancellationToken cancellationToken = default) =>
         context.WithTargetAsync(workspace, project, (target, stopping) =>
         {
-            if (SelfBuilt(target, Whole(project, configuration)) is { } refused)
+            if (SelfBuilt(target, projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
 
-            return DefaultedAsync(target, configuration, [project], chosen =>
+            return DefaultedAsync(target, configuration, projects is { Length: > 0 } ? projects : [project], chosen =>
             {
                 var scope = Scoped(chosen, targetFramework, properties);
 
                 return scope.IsOk
-                    ? Contained(target, project, resolved => RecoveredAsync(target, "test listing", async () =>
+                    ? Each(target, project, projects, "list_tests", resolved => RecoveredAsync(target, "test listing", async () =>
                     {
                         var run = await DotnetRunner.ListTestNamesAsync(
                             target,
@@ -293,6 +295,39 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         cancellationToken: cancellationToken,
         spawns: "list_tests",
         wait: Seconds(timeoutSeconds));
+
+    private static Task<string> Each(WorkspaceTarget target, string? project, string?[]? projects, string tool, Func<string?, Task<string>> action)
+    {
+        if (projects is not { Length: > 0 })
+            return Contained(target, project, action);
+
+        if (project is { Length: > 0 })
+        {
+            return Task.FromResult(Errors.Invalid(
+                "projects= was passed together with project=, and one of them would have been silently dropped",
+                "pass every project in projects=, or the single one in project=").Render());
+        }
+
+        var named = PluralPaths.Combine(null, projects, "projects");
+
+        return named.IsOk ? EachAsync(target, named.Value, tool, action) : Task.FromResult(named.Error!.Render());
+    }
+
+    private static async Task<string> EachAsync(WorkspaceTarget target, ImmutableArray<string> projects, string tool, Func<string?, Task<string>> action)
+    {
+        var response = new ResponseBuilder(tool, string.Empty);
+        var answered = 0;
+
+        foreach (var project in projects)
+        {
+            var answer = await Contained(target, project, action).ConfigureAwait(false);
+
+            answered += answer.StartsWith("ERROR", StringComparison.Ordinal) ? 0 : 1;
+            response.Line(string.Concat(project, "\n", answer));
+        }
+
+        return response.Answered(answered, projects.Length, "projects").ToString();
+    }
 
     private Task<string> BuildWithRecoveryAsync(
         WorkspaceTarget target,

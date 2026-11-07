@@ -22,9 +22,10 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
             [Description("Limit the pass to files modified since the workspace loaded, so the end-of-task gate is one call.")] bool changed = false,
             [Description("Several files, directories or globs analyzed in one pass, at most 10. Combines with path, taken first; an entry carrying a comma or a brace is refused by name.")] string?[]? paths = null,
             [Description("Report only findings on a line the working tree added or changed against this git ref, e.g. HEAD or main, folding the rest to one pre-existing count. A file git does not track counts whole. Omitted beside changed=true it is HEAD on a git tree; an empty string reports every finding in scope.")] string? baseRef = null,
+            [Description("Glob of files to drop after path=, paths= or changed=true selected them, e.g. tests/** or **/*.generated.cs. Alone it drops them from the whole solution.")] string? exclude = null,
         CancellationToken cancellationToken = default) => Aliases.Clash(new ParameterSpelling("minSeverity", minSeverity), new ParameterSpelling("severity", severity)) is { } clash ? Task.FromResult(clash) : replay.ReplayedAsync(
         "analyze",
-        ReplayGate.Key("analyze", path, minSeverity, severity, ids, includeDeadCode.ToString(), maxResults.ToString(CultureInfo.InvariantCulture), changed.ToString(), paths is null ? null : string.Join(',', paths), baseRef, Defaulted(baseRef), workspace),
+        ReplayGate.Key("analyze", path, minSeverity, severity, ids, includeDeadCode.ToString(), maxResults.ToString(CultureInfo.InvariantCulture), changed.ToString(), paths is null ? null : string.Join(',', paths), baseRef, Defaulted(baseRef), workspace, exclude),
         sinceLast || baseRef is { Length: > 0 } || (changed && baseRef is null),
         () => context.WithWorkspaceAsync(
         workspace,
@@ -44,7 +45,7 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
                 return await GateSteered(
                     Steered(
                         AnalysisService.AnalyzeAsync(
-                            loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, Touched, Narrowing(baseRef, Touched), cancellationToken),
+                            loaded, scope.Value, Severity(minSeverity ?? severity), Split(ids), includeDeadCode, NavigationTools.Cap(maxResults, 200), sinceLast, changed, Touched, Narrowing(baseRef, Touched), exclude, cancellationToken),
                         path,
                         paths,
                         changed),

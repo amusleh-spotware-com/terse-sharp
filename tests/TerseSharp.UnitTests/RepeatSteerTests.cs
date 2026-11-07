@@ -48,10 +48,10 @@ public sealed class RepeatSteerTests
     {
         RepeatSteer.Forget();
 
-        Assert.Null(RepeatSteer.Steer("build"));
-        Assert.Null(RepeatSteer.Steer("build"));
-        Assert.Null(RepeatSteer.Steer("build"));
-        Assert.Null(RepeatSteer.Steer("build"));
+        Assert.Null(RepeatSteer.Steer("clean"));
+        Assert.Null(RepeatSteer.Steer("clean"));
+        Assert.Null(RepeatSteer.Steer("clean"));
+        Assert.Null(RepeatSteer.Steer("clean"));
     }
 
     [Theory]

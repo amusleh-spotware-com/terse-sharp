@@ -187,7 +187,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     ];
 
     [McpServerTool(Name = "find_usages", ReadOnly = true)]
-    [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded. impact=true answers the blast radius of a rename or a signature change instead: every referencing file with its src/test marker, every XAML site, and every project that would recompile - and with tests=true the test classes that reference it, each as a ready run_tests test= argument.")]
+    [Description("Every real reference to a symbol, resolved semantically, one line per file with a src/test marker. Use instead of Grep for a type or member name; comments and unrelated matches are excluded. impact=true answers the blast radius of a rename or a signature change instead: every referencing file with its src/test marker, every XAML site, and every project that would recompile - and with tests=true the test classes that reference it, each as a ready run_tests test= argument. symbolIds=[...] answers up to 20 symbols in ONE call, each under its own id line. Replaces one call per symbol.")]
     public Task<string> FindUsages(
         [Description("Symbol id to find references for.")] string? symbolId = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -196,12 +196,19 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Alias for symbolId.")] string? symbol = null,
         [Description("Answer the blast radius instead of the reference list: referencing files, XAML sites and every project that would recompile, then up to 5 files git history co-changed with the declaring file in 2+ of the last 200 commits, tagged HEURISTIC co-changed. Default false.")] bool impact = false,
         [Description("With impact=true, also list the test classes that reference this symbol, each as a ready run_tests test= argument. They are the DIRECT references only, so they narrow a run rather than replacing one. Default false.")] bool tests = false,
-        CancellationToken cancellationToken = default) =>
-        Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
-            ? Task.FromResult(clash)
-            : context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => SiblingSolutions.NotedAsync(loaded, impact
+        [Description("Several symbol ids answered in one call, at most 20, each under its own id line with its own reference list, or its own blast radius with impact=true. Combines with symbolId, taken first; an id that does not resolve answers NOT_RESOLVED inline.")] string[]? symbolIds = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash)
+            return Task.FromResult(clash);
+
+        if (symbolIds is { Length: > 0 })
+            return UsagesOfManyAsync(Requested(symbolId ?? symbol, symbolIds), workspace, new UsageQuery(maxResults, containers, impact, tests), cancellationToken);
+
+        return context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => SiblingSolutions.NotedAsync(loaded, impact
             ? ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
             : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken), cancellationToken), cancellationToken);
+    }
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
     [Description("Where a type is registered in a dependency-injection container - AddSingleton, AddScoped, AddTransient, keyed and TryAdd variants - with the member each call sits in. Grep cannot answer this when the registration uses an open generic, a factory delegate or an Add* extension method. Says so explicitly when nothing matches, rather than implying the type is unregistered. symbol= and name= are aliases for query=; an empty query lists every registration, and a call carrying none of the three is refused naming all three.")]
@@ -388,7 +395,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         return response.ToString();
     }
 
-    private static string Outlined(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)
+    internal static string Outlined(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)
         ? string.Create(CultureInfo.InvariantCulture, $"{(answer.Contains("DocumentNotFound", StringComparison.Ordinal) ? "NOT_FOUND" : "FAILED")} {path}\n{answer}")
         : string.Create(CultureInfo.InvariantCulture, $"{path}\n{answer}");
 
@@ -598,4 +605,49 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
     private static string[] Declaring(string root, ISymbol symbol) =>
         [.. symbol.Locations.Where(location => location.IsInSource).Select(location => PositionFormat.Relative(root, location.SourceTree!.FilePath).Replace('\\', '/')).Distinct(StringComparer.Ordinal)];
+
+    private readonly record struct UsageQuery(int MaxResults, bool Containers, bool Impact, bool Tests);
+
+    private Task<string> UsagesOfManyAsync(string[] requested, string? workspace, UsageQuery query, CancellationToken cancellationToken) => requested switch
+    {
+        [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
+        { Length: > MaxBatchedSymbols } => Task.FromResult(Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"'symbolIds' carried {requested.Length} entries, at most {MaxBatchedSymbols} are answered in one call"),
+            string.Create(CultureInfo.InvariantCulture, $"send at most {MaxBatchedSymbols} per call")).Render()),
+        _ => context.WithWorkspaceAsync(
+            workspace,
+            null,
+            loaded => SiblingSolutions.NotedAsync(loaded, UsagesEachAsync(loaded, requested, query, cancellationToken), cancellationToken),
+            cancellationToken: cancellationToken),
+    };
+
+    private static async Task<string> UsagesEachAsync(LoadedWorkspace loaded, string[] requested, UsageQuery query, CancellationToken cancellationToken)
+    {
+        var response = new ResponseBuilder("find_usages", string.Empty);
+        var answered = 0;
+
+        foreach (var id in requested)
+        {
+            var (line, resolved) = await UsageEntryAsync(loaded, id, query, cancellationToken).ConfigureAwait(false);
+
+            response.Line(line);
+            answered += resolved ? 1 : 0;
+        }
+
+        return response.Answered(answered, requested.Length, "symbols").ToString();
+    }
+
+    private static async Task<(string Line, bool Resolved)> UsageEntryAsync(LoadedWorkspace loaded, string id, UsageQuery query, CancellationToken cancellationToken)
+    {
+        var noted = await SymbolLookup.ResolveNotedAsync(loaded, id, null, cancellationToken, referenced: true).ConfigureAwait(false);
+
+        if (noted.Symbol is not { IsOk: true, Value: { } symbol })
+            return (string.Concat("NOT_RESOLVED ", id, "\n", noted.Symbol.Error!.Render()), false);
+
+        var answer = query.Impact
+            ? await ImpactAsync(loaded, symbol, Cap(query.MaxResults, 200), query.Tests, cancellationToken).ConfigureAwait(false)
+            : await ReferenceService.FindUsagesAsync(loaded, symbol, Cap(query.MaxResults, 100), query.Containers, query.MaxResults > 0, cancellationToken).ConfigureAwait(false);
+
+        return (string.Concat(id, "\n", answer), true);
+    }
 }

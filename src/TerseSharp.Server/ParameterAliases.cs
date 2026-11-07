@@ -37,6 +37,7 @@ internal static class ParameterAliases
         new("replace_symbol", "content", "declaration"),
         new("replace_symbol", "newSource", "declaration"),
         new("list_projects", "contains", "filter"),
+        new("find_registrations", "service", "query"),
         new("read_text", "offset", "startLine"),
         new("read_text", "limit", "maxLines"),
         new("read_text", "root", "path", Shape: AliasShape.Rooted),
@@ -53,6 +54,7 @@ internal static class ParameterAliases
         new("search_regex", "-B", "context"),
         new("search_regex", "output_mode", "countOnly", OutputModes),
         new("search_regex", "globs", "paths"),
+        new("search_regex", "patterns", "queries"),
     ];
 
     private static readonly FrozenDictionary<string, ParameterAlias[]> ByTool = All

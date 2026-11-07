@@ -1336,4 +1336,17 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains("operator +(Awkward left, Awkward right)", text, StringComparison.Ordinal);
         Assert.Contains("this.seed = seed", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task FindUsages_WithSymbolIds_AnswersEachSymbolUnderItsOwnIdLine()
+    {
+        const string Submit = "M:Fixture.Trading.OrderService.Submit(Fixture.Trading.Order)";
+        var text = await server.CallAsync("find_usages", new() { ["symbolIds"] = new[] { Submit, "Fixture.Trading.NoSuchType.Nothing" } });
+        var single = await server.CallAsync("find_usages", new() { ["symbolId"] = Submit });
+
+        Assert.DoesNotContain("ERROR InvalidArgument", text, StringComparison.Ordinal);
+        Assert.StartsWith("1/2 symbols", text, StringComparison.Ordinal);
+        Assert.Contains(Submit + "\n" + single.Split('\n')[0], text, StringComparison.Ordinal);
+        Assert.Contains("NOT_RESOLVED Fixture.Trading.NoSuchType.Nothing", text, StringComparison.Ordinal);
+    }
 }

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using ModelContextProtocol.Server;
 
 namespace TerseSharp.Server.Tools;
@@ -54,26 +55,41 @@ public sealed class XamlTools(ToolContext context)
                 cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "xaml_validate", ReadOnly = true)]
-    [Description("Check XAML for well-formedness, duplicate x:Key and x:Name, and resource references that resolve to no declaration anywhere in the workspace. Pass scope=solution to check every XAML file.")]
+    [Description("Check XAML for well-formedness, duplicate x:Key and x:Name, and resource references that resolve to no declaration anywhere in the workspace. Pass scope=solution to check every XAML file, or paths=[...] to check up to 10 files in ONE call, each under its own path line. Replaces one call per file.")]
     public Task<string> XamlValidate(
         [Description("Path to the XAML file. Ignored when scope is solution.")] string? path = null,
         [Description("file (default) or solution.")] string? scope = null,
         [Description("Max issues when scope is solution (200).")] int maxResults = 0,
         [Description("With scope=solution, also report x:Key and x:Name declarations that nothing references (heuristic).")] bool includeUnused = false,
         [Description("Workspace or worktree name.")] string? workspace = null,
-        CancellationToken cancellationToken = default) =>
-        string.Equals(scope, "solution", StringComparison.OrdinalIgnoreCase)
-            ? context.WithWorkspaceAsync(
+        [Description("Several XAML files checked in one response, at most 10, each under its own path line. Combines with path, which is taken first; a blank or 11th entry is refused by name rather than dropped. Ignored when scope is solution.")] string?[]? paths = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.Equals(scope, "solution", StringComparison.OrdinalIgnoreCase))
+        {
+            return context.WithWorkspaceAsync(
                 workspace,
                 null,
                 async loaded => NavigationTools.Unwrap(
                     await XamlService.ValidateAllAsync(loaded, NavigationTools.Cap(maxResults, 200), includeUnused, cancellationToken).ConfigureAwait(false)),
-                cancellationToken: cancellationToken)
-            : context.WithWorkspace(
+                cancellationToken: cancellationToken);
+        }
+
+        if (paths is not { Length: > 0 })
+        {
+            return context.WithWorkspace(
                 workspace,
                 path,
                 loaded => NavigationTools.Unwrap(XamlService.Validate(loaded, path ?? string.Empty)),
                 cancellationToken: cancellationToken);
+        }
+
+        var combined = PluralPaths.Combine(path, paths, "paths");
+
+        return combined.IsOk
+            ? context.WithWorkspace(workspace, combined.Value[0], loaded => ValidatedMany(loaded, combined.Value), cancellationToken: cancellationToken)
+            : Task.FromResult(combined.Error!.Render());
+    }
 
     [McpServerTool(Name = "xaml_codebehind", ReadOnly = true)]
     [Description("The x:Class a XAML file binds to, and every event handler it names, with the element and event each sits on. Use instead of reading the .xaml.cs to find out what the markup wires up.")]
@@ -151,4 +167,16 @@ public sealed class XamlTools(ToolContext context)
         [Description("Max results (100).")] int maxResults = 0) =>
         context.WithWorkspace(workspace, null, loaded =>
             NavigationTools.Unwrap(XamlService.Find(loaded, query, kind ?? "type", NavigationTools.Cap(maxResults, 100))));
+
+    private static string ValidatedMany(LoadedWorkspace loaded, ImmutableArray<string> paths)
+    {
+        var response = new ResponseBuilder("xaml_validate", string.Empty);
+
+        response.Summary(paths.Length, paths.Length, "files");
+
+        foreach (var path in paths)
+            response.Line(NavigationTools.Outlined(path, NavigationTools.Unwrap(XamlService.Validate(loaded, path))));
+
+        return response.ToString();
+    }
 }
