@@ -29,6 +29,21 @@ public static class ActiveRuns
         }
     }
 
+    public static async Task<ActiveRun?> EnterAsync(string solutionPath, string tool, string detail, CancellationTokenSource stop, TimeSpan wait, CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.GetTimestamp();
+
+        while (!TryEnter(solutionPath, tool, detail, out var holder, stop))
+        {
+            var left = wait - Stopwatch.GetElapsedTime(started);
+
+            if (left <= TimeSpan.Zero || !await FreedAsync(Released(solutionPath), left, cancellationToken).ConfigureAwait(false))
+                return holder;
+        }
+
+        return null;
+    }
+
     public static void Leave(string solutionPath)
     {
         lock (Gate)
@@ -53,7 +68,7 @@ public static class ActiveRuns
             return string.Create(CultureInfo.InvariantCulture, $"{held.Holder.Tool} finished before the cancel arrived - nothing was stopped");
 
         var seconds = Age(held.Holder).TotalSeconds;
-        var freed = await FreedAsync(held.Released.Task, cancellationToken).ConfigureAwait(false);
+        var freed = await FreedAsync(held.Released.Task, Drain, cancellationToken).ConfigureAwait(false);
 
         return string.Create(
             CultureInfo.InvariantCulture,
@@ -82,11 +97,13 @@ public static class ActiveRuns
         }
     }
 
-    private static async Task<bool> FreedAsync(Task released, CancellationToken cancellationToken)
+    private static Task Released(string solutionPath) => Held(solutionPath)?.Released.Task ?? Task.CompletedTask;
+
+    private static async Task<bool> FreedAsync(Task released, TimeSpan wait, CancellationToken cancellationToken)
     {
         try
         {
-            await released.WaitAsync(Drain, cancellationToken).ConfigureAwait(false);
+            await released.WaitAsync(wait, cancellationToken).ConfigureAwait(false);
 
             return true;
         }

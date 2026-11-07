@@ -101,4 +101,68 @@ public sealed class ActiveRunsTests
             ActiveRuns.Leave(solution);
         }
     }
+
+    [Fact]
+    public async Task EnterAsync_WhileARunHoldsTheSolution_WaitsForItToLeaveAndThenEnters()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "terse-active-queue.slnx");
+        using var stop = new CancellationTokenSource();
+
+        Assert.True(ActiveRuns.TryEnter(solution, "run_tests", string.Empty, out _, stop));
+        var queued = ActiveRuns.EnterAsync(solution, "build", string.Empty, stop, TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        try
+        {
+            Assert.False(queued.IsCompleted);
+            ActiveRuns.Leave(solution);
+
+            Assert.Null(await queued);
+            Assert.Equal("build", ActiveRuns.Holding(solution)?.Tool);
+        }
+        finally
+        {
+            ActiveRuns.Leave(solution);
+        }
+    }
+
+    [Fact]
+    public async Task EnterAsync_WhenTheHolderOutlastsTheWait_AnswersTheHolderAndLeavesItHolding()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "terse-active-outlast.slnx");
+        using var stop = new CancellationTokenSource();
+
+        Assert.True(ActiveRuns.TryEnter(solution, "run_tests", "Selection.Core.Tests", out _, stop));
+        try
+        {
+            var holder = await ActiveRuns.EnterAsync(solution, "build", string.Empty, stop, TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+
+            Assert.Equal("run_tests", holder?.Tool);
+            Assert.Equal("run_tests", ActiveRuns.Holding(solution)?.Tool);
+            Assert.Contains("queued behind it for its whole 1s timeoutSeconds", Errors.RunInFlight("build", holder.GetValueOrDefault(), TimeSpan.FromSeconds(1)).Render(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            ActiveRuns.Leave(solution);
+        }
+    }
+
+    [Fact]
+    public async Task EnterAsync_WithNoWait_RefusesAtOnceAndNamesTheHolder()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "terse-active-nowait.slnx");
+        using var stop = new CancellationTokenSource();
+
+        Assert.True(ActiveRuns.TryEnter(solution, "run_tests", string.Empty, out _, stop));
+        try
+        {
+            var refused = ActiveRuns.EnterAsync(solution, "build", string.Empty, stop, TimeSpan.Zero, TestContext.Current.CancellationToken);
+
+            Assert.True(refused.IsCompleted);
+            Assert.Equal("run_tests", (await refused)?.Tool);
+        }
+        finally
+        {
+            ActiveRuns.Leave(solution);
+        }
+    }
 }

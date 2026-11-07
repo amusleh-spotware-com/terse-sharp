@@ -2714,4 +2714,23 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.Contains("the shared maxChars budget ran out at wide-lines.json - paths=[\"package.json\"] reads the rest in a second call", text, StringComparison.Ordinal);
         Assert.DoesNotContain("raise maxChars, or read the rest", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AddMember_ABatchRefusedByNameTaken_HoldsTheRestUnderATokenThatLandsWithoutTheDuplicate()
+    {
+        var refused = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "OrderService", "OrderService" },
+            ["declarations"] = new[] { "public int Unused() => 7;", "public int HeldByI857() => 857;" },
+            ["dryRun"] = true,
+        });
+        var token = refused[(refused.LastIndexOf("retryWith=", StringComparison.Ordinal) + "retryWith=".Length)..].Trim();
+        var replayed = await server.CallAsync("add_member", new() { ["retryWith"] = token, ["dryRun"] = true });
+
+        Assert.Contains("ERROR NameTaken", refused, StringComparison.Ordinal);
+        Assert.Contains("\nretryWith=r", refused, StringComparison.Ordinal);
+        Assert.Contains("HeldByI857", replayed, StringComparison.Ordinal);
+        Assert.DoesNotContain("NameTaken", replayed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Unused() => 7", replayed, StringComparison.Ordinal);
+    }
 }

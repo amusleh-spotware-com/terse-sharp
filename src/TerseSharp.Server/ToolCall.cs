@@ -219,7 +219,9 @@ internal static class ToolCall
             method.GetCustomAttribute<McpServerToolAttribute>()?.Name,
             arguments.Select(argument => argument.Key),
             () => [.. declared.Where(parameter => !parameter.HasDefaultValue).Select(parameter => parameter.Name!)],
-            [.. declared.Select(parameter => parameter.Name!)]);
+            [.. declared.Select(parameter => parameter.Name!)],
+            [.. declared.Where(parameter => parameter.ParameterType.IsArray).Select(parameter => parameter.Name!)],
+            name => arguments[name] is JsonArray);
     }
 
     private static async Task AdvertiseAsync(IServiceProvider provider, ToolContext context, CancellationToken cancellationToken)

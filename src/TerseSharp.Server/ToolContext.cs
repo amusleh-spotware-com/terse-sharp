@@ -231,6 +231,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         bool tests = false,
         string spawns = "",
         bool binaries = false,
+        TimeSpan wait = default,
         CancellationToken cancellationToken = default)
     {
         await ready.ConfigureAwait(false);
@@ -243,7 +244,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
                 target = Result.Ok(target.Value with { Stale = await StaleAsync(workspace, pathHint, target.Value, cancellationToken).ConfigureAwait(false) });
 
             return target.IsOk
-                ? await SpawnedAsync(target.Value!, spawns, pathHint, action, cancellationToken).ConfigureAwait(false)
+                ? await SpawnedAsync(target.Value!, spawns, pathHint, action, wait, cancellationToken).ConfigureAwait(false)
                 : target.Error!.Render();
         }).ConfigureAwait(false);
     }
@@ -547,6 +548,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         string spawns,
         string? detail,
         Func<WorkspaceTarget, CancellationToken, Task<string>> action,
+        TimeSpan wait,
         CancellationToken cancellationToken)
     {
         if (spawns.Length is 0)
@@ -554,8 +556,8 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-        if (!ActiveRuns.TryEnter(target.SolutionPath, spawns, detail ?? string.Empty, out var holder, stop))
-            return Errors.RunInFlight(spawns, holder).Render();
+        if (await ActiveRuns.EnterAsync(target.SolutionPath, spawns, detail ?? string.Empty, stop, wait, cancellationToken).ConfigureAwait(false) is { } holder)
+            return Errors.RunInFlight(spawns, holder, wait).Render();
 
         try
         {

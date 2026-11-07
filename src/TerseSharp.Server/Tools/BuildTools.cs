@@ -43,7 +43,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             }, stopping);
         },
         cancellationToken: cancellationToken,
-        spawns: "build"), Roots),
+        spawns: "build",
+        wait: Seconds(timeoutSeconds)), Roots),
         cancellationToken);
 
     private static async Task<string> DefaultedAsync(
@@ -192,6 +193,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
                 WholeSolution(project, projects),
                 "run_tests",
                 noBuild,
+                Seconds(timeoutSeconds),
                 token), Roots),
             token);
     }
@@ -249,7 +251,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         },
         cancellationToken: cancellationToken,
         spawns: "rerun_failed",
-        binaries: noBuild);
+        binaries: noBuild,
+        wait: Seconds(timeoutSeconds));
 
     [McpServerTool(Name = "list_tests")]
     [Description("Replaces Bash dotnet test --list-tests. Lists the test names a project or solution contains, without running them. A successful listing carries nothing but the names, whatever the build warned about; a build that failed under it returns its error-severity diagnostics only. configuration, targetFramework and properties scope the listing the way they scope build.")]
@@ -288,7 +291,8 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
             }, stopping);
         },
         cancellationToken: cancellationToken,
-        spawns: "list_tests");
+        spawns: "list_tests",
+        wait: Seconds(timeoutSeconds));
 
     private Task<string> BuildWithRecoveryAsync(
         WorkspaceTarget target,

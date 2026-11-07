@@ -253,6 +253,7 @@ public sealed class ChangedTestSelectionE2ETests
 
             Assert.Contains("RunInFlight", collided, StringComparison.Ordinal);
             Assert.Contains("is already running", collided, StringComparison.Ordinal);
+            Assert.Contains("queued behind it for its whole 1s timeoutSeconds", collided, StringComparison.Ordinal);
             Assert.Contains("remedy:", collided, StringComparison.Ordinal);
         }
         finally
@@ -265,7 +266,7 @@ public sealed class ChangedTestSelectionE2ETests
     {
         for (var attempt = 0; attempt < 60 && !running.IsCompleted; attempt++)
         {
-            var text = await CallAsync(server, "build", []);
+            var text = await CallAsync(server, "build", new() { ["timeoutSeconds"] = 1 });
 
             if (text.Contains("RunInFlight", StringComparison.Ordinal))
                 return text;
@@ -815,6 +816,30 @@ public sealed class ChangedTestSelectionE2ETests
             await server.StopAsync();
             await File.WriteAllTextAsync(AdderPath, before, TestContext.Current.CancellationToken);
             File.SetLastWriteTimeUtc(AdderPath, stamp);
+        }
+    }
+
+    [Fact]
+    public async Task ABuildIssuedWhileARunIsInFlight_QueuesBehindItAndThenRuns_InsteadOfAnsweringRunInFlight()
+    {
+        var server = await StartAsync();
+
+        try
+        {
+            var stalling = await StalledAsync(server, () => CallAsync(server, "run_tests", new()
+            {
+                ["projects"] = new[] { "Selection.Core.Tests" },
+                ["timeoutSeconds"] = 15,
+                ["properties"] = new[] { "TerseStallBuild=true" },
+            }));
+            var queued = await CallAsync(server, "build", new() { ["timeoutSeconds"] = 300 });
+
+            Assert.True(stalling.IsCompleted, "the queued build answered before the run it queued behind had finished: " + queued);
+            Assert.DoesNotContain("RunInFlight", queued, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.StopAsync();
         }
     }
 }

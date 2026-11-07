@@ -184,12 +184,16 @@ public static class Errors
             ? string.Create(CultureInfo.InvariantCulture, $"analyze path={single}")
             : string.Create(CultureInfo.InvariantCulture, $"analyze paths=[\"{string.Join("\",\"", paths)}\"]");
 
-    public static TerseError RunInFlight(string tool, ActiveRun holder) => new(
+    private static string Queued(TimeSpan queued) => queued <= TimeSpan.Zero
+        ? string.Empty
+        : string.Create(CultureInfo.InvariantCulture, $", and it was still running after this call queued behind it for its whole {queued.TotalSeconds:F0}s timeoutSeconds");
+
+    public static TerseError RunInFlight(string tool, ActiveRun holder, TimeSpan queued = default) => new(
         TerseErrorCode.RunInFlight,
         string.Create(
             CultureInfo.InvariantCulture,
-            $"{holder.Tool} is already running for this solution in this process, started {ActiveRuns.Age(holder).TotalSeconds:F1}s ago{Detailed(holder.Detail)}, so {tool} would build into its file locks"),
-        "read that run's answer rather than starting a second one - this process started it, so the second can only fail on MSB3027 over the output the first is writing; a detach=true run answers run_tests status=\"<id>\", and run_tests status=\"cancel\" kills a run whose caller stopped waiting and frees the solution; a run over a DIFFERENT solution is unaffected");
+            $"{holder.Tool} is already running for this solution in this process, started {ActiveRuns.Age(holder).TotalSeconds:F1}s ago{Detailed(holder.Detail)}{Queued(queued)}, so {tool} would build into its file locks"),
+        "a build or test call queues behind that run for up to its own timeoutSeconds, so a larger timeoutSeconds waits longer; or read that run's answer rather than starting a second one - this process started it, so the second can only fail on MSB3027 over the output the first is writing; a detach=true run answers run_tests status=\"<id>\", and run_tests status=\"cancel\" kills a run whose caller stopped waiting and frees the solution; a run over a DIFFERENT solution is unaffected");
 
     private static string Detailed(string detail) => detail.Length is 0 ? string.Empty : " with " + detail;
 

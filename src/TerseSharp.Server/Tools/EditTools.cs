@@ -673,8 +673,8 @@ public sealed class EditTools(ToolContext context)
             : context.WithWorkspaceAsync(
                 workspace,
                 null,
-                async loaded => Elsewhere(heldRoot, loaded.Root) ?? Carried(await SymbolEditService.AddMembersAsync(
-                    loaded, typeSymbolIds, declarations, options, cancellationToken).ConfigureAwait(false), carry, loaded.Root),
+                async loaded => Elsewhere(heldRoot, loaded.Root) ?? await HeldAsync(loaded, await SymbolEditService.AddMembersAsync(
+                    loaded, typeSymbolIds, declarations, options, cancellationToken).ConfigureAwait(false), carry, cancellationToken).ConfigureAwait(false),
                 cancellationToken: cancellationToken);
     }
 
@@ -716,6 +716,18 @@ public sealed class EditTools(ToolContext context)
 
     private static string[] PairedIds(string[]? typeSymbolIds, RejectedEdit? held) =>
             typeSymbolIds ?? (held is { Payloads.Count: > 1 } ? [.. held.Targets] : []);
+
+    private static async Task<string> HeldAsync(LoadedWorkspace loaded, Result<string> result, Carry carry, CancellationToken cancellationToken)
+    {
+        if (result.Error is not { Code: TerseErrorCode.NameTaken } taken || carry.Targets is null || carry.Payloads is null)
+            return Carried(result, carry, loaded.Root);
+
+        var (ids, kept) = await SymbolEditService.UntakenAsync(loaded, carry.Targets, carry.Payloads, cancellationToken).ConfigureAwait(false);
+
+        return kept.Length is 0
+            ? taken.Render()
+            : taken.Render() + "\n" + RetryNote.For("add_member", TerseErrorCode.NameTaken, kept.Length) + "\nretryWith=" + Remember("add_member", carry with { Targets = ids, Payloads = kept }, loaded.Root);
+    }
 
     private static string[] PairedDeclarations(string[]? declarations, RejectedEdit? held) =>
             declarations ?? (held is { Payloads.Count: > 1 } ? [.. held.Payloads] : []);

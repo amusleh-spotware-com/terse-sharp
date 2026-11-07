@@ -1254,16 +1254,53 @@ public static class SymbolEditService
     {
         foreach (var member in added)
         {
-            if (Signature(member) is not { } signature)
-                continue;
-
-            var existing = type.Members.FirstOrDefault(candidate => string.Equals(Signature(candidate), signature, StringComparison.Ordinal));
-
-            if (existing is not null)
-                return Errors.NameTaken(signature, type.Identifier.Text, existing.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
+            if (Taken(type, member) is { } existing)
+                return Errors.NameTaken(Signature(member)!, type.Identifier.Text, existing.GetLocation().GetLineSpan().StartLinePosition.Line + 1);
         }
 
         return null;
+    }
+
+    private static MemberDeclarationSyntax? Taken(TypeDeclarationSyntax type, MemberDeclarationSyntax member) =>
+        Signature(member) is { } signature
+            ? type.Members.FirstOrDefault(candidate => string.Equals(Signature(candidate), signature, StringComparison.Ordinal))
+            : null;
+
+    public static async Task<(string[] TypeSymbolIds, string[] Declarations)> UntakenAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> typeSymbolIds,
+        IReadOnlyList<string> declarations,
+        CancellationToken cancellationToken)
+    {
+        var types = await ResolvedTypesAsync(workspace, typeSymbolIds, cancellationToken).ConfigureAwait(false);
+        var ids = new List<string>(typeSymbolIds.Count);
+        var kept = new List<string>(declarations.Count);
+
+        for (var index = 0; types.IsOk && index < Math.Min(typeSymbolIds.Count, declarations.Count); index++)
+        {
+            if (await UntakenEntryAsync(workspace, types.Value![index], declarations[index], cancellationToken).ConfigureAwait(false) is { Length: > 0 } text)
+            {
+                ids.Add(typeSymbolIds[index]);
+                kept.Add(text);
+            }
+        }
+
+        return ([.. ids], [.. kept]);
+    }
+
+    private static async Task<string> UntakenEntryAsync(LoadedWorkspace workspace, ISymbol type, string declaration, CancellationToken cancellationToken)
+    {
+        var target = await TargetAsync(workspace, type, cancellationToken).ConfigureAwait(false);
+        var members = MemberDeclaration.ParseAll(declaration);
+
+        return target?.Node is TypeDeclarationSyntax declared && members.IsOk ? Untaken(declared, members.Value!, declaration) : declaration;
+    }
+
+    private static string Untaken(TypeDeclarationSyntax type, MemberDeclarationSyntax[] members, string declaration)
+    {
+        var kept = Array.FindAll(members, member => Taken(type, member) is null);
+
+        return kept.Length == members.Length ? declaration : string.Concat(kept.Select(member => member.ToFullString()));
     }
 
     private static string? Signature(MemberDeclarationSyntax member) => member switch

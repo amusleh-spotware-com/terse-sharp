@@ -16,21 +16,32 @@ public static class ReferenceSites
             .Where(location => !location.IsImplicit)
             .ToLookup(location => location.Document.Id);
 
-    public static List<Location> Cascaded(IEnumerable<ReferencedSymbol> found, IMethodSymbol method) =>
-    [
-        .. found
+    public static async Task<List<Location>> CascadedAsync(IEnumerable<ReferencedSymbol> found, IMethodSymbol method, CancellationToken cancellationToken)
+    {
+        var cascaded = new List<Location>();
+
+        foreach (var reference in Cascading(found, method))
+        {
+            if (await BindsArgumentsAsync(reference.Location, cancellationToken).ConfigureAwait(false))
+                cascaded.Add(reference.Location);
+        }
+
+        return cascaded;
+    }
+
+    public static async Task<bool> BindsArgumentsAsync(Location location, CancellationToken cancellationToken) =>
+        location.SourceTree is not { } tree || BindsArguments(await tree.GetRootAsync(cancellationToken).ConfigureAwait(false), location);
+
+    public static bool BindsArguments(SyntaxNode root, Location location) =>
+        root.FindToken(location.SourceSpan.Start, findInsideTrivia: true) is not { Parent: { } parent } token
+        || !(token.IsPartOfStructuredTrivia() || parent.AncestorsAndSelf().Any(IsNameOf));
+
+    private static IEnumerable<ReferenceLocation> Cascading(IEnumerable<ReferencedSymbol> found, IMethodSymbol method) =>
+        found
             .Where(symbol => !SymbolEqualityComparer.Default.Equals(symbol.Definition.OriginalDefinition, method.OriginalDefinition))
             .SelectMany(symbol => symbol.Locations)
-            .Where(location => !location.IsImplicit && BindsArguments(location.Location))
-            .Select(location => location.Location),
-    ];
-
-    public static bool BindsArguments(Location location) =>
-        TokenAt(location) is not { Parent: { } parent } token || !(token.IsPartOfStructuredTrivia() || parent.AncestorsAndSelf().Any(IsNameOf));
+            .Where(location => !location.IsImplicit);
 
     private static bool IsNameOf(SyntaxNode node) =>
         node is InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "nameof" } };
-
-    private static SyntaxToken? TokenAt(Location location) =>
-        location.SourceTree is { } tree && tree.TryGetRoot(out var root) ? root.FindToken(location.SourceSpan.Start, findInsideTrivia: true) : null;
 }

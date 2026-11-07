@@ -203,10 +203,10 @@ internal static class ToolArgumentFilter
 
         return request.Params?.Arguments is not { Count: > 0 } supplied
             ? null
-            : Unrecognized(request.Params?.Name, supplied.Keys, () => Required(schema), Accepted(schema), Arrays(schema));
+            : Unrecognized(request.Params?.Name, supplied.Keys, () => Required(schema), Accepted(schema), Arrays(schema), name => supplied.TryGetValue(name, out var value) && ArrayShaped(value));
     }
 
-    public static TerseError? Unrecognized(string? tool, IEnumerable<string> supplied, Func<string[]> required, string[] accepted, string[]? arrays = null)
+    public static TerseError? Unrecognized(string? tool, IEnumerable<string> supplied, Func<string[]> required, string[] accepted, string[]? arrays = null, Func<string, bool>? arrayed = null)
     {
         if (accepted.Length is 0)
             return null;
@@ -219,7 +219,7 @@ internal static class ToolArgumentFilter
             ? null
             : Errors.Invalid(
                 tool + " rejected the call: unrecognized " + string.Join(", ", unknown),
-                Remedy(required(), accepted) + NearestHint(unknown, accepted) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + Drift(unknown) + ToolExamples.Suffix(tool));
+                Remedy(required(), accepted) + NearestHint(unknown, accepted, arrays, arrayed) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + Drift(unknown) + ToolExamples.Suffix(tool));
     }
 
     private static readonly FrozenSet<string> KnownPlurals =
@@ -299,18 +299,46 @@ internal static class ToolArgumentFilter
         : Array.Find(accepted, entry => !string.Equals(name, entry, StringComparison.Ordinal)
             && (name.StartsWith(entry, StringComparison.OrdinalIgnoreCase) || entry.StartsWith(name, StringComparison.OrdinalIgnoreCase)));
 
+    private const int MinSharedPrefix = 4;
+
+    private static bool ArrayShaped(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Array => true,
+        JsonValueKind.String => value.GetString().AsSpan().Trim() is ['[', .., ']'],
+        _ => false,
+    };
+
+    private static string? Nearest(string name, string[] accepted, string[] arrays) =>
+        arrays.Length is 0 ? Nearest(name, accepted) : Nearest(name, arrays) ?? Shared(name, arrays) ?? Nearest(name, accepted);
+
+    private static string? Shared(string name, string[] arrays)
+    {
+        string? best = null;
+        var longest = MinSharedPrefix - 1;
+
+        foreach (var entry in arrays)
+        {
+            var shared = name.AsSpan().CommonPrefixLength(entry);
+
+            if (shared > longest && !string.Equals(name, entry, StringComparison.Ordinal))
+                (best, longest) = (entry, shared);
+        }
+
+        return best;
+    }
+
     private static string? Nearest(string name, string[] accepted) =>
         Synonyms.TryGetValue(name, out var candidates)
             ? Array.Find(candidates, candidate => accepted.Contains(candidate, StringComparer.Ordinal)) ?? Prefixed(name, accepted)
             : Prefixed(name, accepted);
 
-    private static string NearestHint(string[] unknown, string[] accepted)
+    private static string NearestHint(string[] unknown, string[] accepted, string[]? arrays = null, Func<string, bool>? arrayed = null)
     {
         var hints = new List<string>(unknown.Length);
 
         foreach (var name in unknown)
         {
-            if (Nearest(name, accepted) is { } match)
+            if (Nearest(name, accepted, arrayed?.Invoke(name) is true ? arrays ?? [] : []) is { } match)
                 hints.Add(string.Create(CultureInfo.InvariantCulture, $"{name} -> {match}"));
         }
 

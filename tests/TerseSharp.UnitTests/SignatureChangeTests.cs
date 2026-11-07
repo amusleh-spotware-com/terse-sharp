@@ -129,12 +129,56 @@ public sealed class SignatureChangeTests
     [InlineData("/// <see cref=\"M(int)\"/>", false)]
     [InlineData("nameof(M)", false)]
     [InlineData("M(1)", true)]
-    public void BindsArguments_ForANameofOrACrefReference_IsFalseAndForACallIsTrue(string marker, bool expected)
+    public async Task BindsArguments_ForANameofOrACrefReference_IsFalseAndForACallIsTrue(string marker, bool expected)
     {
         var text = "class C\n{\n    /// <see cref=\"M(int)\"/>\n    void M(int a) { }\n    string N() => nameof(M);\n    void P() => M(1);\n}\n";
         var tree = CSharpSyntaxTree.ParseText(text, cancellationToken: TestContext.Current.CancellationToken);
         var start = text.IndexOf(marker, StringComparison.Ordinal) + marker.IndexOf('M', StringComparison.Ordinal);
 
-        Assert.Equal(expected, ReferenceSites.BindsArguments(Location.Create(tree, new Microsoft.CodeAnalysis.Text.TextSpan(start, 1))));
+        Assert.Equal(expected, await ReferenceSites.BindsArgumentsAsync(Location.Create(tree, new Microsoft.CodeAnalysis.Text.TextSpan(start, 1)), TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task BindsArgumentsAsync_ForANameofInATreeWhoseRootWasReleased_RecoversTheRootAndIsFalse()
+    {
+        var text = "class C\n{\n    void M(int a) { }\n    string N() => nameof(M);\n}\n";
+        var parsed = (CSharpSyntaxTree)CSharpSyntaxTree.ParseText(text, cancellationToken: TestContext.Current.CancellationToken);
+        var released = new ReleasedRootTree(parsed);
+        var start = text.IndexOf("nameof(M)", StringComparison.Ordinal) + "nameof(".Length;
+
+        Assert.False(released.TryGetRoot(out _));
+        Assert.False(await ReferenceSites.BindsArgumentsAsync(Location.Create(released, new Microsoft.CodeAnalysis.Text.TextSpan(start, 1)), TestContext.Current.CancellationToken));
+    }
+
+    private sealed class ReleasedRootTree(CSharpSyntaxTree parsed) : CSharpSyntaxTree
+    {
+        public override string FilePath => parsed.FilePath;
+
+        public override bool HasCompilationUnitRoot => parsed.HasCompilationUnitRoot;
+
+        public override CSharpParseOptions Options => parsed.Options;
+
+        public override int Length => parsed.Length;
+
+        public override System.Text.Encoding? Encoding => parsed.Encoding;
+
+        public override CSharpSyntaxNode GetRoot(CancellationToken cancellationToken = default) => parsed.GetRoot(cancellationToken);
+
+        public override bool TryGetRoot([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out CSharpSyntaxNode? root)
+        {
+            root = null;
+
+            return false;
+        }
+
+        public override Microsoft.CodeAnalysis.Text.SourceText GetText(CancellationToken cancellationToken = default) => parsed.GetText(cancellationToken);
+
+        public override bool TryGetText([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Microsoft.CodeAnalysis.Text.SourceText? text) => parsed.TryGetText(out text);
+
+        public override SyntaxReference GetReference(SyntaxNode node) => parsed.GetReference(node);
+
+        public override SyntaxTree WithRootAndOptions(SyntaxNode root, ParseOptions options) => parsed.WithRootAndOptions(root, options);
+
+        public override SyntaxTree WithFilePath(string path) => parsed.WithFilePath(path);
     }
 }

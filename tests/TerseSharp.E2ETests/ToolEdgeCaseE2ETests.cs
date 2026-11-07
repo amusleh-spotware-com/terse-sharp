@@ -518,4 +518,17 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
             Directory.Delete(outside, recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData("replace_symbol", "symbols", true, "symbolIds")]
+    [InlineData("replace_symbol", "symbols", false, "symbol")]
+    [InlineData("search_symbols", "querys", true, "queries")]
+    [InlineData("search_symbols", "querys", false, "query")]
+    public async Task ARejectedParameterName_IsSteeredToAParameterOfTheArgumentsOwnKind(string tool, string passed, bool asArray, string expected)
+    {
+        var text = await server.CallAsync(tool, new() { [passed] = asArray ? new[] { "OrderService" } : (object)"OrderService" });
+
+        Assert.Contains("unrecognized " + passed, text, StringComparison.Ordinal);
+        Assert.Contains(passed + " -> " + expected + "?", text, StringComparison.Ordinal);
+    }
 }

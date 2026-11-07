@@ -29,6 +29,7 @@ internal static class RetryNote
 
     private static string AddMember(TerseErrorCode code, int payloads) => (code, payloads) switch
     {
+        (TerseErrorCode.NameTaken, _) => "the token holds the batch WITHOUT the declarations those types already have, so retryWith alone lands the rest; when an existing member must change as well, replace_symbol takes this same token with append set and symbolIds=[\"<that member>\"] declarations=[\"<its new text>\"]",
         (TerseErrorCode.CompileRegression, > 1) => "the rejected declarations and their usings= are held, so the retry names the token plus a corrected declarations= - one entry per held declaration" + ChangeBeside,
         (TerseErrorCode.CompileRegression, _) => "the rejected declaration and its usings= are held, so the retry names the token instead of re-sending them" + ChangeBeside,
         (_, > 1) => "the declarations are held, so the retry is the token plus a corrected typeSymbolIds= - one entry per held declaration",

@@ -17,7 +17,7 @@ public static class CallSiteRewriter
     {
         var found = ReferenceSites.Moves(change) ? await SymbolFinder.FindReferencesAsync(target.Method, solution, cancellationToken).ConfigureAwait(false) : [];
         var sites = ReferenceSites.Direct(found, target.Method);
-        var context = new RewriteContext(target, change, ReferenceSites.Cascaded(found, target.Method));
+        var context = new RewriteContext(target, change, await ReferenceSites.CascadedAsync(found, target.Method, cancellationToken).ConfigureAwait(false));
         var (updated, changed) = await AppliedAsync(solution, sites, context, cancellationToken).ConfigureAwait(false);
 
         return new SiteRewrite(updated, changed, context.Unplaced);
@@ -75,7 +75,7 @@ public static class CallSiteRewriter
         {
             if (ArgumentsAt(root, site.Location.SourceSpan) is { } list)
                 nodes.Add(list);
-            else if (ReferenceSites.BindsArguments(site.Location))
+            else if (ReferenceSites.BindsArguments(root, site.Location))
                 context.Unplaced.Add(site.Location);
         }
 
