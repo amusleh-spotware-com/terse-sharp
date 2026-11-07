@@ -1235,6 +1235,7 @@ public sealed class ToolGuardTests
     [InlineData("git commit -m x || git status")]
     [InlineData("(git status; git commit -m x)")]
     [InlineData("grep -q TODO README.md && rm README.md")]
+    [InlineData("git add src/A.cs && git commit -F - <<'EOF'\nfix: a; b\n; c\nline two; three\nEOF\ngit log --oneline -3")]
     public void Guard_ForABatchWhoseShapeCannotBeRewrittenSoundly_DeniesItWhole(string command)
     {
         var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
@@ -2376,6 +2377,41 @@ public sealed class ToolGuardTests
     [InlineData("for f in a b; do echo $f; done")]
     public void Guard_ForABackgroundOrLoopThatReadsNoDotNetSource_StillAllowsIt(string command) =>
         Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+
+    [Theory]
+    [InlineData("for r in /tmp/terse-loop-a; do find \"$r\"; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do find $r | wc -l; done")]
+    [InlineData("for r in /tmp/terse-loop-a /tmp/terse-loop-b; do find \"$r\" | wc -l; done")]
+    [InlineData("for r in /tmp/terse-loop-a /tmp/terse-loop-b; do find $r; done")]
+    [InlineData("for f in /tmp/terse-loop-a; do [ -f \"$f\" ] && wc -l \"$f\"; done")]
+    public void Guard_ForALoopWhoseEveryWordIsALiteralPathOutsideTheTree_AllowsTheReadItsVariableNames(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("for r in src tests; do find \"$r\"; done")]
+    [InlineData("for r in /tmp/terse-loop-a src; do find $r | wc -l; done")]
+    [InlineData("for r in $(ls /tmp); do find $r; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do read r; cat \"$r\"/notes.md; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do r=src; find \"$r\"; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do find \"$r\" \"$T\"; done")]
+    public void Guard_ForALoopOverAnInTreeWordOrAVariableItCannotBind_StillDeniesTheRead(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+
+    [Fact]
+    public void Guard_ForADeniedChainCarryingAQuotedHeredoc_ReissuesItsBodyVerbatim()
+    {
+        const string Commit = "git commit -F - <<'EOF'\nfix: a; b\n; c\nline two; three && four | five\nEOF";
+
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "git add src/A.cs && " + Commit + "\ngit log --oneline -3" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Null(verdict.Rewrite);
+        Assert.EndsWith("as it stands: git add src/A.cs  |  " + Commit, verdict.Routing, StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData("cd 'PLAIN' && git init -q && git diff -w --numstat")]

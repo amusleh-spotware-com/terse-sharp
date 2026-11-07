@@ -1063,8 +1063,8 @@ public static class ToolGuard
         var compound = judged.Length > 1;
         var unfenceable = compound ? Unfenceable(command) : string.Empty;
         var directories = Directories(command, cwd, judged.Length);
-        var bodies = Embodied(judged, command);
-        var allowed = new List<string>(judged.Length);
+        var placed = Placed(judged, command);
+        var allowed = new List<Placement>(judged.Length);
         var calls = new List<string>();
         var attached = false;
         GuardVerdict? refused = null;
@@ -1076,7 +1076,7 @@ public static class ToolGuard
             var directory = directories is null ? new StageDirectory(cwd, false) : directories[index];
             var verdict = Denial(stage with { Text = Unkeyworded(stage.Text), Adrift = directory.Adrift }, directory.Here, compound, unfenceable);
 
-            attached = Listed(allowed, stage.Text, bodies[index], attached, verdict.Denied);
+            attached = Listed(allowed, placed[index], attached, verdict.Denied);
 
             if (!verdict.Denied)
             {
@@ -1092,7 +1092,7 @@ public static class ToolGuard
         }
 
         return refused is not null
-            ? refused with { Routing = Reissue(calls, allowed, OnlyAnded(command)) }
+            ? refused with { Routing = Reissue(calls, allowed.ConvertAll(entry => command[entry.Span].Trim()), OnlyAnded(command)) }
             : Unreplaced(allowance);
     }
 
@@ -2447,13 +2447,71 @@ public static class ToolGuard
     {
         var verdict = Assigned(command, cwd);
 
-        if (verdict.Denied || Unrolled(command, Joined) is not { } unrolled)
+        if (Unrolled(command, Joined) is not { } unrolled)
             return verdict;
+
+        if (verdict.Denied)
+            return Bound(command) && Iterating(command, cwd, Allowed) is { Denied: false } passes ? passes : verdict;
 
         var looped = Blocking(Stages(unrolled), unrolled, cwd);
 
         return looped.Denied ? Iterating(command, cwd, verdict) ?? looped : verdict;
     }
+
+    private static readonly SearchValues<char> Unlisted = SearchValues.Create("$`()<>");
+
+    private static bool Bound(string command) =>
+        Resolved(command) is null && OnlyLooped(command) && Pipelines(command).TrueForAll(pipeline => Enumerated(pipeline.Text, command));
+
+    private static readonly SearchValues<char> NameCharacters = SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+
+    private static bool OnlyLooped(string command)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var pipeline in Pipelines(command))
+        {
+            if (Tokenized(Unkeyworded(pipeline.Text)) is ["for", var name, "in", ..])
+                names.Add(name);
+        }
+
+        var looped = names.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        for (var at = command.IndexOf('$', StringComparison.Ordinal); at >= 0; at = command.IndexOf('$', at + 1))
+        {
+            if (!looped.Contains(Expanded(command.AsSpan(at + 1))))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static ReadOnlySpan<char> Expanded(ReadOnlySpan<char> after)
+    {
+        var text = after is ['{', .. var rest] ? rest : after;
+        var end = text.IndexOfAnyExcept(NameCharacters);
+
+        return end < 0 ? text : text[..end];
+    }
+
+    private static bool Enumerated(string pipeline, string command) =>
+        Tokenized(Unkeyworded(pipeline)) is not ["for", var name, "in", .. var words]
+            || (!Array.Exists(words, word => word.AsSpan().ContainsAny(Unlisted)) && !Rebound(command, name));
+
+    private static bool Rebound(string command, string name)
+    {
+        var bare = 0;
+
+        for (var at = command.IndexOf(name, StringComparison.Ordinal); at >= 0; at = command.IndexOf(name, at + name.Length, StringComparison.Ordinal))
+        {
+            if (Bounded(command, at, name.Length) && !Inert(command.AsSpan(0, at)))
+                bare++;
+        }
+
+        return bare > 1;
+    }
+
+    private static bool Inert(ReadOnlySpan<char> before) => before is [.., '$' or '-'] or [.., '$', '{'];
 
     private static string? Unrolled(string command, int pass)
     {
@@ -3026,14 +3084,55 @@ public static class ToolGuard
         return bodies;
     }
 
-    private static bool Listed(List<string> allowed, string text, bool body, bool attached, bool denied)
+    private static bool Listed(List<Placement> allowed, Placement stage, bool attached, bool denied)
     {
-        if (body && attached)
-            allowed[^1] = string.Concat(allowed[^1], "\n", text.TrimEnd('\r'));
-        else if (!body && !denied)
-            allowed.Add(text.Trim());
+        if (stage.Body && attached)
+            Folded(allowed, stage.Span.End.Value);
+        else if (!stage.Body && !denied)
+            allowed.Add(stage);
 
-        return body ? attached : !denied;
+        return stage.Body ? attached : !denied;
+    }
+
+    private readonly record struct Placement(Range Span, bool Body, bool Opens);
+
+    private static Placement[] Placed(Stage[] stages, string command)
+    {
+        var bodies = Embodied(stages, command);
+        var placed = new Placement[stages.Length];
+        var cursor = 0;
+
+        for (var index = 0; index < stages.Length; index++)
+        {
+            var text = stages[index].Text;
+            var found = command.IndexOf(text, cursor, StringComparison.Ordinal);
+            var at = found < 0 ? cursor : found;
+
+            cursor = Math.Min(command.Length, at + text.Length);
+            placed[index] = new Placement(at..cursor, bodies[index], Heredoced(command, at, cursor));
+        }
+
+        return placed;
+    }
+
+    private static void Folded(List<Placement> allowed, int end)
+    {
+        var owner = allowed.FindLastIndex(entry => entry.Opens);
+        var first = owner < 0 ? allowed.Count - 1 : owner;
+
+        allowed[first] = allowed[first] with { Span = allowed[first].Span.Start..end };
+        allowed.RemoveRange(first + 1, allowed.Count - first - 1);
+    }
+
+    private static bool Heredoced(string command, int start, int stop)
+    {
+        for (var at = command.IndexOf("<<", start, stop - start, StringComparison.Ordinal); at >= 0; at = command.IndexOf("<<", at + 2, stop - at - 2, StringComparison.Ordinal))
+        {
+            if (Opening(command, at) is not null)
+                return true;
+        }
+
+        return false;
     }
 
     private static GuardVerdict Refusal(string segment, string? cwd, bool compound, string unfenceable)
