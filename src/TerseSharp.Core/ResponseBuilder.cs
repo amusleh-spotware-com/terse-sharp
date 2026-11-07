@@ -1,4 +1,6 @@
 ﻿using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 
 namespace TerseSharp.Core;
 
@@ -162,4 +164,16 @@ public sealed class ResponseBuilder(string tool, string argument)
 
     private string Offered(Counted count) =>
         Advertised(count) is { Length: > 0 } steer && OfferMemo.First(tool, "listing") ? steer : string.Empty;
+
+    public static string Quoted(string value) => "\"" + JsonEncodedText.Encode(value, JavaScriptEncoder.UnsafeRelaxedJsonEscaping).Value + "\"";
+
+    public static string Next(string tool, string parameter, IReadOnlyList<string> entries)
+    {
+        var next = new StringBuilder("next: ").Append(tool).Append(' ').Append(parameter).Append("=[");
+
+        for (var index = 0; index < entries.Count; index++)
+            next.Append(index is 0 ? string.Empty : ", ").Append(Quoted(entries[index]));
+
+        return next.Append(']').ToString();
+    }
 }

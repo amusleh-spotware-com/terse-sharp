@@ -193,7 +193,7 @@ public static class FileService
         await using var held = await ProjectFileGate.EnterAsync([full], cancellationToken).ConfigureAwait(false);
 
         if (!string.Equals(await OnDiskAsync(full, cancellationToken).ConfigureAwait(false), before, StringComparison.Ordinal))
-            return Errors.Overtaken([PositionFormat.Relative(full, workspace.Root)]);
+            return Errors.Overtaken([PositionFormat.Relative(workspace.Root, full)]);
 
         await StoredAsync(workspace, full, after, workspace.Contains(full), cancellationToken).ConfigureAwait(false);
 

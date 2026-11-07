@@ -40,23 +40,9 @@ internal static class RefRead
         OutlineOptions options,
         CancellationToken cancellationToken)
     {
-        var relative = Relative(workspace, path);
-        var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
+        var (text, read) = await OutlineTextAsync(workspace, path, reference, options, cancellationToken).ConfigureAwait(false);
 
-        if (!shown.IsOk)
-            return Failed(shown.Error!, workspace.Root, relative, reference);
-
-        var outline = NavigationTools.Unwrap(OutlineService.FromText(
-            relative + "@" + reference,
-            shown.Value!,
-            options.Signatures,
-            options.Ids,
-            options.Usings,
-            options.ParameterNames,
-            options.Contains,
-            options.All));
-
-        return outline + "\n" + Historical(reference);
+        return read ? text + "\n" + Historical(reference) : text;
     }
 
     private static string Historical(string reference) => string.Create(
@@ -70,10 +56,6 @@ internal static class RefRead
     private static string Failed(TerseError error, string root, string relative, string reference) => IsAbsent(error)
         ? string.Create(CultureInfo.InvariantCulture, $"ABSENT  {relative} at {reference} - the working tree holds it and that revision does not, so it was added after {reference}")
         : Unread(error, root, relative, reference);
-
-    public static TerseError Batched(string parameter) => Errors.Invalid(
-        "ref= reads one file at a git ref and cannot be combined with " + parameter,
-        "pass a single path= with ref=, or drop ref= to read the working tree");
 
     private static string Relative(LoadedWorkspace workspace, string path) => PositionFormat.Relative(
         workspace.Root,
@@ -157,6 +139,81 @@ internal static class RefRead
         [] => string.Create(CultureInfo.InvariantCulture, $"ABSENT  {relative} at {reference} and not in the working tree - no file beside it shares its extension; find_files glob=\"**/{Path.GetFileName(relative)}\" searches the whole tree"),
         var nearest => string.Create(CultureInfo.InvariantCulture, $"ABSENT  {relative} at {reference} and not in the working tree - nearest: {string.Join("  ", nearest)}"),
     };
+
+    private static async Task<(string Text, bool Read)> OutlineTextAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string reference,
+        OutlineOptions options,
+        CancellationToken cancellationToken)
+    {
+        var relative = Relative(workspace, path);
+        var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
+
+        return shown.IsOk
+            ? (NavigationTools.Unwrap(OutlineService.FromText(relative + "@" + reference, shown.Value!, options.Signatures, options.Ids, options.Usings, options.ParameterNames, options.Contains, options.All)), true)
+            : (Failed(shown.Error!, workspace.Root, relative, reference), false);
+    }
+
+    public static async Task<string> OutlinesAsync(
+        LoadedWorkspace workspace,
+        IReadOnlyList<string> paths,
+        string reference,
+        OutlineOptions options,
+        CancellationToken cancellationToken)
+    {
+        var response = new ResponseBuilder("get_file_outline", string.Empty);
+
+        response.Summary(paths.Count, paths.Count, "files");
+
+        foreach (var path in paths)
+        {
+            var (text, _) = await OutlineTextAsync(workspace, path, reference, options, cancellationToken).ConfigureAwait(false);
+
+            response.Line(NavigationTools.Outlined(path, text));
+        }
+
+        return response.ToString() + "\n" + Historical(reference);
+    }
+
+    internal readonly record struct SymbolBatch(string[] SymbolIds, SourceFormat Format);
+
+    private readonly record struct RefText(string Root, string Label, string Text, MetadataReference[] References);
+
+    public static async Task<string> SourcesAsync(
+        LoadedWorkspace workspace,
+        string path,
+        string reference,
+        SymbolBatch batch,
+        CancellationToken cancellationToken)
+    {
+        var relative = Relative(workspace, path);
+        var shown = await GitRunner.ShowAsync(workspace.Root, reference, relative, cancellationToken).ConfigureAwait(false);
+
+        if (!shown.IsOk)
+            return Failed(shown.Error!, workspace.Root, relative, reference);
+
+        var response = new ResponseBuilder("get_symbol_source", string.Join(", ", batch.SymbolIds)).Verbose(batch.Format.Verbose);
+        var source = new RefText(workspace.Root, relative + "@" + reference, shown.Value!, [.. References(workspace, path)]);
+        var answered = await AppendSourcesAsync(response, source, batch, cancellationToken).ConfigureAwait(false);
+
+        return response.Answered(answered, batch.SymbolIds.Length, "symbols").ToString() + "\n" + Historical(reference);
+    }
+
+    private static async Task<int> AppendSourcesAsync(ResponseBuilder response, RefText source, SymbolBatch batch, CancellationToken cancellationToken)
+    {
+        var answered = 0;
+
+        foreach (var symbolId in batch.SymbolIds)
+        {
+            var read = await SourceService.FromTextAsync(source.Root, source.Label, source.Text, symbolId, source.References, batch.Format, cancellationToken).ConfigureAwait(false);
+
+            answered += read.IsOk ? 1 : 0;
+            response.Line(read.IsOk ? read.Value! : "NOT_RESOLVED " + symbolId + "\n" + read.Error!.Render());
+        }
+
+        return answered;
+    }
 }
 
 internal readonly record struct OutlineOptions(bool Signatures, string Ids, bool Usings, bool ParameterNames, string? Contains, bool All = false);

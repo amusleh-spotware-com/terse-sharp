@@ -486,7 +486,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         return text.ToString();
     }
 
-    private static TimeSpan Seconds(int timeoutSeconds) => TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, DotnetRunner.MaxTimeoutSeconds));
+    internal static TimeSpan Seconds(int timeoutSeconds) => TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, DotnetRunner.MaxTimeoutSeconds));
 
     private static TimeSpan Waited(int waitSeconds) => TimeSpan.FromSeconds(Math.Clamp(waitSeconds, 0, DotnetRunner.MaxTimeoutSeconds));
 

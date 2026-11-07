@@ -199,8 +199,7 @@ forbidden.** Not "discouraged" — forbidden. There is a TerseSharp tool for it 
 
 **And issue independent calls in ONE message.** Several `tool_use` blocks in one message run
 concurrently; one call per message pays a **6 136 ms (p50)** model gap before its tool even starts.
-Measured: eight `get_file_outline` calls one-per-message cost **151.4 s**, one `paths=[...]` call
-**10.2 s**. Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
+Two concrete shapes are most of it: a `search_text` beside a `read_text` of a **different** file, and a
 `find_files` or `search_symbols` beside a read of a file you already know you need. Send those in one
 message - but never guess an argument to make a call parallel. Inside
 one tool the same lever is `paths=`, `symbolIds=`, `queries=`, `edits=`, `files=`, `projects=`.
@@ -254,7 +253,7 @@ that is not `.cs` routes to `diff_text`; `-w` is `ignoreWhitespace=true` on `cha
 `Bash` is the same breach as `grep` — but only for the tree TerseSharp serves: the guard reads the
 directory the command actually addresses (`-C` target, then a directory operand, then a literal earlier `cd`, even one not created yet, then the working
 directory), so `git -C ../some-other-repo status` is allowed, because no tool here answers it. Git **history** is served too now: `git log` and `git show --stat` are `history`, `git log -1 --stat` is `history commit=`, and
-`git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=` (a file added after the ref answers `ABSENT`), and a `git tag` **listing** —
+`git show <ref>:<path>` is `read_text ref=` / `get_file_outline ref=`, for every `paths=` entry at once (a file added after the ref answers `ABSENT`), and a `git tag` **listing** —
 bare, or any flag-only form such as `--list`, `-l` or `--sort=` — is `history tags=true`. A tag listing of
 **origin** — `git ls-remote --tags` — is `history tags=true remote=true`, which merges both lists and
 tags every row `local=yes|no remote=yes|no`; `--heads`, another remote and a bare `git ls-remote` are left alone. Still on the shell: `git blame`
@@ -414,7 +413,7 @@ edit, climb only as high as the edit reaches:
 | 4 | `run_tests` over the whole solution | 85 s+, p99 **16 min** | ONCE, at the end of the task |
 | — | `rerun_failed` | 20 s | after a red run — never re-run a whole suite to watch the same test fail twice |
 
-A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call - the payload is repeated verbatim with a `NOTE <tool> UNCHANGED` line under it, and `reload=true` (or `sinceLast=true`, or any different argument) re-runs. A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `list_tests` or `clean` call inside one session answers with `repeat #N of this exact call Ns ago - previous verdict: ...; nothing was written in between` (or what the file watcher saw change on disk) - the answer you already have. Banned: a full-suite run between two edits of one
+A tier is never dropped; only how often it is re-run. **`analyze`, `get_diagnostics`, `gate dryRun=true` and `load_workspace` replay their previous answer too** when nothing was written and no watcher event landed since that exact call (`NOTE <tool> UNCHANGED` under the repeated payload; `reload=true`, `sinceLast=true` or any other argument re-runs; a `PARTIAL` answer never replays). A call carrying `baseRef=` NEVER replays: git state moves with nothing written, so the stamp cannot see it. A byte-identical `build`, `run_tests`, `list_tests` or `clean` call inside one session answers `repeat #N of this exact call ...` - the answer you already have. Banned: a full-suite run between two edits of one
 slice · re-issuing an identical `build` or `run_tests` with nothing written since - a repeat of a call that already answered GREEN (`run_tests PASSED`, `build ok`), with no edit and no watcher event on any loaded workspace since, answers `run_tests UNCHANGED` / `build UNCHANGED` naming the previous verdict and its age instead of running, and `force=true` opts out; a repeat that re-runs anyway ends `NOTE re-ran: stamp moved <what> a->b`. `rerun_failed` is never memoized and always runs, because the failure list it replays is not named by any of its arguments · a
 run to "confirm" one that already passed · reading a test result before the build result.
 
@@ -626,6 +625,8 @@ everybody's, and `changed_files(exclude: ".research/**")` drops the folders a po
 cannot leave out. `diff_symbols` tags a hunk `EXACT` only when it sits
 inside exactly one declaration; anything else is `HEURISTIC` with the raw line range and the reason.
 
+**Over a cap, nothing is dropped.** Past 10 `paths=` (`analyze`, `get_file_outline`, `read_text`) or 20 `symbolIds=` (`get_symbol_source`, which takes `ref=` beside `path=`) the first ones are answered, then `PARTIAL` and a `next:` call naming the rest. `analyze timeoutSeconds=` (600) answers a pass that ran out of time the same way.
+
 **Searching.** `query` and `queries` combine, `query` first; an 11th entry is refused naming the cap
 rather than truncated, and a blank entry is refused rather than matching everything. An entry that
 matches across a line break — a literal containing a newline, or `[\s\S]` / `(?s).` in a regex — is
@@ -677,9 +678,7 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    is returned instead — `108 files`, never `100/108 files truncated` — so a listing that says it
    truncated is worth a second, narrower call, and one that does not never is. **`find_usages`,
    `resx_find` and `changed_files` widen that band to TWICE the cap when you did NOT pass a
-   `maxResults=` of your own** - a cap you chose is still exactly your bound - because their records are
-   facts rather than a sample: the blast radius, the key set and the change set are answers you act on whole,
-   and the measured re-query rate after their steer was 0, 0 and 6 of 118.
+   `maxResults=` of your own** - a cap you chose is still exactly your bound - because those answers are acted on whole.
 1. **Address a symbol by the name a response printed.** An outline prints `OrderService.Submit`, and
    adds the parameter list (`Reconcile(Order, decimal)`) only where the type overloads that name;
    every tool taking a `symbolId` accepts that, the full documentation id

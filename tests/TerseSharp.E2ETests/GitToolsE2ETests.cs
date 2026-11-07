@@ -291,17 +291,28 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ReadText_AtARef_IsRefusedWithPathsRatherThanReadingOnlyTheFirst()
+    public async Task ReadText_AtARefWithPaths_ReadsEveryEntryAtThatRef()
     {
-        var text = await server.CallAsync("read_text", new()
+        var first = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderService.cs", ["ref"] = "HEAD", ["lines"] = "1-3" });
+        var second = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderRouter.cs", ["ref"] = "HEAD", ["lines"] = "1-3" });
+        var both = await server.CallAsync("read_text", new()
         {
             ["paths"] = new[] { "src/Fixture.Trading/OrderService.cs", "src/Fixture.Trading/OrderRouter.cs" },
             ["ref"] = "HEAD",
+            ["lines"] = "1-3",
+        });
+        var unknown = await server.CallAsync("read_text", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/OrderService.cs", "src/Fixture.Trading/OrderRouter.cs" },
+            ["ref"] = "no-such-ref-anywhere",
         });
 
-        Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("cannot be combined with paths=", text, StringComparison.Ordinal);
-        Assert.Contains("remedy:", text, StringComparison.Ordinal);
+        Assert.StartsWith("2 files", both, StringComparison.Ordinal);
+        Assert.Contains(first.Trim(), both, StringComparison.Ordinal);
+        Assert.Contains(second.Trim(), both, StringComparison.Ordinal);
+        Assert.DoesNotContain("cannot be combined", both, StringComparison.Ordinal);
+        Assert.Contains("no-such-ref-anywhere", unknown, StringComparison.Ordinal);
+        Assert.DoesNotContain("public bool Submit", unknown, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1067,6 +1078,39 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             File.SetLastWriteTimeUtc(book, bookWritten);
             File.SetLastWriteTimeUtc(router, routerWritten);
         }
+    }
+
+    [Fact]
+    public async Task GetFileOutline_AtARefWithPaths_OutlinesEveryEntryAtThatRefAndSaysSoOnce()
+    {
+        var text = await server.CallAsync("get_file_outline", new()
+        {
+            ["paths"] = new[] { "src/Fixture.Trading/OrderService.cs", "src/Fixture.Trading/OrderRouter.cs" },
+            ["ref"] = "HEAD",
+        });
+
+        Assert.StartsWith("2 files", text, StringComparison.Ordinal);
+        Assert.Contains("OrderService.Submit", text, StringComparison.Ordinal);
+        Assert.Contains("OrderRouter", text, StringComparison.Ordinal);
+        Assert.Single(text.Split('\n'), line => line.StartsWith("at HEAD - the ids above", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_AtARefWithSymbolIds_AnswersEveryIdFromThatRevision()
+    {
+        var text = await server.CallAsync("get_symbol_source", new()
+        {
+            ["path"] = "src/Fixture.Trading/OrderService.cs",
+            ["ref"] = "HEAD",
+            ["symbolIds"] = new[] { "OrderService.Submit", "OrderService.SubmitTwice", "OrderService.NoSuchMember" },
+        });
+        var unaddressed = await server.CallAsync("get_symbol_source", new() { ["ref"] = "HEAD", ["symbolIds"] = new[] { "OrderService.Submit" } });
+
+        Assert.Contains("2/3 symbols", text, StringComparison.Ordinal);
+        Assert.Contains("SubmitTwice", text, StringComparison.Ordinal);
+        Assert.Contains("NOT_RESOLVED OrderService.NoSuchMember", text, StringComparison.Ordinal);
+        Assert.Single(text.Split('\n'), line => line.StartsWith("at HEAD - the ids above", StringComparison.Ordinal));
+        Assert.StartsWith("ERROR", unaddressed, StringComparison.Ordinal);
     }
 }
 

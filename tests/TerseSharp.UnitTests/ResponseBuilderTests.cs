@@ -134,4 +134,8 @@ public sealed class ResponseBuilderTests
 
         Assert.Equal("2/9 matches truncated - 7 NOT shown - narrow with glob=", text);
     }
+
+    [Fact]
+    public void Next_QuotesEveryEntryAsAJsonStringSoTheLineIsAReadyCall() =>
+        Assert.Equal("next: analyze paths=[\"src\\\\A\", \"b c\"]", ResponseBuilder.Next("analyze", "paths", ["src\\A", "b c"]));
 }

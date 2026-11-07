@@ -10,7 +10,7 @@ public sealed class FileTools(ToolContext context)
     [Description("Read any file, line-ranged. paths= reads up to 10 files in ONE response. Replaces one call per file: one that does not resolve is reported inline as NOT_FOUND, and ranges=[\"42\", \"101-102\"] reads several DISCONTINUOUS ranges of one file in one call. A .cs path asked for whole - no line range, lines, ranges or tail - answers its OUTLINE plus a steer, a third of the tokens; verbose=true or any line range returns the text. A markdown file over 8000 characters answers its SECTION MAP the same way; headings=, section=, columns= and cellChars= address it without reading it whole. tail=N reads a long log; a clipped read names the line to continue from. ref= reads it at a git ref; <x.zip>!/<entry> reads one archive entry.")]
     public Task<string> ReadText(
                 [Description("Path, absolute or workspace-relative.")] string? path = null,
-                [Description("Several files answered in one response, at most 10. Combines with path, which is taken first; a blank or 11th entry is refused by name rather than dropped.")] string?[]? paths = null,
+                [Description("Several files answered in one response, at most 10; the rest are named in next:. Combines with path, which is taken first; a blank entry is refused by name.")] string?[]? paths = null,
                 [Description("First line, 1-based. 0 = start of file.")] int startLine = 0,
                 [Description("Last line, 1-based. 0 = end of file.")] int endLine = 0,
                 [Description("Discontinuous ranges of one file, at most 20, each \"42\" or \"101-102\"; refused beside every other range or markdown view.")] string?[]? ranges = null,
@@ -28,11 +28,11 @@ public sealed class FileTools(ToolContext context)
                 [Description("Markdown only: comma-separated table column headers to project every row down to, e.g. 'Finding,Tool'. Composes with section=; a column no table declares, and headings=/startLine=/endLine=/tail= beside it, are refused by name.")] string? columns = null,
                 [Description("With columns=, the maximum characters per projected cell; a longer one is clipped and counted. Default 0, the whole cell; below 8 refused.")] int cellChars = 0,
                 [Description("Return the file verbatim - every line numbered, blank lines kept. On a .cs path this is the opt-in that returns the text instead of the outline. Default false.")] bool verbose = false,
-                [Description("Git ref to read the file at, e.g. main - replaces git show <ref>:<path>. Takes one path.")] string? @ref = null,
+                [Description("Git ref to read every path at, e.g. main - replaces git show <ref>:<path>.")] string? @ref = null,
                 [Description("Workspace or worktree name.")] string? workspace = null,
                 CancellationToken cancellationToken = default)
     {
-        var combined = PluralPaths.Combine(path, paths, "paths");
+        var combined = PluralPaths.Spill(path, paths, "paths");
 
         if (!combined.IsOk)
             return Task.FromResult(combined.Error!.Render());
@@ -75,21 +75,13 @@ public sealed class FileTools(ToolContext context)
             && columns is null
             && ranges is not { Length: > 0 };
 
-        if (@ref is { Length: > 0 } reference)
-        {
-            return combined.Value is [var only]
-                ? context.WithWorkspaceAsync(
-                    workspace,
-                    only,
-                    loaded => RefRead.TextAsync(loaded, only, reference, request, whole, cancellationToken),
-                    semantic: false,
-                    cancellationToken)
-                : Task.FromResult(RefRead.Batched("paths=").Render());
-        }
+        var taken = combined.Value.Taken;
+        var site = new ReadSite(workspace, @ref);
+        var answer = taken is [var single]
+            ? ReadEntryAsync(single, request, whole, site, cancellationToken)
+            : ReadManyAsync(taken, request, whole, site, cancellationToken);
 
-        return combined.Value is [var single]
-            ? ReadOneAsync(single, request, whole, workspace, cancellationToken)
-            : ReadManyAsync(combined.Value, request, whole, workspace, cancellationToken);
+        return PluralPaths.TrailedAsync(answer, combined.Value.Trailer("read_text", "paths", PluralPaths.Argument("ref", @ref)));
     }
     private static bool WholeRead(
 int startLine,
@@ -786,7 +778,7 @@ context.RejectWrite() is { } rejection
     ImmutableArray<string> paths,
     FileService.ReadRequest request,
     bool whole,
-    string? workspace,
+    ReadSite site,
     CancellationToken cancellationToken)
     {
         var rendered = new List<string>(paths.Length);
@@ -795,7 +787,7 @@ context.RejectWrite() is { } rejection
         for (var index = 0; index < paths.Length; index++)
         {
             var scoped = request with { Range = request.Range with { MaxChars = Math.Max(1, remaining) } };
-            var answer = await ReadOneAsync(paths[index], scoped, whole, workspace, cancellationToken).ConfigureAwait(false);
+            var answer = await ReadEntryAsync(paths[index], scoped, whole, site, cancellationToken).ConfigureAwait(false);
 
             rendered.Add(Entry(paths[index], answer));
             remaining -= answer.Length;
@@ -1538,4 +1530,11 @@ context.RejectWrite() is { } rejection
 
     private static (IReadOnlyList<FileService.TextEdit> Own, List<FileService.TextEditGroup> Others) BySource(string root, string path, List<FileService.TextEditGroup> groups) =>
         (groups.Find(group => SamePath(root, group.Path, path)).Edits ?? [], groups.FindAll(group => !SamePath(root, group.Path, path)));
+
+    private readonly record struct ReadSite(string? Workspace, string? Reference);
+
+    private Task<string> ReadEntryAsync(string path, FileService.ReadRequest request, bool whole, ReadSite site, CancellationToken cancellationToken) =>
+        site.Reference is { Length: > 0 } reference
+            ? context.WithWorkspaceAsync(site.Workspace, path, loaded => RefRead.TextAsync(loaded, path, reference, request, whole, cancellationToken), semantic: false, cancellationToken)
+            : ReadOneAsync(path, request, whole, site.Workspace, cancellationToken);
 }

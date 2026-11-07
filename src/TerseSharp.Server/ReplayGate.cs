@@ -20,7 +20,7 @@ public sealed class ReplayGate(ToolContext context, UnchangedRun unchanged)
 
         var text = await run().ConfigureAwait(false);
 
-        if (!text.StartsWith("ERROR", StringComparison.Ordinal) && RunStamp.Taken(context.Registry, out _) is { } settled)
+        if (Rememberable(text) && RunStamp.Taken(context.Registry, out _) is { } settled)
             unchanged.Remember(key, settled, ToolContext.Unqueued(text), Stopwatch.GetTimestamp());
 
         return text;
@@ -37,4 +37,7 @@ public sealed class ReplayGate(ToolContext context, UnchangedRun unchanged)
 
         return key.ToString();
     }
+
+    internal static bool Rememberable(string text) =>
+        !text.StartsWith("ERROR", StringComparison.Ordinal) && !text.Contains("\nPARTIAL ", StringComparison.Ordinal);
 }

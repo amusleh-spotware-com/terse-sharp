@@ -89,6 +89,7 @@ public sealed class LoadedWorkspaceOvertakeTests
 
         Assert.Equal(TerseErrorCode.EditConflict, refused?.Code);
         Assert.Contains("changed after this call read it", refused?.Message, StringComparison.Ordinal);
+        Assert.StartsWith("NOTES.md", refused?.Message, StringComparison.Ordinal);
         Assert.Equal("landed first\n", await File.ReadAllTextAsync(notes, TestContext.Current.CancellationToken));
     }
 

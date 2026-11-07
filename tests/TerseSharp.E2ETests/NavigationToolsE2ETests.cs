@@ -1349,4 +1349,33 @@ public sealed class NavigationToolsE2ETests(TerseServerFixture server)
         Assert.Contains(Submit + "\n" + single.Split('\n')[0], text, StringComparison.Ordinal);
         Assert.Contains("NOT_RESOLVED Fixture.Trading.NoSuchType.Nothing", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetFileOutline_WithElevenPaths_OutlinesTheFirstTenAndNamesTheEleventhInNext()
+    {
+        string[] paths =
+        [
+            "src/Fixture.Trading/Awkward.cs", "src/Fixture.Trading/Compactness.cs", "src/Fixture.Trading/Composition.cs",
+            "src/Fixture.Trading/InMemoryOrderRepository.cs", "src/Fixture.Trading/IOrderRepository.cs", "src/Fixture.Trading/Localization.cs",
+            "src/Fixture.Trading/NullOrderRepository.cs", "src/Fixture.Trading/Order.cs", "src/Fixture.Trading/OrderBook.cs",
+            "src/Fixture.Trading/OrderRouter.cs", "src/Fixture.Trading/OrderService.cs",
+        ];
+
+        var text = await server.CallAsync("get_file_outline", new() { ["paths"] = paths, ["signatures"] = false });
+
+        Assert.StartsWith("10 files", text, StringComparison.Ordinal);
+        Assert.Contains("\nPARTIAL 10 of 11 paths answered, 10 per call", text, StringComparison.Ordinal);
+        Assert.Contains("\nnext: get_file_outline paths=[\"src/Fixture.Trading/OrderService.cs\"]", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetSymbolSource_WithMoreIdsThanOneCallAnswers_NamesTheRestInNextRatherThanDroppingThem()
+    {
+        var ids = Enumerable.Repeat("OrderService.Submit", 20).Append("OrderService.SubmitTwice").ToArray();
+
+        var text = await server.CallAsync("get_symbol_source", new() { ["symbolIds"] = ids, ["comments"] = false });
+
+        Assert.Contains("\nPARTIAL 20 of 21 symbolIds answered, 20 per call", text, StringComparison.Ordinal);
+        Assert.Contains("\nnext: get_symbol_source symbolIds=[\"OrderService.SubmitTwice\"]", text, StringComparison.Ordinal);
+    }
 }

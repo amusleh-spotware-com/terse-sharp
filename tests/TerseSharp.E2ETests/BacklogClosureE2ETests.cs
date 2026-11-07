@@ -397,18 +397,21 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task ReadText_WithABlankPathEntryOrTooMany_IsRefusedByNameRatherThanTruncated()
+    public async Task ReadText_WithABlankPathEntry_IsRefusedByName_AndAnEleventhEntryIsNamedInNextRatherThanRefused()
     {
         var blank = await server.CallAsync("read_text", new() { ["paths"] = new[] { "package.json", "" } });
+        var lateBlank = await server.CallAsync("read_text", new() { ["paths"] = Enumerable.Repeat("package.json", 10).Append("").ToArray() });
         var many = await server.CallAsync("read_text", new()
         {
             ["path"] = "package.json",
-            ["paths"] = Enumerable.Repeat("package.json", 10).ToArray(),
+            ["paths"] = Enumerable.Repeat("package.json", 9).Append("appsettings.json").ToArray(),
         });
 
         Assert.Contains("'paths' carries a blank entry", blank, StringComparison.Ordinal);
-        Assert.Contains("11 paths were requested", many, StringComparison.Ordinal);
-        Assert.Contains("remedy:", many, StringComparison.Ordinal);
+        Assert.Contains("'paths' carries a blank entry", lateBlank, StringComparison.Ordinal);
+        Assert.StartsWith("10 files", many, StringComparison.Ordinal);
+        Assert.Contains("\nPARTIAL 10 of 11 paths answered, 10 per call", many, StringComparison.Ordinal);
+        Assert.Contains("\nnext: read_text paths=[\"appsettings.json\"]", many, StringComparison.Ordinal);
     }
 
     [Fact]

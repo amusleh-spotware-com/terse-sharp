@@ -18,9 +18,10 @@ public static class AnalysisService
         TouchedLines? touched = null,
         string baseRef = "",
         string? exclude = null,
+        TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ids, exclude, cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ids, exclude, timeout ?? Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
             return collected.Error!.Render();
@@ -43,7 +44,7 @@ public static class AnalysisService
             ids,
             includeDeadCode,
             changed,
-            new Narrowed(touched, baseRef, all.Length - found.Length - split.Fileless.Count, split));
+            new Narrowed(touched, baseRef, all.Length - found.Length - split.Fileless.Count, split)) + PartialTrailer(value.Partial);
     }
 
     public static async Task<Result<GateFindings>> FindingsAsync(
@@ -55,7 +56,7 @@ public static class AnalysisService
         TouchedLines? touched,
         CancellationToken cancellationToken)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], null, cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], null, Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
             return Result.Fail<GateFindings>(collected.Error!);
@@ -78,6 +79,7 @@ public static class AnalysisService
             bool changed,
             IReadOnlyList<string> ids,
             string? exclude,
+            TimeSpan timeout,
             CancellationToken cancellationToken)
     {
         var unscoped = path is null && !changed && exclude is not { Length: > 0 };
@@ -93,30 +95,38 @@ public static class AnalysisService
 
         var targets = Targets(workspace, documents, unscoped).ToArray();
         var scope = Scope(workspace, documents, unscoped);
-        var found = new ConcurrentBag<Diagnostic>();
-        var analyzed = new ConcurrentBag<string>();
+        var harvest = new Harvest();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var bound = new Bound(deadline.Token, cancellationToken);
+
+        deadline.CancelAfter(timeout);
 
         await Parallel.ForEachAsync(
             targets,
             ParallelWork.Options(cancellationToken),
-            (project, token) => CollectAsync(project, found, analyzed, token)).ConfigureAwait(false);
+            (project, _) => CollectAsync(project, harvest, bound)).ConfigureAwait(false);
 
-        var extra = includeDeadCode
-            ? await DeadCodeService.FindAsync(workspace, targets, scope, cancellationToken).ConfigureAwait(false)
-            : [];
-
-        var policy = await PolicyAsync(workspace, targets, documents, cancellationToken).ConfigureAwait(false);
+        var unfinished = new HashSet<ProjectId>(harvest.Unfinished);
+        var finished = unfinished.Count is 0 ? targets : Array.FindAll(targets, project => !unfinished.Contains(project.Id));
+        var (Findings, Finished) = await DeadCodeAsync(workspace, finished, scope, includeDeadCode, bound).ConfigureAwait(false);
+        var policy = await PolicyAsync(workspace, finished, documents, cancellationToken).ConfigureAwait(false);
         var options = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
+        var partial = new Partial(targets.Length, Unfinished(workspace, targets, documents, unfinished), !Finished, timeout);
 
-        return Result.Ok(new Collected(found, analyzed, [.. extra, .. policy], ProjectDiagnostics.Unsupported(targets, ids, found, options.EnforcedIds()), scope));
+        return Result.Ok(new Collected(harvest, [.. Findings, .. policy], ProjectDiagnostics.Unsupported(targets, ids, harvest.Found, options.EnforcedIds()), scope, partial));
     }
 
     private readonly record struct Collected(
-        ConcurrentBag<Diagnostic> Found,
-        ConcurrentBag<string> Analyzed,
-        IReadOnlyList<string> Extra,
-        IReadOnlyList<string> Unsupported,
-        DiagnosticScope Scope);
+            Harvest Harvest,
+            IReadOnlyList<string> Extra,
+            IReadOnlyList<string> Unsupported,
+            DiagnosticScope Scope,
+            Partial Partial)
+    {
+        public ConcurrentBag<Diagnostic> Found => Harvest.Found;
+
+        public ConcurrentBag<string> Analyzed => Harvest.Analyzed;
+    }
 
     private static List<string> Engines(ConcurrentBag<string> analyzed, bool includeDeadCode)
     {
@@ -141,29 +151,16 @@ public static class AnalysisService
                 .OfType<Project>()
                 .DistinctBy(project => project.Id);
 
-    private static async ValueTask CollectAsync(
-        Project project,
-        ConcurrentBag<Diagnostic> found,
-        ConcurrentBag<string> analyzed,
-        CancellationToken cancellationToken)
+    private static async ValueTask CollectAsync(Project project, Harvest harvest, Bound bound)
     {
-        var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
-
-        if (compilation is null)
-            return;
-
-        foreach (var diagnostic in await SuppressedDiagnostics.CompilerAsync(project, compilation, cancellationToken).ConfigureAwait(false))
-            found.Add(diagnostic);
-
-        var analyzers = ProjectDiagnostics.Analyzers(project);
-
-        if (analyzers.IsEmpty)
-            return;
-
-        analyzed.Add("analyzers(" + project.Name + ")");
-
-        foreach (var diagnostic in await ProjectDiagnostics.RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false))
-            found.Add(diagnostic);
+        try
+        {
+            harvest.Keep(project, await ProjectFindingsAsync(project, bound.Deadline).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (bound.Expired)
+        {
+            harvest.Unfinished.Add(project.Id);
+        }
     }
 
     private static Diagnostic[] Filter(
@@ -208,7 +205,7 @@ public static class AnalysisService
         var findings = DiagnosticFold.Findings(root, found, DiagnosticFormat.Head, declaration);
         var occurrences = Occurrences(findings, extra);
         var scope = string.Create(CultureInfo.InvariantCulture, $"analyze|{root}|{path ?? "solution"}|{changed}|{minimum}|{string.Join(",", ids)}|{includeDeadCode}|{narrowed.BaseRef}");
-        var delta = DiagnosticHistory.Record(scope, occurrences);
+        var delta = Recorded(scope, occurrences, collected.Partial);
         var shown = sinceLast ? delta.Appeared : Grouped(findings, extra);
 
         var response = new ResponseBuilder("analyze", path ?? "solution");
@@ -245,7 +242,7 @@ public static class AnalysisService
         if (changed)
             response.Note("gate runs this, format and cleanup fix=all as one call");
 
-        if (sinceLast)
+        if (sinceLast && !collected.Partial.IsPartial)
         {
             response.Note(delta.Baseline
                 ? string.Create(
@@ -353,6 +350,127 @@ public static class AnalysisService
     private static TerseError AllExcluded(string? path, string exclude) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"exclude={exclude} dropped every document {path ?? "the solution"} selected, so nothing was analyzed"),
         "narrow exclude= or widen path=");
+
+    private const int MaxNextScope = 10;
+
+    private sealed class Harvest
+    {
+        public ConcurrentBag<Diagnostic> Found { get; } = [];
+
+        public ConcurrentBag<string> Analyzed { get; } = [];
+
+        public ConcurrentBag<ProjectId> Unfinished { get; } = [];
+
+        public void Keep(Project project, ProjectFindings findings)
+        {
+            foreach (var diagnostic in findings.Diagnostics)
+                Found.Add(diagnostic);
+
+            if (findings.Analyzed)
+                Analyzed.Add("analyzers(" + project.Name + ")");
+        }
+    }
+
+    private readonly record struct ProjectFindings(ImmutableArray<Diagnostic> Diagnostics, bool Analyzed);
+
+    private readonly record struct Bound(CancellationToken Deadline, CancellationToken Caller)
+    {
+        public bool Expired => Deadline.IsCancellationRequested && !Caller.IsCancellationRequested;
+    }
+
+    private readonly record struct UnfinishedScope(string[] Projects, string[] Scope, bool Widened);
+
+    private readonly record struct Partial(int Targets, UnfinishedScope Unfinished, bool DeadCodeUnfinished, TimeSpan Timeout)
+    {
+        public bool IsPartial => Unfinished.Projects is { Length: > 0 } || DeadCodeUnfinished;
+    }
+
+    private static async Task<ProjectFindings> ProjectFindingsAsync(Project project, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var compilation = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+
+        if (compilation is null)
+            return new([], Analyzed: false);
+
+        var compiler = await SuppressedDiagnostics.CompilerAsync(project, compilation, cancellationToken).ConfigureAwait(false);
+        var analyzers = ProjectDiagnostics.Analyzers(project);
+
+        if (analyzers.IsEmpty)
+            return new(compiler, Analyzed: false);
+
+        var analyzed = await ProjectDiagnostics.RunAsync(compilation, project, analyzers, cancellationToken).ConfigureAwait(false);
+
+        return new(compiler.AddRange(analyzed), Analyzed: true);
+    }
+
+    private static async Task<(IReadOnlyList<string> Findings, bool Finished)> DeadCodeAsync(
+        LoadedWorkspace workspace,
+        Project[] finished,
+        DiagnosticScope scope,
+        bool includeDeadCode,
+        Bound bound)
+    {
+        if (!includeDeadCode)
+            return ([], true);
+
+        try
+        {
+            return (await DeadCodeService.FindAsync(workspace, finished, scope, bound.Deadline).ConfigureAwait(false), true);
+        }
+        catch (OperationCanceledException) when (bound.Expired)
+        {
+            return ([], false);
+        }
+    }
+
+    private static UnfinishedScope Unfinished(LoadedWorkspace workspace, Project[] targets, DocumentId[] documents, HashSet<ProjectId> unfinished)
+    {
+        if (unfinished.Count is 0)
+            return new UnfinishedScope([], [], Widened: false);
+
+        var projects = Array.FindAll(targets, project => unfinished.Contains(project.Id));
+        var narrow = Array.FindAll(documents, id => unfinished.Contains(id.ProjectId));
+        var widened = narrow.Length is 0 or > MaxNextScope;
+        var scope = widened
+            ? Array.ConvertAll(projects, project => Path.GetDirectoryName(project.FilePath))
+            : Array.ConvertAll(narrow, id => workspace.Solution.GetDocument(id)?.FilePath);
+
+        return new UnfinishedScope(Array.ConvertAll(projects, project => project.Name), Relatives(workspace.Root, scope), widened && documents.Length > 0);
+    }
+
+    private static string[] Relatives(string root, string?[] paths) =>
+        [.. paths.OfType<string>().Select(path => PositionFormat.Relative(root, path)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+    private static string PartialTrailer(Partial partial)
+    {
+        if (!partial.IsPartial)
+            return string.Empty;
+
+        var seconds = partial.Timeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture);
+        var deadCode = partial.DeadCodeUnfinished
+            ? string.Create(CultureInfo.InvariantCulture, $"\nPARTIAL the dead-code scan did not finish by the {seconds} s deadline, so no TERSE001 finding is reported - raise timeoutSeconds, or pass includeDeadCode=false")
+            : string.Empty;
+
+        return ProjectTrailer(partial, seconds) + deadCode;
+    }
+
+    private static string ProjectTrailer(Partial partial, string seconds)
+    {
+        var unfinished = partial.Unfinished;
+
+        if (unfinished.Projects.Length is 0)
+            return string.Empty;
+
+        var widened = unfinished.Widened ? " - next: names their project directories, wider than this call's scope" : string.Empty;
+        var next = unfinished.Scope.Length > 0 ? "\n" + ResponseBuilder.Next("analyze", "paths", unfinished.Scope) : string.Empty;
+
+        return string.Create(CultureInfo.InvariantCulture, $"\nPARTIAL {partial.Targets - unfinished.Projects.Length} of {partial.Targets} project(s) analyzed by the {seconds} s deadline - not analyzed, so absent from this answer: {string.Join(", ", unfinished.Projects)}{widened}{next}");
+    }
+
+    private static DiagnosticDelta Recorded(string scope, IReadOnlyList<string> occurrences, Partial partial) =>
+        partial.IsPartial ? new DiagnosticDelta(occurrences, [], 0, Baseline: true) : DiagnosticHistory.Record(scope, occurrences);
 }
 
 public static class DiagnosticFormat

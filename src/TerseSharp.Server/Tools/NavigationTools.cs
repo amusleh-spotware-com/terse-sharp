@@ -46,10 +46,10 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     }
 
     [McpServerTool(Name = "get_file_outline", ReadOnly = true)]
-    [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. Pass paths to outline up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line and a path that does not resolve is reported inline as NOT_FOUND instead of failing the call. ref= outlines the file as it was at a git ref instead of in the working tree, so the pre-change shape of a file costs an outline rather than the whole text a git show returns; it takes one path. An unfiltered outline of a type over 40 members answers its member NAMES grouped by accessibility - no signatures, no positions - which is what contains= or a symbolIds= batch is chosen from; contains= or all=true opens it. parameterNames=false prints parameter types without their names, which is about an eighth of the response.")]
+    [Description("List every type and member of a .cs file with signatures and line ranges, without the bodies. Use instead of Read on a .cs file. Pass paths to outline up to 10 files in ONE response. Replaces one call per file: each is rendered under its own path line and a path that does not resolve is reported inline as NOT_FOUND instead of failing the call. ref= outlines the file as it was at a git ref instead of in the working tree, so the pre-change shape of a file costs an outline rather than the whole text a git show returns; it applies to every paths= entry. An unfiltered outline of a type over 40 members answers its member NAMES grouped by accessibility - no signatures, no positions - which is what contains= or a symbolIds= batch is chosen from; contains= or all=true opens it. parameterNames=false prints parameter types without their names, which is about an eighth of the response.")]
     public Task<string> GetFileOutline(
         [Description("Path to the .cs file.")] string? path = null,
-        [Description("Several .cs files outlined in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry and an 11th entry are refused by name rather than dropped.")] string?[]? paths = null,
+        [Description("Several .cs files outlined in one response, at most 10. Replaces one call per file. Combines with path, which is taken first; a blank entry is refused by name, and entries past the 10th are named in next: rather than dropped.")] string?[]? paths = null,
         [Description("Include member signatures. false gives ids and line ranges only, ~40% cheaper.")] bool signatures = true,
         [Description("short (default) names members as Type.Member(Arg), which every tool accepts; full emits documentation ids.")] string? ids = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
@@ -57,29 +57,25 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Print parameter names alongside their types. Default true; false keeps the types and drops the names.")] bool parameterNames = true,
         [Description("Keep only the members whose name contains this text, case-insensitively, under their declaring type with an 'N of M members' line.")] string? contains = null,
         [Description("List every member instead of the first 40 of each type; the default counts the rest.")] bool all = false,
-        [Description("Git ref to outline the file at, e.g. main or HEAD~3, instead of shelling out for that revision's text. Takes one path, and the members are parsed from that revision's own text.")] string? @ref = null,
+        [Description("Git ref to outline the files at, e.g. main or HEAD~3, instead of shelling out for that revision's text. Applies to every path, and the members are parsed from that revision's own text.")] string? @ref = null,
         CancellationToken cancellationToken = default)
     {
-        var combined = PluralPaths.Combine(path, paths, "paths");
+        var combined = PluralPaths.Spill(path, paths, "paths");
 
         if (!combined.IsOk)
             return Task.FromResult(combined.Error!.Render());
 
-        if (@ref is { Length: > 0 } reference)
+        var spilled = combined.Value;
+        var options = new OutlineOptions(signatures, ids ?? "short", usings, parameterNames, contains, all);
+        var answer = (@ref, spilled.Taken) switch
         {
-            return combined.Value is [var only]
-                ? context.WithWorkspaceAsync(
-                    workspace,
-                    only,
-                    loaded => RefRead.OutlineAsync(loaded, only, reference, new OutlineOptions(signatures, ids ?? "short", usings, parameterNames, contains, all), cancellationToken),
-                    semantic: false,
-                    cancellationToken)
-                : Task.FromResult(RefRead.Batched("paths=").Render());
-        }
+            ({ Length: > 0 } reference, [var only]) => context.WithWorkspaceAsync(workspace, only, loaded => RefRead.OutlineAsync(loaded, only, reference, options, cancellationToken), semantic: false, cancellationToken),
+            ({ Length: > 0 } reference, var many) => context.WithWorkspaceAsync(workspace, many[0], loaded => RefRead.OutlinesAsync(loaded, many, reference, options, cancellationToken), semantic: false, cancellationToken),
+            (_, [var single]) => OutlinedAsync(single, signatures, ids, usings, parameterNames, contains, all, workspace, cancellationToken),
+            (_, var many) => OutlinedManyAsync(many, signatures, ids, usings, parameterNames, contains, all, workspace, cancellationToken),
+        };
 
-        return combined.Value is [var single]
-            ? OutlinedAsync(single, signatures, ids, usings, parameterNames, contains, all, workspace, cancellationToken)
-            : OutlinedManyAsync(combined.Value, signatures, ids, usings, parameterNames, contains, all, workspace, cancellationToken);
+        return PluralPaths.TrailedAsync(answer, spilled.Trailer("get_file_outline", "paths", PluralPaths.Argument("ref", @ref)));
     }
 
     [McpServerTool(Name = "get_type_outline", ReadOnly = true)]
@@ -125,39 +121,45 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             : Described(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, verbose, path, cancellationToken);
 
     [McpServerTool(Name = "get_symbol_source", ReadOnly = true)]
-    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. A name matching 2-5 overloads of one member answers every one under its own overload line instead of AmbiguousSymbol. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. ref= returns the member as it was at a git ref; it takes one id and requires path=, so a pre-change body needs no line range that can clip it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
+    [Description("Return only that member's source text and line range. Use instead of reading the whole file to see one method. A **type** id answers get_type_outline's member list plus a steer to one member instead of the whole class's source, because that is almost never the question; verbose=true returns the type's source. Pass symbolIds to get several members in one response. Replaces one call per member, and each id that does not resolve is reported inline as NOT_RESOLVED rather than failing the call. A name matching 2-5 overloads of one member answers every one under its own overload line instead of AmbiguousSymbol. path= resolves each name inside that file first, so a name an outline just printed round-trips even when the solution holds others like it. ref= returns the members as they were at a git ref; it requires path=, so a pre-change body needs no line range that can clip it. The source is dedented; pass verbose=true for it verbatim, and comments=false to drop the doc comments and inline comments when you are orienting rather than editing - worth about a tenth of the tokens on a documented codebase and nothing on one that carries no comments.")]
     public Task<string> GetSymbolSource(
         [Description("Symbol id of the member.")] string? symbolId = null,
-        [Description("Several symbol ids returned in one response. Replaces one call per member; an entry that does not resolve answers NOT_RESOLVED inline rather than failing the call.")] string[]? symbolIds = null,
+        [Description("Several symbol ids returned in one response. Replaces one call per member; an entry that does not resolve answers NOT_RESOLVED inline rather than failing the call. Past 20, the rest are named in next:.")] string[]? symbolIds = null,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Return the source verbatim, with its original indentation and blank lines. Default false.")] bool verbose = false,
         [Description("Alias for symbolId.")] string? symbol = null,
         [Description("Include doc comments and inline comments. Default true; false drops them, which is the cheap read when you only need the shape.")] bool comments = true,
         [Description("File the names live in. A name is resolved inside it first and only falls back to the solution when the file has no match, and a path naming no document answers DocumentNotFound; a full documentation id ignores it, because it already addresses one symbol.")] string? path = null,
-        [Description("Git ref to read the member at, e.g. main. Takes one symbol id and requires path=; the declaration is resolved from that revision's own text.")] string? @ref = null,
+        [Description("Git ref to read the members at, e.g. main. Applies to every id and requires path=; each declaration is resolved from that revision's own text.")] string? @ref = null,
         CancellationToken cancellationToken = default)
     {
         if (Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash)
             return Task.FromResult(clash);
 
+        var requested = Requested(symbolId ?? symbol, symbolIds);
+        var batched = symbolIds is { Length: > 0 };
+        var format = new SourceFormat(verbose, comments);
+        var trailer = SymbolTrailer(requested, path, @ref);
+
         if (@ref is not { Length: > 0 } reference)
-            return SourceOf(Requested(symbolId ?? symbol, symbolIds), symbolIds is { Length: > 0 }, workspace, new SourceFormat(verbose, comments), path, cancellationToken);
+            return PluralPaths.TrailedAsync(SourceOf(requested, batched, workspace, format, path, cancellationToken), trailer);
 
-        if (symbolIds is { Length: > 0 })
-            return Task.FromResult(RefRead.Batched("symbolIds=").Render());
-
-        if ((symbolId ?? symbol) is not { Length: > 0 } target)
+        if (requested is [])
             return Task.FromResult(Errors.Blank("symbolId").Render());
 
         if (path is not { Length: > 0 } file)
             return Task.FromResult(RefRead.Unaddressed().Render());
 
-        return context.WithWorkspaceAsync(
-            workspace,
-            file,
-            loaded => RefRead.SourceAsync(loaded, file, reference, target, new SourceFormat(verbose, comments), cancellationToken),
-            semantic: false,
-            cancellationToken);
+        return PluralPaths.TrailedAsync(
+            context.WithWorkspaceAsync(
+                workspace,
+                file,
+                loaded => batched
+                    ? RefRead.SourcesAsync(loaded, file, reference, new RefRead.SymbolBatch(requested[..Math.Min(requested.Length, MaxBatchedSymbols)], format), cancellationToken)
+                    : RefRead.SourceAsync(loaded, file, reference, requested[0], format, cancellationToken),
+                semantic: false,
+                cancellationToken),
+            trailer);
     }
 
     private Task<string> SourceOf(string[] requested, bool batched, string? workspace, SourceFormat format, string? path, CancellationToken cancellationToken) => requested switch
@@ -650,4 +652,8 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
         return (string.Concat(id, "\n", answer), true);
     }
+
+    private static string SymbolTrailer(string[] requested, string? path, string? reference) => requested.Length <= MaxBatchedSymbols
+        ? string.Empty
+        : PluralPaths.Trailer("get_symbol_source", "symbolIds", MaxBatchedSymbols, requested[MaxBatchedSymbols..], PluralPaths.Argument("path", path) + PluralPaths.Argument("ref", reference));
 }

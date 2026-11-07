@@ -771,4 +771,36 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("ERROR", two, StringComparison.Ordinal);
         Assert.Contains("files", two, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task Analyze_WithTimeoutSeconds_AnswersAPassThatFinishesInsideItWithoutAPartialLineAndClampsZero()
+    {
+        var text = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["timeoutSeconds"] = 600, ["includeDeadCode"] = false });
+        var clamped = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["timeoutSeconds"] = 0, ["includeDeadCode"] = false });
+
+        Assert.Contains("engines=", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PARTIAL", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", clamped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithElevenPaths_AnalyzesTheFirstTenAndNamesTheEleventhInNext()
+    {
+        string[] batch =
+        [
+            "src/Fixture.Trading/Awkward.cs", "src/Fixture.Trading/Compactness.cs", "src/Fixture.Trading/Composition.cs",
+            "src/Fixture.Trading/InMemoryOrderRepository.cs", "src/Fixture.Trading/IOrderRepository.cs", "src/Fixture.Trading/Localization.cs",
+            "src/Fixture.Trading/NullOrderRepository.cs", "src/Fixture.Trading/Order.cs", "src/Fixture.Trading/OrderBook.cs",
+            "src/Fixture.Trading/OrderRouter.cs",
+        ];
+
+        var text = await server.CallAsync("analyze", new() { ["paths"] = batch.Append("src/Fixture.Trading/OrderService.cs").ToArray(), ["minSeverity"] = "warning" });
+        var comma = await server.CallAsync("analyze", new() { ["paths"] = batch.Append("src/Fixture.Trading/Order.cs,src/Fixture.Trading/OrderBook.cs").ToArray(), ["minSeverity"] = "warning" });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("\nPARTIAL 10 of 11 paths answered, 10 per call", text, StringComparison.Ordinal);
+        Assert.Contains("\nnext: analyze paths=[\"src/Fixture.Trading/OrderService.cs\"]", text, StringComparison.Ordinal);
+        Assert.StartsWith("ERROR InvalidArgument", comma, StringComparison.Ordinal);
+        Assert.Contains("carries a comma or a brace", comma, StringComparison.Ordinal);
+    }
 }
