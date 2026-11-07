@@ -148,7 +148,7 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
     }
 
     [McpServerTool(Name = "workspace_status", ReadOnly = true)]
-    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round, and - in a workspace that declares [McpServerTool] methods - estimates each one's schema from the working tree's own [Description] text (HEURISTIC), naming every tool that differs from the running server or passes the 1024-token cap. guard=\"<command>\" answers what the PreToolUse guard would do with that shell command, executing NOTHING; pass guards=[...] to judge up to 10 commands in ONE call. Replaces one call per command: one ALLOWED or DENIED line each, in input order, with the call that replaces it.")]
+    [Description("Report a loaded workspace: solution, git worktree and branch, project and document counts, load time, any project that failed to load, and - when a tool profile or the loaded workspaces' own file kinds narrow the surface - which tools are advertised. With several loaded and no workspace=, one line per workspace instead. It also warns, without verbose=true, when the PreToolUse guard or the skill is not installed, because an absent guard is what lets an agent answer with Read, Grep or dotnet build, and when a document's in-memory text no longer matches disk - the case where every other read answers from text that is gone. verbose=true adds the doctor self-checks, the memory every live terse server holds, and the in-sync count, so diagnosing terse needs no shell-out. tools=true prices EVERY advertised tool's schema, descending, so a description edit is measured in one call instead of a build-and-test round, and - in a workspace that declares [McpServerTool] methods - estimates each one's schema from the working tree's own [Description] text (HEURISTIC), naming every tool that differs from the running server or passes the 1024-token cap. guard=\"<command>\" answers what the PreToolUse guard would do with that shell command, executing NOTHING; pass guards=[...] to judge up to 10 commands in ONE call. Replaces one call per command: one ALLOWED or DENIED line each, in input order, with the call that replaces it.")]
     public Task<string> WorkspaceStatus(
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("List the MSBuild messages the load reported, and the roslyn, assets, guard coverage, memory, shadow and phases self-checks. Default false.")] bool verbose = false,
@@ -157,13 +157,15 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
             [Description("Several shell commands judged in ONE call, at most 10, one ALLOWED or DENIED line each in input order with the call that replaces it; verbose=true adds each reason. Combines with guard, taken first; a blank or 11th entry is refused by name. NOTHING is executed.")] string?[]? guards = null,
             CancellationToken cancellationToken = default) => Judging(guard, guards) && context.LoadingRoot(workspace) is { } loading
     ? Task.FromResult(Judged(guard, guards, loading, verbose))
-    : context.WithWorkspaceAsync(
-        workspace,
-        null,
-        async loaded => Judging(guard, guards)
-            ? Judged(guard, guards, loaded.Root, verbose)
-            : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await context.AdvertisedAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
-        cancellationToken: cancellationToken);
+    : Unhinted(workspace, verbose, tools, guard, guards) && context.Registry.All().Count > 1
+        ? EachLoadedAsync(cancellationToken)
+        : context.WithWorkspaceAsync(
+            workspace,
+            null,
+            async loaded => Judging(guard, guards)
+                ? Judged(guard, guards, loaded.Root, verbose)
+                : AssetBanner.Appended(await RenderStatusAsync(loaded, verbose, tools, context.Surface, await context.AdvertisedAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false)),
+            cancellationToken: cancellationToken);
 
     [McpServerTool(Name = "list_projects", ReadOnly = true)]
     [Description("List the projects of a loaded workspace: name, language, document count. The name is what build, run_tests, list_tests and clean accept as project=. properties=\"IsTestProject,TargetFramework\" adds each project's EVALUATED value to its line, so 'which projects set X' is ONE call, a Directory.Build.props value is answered rather than missed, and an undefined one reads (unset). path=<file> answers the opposite question - which project compiles that file, and whether an edit to it would be compile-gated; the two are refused together. For a solution that is NOT loaded, call solution_projects path=<solution> instead - it answers from the file and loads nothing.")]
@@ -680,4 +682,53 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
     private static string RestoreNames(IReadOnlyList<string> projects) => projects.Count > MaxRestoreNames
         ? string.Join(", ", projects.Take(MaxRestoreNames).Select(project => Path.GetFileName(project.AsSpan()).ToString())) + string.Create(CultureInfo.InvariantCulture, $" +{projects.Count - MaxRestoreNames} more")
         : string.Join(", ", projects.Select(project => Path.GetFileName(project.AsSpan()).ToString()));
+
+    private static bool Unhinted(string? workspace, bool verbose, bool tools, string? guard, string?[]? guards) =>
+        string.IsNullOrWhiteSpace(workspace) && Plain(verbose, tools) && !Judging(guard, guards);
+
+    private static bool Plain(bool verbose, bool tools) => !(verbose || tools);
+
+    private Task<string> EachLoadedAsync(CancellationToken cancellationToken) =>
+        ToolBoundary.RunAsync(async () =>
+        {
+            await context.ReadyAsync().ConfigureAwait(false);
+
+            var leases = context.Registry.LeaseAll();
+
+            try
+            {
+                return await DescribedEachAsync(leases, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                foreach (var lease in leases)
+                    lease.Dispose();
+            }
+        });
+
+    private static async Task<string> DescribedEachAsync(WorkspaceLease[] leases, CancellationToken cancellationToken)
+    {
+        var response = new ResponseBuilder("workspace_status", string.Empty);
+
+        response.Summary(leases.Length, leases.Length, "workspaces");
+
+        foreach (var lease in leases)
+            await AppendEachAsync(response, lease.Workspace, cancellationToken).ConfigureAwait(false);
+
+        response.Note("pass workspace= for one workspace's full status");
+        response.Note(Version());
+
+        return AssetBanner.Appended(response.ToString());
+    }
+
+    private static async Task AppendEachAsync(ResponseBuilder response, LoadedWorkspace workspace, CancellationToken cancellationToken)
+    {
+        response.Line(Describe(workspace, relative: false));
+
+        if (WorkspaceDivergence.Describe(await WorkspaceDivergence.FindAsync(workspace, cancellationToken).ConfigureAwait(false), verbose: false) is { } diverged)
+            response.Line("  " + diverged);
+
+        if (await SiblingSolutions.WarningAsync(workspace, cancellationToken).ConfigureAwait(false) is { } subset)
+            response.Line("  " + subset);
+    }
 }

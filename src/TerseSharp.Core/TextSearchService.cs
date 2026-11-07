@@ -1295,4 +1295,22 @@ public static class TextSearchService
 
         return stop < 0 ? rest : rest[..stop];
     }
+
+    public static bool Selects(LoadedWorkspace workspace, IReadOnlyList<string> globs)
+    {
+        var index = workspace.Indexes.Paths();
+
+        foreach (var glob in globs)
+        {
+            var matcher = FileGlob.Compile(DirectoryGlob(workspace.Root, glob));
+
+            foreach (var path in index.Paths)
+            {
+                if (matcher.MatchesRelative(path.RelativePath))
+                    return true;
+            }
+        }
+
+        return false;
+    }
 }

@@ -800,4 +800,84 @@ public sealed class WorkspaceRegistryTests
             Directory.Delete(unloaded, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task ResolveSelecting_ForAGlobOnlyTheOuterOfTwoNestedRootsSelects_PicksTheOuterOne()
+    {
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.TestProjectPath, TestContext.Current.CancellationToken);
+
+        var result = registry.ResolveSelecting(null, semantic: false, workspace => TextSearchService.Selects(workspace, ["src/Fixture.Trading/OrderService.cs"]));
+
+        Assert.True(result.IsOk, result.Error?.Message);
+        Assert.Equal(Fixtures.SolutionPath, result.Value!.Workspace.SolutionPath, ignoreCase: true);
+
+        result.Value!.Dispose();
+    }
+
+    [Fact]
+    public async Task ResolveSelecting_ForAGlobBothNestedRootsSelect_StaysAmbiguous()
+    {
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.TestProjectPath, TestContext.Current.CancellationToken);
+
+        var result = registry.ResolveSelecting(null, semantic: false, workspace => TextSearchService.Selects(workspace, ["*.cs"]));
+
+        Assert.False(result.IsOk);
+        Assert.Equal(TerseErrorCode.AmbiguousWorkspace, result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task ResolveSelecting_ForAGlobNoRootSelects_StaysAmbiguous()
+    {
+        using var registry = new WorkspaceRegistry(maxWorkspaces: 2);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        var result = registry.ResolveSelecting(null, semantic: false, workspace => TextSearchService.Selects(workspace, ["no-such-directory/*.cs"]));
+
+        Assert.False(result.IsOk);
+        Assert.Equal(TerseErrorCode.AmbiguousWorkspace, result.Error!.Code);
+    }
+
+    [Fact]
+    public void Detect_ForASolutionAtTheWorktreeRootAndOneBelowIt_RecordsTheRootSoOnlyTheFirstSitsAtIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "terse-worktree-" + Guid.NewGuid().ToString("N"));
+
+        Directory.CreateDirectory(Path.Combine(root, ".git"));
+
+        try
+        {
+            var top = GitContext.Detect(Path.Combine(root, "App.slnx"));
+            var nested = GitContext.Detect(Path.Combine(root, "fixtures", "Small", "Small.slnx"));
+
+            Assert.Equal(Path.GetFileName(root), nested.WorktreeName);
+            Assert.True(WorkspaceRegistry.SitsAtWorktreeRoot(root, top));
+            Assert.False(WorkspaceRegistry.SitsAtWorktreeRoot(Path.Combine(root, "fixtures", "Small"), nested));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Resolve_WithAWorktreeNameTwoSolutionsBelowItsRootShare_StaysAmbiguous()
+    {
+        using var registry = new WorkspaceRegistry(maxWorkspaces: 2);
+
+        await registry.LoadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.RazorSolutionPath, TestContext.Current.CancellationToken);
+
+        var result = registry.Resolve(registry.All()[0].Git.WorktreeName, null);
+
+        Assert.False(result.IsOk);
+        Assert.Equal(TerseErrorCode.AmbiguousWorkspace, result.Error!.Code);
+    }
 }

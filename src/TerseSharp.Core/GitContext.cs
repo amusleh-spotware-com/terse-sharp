@@ -15,7 +15,7 @@ public sealed record GitContext(string Branch, string WorktreeName)
             var gitPath = Path.Combine(directory.FullName, ".git");
 
             if (Directory.Exists(gitPath) || File.Exists(gitPath))
-                return Read(gitPath, directory.Name);
+                return Read(gitPath, directory.Name) with { Root = directory.FullName };
 
             directory = directory.Parent;
         }
@@ -50,4 +50,6 @@ public sealed record GitContext(string Branch, string WorktreeName)
     public string? HeadPath { get; init; }
 
     public string Head { get; init; } = string.Empty;
+
+    public string? Root { get; init; }
 }

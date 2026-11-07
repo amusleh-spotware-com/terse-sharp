@@ -135,4 +135,6 @@ public readonly record struct WorkspaceTarget(
     private static bool IsNamed(string path, string project) =>
             WorkspaceFiles.Matches(Path.GetExtension(path.AsSpan()), ProjectExtensions)
             && Path.GetFileNameWithoutExtension(path.AsSpan()).Equals(project, StringComparison.OrdinalIgnoreCase);
+
+    public string? Note { get; init; }
 }

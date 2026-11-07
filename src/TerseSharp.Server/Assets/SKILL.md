@@ -20,12 +20,11 @@ C# symbols, references, diagnostics, builds, tests or the working tree.
 
 Read the **Job** column for what you want, the **Instead of** column for the built-in it retires, and
 call what is in **Use**. Every tool the server advertises is in this table exactly once. What each
-tool returns, its parameters and its defaults live in the tool's own advertised description — your
-client already carries those, so this table is the job-to-tool map and nothing else.
+tool returns, its parameters and its defaults live in the tool's own advertised description, so this table is the job-to-tool map and nothing else.
 
 | Job | Instead of | Use |
 |---|---|---|
-| **Workspace** | — | `workspace_status` |
+| **Workspace** | — | `workspace_status` — one line per workspace when several are loaded |
 | **Workspace** | `Bash: terse doctor` | `workspace_status(verbose: true)` |
 | **Workspace** | running a command to find out whether the guard allows it | `workspace_status(guards: ["<command>", ...])` — each verdict and replacing call, executing nothing |
 | **Workspace** | what one tool's schema costs | `workspace_status(tools: true)` — one line per tool, tokens descending |

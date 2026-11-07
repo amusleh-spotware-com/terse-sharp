@@ -414,7 +414,7 @@ back once the server has served no call for 60 minutes (`--idle-minutes`, or `wo
 responses are bounded and declare their truncation. A `.terse.json` `build` section -
 `{"build": {"configuration": "Debug", "projects": {"App.Tests": "Debug"}}}` - fills the configuration a
 `build`, `run_tests` or `list_tests` call omits, and the verdict says so. Every answer names its worktree and branch, and an
-ambiguous request lists the candidates instead of guessing.
+ambiguous request lists the candidates instead of guessing; a glob that selects files under one loaded root only, or a worktree name with one loaded solution at its root, answers from that one, and `workspace_status` lists every loaded workspace.
 
 No licence, no IDE, no language server — anything that speaks MCP over stdio works. Git is read-only, and
 databases, debugging and profiling are out of scope on purpose: six shallow tools would be worse than none.

@@ -392,12 +392,10 @@ bool verbose) =>
             early => ListedUnderAsync(early, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
             () => Waited(chosenGlob));
 
-        Task<string> Waited(string chosenGlob) => context.WithWorkspaceAsync(
+        Task<string> Waited(string chosenGlob) => context.WithGlobbedWorkspaceAsync(
             workspace,
-            null,
-            loaded => ListedAsync(loaded, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
-            semantic: false,
-            cancellationToken);
+            [chosenGlob],
+            loaded => ListedAsync(loaded, chosenGlob, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken));
     }
 
     [McpServerTool(Name = "search_text", ReadOnly = true)]
@@ -531,12 +529,10 @@ bool verbose) =>
     : context.WithRootAsync(
         request.Workspace,
         root => TextSearchService.SearchUnderAsync(root, search, cancellationToken),
-        () => context.WithWorkspaceAsync(
+        () => context.WithGlobbedWorkspaceAsync(
             request.Workspace,
-            null,
-            loaded => TextSearchService.SearchAsync(loaded, search, cancellationToken),
-            semantic: false,
-            cancellationToken));
+            search.Globs.IsDefaultOrEmpty ? [search.Glob] : search.Globs,
+            loaded => TextSearchService.SearchAsync(loaded, search, cancellationToken)));
 
     private readonly record struct TextQuery(
             string? Text,
@@ -1184,12 +1180,10 @@ context.RejectWrite() is { } rejection
         context.WithRootAsync(
             workspace,
             early => ListedManyUnderAsync(early, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
-            () => context.WithWorkspaceAsync(
+            () => context.WithGlobbedWorkspaceAsync(
                 workspace,
-                null,
-                loaded => ListedManyAsync(loaded, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken),
-                semantic: false,
-                cancellationToken));
+                globs,
+                loaded => ListedManyAsync(loaded, globs, NavigationTools.Cap(maxResults, 100), stamps, tracked, name, depth, maxResults > 0, exclude, cancellationToken)));
 
     private static async Task<string> ListedManyAsync(
         LoadedWorkspace loaded,

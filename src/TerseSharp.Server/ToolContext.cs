@@ -109,7 +109,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
                 return unresolved is null ? resolution.Symbol.Error!.Render() : await unresolved(lease.Workspace, resolution.Symbol.Error!).ConfigureAwait(false);
             }).ConfigureAwait(false);
 
-            return Queued(answer, marks.Phases(Stopwatch.GetTimestamp()), holder);
+            return Queued(Noted(answer, lease.Note), marks.Phases(Stopwatch.GetTimestamp()), holder);
         }).ConfigureAwait(false);
     }
     public Task<string> WithWorkspace(
@@ -146,7 +146,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
                 ? await AttributedAsync(lease.Workspace, () => action(lease.Workspace)).ConfigureAwait(false)
                 : await action(lease.Workspace).ConfigureAwait(false);
 
-            return Queued(answer, marks.Phases(Stopwatch.GetTimestamp()), holder);
+            return Queued(Noted(answer, lease.Note), marks.Phases(Stopwatch.GetTimestamp()), holder);
         }).ConfigureAwait(false);
     }
 
@@ -170,7 +170,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
             lease.Workspace.MarkRead();
 
-            return Queued(await action(lease.Workspace).ConfigureAwait(false), marks.Phases(Stopwatch.GetTimestamp()), holder);
+            return Queued(Noted(await action(lease.Workspace).ConfigureAwait(false), lease.Note), marks.Phases(Stopwatch.GetTimestamp()), holder);
         }).ConfigureAwait(false);
     }
 
@@ -196,7 +196,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
             var answer = await action(lease.Workspace).ConfigureAwait(false);
             var housed = HousedBy(workspace, pathHint, lease.Workspace) is { } note ? answer + "\n" + note : answer;
 
-            return Queued(housed, marks.Phases(Stopwatch.GetTimestamp()), holder);
+            return Queued(Noted(housed, lease.Note), marks.Phases(Stopwatch.GetTimestamp()), holder);
         }).ConfigureAwait(false);
     }
 
@@ -244,7 +244,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
                 target = Result.Ok(target.Value with { Stale = await StaleAsync(workspace, pathHint, target.Value, cancellationToken).ConfigureAwait(false) });
 
             return target.IsOk
-                ? await SpawnedAsync(target.Value!, spawns, pathHint, action, wait, cancellationToken).ConfigureAwait(false)
+                ? Noted(await SpawnedAsync(target.Value!, spawns, pathHint, action, wait, cancellationToken).ConfigureAwait(false), target.Value.Note)
                 : target.Error!.Render();
         }).ConfigureAwait(false);
     }
@@ -271,7 +271,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
         using var lease = synced.Value!;
 
-        return Result.Ok(Described(lease.Workspace, changed: true, tests));
+        return Result.Ok(Described(lease.Workspace, changed: true, tests) with { Note = lease.Note });
     }
 
     private Result<WorkspaceTarget> Target(string? workspace, string? pathHint, bool changed, bool tests = false)
@@ -283,7 +283,7 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
 
         using var lease = resolved.Value!;
 
-        return Result.Ok(Described(lease.Workspace, changed, tests));
+        return Result.Ok(Described(lease.Workspace, changed, tests) with { Note = lease.Note });
     }
 
     private async Task<ImmutableArray<StaleBinary>> StaleAsync(string? workspace, string? pathHint, WorkspaceTarget target, CancellationToken cancellationToken)
@@ -671,6 +671,32 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         pathHint is { Length: > 0 } && target.ResolveProject(pathHint) is { IsOk: true, Value: { } project }
             ? [project]
             : TestProjectsOf(loaded) is { IsDefaultOrEmpty: false } tests ? tests : [];
+
+    public async Task<string> WithGlobbedWorkspaceAsync(string? workspace, IReadOnlyList<string> globs, Func<LoadedWorkspace, Task<string>> action)
+    {
+        var started = Stopwatch.GetTimestamp();
+
+        await ready.ConfigureAwait(false);
+
+        return await ToolBoundary.RunAsync(async () =>
+        {
+            var loaded = Stopwatch.GetTimestamp();
+            var resolved = Registry.ResolveSelecting(workspace, semantic: false, candidate => TextSearchService.Selects(candidate, globs));
+            var marks = QueueMarks.Unsynced(started, loaded);
+
+            if (!resolved.IsOk)
+                return resolved.Error!.Render();
+
+            using var lease = resolved.Value!;
+            var holder = ActiveRuns.Holding(lease.Workspace.SolutionPath);
+
+            lease.Workspace.MarkRead();
+
+            return Queued(Noted(await action(lease.Workspace).ConfigureAwait(false), lease.Note), marks.Phases(Stopwatch.GetTimestamp()), holder);
+        }).ConfigureAwait(false);
+    }
+
+    private static string Noted(string answer, string? note) => note is null ? answer : answer + "\n" + note;
 }
 
 public readonly record struct PhaseLatency(string Document, double RealizeMs, double OutlineMs, double GateMs, double DiffMs);

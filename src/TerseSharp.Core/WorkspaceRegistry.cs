@@ -210,6 +210,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         {
             [var only] => Ok(only, semantic),
             [] => Result.Fail<WorkspaceLease>(Errors.WorkspaceNotFound(hint, Names(loaded), Unloaded([.. loaded.Select(workspace => workspace.Root)], hint))),
+            _ when AtWorktreeRoot(best, hint) is { } rooted => Rooted(rooted, best.Length, semantic),
             _ => Result.Fail<WorkspaceLease>(Errors.AmbiguousWorkspace(Names(best))),
         };
     }
@@ -248,7 +249,7 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
         _ when Path.IsPathRooted(hint) && PathBoundary.SameFile(solutionPath, Path.GetFullPath(hint)) => 0,
         _ when Same(Path.GetFileName(solutionPath), hint) => 1,
         _ when Same(Path.GetFileNameWithoutExtension(solutionPath), hint) => 2,
-        _ when Same(worktreeName, hint) => 3,
+        _ when Same(worktreeName, hint) => WorktreeTier,
         _ when Same(Path.GetFileName(root), hint) => 4,
         _ when solutionPath.Contains(hint, StringComparison.OrdinalIgnoreCase) => Fragment,
         _ => int.MaxValue,
@@ -477,4 +478,84 @@ public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) 
 
     public LoadedWorkspace[] Named(string hint) =>
         Best([.. Snapshot().Where(workspace => Matched(workspace.SolutionPath, workspace.Root, workspace.Git.WorktreeName, hint) < Fragment)], hint);
+
+    public Result<WorkspaceLease> ResolveSelecting(string? workspaceHint, bool semantic, Func<LoadedWorkspace, bool> answers)
+    {
+        if (!string.IsNullOrWhiteSpace(workspaceHint))
+            return Resolve(workspaceHint, null, semantic);
+
+        var probed = LeaseAll();
+
+        try
+        {
+            return probed.Length > 1 && Answering(probed, answers) is { } only
+                ? Resolve(only.SolutionPath, null, semantic)
+                : Resolve(null, null, semantic);
+        }
+        finally
+        {
+            foreach (var lease in probed)
+                lease.Dispose();
+        }
+    }
+
+    public WorkspaceLease[] LeaseAll()
+    {
+        lock (map)
+            return [.. workspaces.Values.Select(workspace => workspace.Lease())];
+    }
+
+    private static LoadedWorkspace? Answering(WorkspaceLease[] probed, Func<LoadedWorkspace, bool> answers)
+    {
+        LoadedWorkspace? only = null;
+
+        foreach (var lease in probed)
+        {
+            if (!answers(lease.Workspace))
+                continue;
+
+            if (only is not null)
+                return null;
+
+            only = lease.Workspace;
+        }
+
+        return only;
+    }
+
+    private const int WorktreeTier = 3;
+
+    private static LoadedWorkspace? AtWorktreeRoot(LoadedWorkspace[] tied, string hint)
+    {
+        LoadedWorkspace? rooted = null;
+
+        foreach (var workspace in tied)
+        {
+            if (Matched(workspace.SolutionPath, workspace.Root, workspace.Git.WorktreeName, hint) is not WorktreeTier)
+                return null;
+
+            if (!SitsAtWorktreeRoot(workspace.Root, workspace.Git))
+                continue;
+
+            if (rooted is not null)
+                return null;
+
+            rooted = workspace;
+        }
+
+        return rooted;
+    }
+
+    internal static bool SitsAtWorktreeRoot(string root, GitContext git) => PathBoundary.SameFile(root, git.Root);
+
+    private static Result<WorkspaceLease> Rooted(LoadedWorkspace workspace, int tied, bool semantic)
+    {
+        workspace.Touch(semantic);
+
+        return Result.Ok(workspace.Lease() with { Note = WorktreeNote(workspace, tied) });
+    }
+
+    internal static string WorktreeNote(LoadedWorkspace workspace, int tied) => string.Create(
+        CultureInfo.InvariantCulture,
+        $"workspace={Path.GetFileName(workspace.SolutionPath)} ({workspace.Git.WorktreeName}) - the worktree name matches {tied} loaded solutions and this one sits at its root; pass the solution file name for another");
 }

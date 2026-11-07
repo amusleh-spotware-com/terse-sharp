@@ -543,7 +543,7 @@ served no call for 60 minutes (`--idle-minutes`, or `workspace.idleMinutes` in t
 their truncation — a 5,000-type solution answers in the same shape as a 50-type one. Every answer names
 its worktree and branch, and an ambiguous request lists the candidates instead of guessing - except a
 write outside every root and a pathless `history`/`changed_files`/`diff_text`, which use the workspace
-holding the server's working directory and name it. A `.terse.json` `build` section -
+holding the server's working directory and name it. A glob that selects files under one loaded root only, or a worktree name with one loaded solution at its root, answers from that one, and `workspace_status` lists every loaded workspace. A `.terse.json` `build` section -
 `{"build": {"configuration": "Debug", "projects": {"App.Tests": "Debug"}}}` - fills the configuration a
 `build`, `run_tests` or `list_tests` call omits, and the verdict says so.
 </details>
