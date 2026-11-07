@@ -8,6 +8,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.82.1] - 2026-11-07
+
+### Fixed
+
+- **0.82.0 was tagged but never published: its release run stopped at the test step on one E2E whose settle loop gave the watcher 5 s to go quiet.** `ChangedFiles_InALinkedWorktreeRepeatedWithNoEventInBetween_ReplaysTheListingAsUnchanged` passed on all three CI legs at the same commit and timed out on the release runner, so its settle loop now waits up to 30 s; no product code changed. This release carries everything listed under 0.82.0.
+
 ## [0.82.0] - 2026-11-07
 
 ### Added
@@ -7870,7 +7876,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.82.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.82.1...HEAD
+[0.82.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.82.1
 [0.82.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.82.0
 [0.81.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.81.0
 [0.80.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.80.0

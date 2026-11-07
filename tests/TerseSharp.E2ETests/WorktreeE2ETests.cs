@@ -73,7 +73,7 @@ public sealed class WorktreeE2ETests : IAsyncLifetime
     {
         var answer = await CallAsync(arguments);
 
-        for (var attempt = 0; attempt < 50 && !answer.Contains("UNCHANGED", StringComparison.Ordinal); attempt++)
+        for (var attempt = 0; attempt < 300 && !answer.Contains("UNCHANGED", StringComparison.Ordinal); attempt++)
         {
             await Task.Delay(100, TestContext.Current.CancellationToken);
             answer = await CallAsync(arguments);
