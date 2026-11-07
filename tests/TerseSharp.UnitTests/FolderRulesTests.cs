@@ -1,6 +1,8 @@
+using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using ModelContextProtocol.Server;
 using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
@@ -576,7 +578,7 @@ public sealed class FolderRulesTests : IDisposable
 
         Assert.Contains(outer.TrimEnd(), appended, StringComparison.Ordinal);
         Assert.DoesNotContain("--- " + FooRules + " ---", appended, StringComparison.Ordinal);
-        Assert.Contains("1 more folder rule file(s) did not fit here and arrive whole with your next terse call below them: " + FooRules, appended, StringComparison.Ordinal);
+        Assert.Contains("1 more folder rule file(s) did not fit here and arrive whole with your next terse read or write below them: " + FooRules, appended, StringComparison.Ordinal);
         Assert.Contains(inner.TrimEnd(), denial, StringComparison.Ordinal);
         Assert.DoesNotContain("# Outer", denial, StringComparison.Ordinal);
     }
@@ -682,12 +684,139 @@ public sealed class FolderRulesTests : IDisposable
     public async Task PreToolUse_ForAWriteBelowRulesThatOverflowOneDenial_SaysItStopsTheRetryUntilTheRestArrives()
     {
         await File.WriteAllTextAsync(Path.Combine(Repository, "UnitTests", "CLAUDE.md"), LayoutRules(30_000), TestContext.Current.CancellationToken);
-        await File.WriteAllTextAsync(FooRules, LayoutRules(30_000), TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(FooRules, LayoutRules(30_000).Replace("# UnitTests", "# Foo", StringComparison.Ordinal), TestContext.Current.CancellationToken);
 
         var reason = (await HookAsync(Write()))!["permissionDecisionReason"]!.GetValue<string>();
 
         Assert.Contains("it is stopped again until every rule below has arrived whole or been read", reason, StringComparison.Ordinal);
         Assert.Contains("1 more folder rule file(s) did not fit here", reason, StringComparison.Ordinal);
         Assert.DoesNotContain("will not be stopped twice", reason, StringComparison.Ordinal);
+    }
+
+    private async Task<string> TwinWorktreeAsync()
+    {
+        var worktree = Path.Combine(sandbox.FullName, "repo-wt");
+        Directory.CreateDirectory(Path.Combine(worktree, ".git"));
+        Directory.CreateDirectory(Path.Combine(worktree, "UnitTests", "Foo"));
+        await File.WriteAllTextAsync(Path.Combine(worktree, "UnitTests", "CLAUDE.md"), "UNIT RULES", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(worktree, "UnitTests", "Foo", "CLAUDE.md"), "FOO RULES", TestContext.Current.CancellationToken);
+
+        return worktree;
+    }
+
+    private static JsonObject TwinRead() => Call("PostToolUse", "mcp__terse-sharp__read_text", new() { ["path"] = "UnitTests/Foo/BarTests.cs", ["workspace"] = "repo-wt" });
+
+    private static JsonObject TwinWrite() =>
+        Call("PreToolUse", "mcp__terse-sharp__write_text", new() { ["path"] = "UnitTests/Foo/NewTests.cs", ["content"] = "class NewTests;", ["force"] = true, ["workspace"] = "repo-wt" });
+
+    private static JsonObject Listing()
+    {
+        var call = Call("PostToolUse", "mcp__terse-sharp__search_symbols", new() { ["query"] = "BarTests" });
+        call["tool_response"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "1 symbols\nUnitTests\\Foo\\BarTests.cs:1-1  class BarTests" });
+
+        return call;
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForTwoRuleFilesWithTheSameText_InjectsTheTextOnceAndPointsTheSecondAtTheFirst()
+    {
+        var unit = Path.Combine(Repository, "UnitTests", "CLAUDE.md");
+        await File.WriteAllTextAsync(unit, "SHARED RULES", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(FooRules, "SHARED RULES", TestContext.Current.CancellationToken);
+
+        var context = Context(await HookAsync(Read()));
+
+        Assert.Equal(context.IndexOf("SHARED RULES", StringComparison.Ordinal), context.LastIndexOf("SHARED RULES", StringComparison.Ordinal));
+        Assert.Contains("--- " + FooRules + " --- the same text as " + unit + " above", context, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForAWorktreeTwinOfRulesTheSessionWasShown_PointsAtThemInsteadOfResendingTheirText()
+    {
+        var worktree = await TwinWorktreeAsync();
+        var first = Context(await HookAsync(Read()));
+        var twin = Context(await HookAsync(TwinRead()));
+
+        Assert.Contains("FOO RULES", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("FOO RULES", twin, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNIT RULES", twin, StringComparison.Ordinal);
+        Assert.Contains("--- " + Path.Combine(worktree, "UnitTests", "Foo", "CLAUDE.md") + " --- the same text as a rules file this session was already shown whole", twin, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteBelowAWorktreeTwinOfRulesShownWhole_DeniesWithAPointerNotTheText()
+    {
+        await TwinWorktreeAsync();
+        await HookAsync(Read());
+        await EndBatchAsync();
+        var denial = await HookAsync(TwinWrite());
+        await EndBatchAsync();
+        var retry = await HookAsync(TwinWrite());
+
+        var reason = denial!["permissionDecisionReason"]!.GetValue<string>();
+        Assert.Equal("deny", denial["permissionDecision"]!.GetValue<string>());
+        Assert.DoesNotContain("FOO RULES", reason, StringComparison.Ordinal);
+        Assert.Contains("the same text as a rules file this session was already shown whole", reason, StringComparison.Ordinal);
+        Assert.Null(retry);
+    }
+
+    [Fact]
+    public async Task SessionStart_AfterACompaction_ForgetsTheTextSoAWorktreeTwinCarriesItAgain()
+    {
+        await TwinWorktreeAsync();
+        await HookAsync(Read());
+        await HookAsync(new JsonObject { ["hook_event_name"] = "SessionStart", ["source"] = "compact" });
+
+        Assert.Contains("FOO RULES", Context(await HookAsync(TwinRead())), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForAListingThatNamesAFileBelowUnseenRules_InjectsOnePointerPerFolderAndNoText()
+    {
+        var first = Context(await HookAsync(Listing()));
+        var second = await HookAsync(Listing());
+
+        Assert.Contains("rules: " + FooRules + " - read it before editing below its folder", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("FOO RULES", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("UNIT RULES", first, StringComparison.Ordinal);
+        Assert.Null(second);
+    }
+
+    [Fact]
+    public async Task PostToolUse_ForAReadAfterAListingPointedAtTheRules_InjectsTheirTextWhole()
+    {
+        await HookAsync(Listing());
+        await EndBatchAsync();
+
+        var read = Context(await HookAsync(Read()));
+
+        Assert.Contains("UNIT RULES", read, StringComparison.Ordinal);
+        Assert.Contains("FOO RULES", read, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PreToolUse_ForAWriteAfterAListingPointedAtTheRules_IsDeniedWithTheirText()
+    {
+        await HookAsync(Listing());
+        await EndBatchAsync();
+
+        var denial = await HookAsync(Write());
+
+        Assert.Equal("deny", denial?["permissionDecision"]?.GetValue<string>());
+        Assert.Contains("FOO RULES", denial!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Listings_AreAdvertisedToolsThatNeverWriteAndExcludeTheReads()
+    {
+        var advertised = typeof(FolderRules).Assembly.GetTypes()
+            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+            .Select(method => method.GetCustomAttribute<McpServerToolAttribute>()?.Name)
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.All(FolderRules.Listings, tool => Assert.Contains(tool, advertised));
+        Assert.All(FolderRules.Listings, tool => Assert.DoesNotContain(tool, FolderRules.Writers));
+        Assert.All(["read_text", "get_file_outline", "get_symbol_source", "get_type_outline", "analyze"], tool => Assert.DoesNotContain(tool, FolderRules.Listings));
     }
 }

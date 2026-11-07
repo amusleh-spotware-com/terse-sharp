@@ -217,4 +217,52 @@ internal sealed class FolderRuleLedger(string home, string session)
             return false;
         }
     }
+
+    internal static string ContentDigest(ReadOnlySpan<char> content)
+    {
+        Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+        Span<char> name = stackalloc char[1 + (2 * SHA256.HashSizeInBytes)];
+        SHA256.HashData(MemoryMarshal.AsBytes(content), hash);
+        name[0] = ContentPrefix;
+        _ = Convert.TryToHexString(hash, name[1..], out _);
+
+        return new string(name);
+    }
+
+    private const char ContentPrefix = 'C';
+
+    internal bool Known(string digest) => File.Exists(Path.Join(SessionFolder, digest));
+
+    internal void Learn(string digest)
+    {
+        var marker = Path.Join(SessionFolder, digest);
+
+        try
+        {
+            File.OpenHandle(marker, FileMode.CreateNew, FileAccess.Write).Dispose();
+            created.Add(marker);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private const string PointerSuffix = ".pointer";
+
+    internal List<string> Point(List<string> rules)
+    {
+        if (rules is [])
+            return rules;
+
+        var recordable = Prepared();
+        var pointed = new List<string>(rules.Count);
+
+        foreach (var rule in rules)
+        {
+            if (!recordable || Won(Marker(rule) + PointerSuffix, hold: false) is not false)
+                pointed.Add(rule);
+        }
+
+        return pointed;
+    }
 }

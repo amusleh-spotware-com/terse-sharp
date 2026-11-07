@@ -60,6 +60,7 @@ public static class FolderRules
     {
         { Event: "SessionStart" } => Forgotten(hook, home),
         { Event: "PreToolUse", Tool: { } tool, DryRun: false } when Writers.Contains(tool) => AnsweredAsync(hook, home, Denial, cancellationToken),
+        { Event: "PostToolUse", Tool: { } tool } when ListingTools.Contains(tool) => Task.FromResult(Pointed(hook, home)),
         { Event: "PostToolUse", Tool: not null } => AnsweredAsync(hook, home, Injection, cancellationToken),
         _ => Task.FromResult<Answer?>(null),
     };
@@ -81,7 +82,7 @@ public static class FolderRules
 
         var contents = await ContentsAsync(unseen, cancellationToken).ConfigureAwait(false);
         var channel = ChannelFor(reply, hook, Whole(reply.Framing, contents));
-        var planned = Planned(reply.Framing, channel, contents);
+        var planned = Planned(reply.Framing, channel, contents, ledger);
         var shown = Shown(ledger, reply, planned);
 
         return shown is [] ? null : new Answer(new JsonObject { ["hookSpecificOutput"] = channel.Output(Rendered(reply, shown, Waiting(contents, planned))) }.ToJsonString(), ledger);
@@ -122,14 +123,17 @@ public static class FolderRules
         };
     }
 
-    private static List<RuleSection> Planned(int used, Channel channel, List<(string Rule, string Content)> contents)
+    private static List<RuleSection> Planned(int used, Channel channel, List<(string Rule, string Content)> contents, FolderRuleLedger ledger)
     {
         var planned = new List<RuleSection>(contents.Count);
         var fresh = channel.Capacity - used;
 
         foreach (var (rule, content) in contents)
         {
-            if (Section(rule, content.AsSpan().TrimEnd(), channel with { Capacity = channel.Capacity - used }, fresh) is not { } section)
+            var body = content.AsSpan().TrimEnd();
+            var digest = FolderRuleLedger.ContentDigest(body);
+
+            if ((Twin(rule, digest, planned, ledger, channel.Capacity - used) ?? Section(rule, body, channel with { Capacity = channel.Capacity - used }, fresh, digest)) is not { } section)
                 continue;
 
             used += section.Text.Length;
@@ -139,10 +143,10 @@ public static class FolderRules
         return planned;
     }
 
-    private static RuleSection? Section(string rule, ReadOnlySpan<char> body, Channel room, int fresh) =>
+    private static RuleSection? Section(string rule, ReadOnlySpan<char> body, Channel room, int fresh, string digest) =>
     (SectionFrame + rule.Length + body.Length) switch
     {
-        var whole when whole <= room.Capacity => new(rule, string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} ---\n{body}"), Whole: true),
+        var whole when whole <= room.Capacity => new(rule, string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} ---\n{body}"), Whole: true, digest),
         var whole when whole <= fresh || room.Capacity - PointerReserve - (3 * rule.Length) < MinimumRoom => null,
         _ when room.Verbatim => new(rule, Opening(rule, body, room.Capacity - PointerReserve - (3 * rule.Length)), Whole: false),
         _ => new(rule, Digested(rule, body, room.Capacity - PointerReserve - (3 * rule.Length)), Whole: false),
@@ -165,6 +169,9 @@ public static class FolderRules
             ledger.Partial(section.Rule);
         else if (hold)
             ledger.Complete(section.Rule);
+
+        if (section.Digest is { } digest)
+            ledger.Learn(digest);
     }
 
     private sealed record Reply(string Preface, Func<string, JsonObject> Output, bool Hold = false, Closing Closing = default)
@@ -178,7 +185,7 @@ public static class FolderRules
 
     private sealed record Channel(int Capacity, bool Verbatim, Func<string, JsonObject> Output);
 
-    private readonly record struct RuleSection(string Rule, string Text, bool Whole);
+    private readonly record struct RuleSection(string Rule, string Text, bool Whole, string? Digest = null);
 
     internal const string Variable = "TERSE_FOLDER_RULES";
 
@@ -311,7 +318,7 @@ public static class FolderRules
 
         return waiting is []
             ? string.Empty
-            : string.Create(CultureInfo.InvariantCulture, $"\n\n{waiting.Count} more folder rule file(s) did not fit here and arrive whole with your next terse call below them: {string.Join(", ", waiting.Take(NamedWaiting))}{more}");
+            : string.Create(CultureInfo.InvariantCulture, $"\n\n{waiting.Count} more folder rule file(s) did not fit here and arrive whole with your next terse read or write below them: {string.Join(", ", waiting.Take(NamedWaiting))}{more}");
     }
 
     private const int NoteReserve = 1_000;
@@ -334,5 +341,78 @@ public static class FolderRules
         string[] text = [reply.Preface, shown.TrueForAll(section => section.Whole) && waiting.Length is 0 ? reply.Closing.Settled : reply.Closing.Held, .. shown.Select(section => section.Text), waiting];
 
         return string.Concat(text);
+    }
+
+    private static RuleSection? Twin(string rule, string digest, List<RuleSection> planned, FolderRuleLedger ledger, int room) => (Shared(planned, digest), ledger.Known(digest) && !ledger.Seen(rule)) switch
+    {
+        ({ } original, _) => Fitted(new(rule, Twinned(rule, original), Whole: true), room),
+        (null, true) => Fitted(new(rule, Twinned(rule, null), Whole: true), room),
+        _ => null,
+    };
+
+    private static string? Shared(List<RuleSection> planned, string digest)
+    {
+        foreach (var section in planned)
+        {
+            if (string.Equals(section.Digest, digest, StringComparison.Ordinal))
+                return section.Rule;
+        }
+
+        return null;
+    }
+
+    private static RuleSection? Fitted(RuleSection section, int room) => section.Text.Length <= room ? section : null;
+
+    private static string Twinned(string rule, string? original) => original is null
+        ? string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- the same text as a rules file this session was already shown whole; it binds every read, edit and test below {Path.GetDirectoryName(rule.AsSpan())} too")
+        : string.Create(CultureInfo.InvariantCulture, $"\n\n--- {rule} --- the same text as {original} above; it binds every read, edit and test below {Path.GetDirectoryName(rule.AsSpan())} too");
+
+    private static readonly FrozenSet<string> ListingTools = FrozenSet.Create(
+        StringComparer.Ordinal,
+        "search_symbols", "search_text", "search_regex", "find_files", "find_usages", "find_implementations", "find_registrations", "list_endpoints",
+        "changed_files", "diff_symbols", "diff_text", "history", "get_diagnostics", "list_projects", "solution_projects", "list_tests",
+        "resx_files", "resx_find", "resx_usages", "xaml_find", "razor_find");
+
+    internal static IReadOnlySet<string> Listings => ListingTools;
+
+    private const string ListingPreface =
+        "Folder rules from nested CLAUDE.md files bind the folders this listing named. Their text arrives with your first terse read of a file below one, and a terse write below one is denied until it has:";
+    private const string ListingHead = "\nrules: ";
+    private const string ListingTail = " - read it before editing below its folder";
+
+    private static Answer? Pointed(FolderRuleHook hook, string home)
+    {
+        var ledger = new FolderRuleLedger(home, hook.Session);
+        var pointed = ledger.Point(Fitting(Unseen(hook, ledger, Injection)));
+
+        return pointed is [] ? null : new Answer(new JsonObject { ["hookSpecificOutput"] = Injection.Output(Pointers(pointed)) }.ToJsonString(), ledger);
+    }
+
+    private static List<string> Fitting(List<string> rules)
+    {
+        var room = ContextLimit - ListingPreface.Length;
+        var fitting = new List<string>(rules.Count);
+
+        foreach (var rule in rules)
+        {
+            room -= ListingHead.Length + rule.Length + ListingTail.Length;
+
+            if (room < 0)
+                break;
+
+            fitting.Add(rule);
+        }
+
+        return fitting;
+    }
+
+    private static string Pointers(List<string> rules)
+    {
+        var text = new StringBuilder(ListingPreface, ContextLimit);
+
+        foreach (var rule in rules)
+            text.Append(ListingHead).Append(rule).Append(ListingTail);
+
+        return text.ToString();
     }
 }

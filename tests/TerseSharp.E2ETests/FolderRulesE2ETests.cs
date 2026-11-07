@@ -129,4 +129,17 @@ public sealed class FolderRulesE2ETests : IDisposable
         Assert.Equal("class OrderTests", blocks[0]!["text"]!.GetValue<string>());
         Assert.Contains(rules.TrimEnd(), blocks[1]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GuardFolderRules_PointsAtANestedClaudeMdAfterATerseListing_AndStillDeniesAWriteBelowIt()
+    {
+        var pointed = await GuardAsync(Payload("PostToolUse", "mcp__terse-sharp__find_files", "tests/Unit/OrderTests.cs"));
+        await GuardAsync(new JsonObject { ["hook_event_name"] = "PostToolBatch", ["session_id"] = "e2e-session", ["cwd"] = Repository, ["tool_calls"] = new JsonArray() }, "--post-batch");
+        var denied = await GuardAsync(Payload("PreToolUse", "mcp__terse-sharp__write_text", "tests/Unit/NewTests.cs"));
+
+        var context = JsonNode.Parse(pointed)!["hookSpecificOutput"]!["additionalContext"]!.GetValue<string>();
+        Assert.Contains("CLAUDE.md - read it before editing below its folder", context, StringComparison.Ordinal);
+        Assert.DoesNotContain("Use NUnit classic asserts only.", context, StringComparison.Ordinal);
+        Assert.Contains("Use NUnit classic asserts only.", JsonNode.Parse(denied)!["hookSpecificOutput"]!["permissionDecisionReason"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
 }
