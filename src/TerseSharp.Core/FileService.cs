@@ -179,14 +179,31 @@ public static class FileService
 
         var inside = workspace.Contains(full);
 
-        if (!request.DryRun)
-            await StoredAsync(workspace, full, after, inside, cancellationToken).ConfigureAwait(false);
+        if (!request.DryRun && await StoredIfUnchangedAsync(workspace, full, before, after, cancellationToken).ConfigureAwait(false) is { } overtaken)
+            return Result.Fail<string>(overtaken);
 
         return Result.Ok(DiffResponse("edit_text", path, before, after, request.DryRun, request.Verbose, inside ? null : full, notes, request.Context));
     }
 
     private static Task StoredAsync(LoadedWorkspace workspace, string full, string content, bool inside, CancellationToken cancellationToken) =>
         inside ? WriteAsync(workspace, full, content, cancellationToken) : AtomicWrite.TextAsync(full, content, cancellationToken);
+
+    internal static async Task<TerseError?> StoredIfUnchangedAsync(LoadedWorkspace workspace, string full, string before, string after, CancellationToken cancellationToken)
+    {
+        await using var held = await ProjectFileGate.EnterAsync([full], cancellationToken).ConfigureAwait(false);
+
+        if (!string.Equals(await OnDiskAsync(full, cancellationToken).ConfigureAwait(false), before, StringComparison.Ordinal))
+            return Errors.Overtaken([PositionFormat.Relative(full, workspace.Root)]);
+
+        await StoredAsync(workspace, full, after, workspace.Contains(full), cancellationToken).ConfigureAwait(false);
+
+        return null;
+    }
+
+    private static async Task<string> OnDiskAsync(string full, CancellationToken cancellationToken) =>
+        File.Exists(full) ? await File.ReadAllTextAsync(full, cancellationToken).ConfigureAwait(false) : string.Empty;
+
+    private static bool Rewrites(PendingWrite entry, bool inside) => inside || !string.Equals(entry.Before, entry.After, StringComparison.Ordinal);
 
     private static TerseError NoMatch(string before, string oldText, SnippetMatch match, int occurrence)
     {
@@ -981,10 +998,8 @@ public static class FileService
 
         var inside = workspace.Contains(entry.Full);
 
-        if (!dryRun && inside)
-            await WriteAsync(workspace, entry.Full, entry.After, cancellationToken).ConfigureAwait(false);
-        else if (!dryRun && !string.Equals(entry.Before, entry.After, StringComparison.Ordinal))
-            await AtomicWrite.TextAsync(entry.Full, entry.After, cancellationToken).ConfigureAwait(false);
+        if (!dryRun && Rewrites(entry, inside) && await StoredIfUnchangedAsync(workspace, entry.Full, entry.Before, entry.After, cancellationToken).ConfigureAwait(false) is { } overtaken)
+            return overtaken.Render();
 
         return DiffResponse("write_text", inside ? entry.Path : entry.Full, entry.Before, entry.After, dryRun, verbose, inside ? null : entry.Full);
     }
@@ -1480,8 +1495,8 @@ public static class FileService
         if (await GatedAsync(workspace, path, full, after, write.DryRun, write.AllowErrors, write.Verbose, write.AllowPolicy, cancellationToken).ConfigureAwait(false) is { } gated)
             return gated.IsOk ? Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(gated.Value!, dropped), before, after, quiet), ending)) : gated;
 
-        if (!write.DryRun && !string.Equals(before, after, StringComparison.Ordinal))
-            await WriteAsync(workspace, full, after, cancellationToken).ConfigureAwait(false);
+        if (!write.DryRun && !string.Equals(before, after, StringComparison.Ordinal) && await StoredIfUnchangedAsync(workspace, full, before, after, cancellationToken).ConfigureAwait(false) is { } overtaken)
+            return Result.Fail<string>(overtaken);
 
         return Result.Ok(DroppedDeclarations.Warned(ReplacedContent.Marked(DroppedDeclarations.Warned(DiffResponse("write_text", path, before, after, write.DryRun, write.Verbose), dropped), before, after, quiet), ending));
     }
@@ -1496,8 +1511,8 @@ public static class FileService
     {
         var (before, after, ending) = await AdoptedAsync(workspace, full, content, cancellationToken).ConfigureAwait(false);
 
-        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal))
-            await AtomicWrite.TextAsync(full, after, cancellationToken).ConfigureAwait(false);
+        if (!dryRun && !string.Equals(before, after, StringComparison.Ordinal) && await StoredIfUnchangedAsync(workspace, full, before, after, cancellationToken).ConfigureAwait(false) is { } overtaken)
+            return Result.Fail<string>(overtaken);
 
         return Result.Ok(DroppedDeclarations.Warned(DiffResponse("write_text", full, before, after, dryRun, verbose, full), ending));
     }
@@ -2397,8 +2412,8 @@ public static class FileService
         if (gatedWrites.Exists(entry => string.Equals(entry.Full, write.Full, StringComparison.Ordinal)))
             return Result.Ok(GatedTally(write.Path, tally, request));
 
-        if (tally.Applied > 0 && !request.DryRun)
-            await StoredAsync(workspace, write.Full, write.After, workspace.Contains(write.Full), cancellationToken).ConfigureAwait(false);
+        if (tally.Applied > 0 && !request.DryRun && await StoredIfUnchangedAsync(workspace, write.Full, write.Before, write.After, cancellationToken).ConfigureAwait(false) is { } overtaken)
+            return Result.Fail<string>(overtaken);
 
         return Result.Ok(BatchResponse(write.Path, write.Before, write.After, tally.Failed, tally.Notes, tally.Applied, tally.Total, request));
     }

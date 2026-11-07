@@ -31,7 +31,7 @@ public static class GuardEntry
 
     public static Task<int> DispatchAsync(GuardHook hook, TextReader input, TextWriter output, CancellationToken cancellationToken) => hook switch
     {
-        GuardHook.PostBatch => BatchNudge.RunAsync(input, output, cancellationToken),
+        GuardHook.PostBatch => FolderRules.SettleAsync(input, cancellationToken),
         GuardHook.FolderRules => FolderRules.RunAsync(input, output, cancellationToken),
         _ => ToolGuard.RunAsync(input, output, cancellationToken),
     };

@@ -70,4 +70,47 @@ public sealed class LoadedWorkspaceOvertakeTests
 
     private static async Task<Solution> PrefixedAsync(Solution solution, DocumentId id, string prefix) =>
         solution.WithDocumentText(id, SourceText.From(prefix + await solution.GetDocument(id)!.GetTextAsync(TestContext.Current.CancellationToken)));
+
+    [Fact]
+    public async Task StoredIfUnchangedAsync_WhenAnotherWriteLandedAfterThisCallRead_RefusesAndKeepsTheOtherWrite()
+    {
+        using var temporary = TemporarySolution.Create();
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(temporary.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+
+        var notes = Path.Combine(temporary.Root, "NOTES.md");
+
+        await File.WriteAllTextAsync(notes, "landed first\n", TestContext.Current.CancellationToken);
+
+        var refused = await FileService.StoredIfUnchangedAsync(lease.Workspace, notes, "read by this call\n", "stale\n", TestContext.Current.CancellationToken);
+
+        Assert.Equal(TerseErrorCode.EditConflict, refused?.Code);
+        Assert.Contains("changed after this call read it", refused?.Message, StringComparison.Ordinal);
+        Assert.Equal("landed first\n", await File.ReadAllTextAsync(notes, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task StoredIfUnchangedAsync_ForTwoParallelWritesFromOneRead_LandsExactlyOneAndRefusesTheOther()
+    {
+        using var temporary = TemporarySolution.Create();
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(temporary.SolutionPath, TestContext.Current.CancellationToken);
+
+        using var lease = registry.Resolve(null, null).Value!;
+
+        var notes = Path.Combine(temporary.Root, "NOTES.md");
+
+        await File.WriteAllTextAsync(notes, "read\n", TestContext.Current.CancellationToken);
+
+        var answers = await Task.WhenAll(
+            Task.Run(() => FileService.StoredIfUnchangedAsync(lease.Workspace, notes, "read\n", "first\n", TestContext.Current.CancellationToken), TestContext.Current.CancellationToken),
+            Task.Run(() => FileService.StoredIfUnchangedAsync(lease.Workspace, notes, "read\n", "second\n", TestContext.Current.CancellationToken), TestContext.Current.CancellationToken));
+
+        Assert.Single(answers, answer => answer is null);
+        Assert.Equal(answers[0] is null ? "first\n" : "second\n", await File.ReadAllTextAsync(notes, TestContext.Current.CancellationToken));
+    }
 }

@@ -1538,21 +1538,11 @@ Gate 9's three counters convert in this order, because that is their cost order:
    by stating it once in the system prompt. So a row here whose only mechanism is "add a line to
    `CLAUDE.md`" is weak; a row that puts the reminder **at the moment of the call** — a `PostToolUse`
    or `PostToolBatch` hook, a `remedy:` line, a deny message from `ToolGuard` — is the strong form.
-   **The `PostToolBatch` nudge fires on every eligible batch (I697, hold-out closed by I779).** The
-   odd-hash hold-out lifted the multi-call share of the next message two weeks running (+6.8, then
-   +6.7 points at n>=300 per arm), so `terse guard --post-batch` now nudges every batch of one
-   read-only terse call and assigns no arm. Read its effect against the prior-week baseline, not an
-   arm: take every assistant message that carried exactly one read-only terse call (the hook's own
-   eligibility, computable from the transcripts alone), take the NEXT assistant message after it, and
-   print `nudge lift: multi-call next message x%  baseline 28.0%  lift = x-28.0 points  last nudged
-   arm 34.7%` - 28.0% is the held arm and 34.7% the nudged arm of the last hold-out week (2026-10-17
-   scan). The per-id log is opt-in: only with `TERSE_NUDGE_LOG=1` is each eligible batch appended to
-   `~/.terse/batch-nudge.log` (or `$TERSE_HOME/.terse/`) as `<utc> <tool_use_id> nudged` (`-` when
-   the payload carried no id); when it is present, join it by `tool_use.id` as the exact eligible set,
-   and when it is absent say so and use the transcript-derived set. **Drop rule:** with at least 300
-   next-messages, a lift under 3 points two weeks running is a row to re-run the hold-out, and only a
-   re-run hold-out gap under 3 points is a row to delete the `PostToolBatch` hook (`BatchNudge`,
-   `ClientRegistrar.BatchEntry`) and its ~58 tokens per firing.
+   **The `PostToolBatch` nudge was deleted by I866** after two weeks under the 28.0% baseline
+   (27.5%, 26.2%). Keep printing `single-read next message multi-call x%  baseline 26.2%` from the
+   transcripts alone: take every assistant message that carried exactly one read-only terse call and
+   the NEXT assistant message after it. A fall below 23.2% at n>=300 two weeks running is a row to
+   re-add the nudge behind a concurrent hold-out (cc53a94 is the reference implementation).
 3. **redundant share** — identical arguments, one session. Lever `(d)`: the server can *prove* the
    answer did not change (no write in between) and say so instead of recomputing.
 

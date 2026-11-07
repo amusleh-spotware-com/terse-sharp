@@ -220,7 +220,7 @@ denies the call, names the tool that replaces it, and tells you not to run it in
 any spelling.
 **The denial also hands you the answer**: a system reminder beside the tool result reads
 `Call this instead: <the complete call, with the arguments already filled in from what you tried>`.
-Run that call verbatim; it follows the file kind (`.xaml` to `xaml_outline`, `.resx` to `resx_get`). A `PostToolBatch` hook reminds you to batch after a lone read-only call. Nested `CLAUDE.md` rules arrive once per session; a real (not dryRun) write below unseen ones is denied with them - comply, resend. A rules file ending `You MUST read the rest` is too big to arrive whole: run that `read_text` (as text) first; writes stay denied until then.
+Run that call verbatim; it follows the file kind (`.xaml` to `xaml_outline`, `.resx` to `resx_get`). Nested `CLAUDE.md` rules arrive once per session; a real (not dryRun) write below unseen ones is denied with them - comply, resend. A rules file ending `You MUST read the rest` is too big to arrive whole: run that `read_text` (as text) first; writes stay denied until then.
 
 `dotnet format` and `dotnet clean` are covered too, with the **exact** replacement per sub-command:
 `dotnet format analyzers` -> `cleanup fix=analyzers` (add `verify=true` for `--verify-no-changes`),
@@ -334,7 +334,7 @@ rebuilding an analyzer whose behaviour you need to see.
 `watch=active gen=c12/p1/x3/r0/rz2/f4 pending=0 lastSyncMs=8 gaps=0`: the
 watcher state, the per-kind generation counters (Code / Project / Xaml / Resx / Razor / Files), how many paths are
 waiting to be examined, and how many watcher events were lost. The line after it reports the workspace index's hit and miss counts.
-A standing offer - `containers=true names …`, `N members - narrow with contains=`,
+A standing offer - `containers=true names …`, `N members - narrow with contains=`, `changed_files`' unscoped `next: diff_symbols …`,
 a complete listing's ` - narrow with …` - prints on a tool's first answer only; `truncated` steers print
 every time, and `TERSE_OFFERS=always` keeps every offer.
 

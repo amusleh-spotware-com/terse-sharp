@@ -66,6 +66,17 @@ public sealed class GuardEntryTests
         Assert.StartsWith("Unhandled exception: System.InvalidOperationException", error.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task DispatchAsync_ForAPostToolBatchOfOneTerseReadCall_WritesNothingAndExitsZero()
+    {
+        using var output = new StringWriter();
+
+        var exit = await GuardEntry.DispatchAsync(GuardHook.PostBatch, new StringReader("""{"tool_calls":[{"tool_name":"mcp__terse-sharp__read_text","tool_use_id":"abc"}]}"""), output, TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, output.ToString());
+    }
+
     private sealed class ThrowingReader : TextReader
     {
         public override Task<string> ReadToEndAsync(CancellationToken cancellationToken) =>

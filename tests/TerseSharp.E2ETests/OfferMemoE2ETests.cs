@@ -18,6 +18,8 @@ public sealed class OfferMemoE2ETests
             await ReadTextSaysCondensedOnEveryCondensedRangeAsync(server);
             await GetFileOutlineSteersWideOutlineOnceAsync(server);
             await FindFilesAdvertisesNarrowingOnceAsync(server);
+            await CSharpTextEditNotesTheCompileGateOncePerToolAsync(server);
+            await ChangedFilesOffersTheUnscopedDiffSymbolsStepOnceAsync(server);
         }
         finally
         {
@@ -69,5 +71,53 @@ public sealed class OfferMemoE2ETests
 
         Assert.Matches(@"^\d+ files - narrow with ", first.Split('\n')[0]);
         Assert.Matches(@"^\d+ files$", second.Split('\n')[0]);
+    }
+
+    private static async Task CSharpTextEditNotesTheCompileGateOncePerToolAsync(TerseServerProcess server)
+    {
+        const string Probe = "src/Fixture.Trading/OfferMemoEditProbe.cs";
+
+        await CallAsync(server, "write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class OfferMemoEditProbe\n{\n    public int Value => 0;\n}\n", ["force"] = true });
+
+        try
+        {
+            var first = await CallAsync(server, "edit_text", new() { ["path"] = Probe, ["oldText"] = "public int Value => 0;", ["newText"] = "public int Value => 1;" });
+            var second = await CallAsync(server, "edit_text", new() { ["path"] = Probe, ["oldText"] = "public int Value => 1;", ["newText"] = "public int Value => 2;" });
+            var verbose = await CallAsync(server, "edit_text", new() { ["path"] = Probe, ["oldText"] = "public int Value => 2;", ["newText"] = "public int Value => 3;", ["verbose"] = true });
+            var written = await CallAsync(server, "write_text", new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class OfferMemoEditProbe\n{\n    public int Value => 4;\n}\n" });
+            var after = await CallAsync(server, "read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+            Assert.Contains("NOTE a .cs text edit is compile-gated without force=true", first, StringComparison.Ordinal);
+            Assert.Contains("replace_symbol_body", first, StringComparison.Ordinal);
+            Assert.DoesNotContain("NOTE a .cs text edit", second, StringComparison.Ordinal);
+            Assert.Contains("NOTE a .cs text edit is compile-gated", verbose, StringComparison.Ordinal);
+            Assert.Contains("NOTE a .cs text edit is compile-gated", written, StringComparison.Ordinal);
+            Assert.Contains("public int Value => 4;", after, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CallAsync(server, "write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    private static async Task ChangedFilesOffersTheUnscopedDiffSymbolsStepOnceAsync(TerseServerProcess server)
+    {
+        try
+        {
+            await CallAsync(server, "edit_text", new() { ["path"] = "notes.md", ["oldText"] = "# Fixture notes", ["newText"] = "# Fixture notes, momentarily changed" });
+
+            var first = await CallAsync(server, "changed_files", []);
+            var second = await CallAsync(server, "changed_files", new() { ["maxResults"] = 50 });
+            var scoped = await CallAsync(server, "changed_files", new() { ["path"] = "notes.md" });
+
+            Assert.Contains("next: diff_symbols - maps each hunk onto the declaration that contains it", first, StringComparison.Ordinal);
+            Assert.Contains("notes.md", second, StringComparison.Ordinal);
+            Assert.DoesNotContain("next: diff_symbols", second, StringComparison.Ordinal);
+            Assert.Contains("next: diff_symbols path=\"notes.md\"", scoped, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await CallAsync(server, "write_text", new() { ["path"] = "notes.md", ["ref"] = "HEAD" });
+        }
     }
 }

@@ -327,7 +327,7 @@ public sealed class ClientRegistrarTests : IDisposable
     }
 
     [Fact]
-    public async Task InstallGuard_RegistersThePostToolBatchNudgeBesideThePreToolUseGuard_AndKeepsEveryOtherHook()
+    public async Task InstallGuard_RegistersThePostToolBatchSettleBesideThePreToolUseGuard_AndKeepsEveryOtherHook()
     {
         await WriteSettingsAsync("""{"hooks":{"PostToolBatch":[{"hooks":[{"type":"command","command":"other-batch-tool"}]}]}}""");
 

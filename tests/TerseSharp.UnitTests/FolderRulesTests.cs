@@ -489,9 +489,8 @@ public sealed class FolderRulesTests : IDisposable
             ["cwd"] = Repository,
             ["tool_calls"] = new JsonArray(),
         };
-        using var output = new StringWriter();
 
-        Assert.Equal(0, await BatchNudge.RunAsync(new StringReader(payload.ToJsonString()), output, Home, log: false, TestContext.Current.CancellationToken));
+        Assert.Equal(0, await FolderRules.SettleAsync(new StringReader(payload.ToJsonString()), Home, TestContext.Current.CancellationToken));
     }
 
     private const string ToolResultText = "1: class BarTests;";

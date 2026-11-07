@@ -184,7 +184,9 @@ bool verbose) =>
             files is { Length: > 0 } batch
                 ? WrittenMany(workspace, path, content, delete, allowEmpty, batch, options, null, null, cancellationToken)
                 : WrittenOne(workspace, path, content, delete, recursive, @ref, allowEmpty, usings, options, cancellationToken),
-            unforced);
+            unforced,
+            "write_text",
+            verbose);
     }
 
     private Task<string> Written(
@@ -286,7 +288,7 @@ bool verbose) =>
                 rows,
                 cancellationToken),
             TouchesCSharp(target, edits),
-            cancellationToken), UnforcedEdit(force || dryRun, target, edits));
+            cancellationToken), UnforcedEdit(force || dryRun, target, edits), "edit_text", verbose);
     }
 
     private const int MaxEditContext = 10;
@@ -1470,13 +1472,13 @@ context.RejectWrite() is { } rejection
             cancellationToken: cancellationToken);
     }
 
-    private static Task<string> Noted(Task<string> answer, bool unforced) => unforced ? NotedAsync(answer) : answer;
+    private static Task<string> Noted(Task<string> answer, bool unforced, string tool, bool verbose) => unforced ? NotedAsync(answer, tool, verbose) : answer;
 
-    private static async Task<string> NotedAsync(Task<string> answer)
+    private static async Task<string> NotedAsync(Task<string> answer, string tool, bool verbose)
     {
         var text = await answer.ConfigureAwait(false);
 
-        return text.StartsWith("ERROR", StringComparison.Ordinal) ? text : text + "\n" + TextOnCSharp;
+        return text.StartsWith("ERROR", StringComparison.Ordinal) || !(verbose || OfferMemo.First(tool, TextOnCSharp)) ? text : text + "\n" + TextOnCSharp;
     }
 
     private static EditTools.Carry EditCarry(string path, FileService.EditRequest request, FileService.TextEdit[]? edits)

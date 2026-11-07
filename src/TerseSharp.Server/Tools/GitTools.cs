@@ -14,7 +14,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
     private const string UntrackedOnDisk = "D (untracked on disk)";
 
     [McpServerTool(Name = "changed_files", ReadOnly = true)]
-    [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec, and paths=[...] to up to 10, OR-ed, in ONE listing. Replaces one call per path. exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations. root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed. A byte-identical repeat with no watcher event and no git state change since replays the previous listing plus an UNCHANGED marker instead of re-shelling to git.")]
+    [Description("Replaces Bash git status and git diff --stat and git diff --cached --name-only. One line per changed file - path, added and deleted line counts, and the status letter - so the end-of-task review costs a listing instead of a diff. Empty baseRef compares the working tree against HEAD and includes untracked files; staged=true answers the INDEX instead and untracked=false drops the files git does not track. path= scopes the listing to one path or pathspec, and paths=[...] to up to 10, OR-ed, in ONE listing. Replaces one call per path. exclude= drops the paths a path= cannot leave out - another session's notes on a shared tree, a scratch folder, an agent worktree. A listing carrying both kinds says how many of each it counted, and one carrying tracked changes ends with the diff_symbols call that maps them onto declarations (unscoped: on the first such answer only). root= answers about any absolute directory instead of the loaded workspace - a sibling worktree or another repository, tagged outside-workspace - so no second load_workspace is needed. A byte-identical repeat with no watcher event and no git state change since replays the previous listing plus an UNCHANGED marker instead of re-shelling to git.")]
     public Task<string> ChangedFiles(
         [Description("Commit, branch or range to compare against, e.g. main or HEAD~3. Empty compares the working tree against HEAD.")] string? baseRef = null,
         [Description("Limit to one path or pathspec, e.g. src or src/**/*.cs.")] string? path = null,
@@ -219,7 +219,7 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
             response.Line(line);
 
         if (outside is not { Length: > 0 } && listed.Tracked > 0 && steer is { Length: > 0 })
-            response.Note(steer);
+            Steered(response, steer);
 
         if (outside is not { Length: > 0 } && ArgumentLine.Paths(shown.Where(row => !Folded(row))) is { } batch)
             response.Note(batch);
@@ -743,8 +743,14 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         for (var index = 0; index < paths.Count; index++)
             arguments.Append(index is 0 ? " path=\"" : ", then path=\"").Append(paths[index]).Append('"');
 
-        return arguments.Append(" - maps each hunk onto the declaration that contains it").ToString();
+        return arguments.Append(UnscopedSteerTail).ToString();
     }
+
+    private const string UnscopedSteerTail = " - maps each hunk onto the declaration that contains it";
+    private const string UnscopedSteer = "next: diff_symbols" + UnscopedSteerTail;
+
+    private static ResponseBuilder Steered(ResponseBuilder response, string steer) =>
+        string.Equals(steer, UnscopedSteer, StringComparison.Ordinal) ? response.Offer("diff_symbols", steer) : response.Note(steer);
 
     private static string[] Requested(
         string? baseRef,

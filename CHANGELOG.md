@@ -7,6 +7,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 (`vMAJOR.MINOR.PATCH`) by [MinVer](https://github.com/adamralph/minver).
 
 ## [Unreleased]
+### Added
+
+### Changed
+- **Response format: the `NOTE a .cs text edit is compile-gated without force=true; ...` line that ended every successful unforced `.cs` `edit_text` and `write_text` now prints on each tool's first such answer in a process only (I870).** It is a standing offer like `containers=true names …`: later answers drop the line, `verbose=true` prints it every time, and `TERSE_OFFERS=always` restores it on every call. Measured at 1 204 notes a week, 30 tokens each. Covered by `EveryStandingOffer_IsPrintedOncePerToolPerProcess_AndEveryTruncationSteerOnEveryCall` and `EditText_WithoutForceOnACompiledFile_LandsThroughTheCompileGate`.
+- **Response format: `changed_files` prints its unscoped `next: diff_symbols - maps each hunk onto the declaration that contains it` line once per server process (I871).** It is a constant standing offer (209 answers a week), now routed like the containers and listing offers: it appears on the first answer that carries it and `TERSE_OFFERS=always` keeps it everywhere. A steer naming `baseRef=` or `path=` still prints every time. `HEURISTIC  text match` (the response's confidence tag), the `condensed=true` caveat and the `no file matched` remedy on an empty answer are unchanged. Covered by `EveryStandingOffer_IsPrintedOncePerToolPerProcess_AndEveryTruncationSteerOnEveryCall`.
+
+### Removed
+
+- **The `PostToolBatch` batch nudge is gone (I866).** With every eligible batch nudged, the next message was multi-call 27.5% and then 26.2% for two weeks, below the 28.0% held-arm baseline and the 28.3% corpus share, so it bought nothing for ~166 000 tokens a week. The hold-out the drop rule asked to re-run was itself deleted in I779, so this decision is taken on the two measured weeks. `terse guard --post-batch` stays registered and now only lifts the folder-rules hold on a response's sibling writes; it writes nothing and exits 0, so an existing settings.json needs no change. `TERSE_NUDGE_LOG` and `~/.terse/batch-nudge.log` are no longer written. Covered by `DispatchAsync_ForAPostToolBatchOfOneTerseReadCall_WritesNothingAndExitsZero`.
+
+### Fixed
+- **Two `edit_text` or `write_text` calls on one plain file issued in parallel no longer lose one of them (I853).** The I839 write ledger covered workspace documents only, so two calls on one `.md`, `.json` or `.csproj` each wrote from their own read and the later one silently dropped the earlier change. A plain-file write now takes that path's gate, re-reads the file and lands only when it still holds the text this call read; otherwise it answers `ERROR EditConflict: <path> changed after this call read it ...` and writes nothing, so the other change is kept. Covered by `StoredIfUnchangedAsync_WhenAnotherWriteLandedAfterThisCallRead_RefusesAndKeepsTheOtherWrite`, `StoredIfUnchangedAsync_ForTwoParallelWritesFromOneRead_LandsExactlyOneAndRefusesTheOther` and `EditText_TwoParallelEditsOfOneMarkdownFile_NeverAnswerAppliedForAnEditTheFileLost`.
 
 ## [0.81.0] - 2026-10-31
 ### Added

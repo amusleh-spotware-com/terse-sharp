@@ -2749,7 +2749,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     }
 
     [Fact]
-    public async Task EditText_WithoutForceOnACompiledFile_LandsAndNamesTheCheaperSymbolRoute()
+    public async Task EditText_WithoutForceOnACompiledFile_LandsThroughTheCompileGate()
     {
         const string Probe = "src/Fixture.Trading/UnforcedEditProbe.cs";
 
@@ -2765,8 +2765,6 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
             var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
 
             Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
-            Assert.Contains("NOTE a .cs text edit is compile-gated without force=true", applied, StringComparison.Ordinal);
-            Assert.Contains("replace_symbol_body", applied, StringComparison.Ordinal);
             Assert.Contains("public int Value => 1;", after, StringComparison.Ordinal);
         }
         finally
@@ -2984,6 +2982,33 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         {
             File.SetAttributes(path, FileAttributes.Normal);
             directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task EditText_TwoParallelEditsOfOneMarkdownFile_NeverAnswerAppliedForAnEditTheFileLost()
+    {
+        const string Probe = "ParallelEditProbe.md";
+
+        try
+        {
+            for (var round = 0; round < 10; round++)
+            {
+                await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "alpha\nbeta\n" });
+
+                var answers = await Task.WhenAll(
+                    server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "alpha", ["newText"] = "ALPHA" }),
+                    server.CallAsync("edit_text", new() { ["path"] = Probe, ["oldText"] = "beta", ["newText"] = "BETA" }));
+                var after = await server.CallAsync("read_text", new() { ["path"] = Probe, ["verbose"] = true });
+
+                Assert.All(answers, answer => Assert.True(!answer.StartsWith("ERROR", StringComparison.Ordinal) || answer.StartsWith("ERROR EditConflict", StringComparison.Ordinal), answer));
+                Assert.Equal(!answers[0].StartsWith("ERROR", StringComparison.Ordinal), after.Contains("ALPHA", StringComparison.Ordinal));
+                Assert.Equal(!answers[1].StartsWith("ERROR", StringComparison.Ordinal), after.Contains("BETA", StringComparison.Ordinal));
+            }
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
     }
 }

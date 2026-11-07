@@ -14,7 +14,7 @@ static async Task<int> CommandLineAsync(string[] arguments)
 
     var skillOption = new Option<bool>("--skill") { Description = "Also install the agent skill that teaches which TerseSharp tool replaces which built-in." };
 
-    var guardOption = new Option<bool>("--guard") { Description = "Also install a Claude Code PreToolUse hook that blocks Read/Grep/Edit on C#/.NET and XAML files, a PostToolBatch hook that asks for independent calls in one response after a lone read-only terse call, and PreToolUse, PostToolUse and SessionStart hooks that hand a terse call the nested CLAUDE.md files above the paths it touched." };
+    var guardOption = new Option<bool>("--guard") { Description = "Also install a Claude Code PreToolUse hook that blocks Read/Grep/Edit on C#/.NET and XAML files, and PreToolUse, PostToolUse, PostToolBatch and SessionStart hooks that hand a terse call the nested CLAUDE.md files above the paths it touched." };
 
     var maxWorkspacesOption = new Option<int?>("--max-workspaces") { Description = "How many solutions stay loaded at once; the least recently used is unloaded beyond that. Default 4. TERSE_MAX_WORKSPACES does the same. A large solution costs gigabytes, so set 1 when you only ever work in one." };
 
@@ -23,7 +23,7 @@ static async Task<int> CommandLineAsync(string[] arguments)
     var toolsOption = new Option<string?>("--tools") { Description = TerseSharp.Server.ToolProfile.ToolsOptionDescription };
 
     var serve = new Command("serve", "Run the MCP server over stdio.") { workspaceOption, readOnlyOption, noWatchOption, maxWorkspacesOption, idleMinutesOption, toolsOption };
-    var postBatchOption = new Option<bool>("--post-batch") { Description = "Read a Claude Code PostToolBatch payload instead, and nudge the next response to batch its independent calls when the batch was one read-only terse call; TERSE_NUDGE_LOG=1 also appends its tool_use id to ~/.terse/batch-nudge.log." };
+    var postBatchOption = new Option<bool>("--post-batch") { Description = "Read a Claude Code PostToolBatch payload instead, and lift the folder-rules hold on that response's sibling writes; it writes nothing." };
 
     var folderRulesOption = new Option<bool>("--folder-rules") { Description = "Read a Claude Code PreToolUse, PostToolUse or SessionStart payload for a terse call instead, and inject the nested CLAUDE.md files above the paths it touched once per session - Claude Code loads them only for its own Read, Edit and Write. The first terse write that names a path below rules the session has not seen is denied with them; a compaction forgets what was shown." };
 

@@ -210,6 +210,16 @@ public static class FolderRules
         }
     }
 
+    public static Task<int> SettleAsync(TextReader input, CancellationToken cancellationToken) =>
+        SettleAsync(input, ClientRegistrar.Home(), cancellationToken);
+
+    internal static async Task<int> SettleAsync(TextReader input, string home, CancellationToken cancellationToken)
+    {
+        Settle(await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false), home);
+
+        return 0;
+    }
+
     private const int PointerReserve = 360;
     private static readonly string[] BindingMarkers = ["MUST", "NEVER", "Never", "never", "Do not", "do not", "Don't", "don't", "BANNED", "Banned", "banned", "HARD GATE", "🚫", "ALWAYS", "Always", "always", "FORBIDDEN", "Forbidden", "forbidden", "MANDATORY", "Mandatory", "mandatory", "REQUIRED", "required"];
 
