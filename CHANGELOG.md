@@ -12,7 +12,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ### Fixed
 
-- **0.82.0 was tagged but never published: its release run stopped at the test step on one E2E whose settle loop gave the watcher 5 s to go quiet.** `ChangedFiles_InALinkedWorktreeRepeatedWithNoEventInBetween_ReplaysTheListingAsUnchanged` passed on all three CI legs at the same commit and timed out on the release runner, so its settle loop now waits up to 30 s; no product code changed. This release carries everything listed under 0.82.0.
+- **0.82.0 was tagged but never published: its release run stopped at the test step on one E2E whose settle loop gave the watcher 5 s to go quiet.** `ChangedFiles_InALinkedWorktreeRepeatedWithNoEventInBetween_ReplaysTheListingAsUnchanged` passed on all three CI legs at the same commit and timed out on the release runner, so its settle loop now waits up to 30 s. `WriteText_ANewFileWhoseOnlyErrorIsAnUnresolvedName_LandsAndSaysItWasNotRolledBack` retried a create after an `ERROR Transient` that had already landed the file, so the retry answered `no change` without the note it asserts; it now deletes the half-landed file before retrying (`TransientWrites.WriteNewAsync`). No product code changed. This release carries everything listed under 0.82.0.
 
 ## [0.82.0] - 2026-11-07
 

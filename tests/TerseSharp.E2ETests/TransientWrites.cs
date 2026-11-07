@@ -20,4 +20,22 @@ internal static class TransientWrites
 
         return text;
     }
+
+    public static async Task<string> WriteNewAsync(this TerseServerFixture server, Dictionary<string, object?> arguments)
+    {
+        var text = string.Empty;
+
+        for (var attempt = 0; attempt < Attempts; attempt++)
+        {
+            text = await server.CallAsync("write_text", new(arguments));
+
+            if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
+                break;
+
+            await server.CallAsync("write_text", new() { ["path"] = arguments["path"], ["delete"] = true, ["force"] = true });
+            await Task.Delay(500, TestContext.Current.CancellationToken);
+        }
+
+        return text;
+    }
 }
