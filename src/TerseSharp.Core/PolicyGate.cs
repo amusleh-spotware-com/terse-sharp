@@ -71,7 +71,10 @@ public static class PolicyGate
         string.Equals(document.Project.Language, LanguageNames.CSharp, StringComparison.Ordinal)
             && !GeneratedCode.IsGenerated(root, document.FilePath);
 
-    public static PolicyFinding[] Introduced(IReadOnlyList<PolicyFinding> before, IReadOnlyList<PolicyFinding> after)
+    public static PolicyFinding[] Introduced(IReadOnlyList<PolicyFinding> before, IReadOnlyList<PolicyFinding> after) =>
+        [.. Matched([.. before.Where(HealthDecline.IsUnscored)], [.. after.Where(HealthDecline.IsUnscored)]), .. HealthDecline.Charged(before, after)];
+
+    private static IEnumerable<PolicyFinding> Matched(IReadOnlyList<PolicyFinding> before, IReadOnlyList<PolicyFinding> after)
     {
         var exact = Tally(before, static finding => (finding.Key, finding.Measured));
         var named = Tally(before, static finding => finding.Key);
@@ -87,7 +90,7 @@ public static class PolicyGate
                 unmatched.Add((finding, key));
         }
 
-        return [.. unmatched.Where(entry => !Take(named, entry.Key)).Select(entry => entry.Finding)];
+        return unmatched.Where(entry => !Take(named, entry.Key)).Select(entry => entry.Finding);
     }
 
     private static Dictionary<TKey, int> Tally<TKey>(IReadOnlyList<PolicyFinding> findings, Func<PolicyFinding, TKey> key)

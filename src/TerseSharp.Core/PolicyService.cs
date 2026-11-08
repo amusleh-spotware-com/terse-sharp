@@ -23,6 +23,7 @@ public static class PolicyService
 
         Expressions(root, scope);
         Comments(root, scope);
+        scope.Check(PolicyRule.CodeHealth, root, Health(root, scope));
 
         return found;
     }
@@ -274,7 +275,7 @@ public static class PolicyService
         _ => null,
     };
 
-    private readonly record struct Measure(string Measured, string Allowed);
+    private readonly record struct Measure(string Measured, string Allowed, string Relation = "exceeds", double? Health = null);
 
     private sealed record Scope(string Path, PolicyOptions Options, List<PolicyFinding> Found)
     {
@@ -295,7 +296,9 @@ public static class PolicyService
                 position.Character + 1,
                 Declaration(node),
                 found.Measured,
-                found.Allowed));
+                found.Allowed,
+                found.Relation,
+                found.Health));
         }
 
         private static string Declaration(SyntaxNode node) => node.AncestorsAndSelf()
@@ -392,7 +395,7 @@ public static class PolicyService
     private static bool IsTestAttribute(string name) =>
         name.EndsWith("Attribute", StringComparison.Ordinal) ? IsTestAttribute(name[..^"Attribute".Length]) : name is "Fact" or "Theory" or "Test" or "TestMethod" or "TestCase" or "TestCaseSource" or "DataTestMethod" or "SkippableFact" or "SkippableTheory" or "StaFact" or "StaTheory" or "WpfFact" or "WpfTheory" or "UITestMethod";
 
-    private static bool IsTest(MethodDeclarationSyntax method)
+    internal static bool IsTest(MethodDeclarationSyntax method)
     {
         foreach (var list in method.AttributeLists)
         {
@@ -404,5 +407,18 @@ public static class PolicyService
         }
 
         return false;
+    }
+
+    private static Measure? Health(SyntaxNode root, Scope scope)
+    {
+        if (!scope.Options.Enforces(PolicyRule.CodeHealth))
+            return null;
+
+        var health = CodeHealth.Assess(root);
+        var threshold = scope.Limit(PolicyRule.CodeHealth);
+
+        return health.Score >= threshold
+            ? null
+            : new Measure(health.Describe(), threshold.ToString(CultureInfo.InvariantCulture), "is below", health.Score);
     }
 }

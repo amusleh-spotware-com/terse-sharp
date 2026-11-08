@@ -887,26 +887,28 @@ while one project re-advertises it with an explicit `true`.
 
 A project can make this server **reject an edit that violates its standards**, through a `policy`
 section in the same `.terse.json`, cascading exactly as the `tools` half does. `terse install` writes
-the home file with every rule at its default, and each later `terse serve` adds the rules a new version
-introduced without changing a value the user set. It is **off unless that section
+the home file at defaults; `terse serve` tops up new rules, never a value you set. It is **off unless that section
 exists - except `TERSE112 comments` and `TERSE113 xmlDocs`**, both enforced at `warn` with no
 `.terse.json` at all: an edit introducing a `//` or `/* */` answers `WARNING policy  TERSE112 ...` and
-one introducing a `///` block answers `WARNING policy  TERSE113 ...`, and both still land. Make the
-code say it instead. `{"policy":{"enabled":false}}` turns them off - NOT
-`{"rules":{"comments":false}}`, because declaring a `policy` section turns the other twelve rules ON -
+one introducing a `///` block answers `WARNING policy  TERSE113 ...`, and both still land.
+`{"policy":{"enabled":false}}` turns them off - NOT
+`{"rules":{"comments":false}}`, because declaring a `policy` section turns the other thirteen rules ON -
 all at `warn`, `chainedReferences` off, so **nothing rejects until you ask**:
 `"rules":{"comments":{"action":"reject"}}` refuses. When on, an edit answers
 `ERROR PolicyViolation` naming each rule, the declaration, measured against allowed, and a `fix:` line.
 
 **Only what the edit INTRODUCES counts** - a violation already in the file does not block you, so never
 "fix" unrelated members to get an edit through. A finding is counted per rule, path and member, not
-by its measured value, so neither improving nor worsening an already-violating member registers.
+by its measured value, so neither improving nor worsening an already-violating member registers (`TERSE114` excepted).
 
-Fourteen rules, `TERSE100`-`TERSE113`: cognitive complexity, method statements, methods per type,
-constructor dependencies, parameter count, method-name length, meaningless type suffixes, naming per
-declaration kind (a `[Fact]`/`[Theory]`/`[Test]`-style method uses the `testMethod` key, which accepts `Method_Scenario_Outcome`), `async void`, condition operands, chained references (off by default), nesting depth,
-and **comments (`TERSE112`) and XML doc comments (`TERSE113`), the two rules that are ON at `warn` with
-no `.terse.json` at all**. `TERSE112` never flags a `///` block and `TERSE113` never flags a `//` one.
+Fifteen rules, `TERSE100`-`TERSE114`: cognitive complexity, method statements, methods per type,
+constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
+declaration kind (a `[Fact]`-style method uses the `testMethod` key), `async void`, condition operands, chained references (off), nesting (3),
+comments (`TERSE112`) and XML docs (`TERSE113`) - ON at `warn` with no `.terse.json` - and **code health
+(`TERSE114`)**: each file scored 1-10 from Brain Method, Deep Nested Complexity, Complex Method, Large
+Method, Bumpy Road, Excess Function Arguments, Complex Conditional, Code Duplication, Low Cohesion and
+Large File; a file the edit leaves below `limit` (9) is flagged when new, newly below, or lower,
+naming each smell.
 Each is `reject`, `warn` or `off` and every one DEFAULTS to `warn`, so a rule only refuses an edit
 where a `.terse.json` asked it to; a `warn` rule lets the edit land and answers `WARNING policy  ...` above the one-line success; the diff stays behind `verbose=true`.
 Cognitive complexity is a **percentage of a threshold** - default `150`% of `10`, so a score above 15

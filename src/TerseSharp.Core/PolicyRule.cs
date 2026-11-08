@@ -22,7 +22,8 @@ public enum PolicyRule
     ChainedReferences,
     NestingDepth,
     Comments,
-    XmlDocs
+    XmlDocs,
+    CodeHealth
 }
 
 public sealed record PolicyLimit(PolicyAction Action, int Value);
@@ -55,12 +56,14 @@ public static class PolicyRules
                 "name the condition - extract it into a predicate whose name says what it tests"),
             new(PolicyRule.ChainedReferences, "TERSE110", "chainedReferences", 3, PolicyAction.Off,
                 "ask the collaborator for what you need instead of reaching through it"),
-            new(PolicyRule.NestingDepth, "TERSE111", "nestingDepth", 4, PolicyAction.Warn,
+            new(PolicyRule.NestingDepth, "TERSE111", "nestingDepth", 3, PolicyAction.Warn,
                 "invert the condition and return early, or extract the inner block"),
             new(PolicyRule.Comments, "TERSE112", "comments", 0, PolicyAction.Warn,
                 "make the code say it - rename, extract a method, or split the type; /// XML doc comments are TERSE113 rather than this rule, and {\"policy\":{\"enabled\":false}} turns the whole policy, this rule included, off"),
             new(PolicyRule.XmlDocs, "TERSE113", "xmlDocs", 0, PolicyAction.Warn,
-                "delete the /// block and let the signature say it; a public API that genuinely ships documentation sets {\"policy\":{\"rules\":{\"xmlDocs\":false}}}")
+                "delete the /// block and let the signature say it; a public API that genuinely ships documentation sets {\"policy\":{\"rules\":{\"xmlDocs\":false}}}"),
+            new(PolicyRule.CodeHealth, "TERSE114", "codeHealth", 9, PolicyAction.Warn,
+                "raise the file's code health back to the threshold - unnest the deep blocks, split the complex or long methods, group the arguments into a parameter object and name the compound conditions; the measured line names each smell and the member carrying it")
         ];
 
     public const int CognitiveThreshold = 10;

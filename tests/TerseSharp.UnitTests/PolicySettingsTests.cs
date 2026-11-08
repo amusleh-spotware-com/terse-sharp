@@ -217,4 +217,37 @@ public sealed class PolicySettingsTests
     [Fact]
     public void Unsupported_ForAnIdTheActivePolicyEnforces_DoesNotCallItNotEnabled() =>
         Assert.Equal("TERSE199", Assert.Single(ProjectDiagnostics.Unsupported([], ["TERSE107", "TERSE199"], [], ["TERSE107"])));
+
+    [Fact]
+    public void Parse_WithAnEmptyPolicySection_WarnsOnCodeHealthBelowNine()
+    {
+        var options = PolicySettings.Parse("""{"policy":{}}""");
+
+        Assert.Equal(new PolicyLimit(PolicyAction.Warn, 9), options.Limit(PolicyRule.CodeHealth));
+    }
+
+    [Fact]
+    public void Parse_WithCodeHealthAsANumber_TakesItAsTheThresholdAndKeepsWarning()
+    {
+        var options = PolicySettings.Parse("""{"policy":{"rules":{"codeHealth":7}}}""");
+
+        Assert.Equal(new PolicyLimit(PolicyAction.Warn, 7), options.Limit(PolicyRule.CodeHealth));
+    }
+
+    [Fact]
+    public void Parse_WithCodeHealthFalse_TurnsOnlyThatRuleOff()
+    {
+        var options = PolicySettings.Parse("""{"policy":{"rules":{"codeHealth":false}}}""");
+
+        Assert.False(options.Enforces(PolicyRule.CodeHealth));
+        Assert.True(options.Enforces(PolicyRule.NestingDepth));
+    }
+
+    [Fact]
+    public void Parse_WithCodeHealthSetToReject_RejectsBelowItsOwnThreshold()
+    {
+        var options = PolicySettings.Parse("""{"policy":{"rules":{"codeHealth":{"limit":8,"action":"reject"}}}}""");
+
+        Assert.Equal(new PolicyLimit(PolicyAction.Reject, 8), options.Limit(PolicyRule.CodeHealth));
+    }
 }

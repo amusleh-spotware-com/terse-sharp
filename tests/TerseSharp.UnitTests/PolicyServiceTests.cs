@@ -535,4 +535,41 @@ public sealed class PolicyServiceTests
 
     private static string Declared(string attribute, int count, int start) =>
         string.Concat(Enumerable.Range(start, count).Select(index => string.Create(CultureInfo.InvariantCulture, $"{attribute}void M{index}() {{ }} ")));
+
+    [Fact]
+    public void Inspect_ForAFileBelowTheCodeHealthThreshold_WarnsNamingTheSmells()
+    {
+        var finding = Assert.Single(Findings(PolicyRule.CodeHealth, CodeHealthTests.BrainMethod()));
+
+        Assert.Equal(PolicyAction.Warn, finding.Action);
+        Assert.Equal(7.5, finding.Health);
+        Assert.Equal(
+            "TERSE114  Sample.cs:1  <file>  code health 7.5 (Brain Method Sample.Brain, Complex Method Sample.Brain, Large Method Sample.Brain) is below 9",
+            finding.Render());
+    }
+
+    [Fact]
+    public void Inspect_ForAFileExactlyAtTheCodeHealthThreshold_ReportsNothing()
+    {
+        var fields = string.Join('\n', Enumerable.Range(0, 1001).Select(index => string.Create(CultureInfo.InvariantCulture, $"int field{index};")));
+
+        Assert.Empty(Findings(PolicyRule.CodeHealth, "class Sample\n{\n" + fields + "\n}"));
+    }
+
+    [Fact]
+    public void Inspect_WithNoCheckedInPolicy_LeavesCodeHealthOffLikeEveryOtherScoredRule()
+    {
+        var found = PolicyService.Inspect(Root(CodeHealthTests.BrainMethod()), "Sample.cs", PolicyOptions.Off.Effective);
+
+        Assert.DoesNotContain(found, finding => finding.Rule is PolicyRule.CodeHealth);
+    }
+
+    [Fact]
+    public void Inspect_ForFourNestedBlocks_ReportsNestingDepthAgainstTheDefaultLimitOfThree()
+    {
+        var finding = Assert.Single(Findings(PolicyRule.NestingDepth, "class Sample { void Deep(bool a, bool b, bool c, bool d) { if (a) { if (b) { if (c) { if (d) { } } } } } }"));
+
+        Assert.Equal("4 nesting levels", finding.Measured);
+        Assert.Equal("3", finding.Allowed);
+    }
 }

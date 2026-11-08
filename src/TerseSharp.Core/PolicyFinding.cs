@@ -9,7 +9,9 @@ public sealed record PolicyFinding(
     int Column,
     string Declaration,
     string Measured,
-    string Allowed)
+    string Allowed,
+    string Relation = "exceeds",
+    double? Health = null)
 {
     public string Key => string.Create(
             CultureInfo.InvariantCulture,
@@ -17,11 +19,11 @@ public sealed record PolicyFinding(
 
     public string Render() => string.Create(
         CultureInfo.InvariantCulture,
-        $"{PolicyRules.Of(Rule).Id}  {Path}:{Line}  {Declaration}  {Measured} exceeds {Allowed}");
+        $"{PolicyRules.Of(Rule).Id}  {Path}:{Line}  {Declaration}  {Measured} {Relation} {Allowed}");
 
     public string Diagnostic() => string.Create(
         CultureInfo.InvariantCulture,
-        $"{PolicyRules.Of(Rule).Id} {Severity()} Policy {Path}:{Line}:{Column}: {Declaration} - {Measured} exceeds {Allowed}");
+        $"{PolicyRules.Of(Rule).Id} {Severity()} Policy {Path}:{Line}:{Column}: {Declaration} - {Measured} {Relation} {Allowed}");
 
     public string Explain() => string.Create(
         CultureInfo.InvariantCulture,

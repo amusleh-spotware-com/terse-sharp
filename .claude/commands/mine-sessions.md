@@ -1834,6 +1834,11 @@ Anything in that table is a premise, not a research task.
 - **code-generation quality** (`[modern]`) and **performance-aware generation** (`[perf]`): measured
   rates of deprecated API use in LLM completions, and which intervention shape — schema wording, an
   in-response diagnostic, a worked example, an analyzer surfaced at the write — measurably changes it;
+- **code-quality metrics an edit can be scored on** (`[metric]`): maintainability and code-health
+  models — CodeScene Code Health and its biomarkers, SonarSource cognitive complexity and S134 nesting,
+  the maintainability index, LCOM cohesion, duplication and change-coupling detectors — each with its
+  published default thresholds and the evidence linking it to defect rate or change speed, diffed
+  against what the `.terse.json` policy (`TERSE100`-`TERSE114`) already computes;
 - benchmark evidence: token, latency and accuracy numbers from published evaluations of MCP servers
   and semantic code-navigation tools;
 - **cross-session adaptation**: mechanisms that learn from a repository's own past sessions — facts
@@ -1903,6 +1908,15 @@ teaches the retry, a `SKILL.md` section rewritten, a default flipped, a hook tha
 State the expected accuracy or productivity gain, **the instrument that verified it**, and how the
 next run would *observe* it — a row whose success can only be felt is not accepted. A method that is
 real but has no lever in this repo goes in the report's research section, not in the backlog.
+
+**A `[metric]` finding is implemented, not only logged.** A metric computable from one file's syntax,
+with a published threshold, that no `TERSE1nn` rule already measures, becomes a policy rule in the same
+run: a `PolicyRule` member and a `PolicyRules.All` row with the next `TERSE1nn` id and `warn` as its
+default action, the measurement in `TerseSharp.Core` beside `CodeHealth` and `CognitiveComplexity`, a
+unit test per threshold edge, an E2E against `fixtures/PolicySolution`, and the docs gate. A metric that
+needs cross-file state — cohesion across types, duplication across files, change coupling from history —
+is logged as an open row naming that dependency, and a biomarker that refines an existing score (a new
+`CodeHealth` smell) is added to that score rather than shipped as a rule of its own.
 
 ## M8 — Deduplicate against what is already logged
 

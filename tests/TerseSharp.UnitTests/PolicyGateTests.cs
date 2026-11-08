@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using TerseSharp.Core;
 
@@ -319,4 +320,42 @@ public sealed class PolicyGateTests
         Assert.True(result.IsOk);
         Assert.Contains("methodLenght", result.Value!, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Introduced_ForAFileWhoseCodeHealthDeclined_ChargesIt()
+    {
+        PolicyFinding[] before = [Health(8.0)];
+        PolicyFinding[] after = [Health(7.5)];
+
+        Assert.Equal(7.5, Assert.Single(PolicyGate.Introduced(before, after)).Health);
+    }
+
+    [Fact]
+    public void Introduced_ForAFileWhoseCodeHealthHeldOrImproved_ChargesNothing()
+    {
+        PolicyFinding[] before = [Health(8.0)];
+
+        Assert.Empty(PolicyGate.Introduced(before, [Health(8.0)]));
+        Assert.Empty(PolicyGate.Introduced(before, [Health(8.5)]));
+    }
+
+    [Fact]
+    public void Introduced_ForAFileThatDroppedBelowTheThresholdForTheFirstTime_ChargesIt() =>
+        Assert.Single(PolicyGate.Introduced([], [Health(8.9)]));
+
+    private static PolicyFinding Health(double score) =>
+        new(PolicyRule.CodeHealth, PolicyAction.Warn, "src/Plumbing.cs", 1, 1, "<file>", string.Create(CultureInfo.InvariantCulture, $"code health {score}"), "9", "is below", score);
+
+    [Fact]
+    public void Introduced_ForTwoDocumentsOfOneFileWhoseDifferentScoresBothHold_ChargesNothing()
+    {
+        PolicyFinding[] before = [Health(8.0), Health(7.0)];
+        PolicyFinding[] after = [Health(8.0), Health(7.0)];
+
+        Assert.Empty(PolicyGate.Introduced(before, after));
+    }
+
+    [Fact]
+    public void Introduced_ForTwoDocumentsOfOneFileWhoseLowestScoreDropped_ChargesItOnce() =>
+        Assert.Equal(6.5, Assert.Single(PolicyGate.Introduced([Health(8.0), Health(7.0)], [Health(8.0), Health(6.5)])).Health);
 }

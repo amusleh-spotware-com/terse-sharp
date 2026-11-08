@@ -93,6 +93,20 @@ public sealed class PolicyE2ETests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task AddMember_WithAMethodThatDropsTheFileBelowTheCodeHealthThreshold_IsRolledBackNamingTerse114()
+    {
+        var branches = string.Join('\n', Enumerable.Range(1, 9).Select(index => string.Create(CultureInfo.InvariantCulture, $"if (amount == {index}) total += {index};")));
+        var statements = string.Join('\n', Enumerable.Range(0, 70).Select(index => string.Create(CultureInfo.InvariantCulture, $"total += amount * {index};")));
+
+        var response = await AddAsync("public int Classify(int amount)\n{\nvar total = 0;\n" + branches + "\n" + statements + "\nreturn total;\n}", allowPolicy: false);
+
+        Assert.Contains("ERROR PolicyViolation", response, StringComparison.Ordinal);
+        Assert.Contains("TERSE114", response, StringComparison.Ordinal);
+        Assert.Contains("code health 7.5 (Brain Method Ledger.Classify", response, StringComparison.Ordinal);
+        Assert.Equal(await OriginalAsync(), await CurrentAsync());
+    }
+
     private static string Long() =>
         "public int Long()\n{\n" + string.Concat(Enumerable.Range(0, 10).Select(index => "    var a" + index.ToString(CultureInfo.InvariantCulture) + " = " + index.ToString(CultureInfo.InvariantCulture) + ";\n")) + "    return 0;\n}";
 
