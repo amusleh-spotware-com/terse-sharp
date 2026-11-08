@@ -179,13 +179,22 @@ in R2. Nothing else takes input from the user.
 
 ## R8 — Wait until the version is live on NuGet
 
-1. Poll the flat container — authoritative and first to update:
+1. Poll the flat container — authoritative and first to update — for **every** package id the release
+   pushed, not only the pointer package:
    ```bash
-   curl -s https://api.nuget.org/v3-flatcontainer/tersesharp/index.json
+   for p in tersesharp tersesharp.any tersesharp.win-x64 tersesharp.win-arm64 tersesharp.linux-x64 \
+            tersesharp.linux-arm64 tersesharp.osx-x64 tersesharp.osx-arm64; do
+     curl -s "https://api.nuget.org/v3-flatcontainer/$p/index.json" | grep -q '"X.Y.Z"' || echo "missing $p"
+   done
    ```
+   The pointer package `tersesharp` resolves to the RID package of the installing machine, so it can
+   list minutes before that RID package does. Measured on 0.83.0: `tersesharp` and six RID packages
+   were indexed while `tersesharp.win-x64` still showed "This package has not been indexed yet", and
+   `dotnet tool install` on Windows failed with `Version 0.83.0 of package tersesharp.win-x64 is not
+   found`. The release is live only when all eight list.
    PowerShell fallback:
    `powershell -NoProfile -Command "Invoke-RestMethod https://api.nuget.org/v3-flatcontainer/tersesharp/index.json | ConvertTo-Json -Compress"`.
-2. Every 30 s, capped at 30 minutes, stopping the moment `X.Y.Z` appears. **Each poll also re-checks
+2. Every 30 s, capped at 30 minutes, stopping the moment `X.Y.Z` appears for all eight ids. **Each poll also re-checks
    the release run is still `completed/success`** — a wait that only watches for the artifact cannot
    tell a slow publish from a dead one.
 3. The **registration** endpoint lags the flat container by about a minute, so
