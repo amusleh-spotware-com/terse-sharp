@@ -561,8 +561,7 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         }
         finally
         {
-            await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = original, ["force"] = true });
-            File.SetLastWriteTimeUtc(full, stamp);
+            await RestoreSampleAsync(Sample, full, original, stamp);
         }
     }
 
@@ -589,9 +588,19 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         }
         finally
         {
-            await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = original, ["force"] = true });
-            File.SetLastWriteTimeUtc(full, stamp);
+            await RestoreSampleAsync(Sample, full, original, stamp);
         }
+    }
+
+    private async Task RestoreSampleAsync(string sample, string full, string original, DateTime stamp)
+    {
+        var answer = await server.CallAsync("write_text", new() { ["path"] = sample, ["content"] = original, ["force"] = true });
+        var onDisk = await File.ReadAllTextAsync(full, TestContext.Current.CancellationToken);
+
+        File.SetLastWriteTimeUtc(full, stamp);
+
+        if (onDisk != original)
+            throw new InvalidOperationException("the restore did not land - write_text answered:\n" + answer + "\non disk:\n" + onDisk);
     }
 
     [Fact]
