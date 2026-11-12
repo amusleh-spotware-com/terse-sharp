@@ -712,15 +712,21 @@ member that does it — `get_type_outline System.MemoryExtensions contains=White
 | a `char.IsWhiteSpace` loop, `Length - TrimStart().Length`, `TrimEnd()` then `TrimStart()` | `IndexOfAnyWhiteSpace` · `IndexOfAnyExceptWhiteSpace` · `LastIndexOfAny[Except]WhiteSpace` (`SnippetSearch.Depth` is the shared indent width) |
 | `s.Trim().Length > 0` on a `string`, `Split` + `Trim` to find a non-blank line | `!s.AsSpan().IsWhiteSpace()` |
 | `Task.WhenAny(task, Task.Delay(…))` | `task.WaitAsync(timeout, token)` (CA2027; the two-task overload is banned) |
-| a `ProcessStartInfo` without a handle list | `InheritedHandles = []`, and `KillOnParentExit = true` under `OperatingSystem.IsWindows() \|\| OperatingSystem.IsLinux()` — `ChildProcess.StartInfo` already does both, so spawn through it |
+| a child that outlives a crashed server | `KillOnParentExit = true` under `OperatingSystem.IsWindows() \|\| OperatingSystem.IsLinux()` — `ChildProcess.StartInfo` does it, so spawn through it. **Never** set `InheritedHandles = []` there: it made MSBuild's BuildHost answer `RemoteInvocationException` on add-document edits in 4 of 4 full E2E runs and 0 of 2 without it (`I905`) |
 | `Process.GetProcessById` + `catch (ArgumentException)` | `Process.TryGetProcessById` |
 
-**`runtime-async=on` was measured and rejected for this server - do not re-enable it without a new
-measurement.** It removed every compiler-generated async state machine (`terse.dll` 388 to 0, `Core`
-927 to 67) and cut the `bin/Release` IL of both assemblies by 21-22%, but a long-running `serve`
-answered the same ten tools no faster (2 294 against 2 133 ms per iteration, median of 3 x 20) while
-holding 8.5% more working set (2 338 against 2 154 MB), and the cold one-shot calls were inside their
-spread. The work here is Roslyn and git, not await chains. `Process.ReadAllTextAsync` /
+**`runtime-async=on` is set for every project under `src/` (`src/Directory.Build.props`) - the
+maintainer's decision, and it stays on.** It removed every compiler-generated async state machine
+(`terse.dll` 388 to 0, `Core` 927 to 67, the rest iterators) and cut the IL of both assemblies by
+21-22% and the shipped ReadyToRun images by 9-10%. crossgen2 precompiles the runtime-async methods:
+`DOTNET_JitDisasmSummary=1` on a cold R2R `get_file_outline` lists 168 TerseSharp methods JIT-compiled
+against 621 before, one of them async against 411 (the `AsyncMethodBuilderCore.Start<d__N>`
+instantiations R2R could not pregenerate), and the package starts in 107 ms against 109 ms. Measured
+costs, so nobody re-derives them: a long-running `serve` took 7.5% longer per iteration of ten tools
+than the same code without it (2 294 against 2 133 ms, median of 3 x 20) - inside the 10% gap the
+same benchmark showed between two builds differing in no measured path (2 356 against 2 133 ms) -
+and held 8.5% more working set (2 338 against 2 154 MB). Do not turn it
+off to work around a behaviour difference - reproduce it and report it. `Process.ReadAllTextAsync` /
 `RunAndCaptureTextAsync` are **not** a fit for `ChildProcess`: they throw on a timeout and keep no
 partial output, and `build`/`run_tests` must answer a timeout with what the child already printed.
 A gain .NET 11 delivers automatically (regex, JSON, `Split`, `FrozenDictionary`, pipe reads) needs

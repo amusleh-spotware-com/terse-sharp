@@ -48,12 +48,13 @@ public sealed class ChildProcessTests
     }
 
     [Fact]
-    public void StartInfo_HandsTheChildOnlyItsStandardHandles()
+    public void StartInfo_LeavesHandleInheritanceToTheRuntime()
     {
         var start = ChildProcess.StartInfo("dotnet", [], AppContext.BaseDirectory);
 
-        Assert.NotNull(start.InheritedHandles);
-        Assert.Empty(start.InheritedHandles);
+        Assert.True(
+            start.InheritedHandles is null,
+            "an explicit InheritedHandles list on the build and test children made the in-process MSBuild BuildHost answer RemoteInvocationException on every full E2E run (4 of 4) - add-document edits came back ERROR Transient");
     }
 
     [Fact]

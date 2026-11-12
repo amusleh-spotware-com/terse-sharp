@@ -95,7 +95,6 @@ internal static class ChildProcess
             UseShellExecute = false,
             StandardOutputEncoding = encoding,
             StandardErrorEncoding = encoding,
-            InheritedHandles = [],
         };
 
         if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
