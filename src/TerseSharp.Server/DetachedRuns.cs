@@ -58,10 +58,7 @@ public sealed class DetachedRuns : IDisposable, IAsyncDisposable
         if (run.IsCompleted || wait <= TimeSpan.Zero)
             return;
 
-        using var expiry = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-        await Task.WhenAny(run, Task.Delay(wait, expiry.Token)).ConfigureAwait(false);
-        await expiry.CancelAsync().ConfigureAwait(false);
+        await run.WaitAsync(wait, cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
 
     private static string Unknown(string id) => Errors.RunNotFound(id).Render();

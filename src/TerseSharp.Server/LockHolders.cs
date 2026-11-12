@@ -72,36 +72,43 @@ internal static partial class LockHolders
 
     private static string? NameOf(int pid)
     {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-
-            return process.ProcessName;
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-        {
+        if (!Process.TryGetProcessById(pid, out var process))
             return null;
+
+        using (process)
+        {
+            try
+            {
+                return process.ProcessName;
+            }
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
         }
     }
 
     private static async Task<string> ResolvedAsync(int pid, string root, CancellationToken cancellationToken)
     {
-        try
-        {
-            using var process = Process.GetProcessById(pid);
-            var command = await CommandTailAsync(pid, root, cancellationToken).ConfigureAwait(false);
+        const string Gone = "already gone - the lock it held is released; retry";
 
-            return string.Create(
-                CultureInfo.InvariantCulture,
-                $"{process.ProcessName} startedUtc={Started(process)} age={Age(process)}{Executable(process, root)}{command} - {Kind(process.Id, process.ProcessName, root)}");
-        }
-        catch (ArgumentException)
+        if (!Process.TryGetProcessById(pid, out var process))
+            return Gone;
+
+        using (process)
         {
-            return "already gone - the lock it held is released; retry";
-        }
-        catch (InvalidOperationException)
-        {
-            return "already gone - the lock it held is released; retry";
+            try
+            {
+                var command = await CommandTailAsync(pid, root, cancellationToken).ConfigureAwait(false);
+
+                return string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{process.ProcessName} startedUtc={Started(process)} age={Age(process)}{Executable(process, root)}{command} - {Kind(process.Id, process.ProcessName, root)}");
+            }
+            catch (InvalidOperationException)
+            {
+                return Gone;
+            }
         }
     }
 

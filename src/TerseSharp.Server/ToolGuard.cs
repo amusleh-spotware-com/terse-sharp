@@ -1042,7 +1042,7 @@ public static class ToolGuard
         if (!Uniform(pipelines))
             return null;
 
-        var judged = Judging(pipelines.FindAll(pipeline => pipeline.Text.Trim().Length > 0), command, cwd);
+        var judged = Judging(pipelines.FindAll(static pipeline => !pipeline.Text.AsSpan().IsWhiteSpace()), command, cwd);
         var kept = judged.FindAll(entry => !entry.Verdict.Denied);
         var dropped = judged.FindAll(entry => entry.Verdict.Denied);
 
@@ -2269,7 +2269,7 @@ public static class ToolGuard
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var (here, conditional) = (new StageDirectory(cwd, false), false);
 
-        foreach (var pipeline in Pipelines(command).FindAll(pipeline => pipeline.Text.Trim().Length > 0))
+        foreach (var pipeline in Pipelines(command).FindAll(static pipeline => !pipeline.Text.AsSpan().IsWhiteSpace()))
         {
             var anded = pipeline.Lead.AsSpan().Trim() is "&&";
             var current = !anded && conditional ? new StageDirectory(cwd, false) : here;
@@ -2690,7 +2690,7 @@ public static class ToolGuard
         if (!OnlyAnded(command))
             return null;
 
-        var judged = Judging(Pipelines(command).FindAll(pipeline => pipeline.Text.Trim().Length > 0), command, cwd);
+        var judged = Judging(Pipelines(command).FindAll(static pipeline => !pipeline.Text.AsSpan().IsWhiteSpace()), command, cwd);
         var first = judged.FindIndex(entry => entry.Verdict.Denied);
 
         if (first <= 0)

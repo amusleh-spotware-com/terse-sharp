@@ -31,6 +31,9 @@ public sealed class BannedApiTests
             "M:System.IO.File.WriteAllBytes(System.String,System.Byte[])",
             "M:System.IO.StreamReader.ReadToEnd()",
             "M:System.Xml.Linq.XDocument.Load(System.String)",
+            "M:System.Threading.Tasks.Task.WhenAny(System.Threading.Tasks.Task,System.Threading.Tasks.Task)",
+            "M:System.Diagnostics.Process.GetProcessById(System.Int32)",
+            "M:System.Diagnostics.Process.GetProcessById(System.Int32,System.String)",
         ];
 
         Assert.All(required, symbol => Assert.Contains(symbol + ";", Banned, StringComparison.Ordinal));

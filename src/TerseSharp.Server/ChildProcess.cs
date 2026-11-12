@@ -95,7 +95,11 @@ internal static class ChildProcess
             UseShellExecute = false,
             StandardOutputEncoding = encoding,
             StandardErrorEncoding = encoding,
+            InheritedHandles = [],
         };
+
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+            start.KillOnParentExit = true;
 
         foreach (var argument in arguments)
             start.ArgumentList.Add(argument);

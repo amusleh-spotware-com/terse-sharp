@@ -26,10 +26,8 @@ public static class TextCompressor
 
         foreach (var line in text.AsSpan().EnumerateLines())
         {
-            var trimmed = line.TrimEnd();
-
-            if (!trimmed.IsEmpty)
-                indent = Math.Min(indent, trimmed.Length - trimmed.TrimStart().Length);
+            if (line.IndexOfAnyExceptWhiteSpace() is var first and >= 0)
+                indent = Math.Min(indent, first);
         }
 
         return indent is int.MaxValue ? 0 : indent;

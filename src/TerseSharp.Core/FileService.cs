@@ -1869,17 +1869,11 @@ public static class FileService
         if (at < 0)
             return default;
 
-        var start = at;
+        var start = cell[..at].LastIndexOfAnyWhiteSpace() + 1;
+        var after = at + identifier.Length;
+        var stop = cell[after..].IndexOfAnyWhiteSpace();
 
-        while (start > 0 && !char.IsWhiteSpace(cell[start - 1]))
-            start--;
-
-        var end = at + identifier.Length;
-
-        while (end < cell.Length && !char.IsWhiteSpace(cell[end]))
-            end++;
-
-        return cell[start..end];
+        return cell[start..(stop < 0 ? cell.Length : after + stop)];
     }
 
     private const int MarkdownMapCharacters = 8000;

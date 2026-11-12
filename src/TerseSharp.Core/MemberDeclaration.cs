@@ -62,7 +62,7 @@ public static class MemberDeclaration
         var members = new List<MemberDeclarationSyntax>();
         var remaining = declarations;
 
-        while (remaining.Trim().Length > 0)
+        while (!remaining.AsSpan().IsWhiteSpace())
         {
             var parsed = SyntaxFactory.ParseMemberDeclaration(remaining, consumeFullText: false);
 
@@ -137,12 +137,11 @@ public static class MemberDeclaration
 
     private static bool Dedented(string declaration)
     {
-        var lines = declaration.Split('\n');
+        var newline = declaration.IndexOf('\n');
 
-        return lines.Length > 1
-            && lines[0].Length > 0
-            && !char.IsWhiteSpace(lines[0][0])
-            && Array.Exists(lines[1..], line => line.Trim().Length > 0);
+        return newline > 0
+            && !char.IsWhiteSpace(declaration[0])
+            && !declaration.AsSpan(newline + 1).IsWhiteSpace();
     }
 
     private static HashSet<int> Continued(string declaration)
@@ -303,8 +302,6 @@ public static class MemberDeclaration
             return line;
         }
 
-        var lead = line.Length - line.TrimStart().Length;
-
-        return line[Math.Min(lead, -shift)..];
+        return line[Math.Min(SnippetSearch.Depth(line), -shift)..];
     }
 }

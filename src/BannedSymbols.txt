@@ -8,6 +8,9 @@ M:System.Threading.Tasks.Task.Wait(System.TimeSpan);await the task with a Cancel
 M:System.Threading.Tasks.Task.Wait(System.Threading.CancellationToken);await the task instead of blocking on it
 M:System.Threading.Tasks.Task.WaitAll(System.Threading.Tasks.Task[]);await Task.WhenAll - blocking on a set of tasks burns a pool thread per wait
 M:System.Threading.Tasks.Task.WaitAny(System.Threading.Tasks.Task[]);await Task.WhenAny - blocking on a set of tasks burns a pool thread per wait
+M:System.Threading.Tasks.Task.WhenAny(System.Threading.Tasks.Task,System.Threading.Tasks.Task);await task.WaitAsync(timeout, token) - a Task.Delay raced through WhenAny leaks its timer (CA2027)
+M:System.Diagnostics.Process.GetProcessById(System.Int32);Process.TryGetProcessById - .NET 11 answers a gone pid without throwing
+M:System.Diagnostics.Process.GetProcessById(System.Int32,System.String);Process.TryGetProcessById - .NET 11 answers a gone pid without throwing
 M:System.Runtime.CompilerServices.TaskAwaiter.GetResult();await the task - sync-over-async is banned
 M:System.Runtime.CompilerServices.TaskAwaiter`1.GetResult();await the task - sync-over-async is banned
 M:System.Runtime.CompilerServices.ValueTaskAwaiter.GetResult();await the value task - sync-over-async is banned

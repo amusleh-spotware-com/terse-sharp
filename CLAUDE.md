@@ -702,6 +702,30 @@ allocation gate mandates pre-sizing the one collection you must build; the style
 code-style fixer rewrites `new(count)` and `new(comparer)` into that form and the ubuntu
 `dotnet format style` step fails on the old spelling. `I428`.
 
+**🚫 HARD GATE — on `net11.0` the .NET 11 API is the default, not an option.** Before writing a
+whitespace scan, a timeout, a child-process start or a pid probe, ask whether .NET 11 ships the
+member that does it — `get_type_outline System.MemoryExtensions contains=WhiteSpace` and
+`get_type_outline System.Diagnostics.Process` answer from metadata — and use it:
+
+| Instead of | Write |
+|---|---|
+| a `char.IsWhiteSpace` loop, `Length - TrimStart().Length`, `TrimEnd()` then `TrimStart()` | `IndexOfAnyWhiteSpace` · `IndexOfAnyExceptWhiteSpace` · `LastIndexOfAny[Except]WhiteSpace` (`SnippetSearch.Depth` is the shared indent width) |
+| `s.Trim().Length > 0` on a `string`, `Split` + `Trim` to find a non-blank line | `!s.AsSpan().IsWhiteSpace()` |
+| `Task.WhenAny(task, Task.Delay(…))` | `task.WaitAsync(timeout, token)` (CA2027; the two-task overload is banned) |
+| a `ProcessStartInfo` without a handle list | `InheritedHandles = []`, and `KillOnParentExit = true` under `OperatingSystem.IsWindows() \|\| OperatingSystem.IsLinux()` — `ChildProcess.StartInfo` already does both, so spawn through it |
+| `Process.GetProcessById` + `catch (ArgumentException)` | `Process.TryGetProcessById` |
+
+**`runtime-async=on` was measured and rejected for this server - do not re-enable it without a new
+measurement.** It removed every compiler-generated async state machine (`terse.dll` 388 to 0, `Core`
+927 to 67) and cut the `bin/Release` IL of both assemblies by 21-22%, but a long-running `serve`
+answered the same ten tools no faster (2 294 against 2 133 ms per iteration, median of 3 x 20) while
+holding 8.5% more working set (2 338 against 2 154 MB), and the cold one-shot calls were inside their
+spread. The work here is Roslyn and git, not await chains. `Process.ReadAllTextAsync` /
+`RunAndCaptureTextAsync` are **not** a fit for `ChildProcess`: they throw on a timeout and keep no
+partial output, and `build`/`run_tests` must answer a timeout with what the child already printed.
+A gain .NET 11 delivers automatically (regex, JSON, `Split`, `FrozenDictionary`, pipe reads) needs
+no edit - never rewrite working code to "use" one, and never claim one unmeasured.
+
 ## 🚫 HARD GATE — a release is not cut until the review is closed and the changelog links it
 
 **No tag, no `dotnet pack`, no `dotnet nuget push`, no GitHub release, while a code review is open.**
@@ -756,7 +780,7 @@ and being absent from it is the point:**
 
 | Rule | Gate | Discovers its subject from |
 |---|---|---|
-| **the sync-over-async and synchronous-file halves of the async gate are compiled, not asserted** | `Microsoft.CodeAnalysis.BannedApiAnalyzers` + `BannedApiTests` | `src/BannedSymbols.txt`, applied to every project under `src/` by `src/Directory.Build.props`, so `.Result`, `Task.Wait`/`WaitAll`/`WaitAny`, `GetAwaiter().GetResult()`, `Thread.Sleep`, the synchronous `File` reads and writes, `StreamReader.ReadToEnd` and `XDocument.Load(path)` are build errors. It does **not** compile the whole gate - a `FileStream` opened without `FileOptions.Asynchronous`, and `SemaphoreSlim.Wait`, are still prose. Every `RS0030` suppression carries a `Justification` and the set is ratcheted by `MaxSuppressions` |
+| **the sync-over-async and synchronous-file halves of the async gate, and the two-task `WhenAny` timeout and throwing-pid-probe rows of the .NET 11 gate, are compiled, not asserted** | `Microsoft.CodeAnalysis.BannedApiAnalyzers` + `BannedApiTests` | `src/BannedSymbols.txt`, applied to every project under `src/` by `src/Directory.Build.props`, so `.Result`, `Task.Wait`/`WaitAll`/`WaitAny`, `GetAwaiter().GetResult()`, `Thread.Sleep`, the synchronous `File` reads and writes, `StreamReader.ReadToEnd` and `XDocument.Load(path)` are build errors, and so are `Task.WhenAny(Task, Task)` and `Process.GetProcessById`. It does **not** compile the whole gate - a `FileStream` opened without `FileOptions.Asynchronous`, and `SemaphoreSlim.Wait`, are still prose. Every `RS0030` suppression carries a `Justification` and the set is ratcheted by `MaxSuppressions` |
 | **`IMPROVEMENTS.md` is the open table and `IMPROVEMENTS-ARCHIVE.md` the closed one** | `BacklogShapeTests` | both files themselves — the headings must be exactly `# Improvements backlog` + `## Open` and `# Improvements archive` + `## Closed`, every non-blank line must open with `#` or `\|` or be that file's own one-line pointer to the other, each mandated column header must be present, every row must carry the cell count its own table's header declares, and the archive must hold at least one row so the split cannot decay into an empty second file |
 | **every test the changelog names still exists** | `ChangelogReferenceTests` | the two newest `## [` sections of `CHANGELOG.md` — every back-ticked test-name-shaped identifier resolved against the method declarations of both test projects, with the discriminator itself covered and the referenced set asserted non-empty |
 | **every changelog version heading has a link definition, and every tag has a heading** | `ChangelogReferenceTests` | `CHANGELOG.md` and `git tag --list v*` — every `## [X.Y.Z]` heading must have a `[X.Y.Z]:` definition, no definition may name a missing heading, `[Unreleased]` must compare against the newest version, every version older than the newest must have a tag, and every tag must have a heading, minus `Unreleased` — one reasoned entry (`v0.15.1`, tagged on the 0.15.0 commit by mistake) ratcheted by `MaxUnreleasedTags` and asserted to still name an existing tag |

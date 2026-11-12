@@ -1,3 +1,4 @@
+using System.Globalization;
 using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
@@ -220,5 +221,19 @@ public sealed class SnippetSearchTests
         Assert.Equal(1, match.Occurrences);
         Assert.Equal("    ", match.Indent);
         Assert.Equal("        Foo();\n", Text[match.Start..(match.Start + match.Length)]);
+    }
+
+    [Fact]
+    public void Depth_TreatsExactlyTheCharactersCharIsWhiteSpaceAccepts_AsIndentation()
+    {
+        var differing = Enumerable.Range(0, char.MaxValue + 1)
+            .Select(code => (char)code)
+            .Where(character => (SnippetSearch.Depth([character]) is 1) != char.IsWhiteSpace(character)
+                || (MemoryExtensions.IndexOfAnyWhiteSpace([character]) is 0) != char.IsWhiteSpace(character)
+                || (MemoryExtensions.LastIndexOfAnyWhiteSpace([character]) is 0) != char.IsWhiteSpace(character))
+            .Select(character => ((int)character).ToString("X4", CultureInfo.InvariantCulture))
+            .ToArray();
+
+        Assert.Empty(differing);
     }
 }

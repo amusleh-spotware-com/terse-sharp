@@ -270,7 +270,7 @@ public static class SnippetSearch
         public static AnchorRegion None => new(-1, -1, -1, -1, false);
     }
 
-    private static int Depth(ReadOnlySpan<char> line) => line.Length - line.TrimStart().Length;
+    internal static int Depth(ReadOnlySpan<char> line) => line.IndexOfAnyExceptWhiteSpace() is var first and >= 0 ? first : line.Length;
 
     private static int LastLine(ReadOnlySpan<char> body)
     {
@@ -434,7 +434,7 @@ public static class SnippetSearch
     {
         var line = text[Filled(text, 0)..];
 
-        return line[..(line.Length - line.TrimStart().Length)];
+        return line[..Depth(line)];
     }
 
     private static SnippetMatch Loose(string haystack, string needle, int occurrence)

@@ -48,6 +48,24 @@ public sealed class ChildProcessTests
     }
 
     [Fact]
+    public void StartInfo_HandsTheChildOnlyItsStandardHandles()
+    {
+        var start = ChildProcess.StartInfo("dotnet", [], AppContext.BaseDirectory);
+
+        Assert.NotNull(start.InheritedHandles);
+        Assert.Empty(start.InheritedHandles);
+    }
+
+    [Fact]
+    public void StartInfo_OnAPlatformThatCanTieTheChildToTheServer_AsksForTheChildToDieWithIt()
+    {
+        var start = ChildProcess.StartInfo("dotnet", [], AppContext.BaseDirectory);
+
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
+            Assert.True(start.KillOnParentExit, "a child that outlives a crashed server keeps its build outputs locked and its memory held");
+    }
+
+    [Fact]
     public void RegisteredMsBuildVariables_CoversEveryMsBuildVariableThatPointsAtADirectory()
     {
         var registered = Registered();
@@ -159,4 +177,33 @@ public sealed class ChildProcessTests
     }
 
     private const int SettleCeilingMilliseconds = 30_000;
+
+    [Fact]
+    public async Task StartInfo_OnLinux_KeepsTheChildAliveAfterTheThreadThatStartedItExits()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "only Linux ties KillOnParentExit to a thread, through PR_SET_PDEATHSIG");
+
+        System.Diagnostics.Process? child = null;
+        var spawner = new Thread(() => child = System.Diagnostics.Process.Start(ChildProcess.StartInfo("sleep", ["30"], AppContext.BaseDirectory)));
+        spawner.Start();
+        spawner.Join();
+
+        using var started = child ?? throw new InvalidOperationException("sleep did not start");
+        using var window = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        window.CancelAfter(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            await started.WaitForExitAsync(window.Token);
+            Assert.Fail("the child died with the thread that spawned it, so a long build would be killed when that pool thread retires");
+        }
+        catch (OperationCanceledException) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
+        {
+            Assert.False(started.HasExited);
+        }
+        finally
+        {
+            started.Kill();
+        }
+    }
 }
