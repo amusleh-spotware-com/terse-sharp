@@ -674,6 +674,8 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
     [Fact]
     public async Task ObservedSiblingSpellings_BindToTheirCanonicalParameter_InsteadOfAnsweringInvalidArgument()
     {
+        await server.CallAsync("get_type_outline", new() { ["symbol"] = "OrderService" });
+
         var outline = await server.CallAsync("get_type_outline", new() { ["typeName"] = "OrderService" });
         var counted = await server.CallAsync("search_text", new() { ["query"] = "OrderService", ["glob"] = "src/**/*.cs", ["output_mode"] = "count" });
         var canonicalOutline = await server.CallAsync("get_type_outline", new() { ["symbol"] = "OrderService" });

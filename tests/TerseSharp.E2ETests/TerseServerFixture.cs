@@ -59,7 +59,7 @@ public sealed class TerseServerFixture : IAsyncLifetime
     private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(500);
     private HashSet<string> baseline = [];
 
-    private static System.Diagnostics.ProcessStartInfo GitStatus()
+    private static System.Diagnostics.ProcessStartInfo Git(string[] arguments)
     {
         var start = new System.Diagnostics.ProcessStartInfo("git")
         {
@@ -70,25 +70,14 @@ public sealed class TerseServerFixture : IAsyncLifetime
         };
 
         start.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        foreach (var argument in (string[])["status", "--porcelain", "--untracked-files=all", "--", "fixtures/FixtureSolution"])
+        foreach (var argument in arguments)
             start.ArgumentList.Add(argument);
 
         return start;
     }
 
-    private static async Task<HashSet<string>> FixtureStatusAsync()
-    {
-        using var process = System.Diagnostics.Process.Start(GitStatus()) ?? throw new InvalidOperationException("git did not start");
-
-        process.StandardInput.Close();
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        await Task.WhenAll(output, error, process.WaitForExitAsync());
-
-        return process.ExitCode is 0
-            ? [.. (await output).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)]
-            : throw new InvalidOperationException("git status exited " + process.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + await error);
-    }
+    private static async Task<HashSet<string>> FixtureStatusAsync() =>
+        [.. (await GitOutputAsync(["status", "--porcelain", "--untracked-files=all", "--", "fixtures/FixtureSolution"])).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
 
     private async Task<List<string>> IntroducedAsync() =>
         [.. (await FixtureStatusAsync()).Where(line => !baseline.Contains(line)).Order(StringComparer.Ordinal)];
@@ -104,8 +93,31 @@ public sealed class TerseServerFixture : IAsyncLifetime
         }
 
         if (introduced.Count > 0)
-            throw new InvalidOperationException("the shared fixture was left dirty by this collection: " + string.Join(", ", introduced));
+            throw new InvalidOperationException("the shared fixture was left dirty by this collection: " + string.Join(", ", introduced) + "\n" + await FixtureDiffAsync());
     }
+
+    private static async Task<string> GitOutputAsync(string[] arguments)
+    {
+        using var process = System.Diagnostics.Process.Start(Git(arguments)) ?? throw new InvalidOperationException("git did not start");
+
+        process.StandardInput.Close();
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await Task.WhenAll(output, error, process.WaitForExitAsync());
+
+        return process.ExitCode is 0
+            ? await output
+            : throw new InvalidOperationException("git " + arguments[0] + " exited " + process.ExitCode.ToString(CultureInfo.InvariantCulture) + ": " + await error);
+    }
+
+    private static async Task<string> FixtureDiffAsync()
+    {
+        var diff = await GitOutputAsync(["diff", "--", "fixtures/FixtureSolution"]);
+
+        return diff.Length <= MaxReportedDiff ? diff : diff[..MaxReportedDiff];
+    }
+
+    private const int MaxReportedDiff = 4000;
 }
 
 [CollectionDefinition(nameof(TerseServerCollection))]
