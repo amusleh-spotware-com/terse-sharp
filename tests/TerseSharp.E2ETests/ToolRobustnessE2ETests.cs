@@ -36,6 +36,8 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
     [Fact]
     public async Task EveryTool_WithEmptyStringArguments_AnswersWithoutThrowing()
     {
+        await ForgetUndoHistoryAsync();
+
         foreach (var tool in await Surface())
             AssertHandled(tool.Name, await CallAsync(tool, Empty(tool)));
 
@@ -60,6 +62,9 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
     {
         var sentinels = Sentinels();
         var before = sentinels.Select(File.ReadAllBytes).ToArray();
+        var edited = await LeaveUndoHistoryAsync();
+
+        await ForgetUndoHistoryAsync();
 
         foreach (var tool in await Surface())
         {
@@ -71,7 +76,26 @@ public sealed class ToolRobustnessE2ETests(TerseServerFixture server)
 
         for (var index = 0; index < sentinels.Length; index++)
             Assert.True(before[index].AsSpan().SequenceEqual(after[index]), sentinels[index] + " was modified");
+
+        Assert.Equal(edited.Original, await File.ReadAllTextAsync(edited.Path, TestContext.Current.CancellationToken));
     }
+
+    private async Task<(string Path, string Original)> LeaveUndoHistoryAsync()
+    {
+        const string Sample = "src/Fixture.Trading/Awkward.cs";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "Awkward.cs");
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var stamp = File.GetLastWriteTimeUtc(path);
+
+        await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = original + "// a change an earlier test made and restored\n" });
+        await server.CallAsync("write_text", new() { ["path"] = Sample, ["content"] = original });
+        File.SetLastWriteTimeUtc(path, stamp);
+
+        return (path, original);
+    }
+
+    private Task<string> ForgetUndoHistoryAsync() =>
+        server.CallAsync("load_workspace", new() { ["path"] = Path.Combine(TerseServerFixture.FixtureRoot, "FixtureSolution.slnx"), ["reload"] = true });
 
     private static string[] Sentinels() =>
     [
