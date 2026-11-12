@@ -712,7 +712,7 @@ member that does it — `get_type_outline System.MemoryExtensions contains=White
 | a `char.IsWhiteSpace` loop, `Length - TrimStart().Length`, `TrimEnd()` then `TrimStart()` | `IndexOfAnyWhiteSpace` · `IndexOfAnyExceptWhiteSpace` · `LastIndexOfAny[Except]WhiteSpace` (`SnippetSearch.Depth` is the shared indent width) |
 | `s.Trim().Length > 0` on a `string`, `Split` + `Trim` to find a non-blank line | `!s.AsSpan().IsWhiteSpace()` |
 | `Task.WhenAny(task, Task.Delay(…))` | `task.WaitAsync(timeout, token)` (CA2027; the two-task overload is banned) |
-| a child that outlives a crashed server | `KillOnParentExit = true` under `OperatingSystem.IsWindows() \|\| OperatingSystem.IsLinux()` — `ChildProcess.StartInfo` does it, so spawn through it. **Never** set `InheritedHandles = []` there: it made MSBuild's BuildHost answer `RemoteInvocationException` on add-document edits in 4 of 4 full E2E runs and 0 of 2 without it (`I905`) |
+| a new `ProcessStartInfo` switch | spawn through `ChildProcess.StartInfo`, and leave .NET 11's `InheritedHandles` and `KillOnParentExit` **unset** there: the list made MSBuild's BuildHost answer `RemoteInvocationException` on add-document edits in 4 of 4 full E2E runs (0 of 2 without), and the job object turned the windows CI leg red in 2 of 2 runs (`dotnet test`'s pipe outlived the drain grace) - `I905`; a process-start change is judged by full E2E runs and the CI matrix, never by a unit test |
 | `Process.GetProcessById` + `catch (ArgumentException)` | `Process.TryGetProcessById` |
 
 **`runtime-async=on` is set for every project under `src/` (`src/Directory.Build.props`) - the

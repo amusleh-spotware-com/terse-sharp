@@ -97,9 +97,6 @@ internal static class ChildProcess
             StandardErrorEncoding = encoding,
         };
 
-        if (OperatingSystem.IsWindows() || OperatingSystem.IsLinux())
-            start.KillOnParentExit = true;
-
         foreach (var argument in arguments)
             start.ArgumentList.Add(argument);
 
