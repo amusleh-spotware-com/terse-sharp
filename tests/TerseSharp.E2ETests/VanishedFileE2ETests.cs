@@ -10,7 +10,7 @@ public sealed class VanishedFileE2ETests : IAsyncLifetime
     {
         Directory.CreateDirectory(Path.Combine(root, ".git"));
         await File.WriteAllTextAsync(Path.Combine(root, "Probe.slnx"), "<Solution>\n  <Project Path=\"Probe.csproj\" />\n</Solution>\n", TestContext.Current.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(root, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net11.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n", TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(Path.Combine(root, "Vanish.cs"), "namespace Probe;\n\npublic sealed class Vanish;\n", TestContext.Current.CancellationToken);
 
         server = await TerseServerProcess.StartAsync(

@@ -323,11 +323,11 @@ public sealed class FieldReportE2ETests(TerseServerFixture server)
             root => File.WriteAllTextAsync(Path.Combine(root, ".terse.json"), "{ \"build\": { \"configuration\": \"Debug\" } }\n", Token));
         var arguments = new Dictionary<string, object?> { ["path"] = "src/Fixture.Trading/OrderService.cs", ["includeDeadCode"] = false };
 
-        await solution.CallAsync("analyze", new(arguments));
-        await PollAsync(() => solution.CallAsync("analyze", new(arguments)), text => text.Contains("UNCHANGED", StringComparison.Ordinal));
+        await solution.CallAsync("analyze", [with(arguments)]);
+        await PollAsync(() => solution.CallAsync("analyze", [with(arguments)]), text => text.Contains("UNCHANGED", StringComparison.Ordinal));
         await File.WriteAllTextAsync(Path.Combine(solution.Root, ".terse.json"), "{ \"build\": { \"configuration\": \"Release\" } }\n", Token);
 
-        var after = await PollAsync(() => solution.CallAsync("analyze", new(arguments)), text => !text.Contains("UNCHANGED", StringComparison.Ordinal));
+        var after = await PollAsync(() => solution.CallAsync("analyze", [with(arguments)]), text => !text.Contains("UNCHANGED", StringComparison.Ordinal));
 
         Assert.DoesNotContain("UNCHANGED", after, StringComparison.Ordinal);
     }

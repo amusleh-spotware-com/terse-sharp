@@ -64,9 +64,11 @@ jobs:
 
       - name: Smoke test the packaged tool
         run: |
-          dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease
+          set -euo pipefail
+          version=$(cd artifacts/nupkg && echo TerseSharp.[0-9]*.nupkg | sed -E 's/^TerseSharp\.(.*)\.nupkg$/\1/')
+          (cd "$RUNNER_TEMP" && dotnet tool install -g TerseSharp --add-source "$GITHUB_WORKSPACE/artifacts/nupkg" --version "$version")
           export PATH="$PATH:$HOME/.dotnet/tools"
-          terse --version
+          terse --version | grep -F "$version"
           find "$HOME/.dotnet/tools/.store" -ipath '*linux-x64*' -name terse.dll | grep -q .
           cd fixtures/FixtureSolution
           terse doctor

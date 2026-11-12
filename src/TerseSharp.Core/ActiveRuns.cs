@@ -9,7 +9,7 @@ public static class ActiveRuns
     private const string Draining = "its processes are still exiting, so the next build or test call may answer RunInFlight for a few more seconds";
     private static readonly TimeSpan Drain = TimeSpan.FromSeconds(30);
     private static readonly Lock Gate = new();
-    private static readonly Dictionary<string, HeldRun> Running = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, HeldRun> Running = [with(StringComparer.OrdinalIgnoreCase)];
 
     public static bool TryEnter(string solutionPath, string tool, string detail, out ActiveRun holder, CancellationTokenSource stop)
     {

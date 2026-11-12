@@ -14,7 +14,7 @@ public sealed class WorktreeE2ETests : IAsyncLifetime
     {
         Directory.CreateDirectory(Main);
         await File.WriteAllTextAsync(Path.Combine(Main, "Probe.slnx"), "<Solution>\n  <Project Path=\"Probe.csproj\" />\n</Solution>\n", TestContext.Current.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(Main, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(Main, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net11.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n", TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(Path.Combine(Main, "notes.txt"), "a\n", TestContext.Current.CancellationToken);
         await GitAsync(Main, "init", "--quiet", "--initial-branch=main");
         await GitAsync(Main, "add", "-A");
@@ -83,7 +83,7 @@ public sealed class WorktreeE2ETests : IAsyncLifetime
     }
 
     private Task<string> CallAsync(Dictionary<string, object?> arguments) =>
-        server.CallAsync("changed_files", new(arguments), TestContext.Current.CancellationToken);
+        server.CallAsync("changed_files", [with(arguments)], TestContext.Current.CancellationToken);
 
     private static Task<string> GitAsync(string directory, params string[] arguments) => GitToolsE2ETests.GitOutputAsync(
         directory,

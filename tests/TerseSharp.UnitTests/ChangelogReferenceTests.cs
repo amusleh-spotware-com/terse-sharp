@@ -7,7 +7,7 @@ public sealed partial class ChangelogReferenceTests
     private static readonly string[] Lines =
         File.ReadAllLines(Path.Combine(Fixtures.RepositoryRoot, "CHANGELOG.md"));
 
-    private static readonly HashSet<string> Excluded = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> Excluded = [with(StringComparer.Ordinal)];
 
     [Fact]
     public void TheChangelog_NamesOnlyTestsThatStillExist()
@@ -152,7 +152,7 @@ public sealed partial class ChangelogReferenceTests
     }
 
     private const int MaxUnreleasedTags = 1;
-    private static readonly HashSet<string> Unreleased = new(StringComparer.Ordinal) { "v0.15.1" };
+    private static readonly HashSet<string> Unreleased = [with(StringComparer.Ordinal), "v0.15.1"];
 
     private static string UnreleasedReason(string tag) => tag switch
     {

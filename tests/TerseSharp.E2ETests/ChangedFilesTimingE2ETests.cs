@@ -20,13 +20,13 @@ public sealed class ChangedFilesTimingE2ETests : IAsyncLifetime
     {
         var arguments = new Dictionary<string, object?> { ["path"] = "notes.md" };
 
-        var first = await CallAsync("changed_files", new(arguments));
+        var first = await CallAsync("changed_files", [with(arguments)]);
         var second = first;
 
         for (var attempt = 0; attempt < 150 && !second.Contains("UNCHANGED", StringComparison.Ordinal); attempt++)
         {
             await Task.Delay(100, TestContext.Current.CancellationToken);
-            second = await CallAsync("changed_files", new(arguments));
+            second = await CallAsync("changed_files", [with(arguments)]);
         }
 
         Assert.Equal(1, first.Split("\ntiming stamp=").Length - 1);

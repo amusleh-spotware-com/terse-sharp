@@ -12,7 +12,7 @@ public sealed class StageE2ETests : IAsyncLifetime
     {
         Directory.CreateDirectory(Solution);
         await File.WriteAllTextAsync(Path.Combine(Solution, "Probe.slnx"), "<Solution>\n  <Project Path=\"Probe.csproj\" />\n</Solution>\n", TestContext.Current.CancellationToken);
-        await File.WriteAllTextAsync(Path.Combine(Solution, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(Solution, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net11.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n", TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(Path.Combine(Solution, "notes.txt"), "a\n", TestContext.Current.CancellationToken);
         await GitAsync("init", "--quiet", "--initial-branch=main");
         await GitAsync("config", "core.autocrlf", "true");

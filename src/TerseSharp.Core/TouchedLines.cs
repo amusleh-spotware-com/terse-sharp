@@ -67,7 +67,7 @@ public sealed class TouchedLines
         return Covers(position.Path, position.Line);
     }
 
-    private readonly HashSet<string> whole = new(StringComparer.FromComparison(PathBoundary.Comparison));
+    private readonly HashSet<string> whole = [with(StringComparer.FromComparison(PathBoundary.Comparison))];
 
     private void Add(string root, string path)
     {

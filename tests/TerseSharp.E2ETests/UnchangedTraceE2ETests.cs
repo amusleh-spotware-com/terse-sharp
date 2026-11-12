@@ -26,12 +26,12 @@ public sealed class UnchangedTraceE2ETests
                 ["timeoutSeconds"] = 400,
             };
 
-            var first = await server.CallAsync("run_tests", new(arguments), TestContext.Current.CancellationToken);
+            var first = await server.CallAsync("run_tests", [with(arguments)], TestContext.Current.CancellationToken);
             var second = first;
 
             for (var attempt = 0; attempt < 30; attempt++)
             {
-                second = await server.CallAsync("run_tests", new(arguments), TestContext.Current.CancellationToken);
+                second = await server.CallAsync("run_tests", [with(arguments)], TestContext.Current.CancellationToken);
 
                 if (second.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
                     break;

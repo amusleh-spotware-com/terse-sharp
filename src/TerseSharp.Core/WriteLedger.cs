@@ -4,7 +4,7 @@ internal sealed class WriteLedger
 {
     private static readonly AsyncLocal<ReadMark?> Current = new();
 
-    private readonly Dictionary<string, Stamp> written = new(PathBoundary.Comparer);
+    private readonly Dictionary<string, Stamp> written = [with(PathBoundary.Comparer)];
     private long generation;
 
     public void MarkRead(LoadedWorkspace owner) => Current.Value = new ReadMark(owner, Interlocked.Read(ref generation));

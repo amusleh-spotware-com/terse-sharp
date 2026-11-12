@@ -368,7 +368,7 @@ public sealed class ChangedTestSelectionE2ETests
             Assert.Contains("Selection.Core  C#", text, StringComparison.Ordinal);
             Assert.Contains("IsPackable=true", text, StringComparison.Ordinal);
             Assert.Contains("IsPackable=false", text, StringComparison.Ordinal);
-            Assert.Contains("TargetFramework=net10.0", text, StringComparison.Ordinal);
+            Assert.Contains("TargetFramework=net11.0", text, StringComparison.Ordinal);
         }
         finally
         {

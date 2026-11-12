@@ -12,7 +12,7 @@ public sealed record ToolOverrides(
     ImmutableArray<string> Ignored,
     string? Failure)
 {
-    public static ToolOverrides None { get; } = new(null, FrozenDictionary<string, bool>.Empty, [], [], null);
+    public static ToolOverrides None { get; } = new(null, [], [], [], null);
 
     public bool Configured => Tools.Count is not 0 || !Ignored.IsEmpty || Failure is not null;
 

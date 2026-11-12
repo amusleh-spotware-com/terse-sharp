@@ -11,7 +11,7 @@ public static class IdenticalCall
     public static readonly FrozenSet<string> Watched = new[] { "build", "run_tests", "list_tests", "clean" }.ToFrozenSet(StringComparer.Ordinal);
 
     private static readonly Lock Gate = new();
-    private static readonly Dictionary<string, Seen> Calls = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, Seen> Calls = [with(StringComparer.Ordinal)];
 
     public static string? Note(string tool, CallToolRequestParams parameters, CallToolResult result) =>
             Watched.Contains(tool) && !IsStatusRead(parameters)

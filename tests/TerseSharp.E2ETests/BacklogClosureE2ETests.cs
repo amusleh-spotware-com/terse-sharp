@@ -573,7 +573,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
 
             for (var attempt = 0; attempt < 3; attempt++)
             {
-                text = await server.CallAsync("write_text", new(arguments));
+                text = await server.CallAsync("write_text", [with(arguments)]);
 
                 if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
                     break;
@@ -2041,11 +2041,11 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             ["properties"] = new[] { "TerseBacklogProbe=1" },
         };
 
-        var second = await server.CallAsync("build", new(arguments));
+        var second = await server.CallAsync("build", [with(arguments)]);
 
         for (var attempt = 0; attempt < 30; attempt++)
         {
-            second = await server.CallAsync("build", new(arguments));
+            second = await server.CallAsync("build", [with(arguments)]);
 
             if (second.StartsWith("build UNCHANGED", StringComparison.Ordinal))
                 break;

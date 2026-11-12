@@ -165,7 +165,7 @@ public static class RepeatSteer
     }
 
     private const int MaxValueLength = 80;
-    private static readonly List<string> Values = new(MaxBatch);
+    private static readonly List<string> Values = [with(MaxBatch)];
     public static readonly FrozenDictionary<string, string> Singular = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["read_text"] = "path",

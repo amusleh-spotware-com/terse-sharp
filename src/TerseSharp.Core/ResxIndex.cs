@@ -7,7 +7,7 @@ public sealed class ResxIndex
     private static readonly string[] Extensions = [".resx", ".resw"];
 
     private readonly ParsedDocumentCache documents;
-    private readonly Dictionary<string, IReadOnlyList<string>> names = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IReadOnlyList<string>> names = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly Lock namesGate = new();
 
     private ResxIndex(string root, ParsedDocumentCache documents)

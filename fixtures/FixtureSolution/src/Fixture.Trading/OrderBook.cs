@@ -2,7 +2,7 @@ namespace Fixture.Trading;
 
 public sealed class OrderBook
 {
-    private readonly Dictionary<string, List<Order>> bySymbol = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<Order>> bySymbol = [with(StringComparer.Ordinal)];
 
     public int SymbolCount => bySymbol.Count;
 

@@ -11,7 +11,7 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
     public Task<string> LoadWorkspace(
         [Description("Path to the solution or project, or a directory holding exactly one - a .slnx or .sln beside its own .slnf counts as one. Empty = discover upwards from the working directory.")] string? path = null,
         [Description("Discard the in-memory solution and read it from disk again. Generation counters carry over and the undo history is cleared. It always runs, so it is also the escape from a replayed answer.")] bool reload = false,
-        [Description("Target framework to evaluate a multi-targeted project as, e.g. net10.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
+        [Description("Target framework to evaluate a multi-targeted project as, e.g. net11.0. Empty lets MSBuild pick, and the answering framework stays implicit.")] string? targetFramework = null,
         [Description("List the MSBuild messages the load reported, not just their count. Default false.")] bool verbose = false,
         [Description("List every .slnx/.sln/.slnf/.csproj under path without loading anything. Use before the first load when you do not know what a repository contains.")] bool discover = false,
         [Description("Max candidates when discover=true (100).")] int maxResults = 0,

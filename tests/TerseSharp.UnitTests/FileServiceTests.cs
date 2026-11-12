@@ -627,7 +627,7 @@ public sealed class FileServiceTests
         var template = Path.Combine(root, "Excluded", "Template.cs");
         Directory.CreateDirectory(Path.Combine(root, ".git"));
         Directory.CreateDirectory(Path.Combine(root, "Excluded"));
-        await File.WriteAllTextAsync(Path.Combine(root, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><Compile Remove=\"Excluded/**\" /></ItemGroup></Project>", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(root, "Probe.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework></PropertyGroup><ItemGroup><Compile Remove=\"Excluded/**\" /></ItemGroup></Project>", TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(Path.Combine(root, "Kept.cs"), "namespace Probe;\n\npublic static class Kept\n{\n    public static int One() => 1;\n}\n", TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(template, "namespace Probe;\n\npublic static class Template\n{\n    public static int Value() => Seed();\n}\n", TestContext.Current.CancellationToken);
 

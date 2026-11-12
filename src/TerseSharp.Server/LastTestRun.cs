@@ -54,7 +54,7 @@ public sealed class LastTestRun
 
     private static readonly TestRunMemory Nothing = new(string.Empty, string.Empty, []);
 
-    private readonly Dictionary<string, (TestRunMemory Memory, long Order)> runs = new(StringComparer.FromComparison(PathBoundary.Comparison));
+    private readonly Dictionary<string, (TestRunMemory Memory, long Order)> runs = [with(StringComparer.FromComparison(PathBoundary.Comparison))];
     private long order;
     private readonly Lock gate = new();
 

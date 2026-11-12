@@ -48,8 +48,8 @@ public static class Doctor
         return Check(
             "server runtime",
             string.Create(CultureInfo.InvariantCulture, $"{runtime} - the runtime this server process is on, not what the machine offers a build"),
-            runtime.Major >= 10,
-            "install the .NET 10 SDK from https://dot.net");
+            runtime.Major >= 11,
+            "install the .NET 11 SDK from https://dot.net");
     }
 
     private static async Task<string[]> InstalledLinesAsync(string probeDirectory, CancellationToken cancellationToken)

@@ -268,9 +268,9 @@ public sealed class WorkspaceRegistryTests
     {
         using var registry = new WorkspaceRegistry();
 
-        var result = await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+        var result = await registry.LoadAsync(Fixtures.SolutionPath, "net11.0", TestContext.Current.CancellationToken);
 
-        Assert.Equal("net10.0", result.TargetFramework);
+        Assert.Equal("net11.0", result.TargetFramework);
     }
 
     [Fact]
@@ -278,12 +278,12 @@ public sealed class WorkspaceRegistryTests
     {
         using var registry = new WorkspaceRegistry();
 
-        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.SolutionPath, "net11.0", TestContext.Current.CancellationToken);
 
         var reloaded = await registry.ReloadAsync(Fixtures.SolutionPath, TestContext.Current.CancellationToken);
 
-        Assert.Equal("net10.0", reloaded.TargetFramework);
-        Assert.Equal("net10.0", registry.All()[0].Load.TargetFramework);
+        Assert.Equal("net11.0", reloaded.TargetFramework);
+        Assert.Equal("net11.0", registry.All()[0].Load.TargetFramework);
     }
 
     [Fact]
@@ -291,7 +291,7 @@ public sealed class WorkspaceRegistryTests
     {
         using var registry = new WorkspaceRegistry();
 
-        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.SolutionPath, "net11.0", TestContext.Current.CancellationToken);
 
         var first = registry.All()[0];
         var second = await registry.LoadAsync(Fixtures.SolutionPath, null, TestContext.Current.CancellationToken);
@@ -307,11 +307,11 @@ public sealed class WorkspaceRegistryTests
     {
         using var registry = new WorkspaceRegistry();
 
-        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.SolutionPath, "net11.0", TestContext.Current.CancellationToken);
 
         var first = registry.All()[0];
 
-        await registry.LoadAsync(Fixtures.SolutionPath, "net10.0", TestContext.Current.CancellationToken);
+        await registry.LoadAsync(Fixtures.SolutionPath, "net11.0", TestContext.Current.CancellationToken);
 
         Assert.Same(first, registry.All()[0]);
     }

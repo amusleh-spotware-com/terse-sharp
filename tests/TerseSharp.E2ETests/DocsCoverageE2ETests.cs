@@ -38,9 +38,7 @@ public sealed partial class DocsCoverageE2ETests(TerseServerFixture server)
     [Fact]
     public async Task TheShippedSkill_StaysWithinItsTokenBudget()
     {
-        var path = Path.Combine(
-        TerseServerFixture.RepositoryRoot,
-        Path.Combine("src", "TerseSharp.Server", "Assets", "SKILL.md"));
+        var path = Path.Combine(TerseServerFixture.RepositoryRoot, "src", "TerseSharp.Server", "Assets", "SKILL.md");
 
         var text = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
         var tokens = TerseSharp.Core.SkillBudget.Used(text);
@@ -53,9 +51,7 @@ public sealed partial class DocsCoverageE2ETests(TerseServerFixture server)
     [Fact]
     public async Task TheShippedSkill_EnumeratesEveryToolExactlyOnceInOneTable()
     {
-        var path = Path.Combine(
-            TerseServerFixture.RepositoryRoot,
-            Path.Combine("src", "TerseSharp.Server", "Assets", "SKILL.md"));
+        var path = Path.Combine(TerseServerFixture.RepositoryRoot, "src", "TerseSharp.Server", "Assets", "SKILL.md");
 
         var text = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
         var advertised = await server.Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);

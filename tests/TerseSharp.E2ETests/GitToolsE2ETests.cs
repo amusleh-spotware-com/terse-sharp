@@ -752,12 +752,12 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             ["exclude"] = "terse-memo-probe-unique/**",
         };
 
-        var first = await server.CallAsync("changed_files", new(arguments));
+        var first = await server.CallAsync("changed_files", [with(arguments)]);
         var second = first;
 
         for (var attempt = 0; attempt < 30; attempt++)
         {
-            second = await server.CallAsync("changed_files", new(arguments));
+            second = await server.CallAsync("changed_files", [with(arguments)]);
 
             if (second.Contains("UNCHANGED", StringComparison.Ordinal))
                 break;
@@ -791,7 +791,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             await File.WriteAllTextAsync(Path.Combine(scratch, "first.txt"), "scratch", TestContext.Current.CancellationToken);
 
             var arguments = new Dictionary<string, object?> { ["path"] = "node_modules" };
-            var first = await server.CallAsync("changed_files", new(arguments));
+            var first = await server.CallAsync("changed_files", [with(arguments)]);
 
             await File.WriteAllTextAsync(Path.Combine(scratch, "second.txt"), "scratch", TestContext.Current.CancellationToken);
 
@@ -799,7 +799,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
 
             for (var attempt = 0; attempt < 30; attempt++)
             {
-                second = await server.CallAsync("changed_files", new(arguments));
+                second = await server.CallAsync("changed_files", [with(arguments)]);
 
                 if (second.Contains("second.txt", StringComparison.Ordinal))
                     break;

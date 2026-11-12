@@ -10,7 +10,7 @@
   <a href="https://www.nuget.org/packages/TerseSharp"><img src="https://img.shields.io/nuget/dt/TerseSharp.svg?logo=nuget&label=downloads" alt="Downloads"/></a>
   <a href="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml"><img src="https://github.com/amusleh-spotware-com/terse-sharp/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT"/></a>
-  <img src="https://img.shields.io/badge/.NET-10-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 10"/>
+  <img src="https://img.shields.io/badge/.NET-11-512BD4.svg?logo=dotnet&logoColor=white" alt=".NET 11"/>
   <img src="https://img.shields.io/badge/tools-86-26C281.svg" alt="86 tools"/>
   <img src="https://img.shields.io/badge/tokens-10--30×_fewer-26C281.svg" alt="10-30x fewer tokens"/>
 </p>
@@ -231,7 +231,8 @@ terse install --skill --guard
 
 Restart your agent and ask it about your code. TerseSharp finds your `.sln`, `.slnx` or `.csproj` on its
 own. It works with Claude Code, Cursor, VS Code, Windsurf and any MCP client over stdio. No IDE, no
-licence, no API key. `terse doctor` checks the setup.
+licence, no API key. It runs on the .NET 11 runtime; a solution pinned to the .NET 10 SDK still loads.
+`terse doctor` checks the setup.
 
 <details>
 <summary>Manual MCP setup, building from source, updates</summary>
@@ -240,8 +241,9 @@ licence, no API key. `terse doctor` checks the setup.
 { "mcpServers": { "terse-sharp": { "command": "terse", "args": ["serve", "--workspace", "C:/path/to/App.slnx"] } } }
 ```
 
-Build from source with `dotnet pack src/TerseSharp.Server -c Release -o artifacts/nupkg`, then
-`dotnet tool install -g TerseSharp --add-source artifacts/nupkg --prerelease`. TerseSharp checks for a
+Build from source with `dotnet pack src/TerseSharp.Server -c Release -o artifacts/nupkg`, then, from a
+directory outside the repository (its `nuget.config` maps package sources, which `--add-source` refuses),
+`dotnet tool install -g TerseSharp --add-source <repo>/artifacts/nupkg --prerelease`. TerseSharp checks for a
 new release at most once a day; `TERSE_UPDATE=0` turns that off.
 </details>
 

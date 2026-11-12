@@ -273,7 +273,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
         Assert.SkipWhen(HostedByDotnet(), "a holder named dotnet may be this server's own MSBuild host, so the unload-and-retry path is taken instead");
 
         var project = Path.Combine(TerseServerFixture.FixtureRoot, "tests", "Fixture.Trading.Tests");
-        var output = Path.Combine(project, "bin", "Debug", "net10.0", "Fixture.Trading.Tests.dll");
+        var output = Path.Combine(project, "bin", "Debug", "net11.0", "Fixture.Trading.Tests.dll");
 
         await RunAsync(new() { ["project"] = TestProject });
 
@@ -487,12 +487,12 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
             ["timeoutSeconds"] = 400,
         };
 
-        var first = await server.CallAsync("run_tests", new(arguments));
+        var first = await server.CallAsync("run_tests", [with(arguments)]);
         var second = first;
 
         for (var attempt = 0; attempt < 30; attempt++)
         {
-            second = await server.CallAsync("run_tests", new(arguments));
+            second = await server.CallAsync("run_tests", [with(arguments)]);
 
             if (second.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
                 break;
@@ -551,12 +551,12 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
             ["properties"] = new[] { "TerseUnchangedProbe=1" },
         };
 
-        var first = await server.CallAsync("build", new(arguments));
+        var first = await server.CallAsync("build", [with(arguments)]);
         var second = first;
 
         for (var attempt = 0; attempt < 30; attempt++)
         {
-            second = await server.CallAsync("build", new(arguments));
+            second = await server.CallAsync("build", [with(arguments)]);
 
             if (second.StartsWith("build UNCHANGED", StringComparison.Ordinal))
                 break;
@@ -586,7 +586,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
         var bytes = await File.ReadAllBytesAsync(source, TestContext.Current.CancellationToken);
         var stamp = File.GetLastWriteTimeUtc(source);
 
-        var first = await server.CallAsync("run_tests", new(arguments));
+        var first = await server.CallAsync("run_tests", [with(arguments)]);
         var primed = await ReplayedOnceSettledAsync(arguments);
 
         Assert.StartsWith("run_tests PASSED", first, StringComparison.Ordinal);
@@ -600,7 +600,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
 
             for (var attempt = 0; attempt < 50; attempt++)
             {
-                repeat = await server.CallAsync("run_tests", new(arguments));
+                repeat = await server.CallAsync("run_tests", [with(arguments)]);
 
                 if (!repeat.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal))
                     break;
@@ -632,7 +632,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
         var bytes = await File.ReadAllBytesAsync(source, TestContext.Current.CancellationToken);
         var stamp = File.GetLastWriteTimeUtc(source);
 
-        await server.CallAsync("run_tests", new(arguments));
+        await server.CallAsync("run_tests", [with(arguments)]);
 
         try
         {
@@ -641,7 +641,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
             await File.WriteAllBytesAsync(source, [.. bytes, (byte)'\n'], TestContext.Current.CancellationToken);
             await WatcherMovedAsync(before);
 
-            var repeat = await server.CallAsync("run_tests", new(arguments));
+            var repeat = await server.CallAsync("run_tests", [with(arguments)]);
 
             Assert.Contains("nothing was written through terse, but the file watcher reported", repeat, StringComparison.Ordinal);
             Assert.DoesNotContain("nothing was written in between", repeat, StringComparison.Ordinal);
@@ -671,7 +671,7 @@ public sealed partial class TestToolsE2ETests(TerseServerFixture server)
         var answer = string.Empty;
 
         for (var attempt = 0; attempt < 5 && !answer.StartsWith("run_tests UNCHANGED", StringComparison.Ordinal); attempt++)
-            answer = await server.CallAsync("run_tests", new(arguments));
+            answer = await server.CallAsync("run_tests", [with(arguments)]);
 
         return answer;
     }

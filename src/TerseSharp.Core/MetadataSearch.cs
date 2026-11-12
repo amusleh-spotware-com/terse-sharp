@@ -95,11 +95,11 @@ public static class MetadataSearch
 
         public List<INamedTypeSymbol> Found { get; } = [];
 
-        public HashSet<string> Assemblies { get; } = new(StringComparer.Ordinal);
+        public HashSet<string> Assemblies { get; } = [with(StringComparer.Ordinal)];
 
         public int Total { get; private set; }
 
-        private HashSet<string> Types { get; } = new(StringComparer.Ordinal);
+        private HashSet<string> Types { get; } = [with(StringComparer.Ordinal)];
 
         public bool Done => !exhaustive && Found.Count >= cap;
 

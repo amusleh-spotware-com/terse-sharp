@@ -23,7 +23,8 @@ terse install --skill --guard
 
 Restart your agent and ask it about your code. TerseSharp finds your `.sln`, `.slnx` or `.csproj` on its
 own. It works with Claude Code, Cursor, VS Code, Windsurf and any MCP client over stdio. No IDE, no
-licence, no API key. `terse doctor` checks the setup.
+licence, no API key. It runs on the .NET 11 runtime; a solution pinned to the .NET 10 SDK still loads.
+`terse doctor` checks the setup.
 
 ## 💸 Save tokens
 

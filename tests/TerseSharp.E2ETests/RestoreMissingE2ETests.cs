@@ -11,7 +11,7 @@ public sealed class RestoreMissingE2ETests : IAsyncLifetime
     public async ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(Path.Combine(Fresh, ".git"));
-        await File.WriteAllTextAsync(Path.Combine(Fresh, "Fresh.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(Fresh, "Fresh.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework></PropertyGroup></Project>", TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(Path.Combine(Fresh, "Order.cs"), "namespace Fresh;\n\npublic sealed class Order;\n", TestContext.Current.CancellationToken);
 
         server = await TerseServerProcess.StartAsync(

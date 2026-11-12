@@ -2,8 +2,8 @@ namespace TerseSharp.Core;
 
 public sealed class WorkspaceRegistry(int maxWorkspaces = 4, bool watch = true) : IDisposable
 {
-    private readonly Dictionary<string, LoadedWorkspace> workspaces = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DateTimeOffset> carriedEpochs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, LoadedWorkspace> workspaces = [with(StringComparer.OrdinalIgnoreCase)];
+    private readonly Dictionary<string, DateTimeOffset> carriedEpochs = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly Lock map = new();
     private readonly int maxWorkspaces = maxWorkspaces;

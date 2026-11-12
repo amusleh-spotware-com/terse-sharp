@@ -131,8 +131,9 @@ public sealed class BacklogShapeTests
             .Select(group => group.Key),
     ];
 
-    private static readonly HashSet<string> CollidedBeforeThisGate = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> CollidedBeforeThisGate =
+    [
+        with(StringComparer.Ordinal),
         "I28", "I38", "I70", "I74", "I81", "I81/I82", "I93", "I216", "I217", "I314",
-    };
+    ];
 }

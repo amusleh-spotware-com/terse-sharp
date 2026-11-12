@@ -39,7 +39,7 @@ internal sealed class RazorScanner
     private readonly List<RazorExpression> expressions = [];
     private readonly List<string> issues = [];
     private readonly List<Frame> stack = [];
-    private readonly Dictionary<string, int> rootCounters = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> rootCounters = [with(StringComparer.Ordinal)];
 
     private int index;
 
@@ -288,7 +288,7 @@ internal sealed class RazorScanner
         elements.Add(new RazorElement(name, path, LineAt(start), new RazorSpan(start, index - start), selfClosing, attributes));
 
         if (!selfClosing && !VoidElements.Contains(name, StringComparer.OrdinalIgnoreCase))
-            stack.Add(new Frame(name, path, LineAt(start), new Dictionary<string, int>(StringComparer.Ordinal)));
+            stack.Add(new Frame(name, path, LineAt(start), [with(StringComparer.Ordinal)]));
     }
 
     private void CloseTag()

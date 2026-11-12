@@ -313,7 +313,7 @@ agent calls only what its client lists. `workspace_status` prints `tools=core - 
 `workspace_status` then says `idle=<n>m compilations=dropped` and the next semantic call re-realizes
 what it needs, then warms the rest in the background. While the startup load runs, the
 text, file and git tools already answer. On a **multi-targeted** solution pass
-`load_workspace(targetFramework: "net10.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
+`load_workspace(targetFramework: "net11.0")`: without it MSBuild picks, and an `#if NET6_0` branch can
 be invisible to `find_usages` with every gate green; whatever was chosen is printed as
 `targetFramework=`; an outline names members an inactive `#if` hides. `WARNING subset` names a sibling solution with projects this one lacks (`find_usages` adds `NOTE incomplete`); `load_workspace replace=true` swaps to it. A `WARNING config-mapping` line names a project the solution builds at another Configuration|Platform: its warnaserror and nowarn severities are re-read at that configuration.
 Unloading — by `unload_workspace` or by eviction — ends with a compacting collection, so the memory

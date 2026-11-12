@@ -11,7 +11,7 @@ public sealed class ParsedDocumentCache(int maxDocuments = ParsedDocumentCache.M
     public const int ResourceFactor = 3;
 
     private readonly Lock gate = new();
-    private readonly Dictionary<string, LinkedListNode<Cached>> nodes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, LinkedListNode<Cached>> nodes = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly LinkedList<Cached> order = new();
 
     private long bytes;

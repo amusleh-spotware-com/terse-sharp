@@ -37,7 +37,7 @@ public sealed class TerseServerFixture : IAsyncLifetime
     public static string ServerAssemblyPath()
     {
         var configuration = Path.GetFileName(Path.GetDirectoryName(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)))!;
-        var path = Path.Combine(RepositoryRoot, "src", "TerseSharp.Server", "bin", configuration, "net10.0", "terse.dll");
+        var path = Path.Combine(RepositoryRoot, "src", "TerseSharp.Server", "bin", configuration, "net11.0", "terse.dll");
 
         return File.Exists(path) ? path : throw new FileNotFoundException("build TerseSharp.Server first", path);
     }

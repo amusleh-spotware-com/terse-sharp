@@ -34,8 +34,8 @@ public sealed record XamlFileRecord(
 
 public sealed partial class XamlResourceGraph
 {
-    private readonly Dictionary<string, List<XamlResourceDeclaration>> declarations = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, XamlFileRecord> byPath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<XamlResourceDeclaration>> declarations = [with(StringComparer.Ordinal)];
+    private readonly Dictionary<string, XamlFileRecord> byPath = [with(StringComparer.OrdinalIgnoreCase)];
     private readonly ParsedDocumentCache documents;
 
     private XamlResourceGraph(ParsedDocumentCache documents, IReadOnlyList<XamlFileRecord> files)

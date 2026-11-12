@@ -24,7 +24,7 @@ public static class RazorValidation
         if (targets.Count is 0)
             return Result.Fail<string>(Errors.Invalid("no Razor file matched the request", "pass a .razor path, or scope=solution"));
 
-        var run = new RazorRun(workspace, new RazorRegistrationCache(workspace), [], new List<RazorContext>(targets.Count));
+        var run = new RazorRun(workspace, new RazorRegistrationCache(workspace), [], [with(targets.Count)]);
 
         foreach (var target in targets)
             await CollectAsync(run, target, cancellationToken).ConfigureAwait(false);

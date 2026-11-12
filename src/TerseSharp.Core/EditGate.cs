@@ -243,10 +243,10 @@ public static class EditGate
         CancellationToken cancellationToken)
     {
         var tally = new Tally(
-            new Dictionary<string, int>(StringComparer.Ordinal),
-            new Dictionary<string, int>(StringComparer.Ordinal),
-            new Dictionary<string, int>(StringComparer.Ordinal),
-            new Dictionary<string, List<int>>(StringComparer.Ordinal),
+            [with(StringComparer.Ordinal)],
+            [with(StringComparer.Ordinal)],
+            [with(StringComparer.Ordinal)],
+            [with(StringComparer.Ordinal)],
             0,
             0,
             0);
@@ -565,7 +565,7 @@ public static class EditGate
     private static void Note(Dictionary<string, List<int>> lines, string key, int line)
     {
         if (!lines.TryGetValue(key, out var at))
-            lines[key] = at = new List<int>(1);
+            lines[key] = at = [with(1)];
 
         if (at.Count <= MaxCallerHints && !at.Contains(line))
             at.Add(line);

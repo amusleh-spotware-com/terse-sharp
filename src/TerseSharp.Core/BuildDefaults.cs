@@ -6,7 +6,7 @@ namespace TerseSharp.Core;
 
 public sealed record BuildDefaults(string? Configuration, FrozenDictionary<string, string> Projects, string? Source)
 {
-    public static BuildDefaults None { get; } = new(null, FrozenDictionary<string, string>.Empty, null);
+    public static BuildDefaults None { get; } = new(null, [], null);
 
     public static async Task<BuildDefaults> LoadAsync(string directory, CancellationToken cancellationToken)
     {

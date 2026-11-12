@@ -168,7 +168,7 @@ public sealed class UpdateE2ETests : IAsyncLifetime
     }
 
     private static Task<string> CallAsync(TerseServerProcess server) =>
-        server.CallAsync("list_workspaces", new Dictionary<string, object?>(StringComparer.Ordinal), TestContext.Current.CancellationToken);
+        server.CallAsync("list_workspaces", [with(StringComparer.Ordinal)], TestContext.Current.CancellationToken);
 
     private static async Task<string> AnnouncedAsync(TerseServerProcess server)
     {

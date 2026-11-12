@@ -10,7 +10,7 @@ internal static class TransientWrites
 
         for (var attempt = 0; attempt < Attempts; attempt++)
         {
-            text = await server.CallAsync("write_text", new(arguments));
+            text = await server.CallAsync("write_text", [with(arguments)]);
 
             if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
                 break;
@@ -27,7 +27,7 @@ internal static class TransientWrites
 
         for (var attempt = 0; attempt < Attempts; attempt++)
         {
-            text = await server.CallAsync("write_text", new(arguments));
+            text = await server.CallAsync("write_text", [with(arguments)]);
 
             if (!text.StartsWith("ERROR Transient", StringComparison.Ordinal))
                 break;

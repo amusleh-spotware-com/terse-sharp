@@ -108,7 +108,7 @@ public sealed class ToolSchemaEstimateTests
         {
             Name = "fake_tool",
             Description = "abc  example: fake_tool x=1",
-            InputSchema = JsonDocument.Parse("""{"type":"object","properties":{"workspace":{"description":"xy","type":"string"}}}""").RootElement,
+            InputSchema = JsonElement.Parse("""{"type":"object","properties":{"workspace":{"description":"xy","type":"string"}}}"""),
         };
         AdvertisedCost.Observe([installed], [installed]);
 
@@ -163,7 +163,7 @@ public sealed class ToolSchemaEstimateTests
         {
             Name = "fake_tool",
             Description = "abc",
-            InputSchema = JsonDocument.Parse("""{"type":"object","properties":{"workspace":{"description":"xy","type":"string"}}}""").RootElement,
+            InputSchema = JsonElement.Parse("""{"type":"object","properties":{"workspace":{"description":"xy","type":"string"}}}"""),
         };
         AdvertisedCost.Observe([installed], [installed]);
         using var workspace = new AdhocWorkspace();

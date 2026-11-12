@@ -18,9 +18,9 @@ public sealed record PolicyOptions(
         false,
         true,
         PolicyRules.CognitiveThreshold,
-        FrozenDictionary<PolicyRule, PolicyLimit>.Empty,
         [],
-        FrozenDictionary<NamingKind, NamingPattern>.Empty,
+        [],
+        [],
         [],
         null,
         null);

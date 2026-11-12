@@ -50,7 +50,7 @@ public sealed class ProjectTools(ToolContext context)
     public Task<string> ProjectCreate(
         [Description("Path of the .csproj to create.")] string project,
         [Description("classlib, console, web or razor. Default classlib.")] string? kind = null,
-        [Description("Optional target framework, e.g. net10.0. Omit to inherit from Directory.Build.props.")] string? targetFramework = null,
+        [Description("Optional target framework, e.g. net11.0. Omit to inherit from Directory.Build.props.")] string? targetFramework = null,
         [Description("Diff only, write nothing.")] bool dryRun = false,
         [Description("Return the full diff instead of the one-line summary. Default false.")] bool verbose = false,
         [Description("Workspace or worktree name.")] string? workspace = null) =>

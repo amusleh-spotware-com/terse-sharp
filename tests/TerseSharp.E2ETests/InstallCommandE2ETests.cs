@@ -406,7 +406,7 @@ public sealed class InstallCommandE2ETests : IDisposable
         {
             var first = await server.CallAsync(
                 "workspace_status",
-                new Dictionary<string, object?>(StringComparer.Ordinal),
+                [with(StringComparer.Ordinal)],
                 TestContext.Current.CancellationToken);
 
             Assert.Contains("WARNING guard=absent", first, StringComparison.Ordinal);

@@ -58,7 +58,7 @@ public static class McpHost
         context.ToolsChanged = token => Announce(host.Services, token);
 
         if (ToolSettings.Notice(overrides) is { } notice)
-            await Console.Error.WriteLineAsync(notice).ConfigureAwait(false);
+            await Console.Error.WriteLineAsync(notice, cancellationToken).ConfigureAwait(false);
 
         if (await ClientRegistrar.ProbeAsync(cancellationToken).ConfigureAwait(false) is { } assets)
             AssetBanner.Publish(assets);
@@ -93,7 +93,7 @@ public static class McpHost
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                await Console.Error.WriteLineAsync("terse idle release failed: " + exception.Message).ConfigureAwait(false);
+                await Console.Error.WriteLineAsync("terse idle release failed: " + exception.Message, CancellationToken.None).ConfigureAwait(false);
             }
         }
     }
@@ -131,14 +131,14 @@ public static class McpHost
         try
         {
             if (await ClientRegistrar.RefreshAsync(cancellationToken).ConfigureAwait(false) is { } refreshed)
-                await Console.Error.WriteLineAsync(refreshed).ConfigureAwait(false);
+                await Console.Error.WriteLineAsync(refreshed, cancellationToken).ConfigureAwait(false);
 
             if (UpdateSettings.Enabled() && UpdateSettings.Requested() is { } request)
                 UpdateBanner.Publish(UpdateCheck.Notice(request.Running, await UpdateCheck.RunAsync(request, cancellationToken).ConfigureAwait(false)));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await Console.Error.WriteLineAsync("terse maintenance failed: " + exception.Message).ConfigureAwait(false);
+            await Console.Error.WriteLineAsync("terse maintenance failed: " + exception.Message, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

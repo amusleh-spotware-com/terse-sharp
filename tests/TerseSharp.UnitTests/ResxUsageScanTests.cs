@@ -4,7 +4,7 @@ namespace TerseSharp.UnitTests;
 
 public sealed class ResxUsageScanTests : IDisposable
 {
-    private static readonly HashSet<string> ResourceClasses = new(StringComparer.Ordinal) { "Strings" };
+    private static readonly HashSet<string> ResourceClasses = [with(StringComparer.Ordinal), "Strings"];
 
     private readonly DirectoryInfo directory = Directory.CreateTempSubdirectory("terse-resx-usage-");
 

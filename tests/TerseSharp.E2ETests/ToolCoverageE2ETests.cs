@@ -3,8 +3,9 @@ namespace TerseSharp.E2ETests;
 [Collection(nameof(TerseServerCollection))]
 public sealed class ToolCoverageE2ETests(TerseServerFixture server)
 {
-    private static readonly HashSet<string> Exercised = new(StringComparer.Ordinal)
-    {
+    private static readonly HashSet<string> Exercised =
+    [
+        with(StringComparer.Ordinal),
         "load_workspace", "workspace_status", "list_workspaces", "unload_workspace", "list_projects",
         "history",
     "search_symbols", "get_symbol", "get_file_outline", "get_type_outline", "get_symbol_source",
@@ -27,7 +28,7 @@ public sealed class ToolCoverageE2ETests(TerseServerFixture server)
         "razor_outline", "razor_component", "razor_find", "razor_bindings", "razor_codebehind",
         "razor_validate", "razor_set_attribute", "razor_add_element", "razor_remove_element", "razor_set_directive",
         "changed_files", "diff_symbols", "diff_text",
-    };
+    ];
 
     [Fact]
     public async Task EveryAdvertisedTool_HasAnE2ETest()

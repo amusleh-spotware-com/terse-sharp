@@ -1526,7 +1526,7 @@ context.RejectWrite() is { } rejection
     };
 
     private bool Unbound(string path, WriteOptions options) =>
-        options.IfUnchangedSince is null && !context.Registry.All().Any() && Unhoused(path);
+        options.IfUnchangedSince is null && context.Registry.All().Count == 0 && Unhoused(path);
 
     private static (IReadOnlyList<FileService.TextEdit> Own, List<FileService.TextEditGroup> Others) BySource(string root, string path, List<FileService.TextEditGroup> groups) =>
         (groups.Find(group => SamePath(root, group.Path, path)).Edits ?? [], groups.FindAll(group => !SamePath(root, group.Path, path)));

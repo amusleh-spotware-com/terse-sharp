@@ -11,7 +11,7 @@ public sealed class FixtureSdkPinTests
         var fixture = await PinAsync(Path.Combine(Fixtures.RepositoryRoot, "fixtures", "FixtureSolution", "global.json"));
 
         Assert.Equal(repository, fixture);
-        Assert.Equal(("10.0.300", "latestPatch"), fixture);
+        Assert.Equal(("11.0.100", "latestPatch"), fixture);
     }
 
     private static async Task<(string Version, string RollForward)> PinAsync(string path)

@@ -226,7 +226,7 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
         var text = await server.CallAsync("project_properties", new() { ["project"] = Project });
 
         Assert.False(text.StartsWith("0 properties", StringComparison.Ordinal), text);
-        Assert.Contains("TargetFramework = net10.0", text, StringComparison.Ordinal);
+        Assert.Contains("TargetFramework = net11.0", text, StringComparison.Ordinal);
         Assert.Contains("Directory.Build.props", text, StringComparison.Ordinal);
         Assert.Single(text.Split('\n'), line => line.StartsWith("TargetFramework = ", StringComparison.Ordinal));
     }
@@ -236,7 +236,7 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("project_properties", new() { ["project"] = Project, ["name"] = "TargetFramework" });
 
-        Assert.Contains("TargetFramework = net10.0", text, StringComparison.Ordinal);
+        Assert.Contains("TargetFramework = net11.0", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Nullable = ", text, StringComparison.Ordinal);
     }
 
@@ -279,7 +279,7 @@ public sealed class ProjectToolsE2ETests(TerseServerFixture server)
             ["properties"] = "TargetFramework,IsPackable,NoSuchPropertyAnywhere",
         });
 
-        Assert.Contains("TargetFramework=net10.0", text, StringComparison.Ordinal);
+        Assert.Contains("TargetFramework=net11.0", text, StringComparison.Ordinal);
         Assert.Contains("IsPackable=true", text, StringComparison.Ordinal);
         Assert.Contains("NoSuchPropertyAnywhere=(unset)", text, StringComparison.Ordinal);
     }

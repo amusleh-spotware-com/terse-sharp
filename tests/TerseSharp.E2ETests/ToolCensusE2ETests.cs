@@ -455,7 +455,7 @@ public sealed class ToolCensusE2ETests(TerseServerFixture server)
             foreach (var command in Shell(tool.Description ?? string.Empty))
             {
                 if (!advertised.TryGetValue(command, out var owners))
-                    advertised[command] = owners = new HashSet<string>(StringComparer.Ordinal);
+                    advertised[command] = owners = [with(StringComparer.Ordinal)];
 
                 owners.Add(tool.Name);
             }

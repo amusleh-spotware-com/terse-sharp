@@ -132,8 +132,8 @@ public sealed class RepeatSteerTests
             Name = "read_text",
             Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
             {
-                ["path"] = System.Text.Json.JsonDocument.Parse("\"a.md\"").RootElement,
-                [argument] = System.Text.Json.JsonDocument.Parse("1").RootElement,
+                ["path"] = System.Text.Json.JsonElement.Parse("\"a.md\""),
+                [argument] = System.Text.Json.JsonElement.Parse("1"),
             },
         };
 
@@ -306,8 +306,8 @@ public sealed class RepeatSteerTests
             Name = "write_text",
             Arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
             {
-                ["path"] = System.Text.Json.JsonDocument.Parse("\"obj\"").RootElement,
-                [argument] = System.Text.Json.JsonDocument.Parse(json).RootElement,
+                ["path"] = System.Text.Json.JsonElement.Parse("\"obj\""),
+                [argument] = System.Text.Json.JsonElement.Parse(json),
             },
         };
 
@@ -375,7 +375,7 @@ public sealed class RepeatSteerTests
         var arguments = new Dictionary<string, System.Text.Json.JsonElement>(StringComparer.Ordinal)
         {
             ["path"] = System.Text.Json.JsonSerializer.SerializeToElement(path),
-            [argument] = System.Text.Json.JsonDocument.Parse(json).RootElement,
+            [argument] = System.Text.Json.JsonElement.Parse(json),
         };
 
         if (moved)

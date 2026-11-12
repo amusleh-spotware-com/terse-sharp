@@ -44,7 +44,7 @@ public static class GuardEntry
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            await error.WriteLineAsync(string.Concat(UnhandledHeader, exception.ToString())).ConfigureAwait(false);
+            await error.WriteLineAsync(string.Concat(UnhandledHeader, exception.ToString()), CancellationToken.None).ConfigureAwait(false);
 
             return 1;
         }

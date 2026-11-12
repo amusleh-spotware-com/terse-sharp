@@ -12,7 +12,7 @@ public static class DotSettingsFormat
     private const string Suffix = ".sln.DotSettings";
 
     private static readonly Lock Gate = new();
-    private static readonly Dictionary<string, (DateTime Stamp, DotSettingsConvention Convention)> Cached = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, (DateTime Stamp, DotSettingsConvention Convention)> Cached = [with(StringComparer.OrdinalIgnoreCase)];
 
     public static async Task<DotSettingsConvention> FoundAsync(string? filePath, CancellationToken cancellationToken)
     {

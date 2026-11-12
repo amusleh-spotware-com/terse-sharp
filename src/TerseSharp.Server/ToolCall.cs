@@ -23,7 +23,7 @@ internal static class ToolCall
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await output.WriteLineAsync(Errors.Internal(Unwrapped(exception)).Render()).ConfigureAwait(false);
+            await output.WriteLineAsync(Errors.Internal(Unwrapped(exception)).Render(), CancellationToken.None).ConfigureAwait(false);
 
             return 1;
         }
@@ -46,7 +46,7 @@ internal static class ToolCall
         {
             await output.WriteLineAsync(Errors.Invalid(
                 "no tool is named '" + tool + "'",
-                "run terse call --help, or pick one of: " + string.Join(", ", methods.Keys.Order(StringComparer.Ordinal).Take(12)) + ", ...").Render()).ConfigureAwait(false);
+                "run terse call --help, or pick one of: " + string.Join(", ", methods.Keys.Order(StringComparer.Ordinal).Take(12)) + ", ...").Render(), cancellationToken).ConfigureAwait(false);
 
             return 1;
         }
@@ -78,7 +78,7 @@ internal static class ToolCall
 
         if (!arguments.IsOk)
         {
-            await output.WriteLineAsync(arguments.Error!.Render()).ConfigureAwait(false);
+            await output.WriteLineAsync(arguments.Error!.Render(), cancellationToken).ConfigureAwait(false);
 
             return 1;
         }
@@ -87,7 +87,7 @@ internal static class ToolCall
 
         if (!bound.IsOk)
         {
-            await output.WriteLineAsync(bound.Error!.Render()).ConfigureAwait(false);
+            await output.WriteLineAsync(bound.Error!.Render(), cancellationToken).ConfigureAwait(false);
 
             return 1;
         }
@@ -99,8 +99,8 @@ internal static class ToolCall
         var answer = await Text(method.Invoke(instance, bound.Value!)).ConfigureAwait(false);
         var measured = new CallTiming(load, Stopwatch.GetElapsedTime(callStarted));
 
-        await output.WriteLineAsync(answer).ConfigureAwait(false);
-        await timing.WriteLineAsync(measured.ToString()).ConfigureAwait(false);
+        await output.WriteLineAsync(answer, cancellationToken).ConfigureAwait(false);
+        await timing.WriteLineAsync(measured.ToString(), cancellationToken).ConfigureAwait(false);
 
         return 0;
     }

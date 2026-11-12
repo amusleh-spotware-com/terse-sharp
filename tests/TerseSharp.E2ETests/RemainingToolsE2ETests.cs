@@ -79,7 +79,7 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
     {
         var text = await server.CallAsync("read_text", new()
         {
-            ["path"] = "src/Fixture.Trading/bin/Debug/net10.0/Fixture.Trading.dll",
+            ["path"] = "src/Fixture.Trading/bin/Debug/net11.0/Fixture.Trading.dll",
         });
 
         Assert.Contains("ERROR", text, StringComparison.Ordinal);

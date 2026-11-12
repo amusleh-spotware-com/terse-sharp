@@ -72,11 +72,11 @@ and `clean` — the
 `dotnet` CLI is a fallback under the gate above, not a shortcut, and `cd … && dotnet …` was the single
 most common breach in this repo's own session log.
 
-.NET 10 SDK required (`global.json` pins `10.0.300`). Central package management: add versions to
+.NET 11 SDK required (`global.json` pins `11.0.100`). Central package management: add versions to
 `Directory.Packages.props`, never inline in a `.csproj`.
 
 **E2E tests need `TerseSharp.Server` built first, in the same configuration as the test binaries** —
-`TerseServerFixture` launches `src/TerseSharp.Server/bin/<Configuration>/net10.0/terse.dll` as a real
+`TerseServerFixture` launches `src/TerseSharp.Server/bin/<Configuration>/net11.0/terse.dll` as a real
 child process over stdio and throws `build TerseSharp.Server first` if it is missing.
 
 ## 🚫 HARD GATE — the `terse` that answers you is the installed tool, never your working tree
@@ -94,7 +94,7 @@ spent arguing with this:
 So: **no claim about tool behaviour is made from the connected server.** A statement of the form "tool
 X does/does not Y" is proven by, in order of preference: (a) an E2E test against the freshly built
 `terse.dll`, (b) a hand-run
-`dotnet src/TerseSharp.Server/bin/<Configuration>/net10.0/terse.dll call <tool> --workspace <path> --json '{…}'`
+`dotnet src/TerseSharp.Server/bin/<Configuration>/net11.0/terse.dll call <tool> --workspace <path> --json '{…}'`
 — one command, and `--workspace` is mandatory in practice because a probe that omits it answers about
 an auto-discovered solution rather than the one under test — (c) current source read with
 `get_symbol_source`. **Say which one answered, and say the version** —
@@ -696,11 +696,11 @@ suggestions.
 
 **Pre-sizing beats the collection expression, and that is settled — stop re-deriving it.** The
 allocation gate mandates pre-sizing the one collection you must build; the style rule above prefers
-`[]` over `new List<T>()`. Where you know the count, `new List<T>(count)` / `new
-Dictionary<K,V>(count)` / `EnsureCapacity` **wins**, and it is not a style breach. C# 15 collection
-expression arguments (`[with(capacity: n), .. items]`) resolve the tension properly and are the form to
-adopt the moment the SDK pin moves: they need the .NET 11 SDK plus `LangVersion=preview`, and
-`global.json` pins `10.0.300` on three CI runners. Logged as `I428`.
+`[]` over `new List<T>()`. Where you know the count, pre-sizing **wins** - and since the pin moved to
+`11.0.100` it is spelled with C# 15 collection expression arguments: `[with(count)]`,
+`[with(comparer)]`, `[with(comparer), item]`, or `EnsureCapacity` on an existing collection. The SDK 11
+code-style fixer rewrites `new(count)` and `new(comparer)` into that form and the ubuntu
+`dotnet format style` step fails on the old spelling. `I428`.
 
 ## 🚫 HARD GATE — a release is not cut until the review is closed and the changelog links it
 

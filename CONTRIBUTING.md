@@ -7,7 +7,7 @@ dotnet build TerseSharp.slnx
 dotnet test  TerseSharp.slnx
 ```
 
-Requires the **.NET 10 SDK** (see `global.json`). Nothing else — no IDE, no licence, no Node.
+Requires the **.NET 11 SDK** (see `global.json`). Nothing else — no IDE, no licence, no Node.
 
 ## The two rules that are not negotiable
 

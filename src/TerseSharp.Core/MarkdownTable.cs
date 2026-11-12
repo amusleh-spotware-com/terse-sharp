@@ -81,7 +81,7 @@ public static class MarkdownTable
     {
         private const string Ellipsis = "...";
 
-        private readonly HashSet<string> matched = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> matched = [with(StringComparer.OrdinalIgnoreCase)];
 
         public List<string> Rows { get; } = [];
 

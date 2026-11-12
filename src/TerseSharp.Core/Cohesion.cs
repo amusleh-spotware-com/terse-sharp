@@ -74,7 +74,7 @@ internal static class Cohesion
     {
         private readonly int[] parents = [.. Enumerable.Range(0, size)];
         private readonly bool[] linked = new bool[size];
-        private readonly Dictionary<string, int> owners = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> owners = [with(StringComparer.Ordinal)];
 
         public int Count => Enumerable.Range(0, parents.Length).Where(index => linked[index]).Select(Find).Distinct().Count();
 

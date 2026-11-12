@@ -100,7 +100,7 @@ public static class ToolGuard
         var payload = await input.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
         var verdict = await DecideAsync(payload, cancellationToken).ConfigureAwait(false);
 
-        await output.WriteLineAsync(Render(verdict)).ConfigureAwait(false);
+        await output.WriteLineAsync(Render(verdict), cancellationToken).ConfigureAwait(false);
         await LogAsync(payload, verdict, cancellationToken).ConfigureAwait(false);
 
         return 0;

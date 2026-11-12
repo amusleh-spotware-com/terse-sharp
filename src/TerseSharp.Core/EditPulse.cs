@@ -9,7 +9,7 @@ public static class EditPulse
 
     private static readonly Lock Gate = new();
 
-    private static readonly List<(int At, string Path)> Recent = new(MaxRemembered);
+    private static readonly List<(int At, string Path)> Recent = [with(MaxRemembered)];
 
     public static int Changed => Volatile.Read(ref changed);
 

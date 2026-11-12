@@ -8,7 +8,7 @@ public sealed class ResponseBuilder(string tool, string argument)
 {
     private const int SteerThreshold = 25;
 
-    private readonly List<Entry> entries = new(16);
+    private readonly List<Entry> entries = [with(16)];
     private bool verbose;
 
     public ResponseBuilder Verbose(bool value)

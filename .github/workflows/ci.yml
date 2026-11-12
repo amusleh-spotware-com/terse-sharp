@@ -64,8 +64,11 @@ jobs:
           precompiled=$(unzip -l TerseSharp.linux-x64.*.nupkg | awk '$NF ~ /\/Microsoft\.CodeAnalysis\.dll$/ {print $1}')
           portable=$(unzip -l TerseSharp.any.*.nupkg | awk '$NF ~ /\/Microsoft\.CodeAnalysis\.dll$/ {print $1}')
           test "$precompiled" -gt "$portable"
-          dotnet tool install --tool-path "$RUNNER_TEMP/terse" TerseSharp --add-source . --prerelease
-          "$RUNNER_TEMP/terse/terse" --version
+          version=$(echo TerseSharp.[0-9]*.nupkg | sed -E 's/^TerseSharp\.(.*)\.nupkg$/\1/')
+          packages="$PWD"
+          cd "$RUNNER_TEMP"
+          dotnet tool install --tool-path "$RUNNER_TEMP/terse" TerseSharp --add-source "$packages" --version "$version"
+          "$RUNNER_TEMP/terse/terse" --version | grep -F "$version"
           find "$RUNNER_TEMP/terse/.store" -ipath '*linux-x64*' -name terse.dll | grep -q .
 
       - name: Upload package
