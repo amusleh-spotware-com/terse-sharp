@@ -227,7 +227,7 @@ public static partial class DotnetRunner
         AppendTimings(response, report, request);
         AppendRerun(response, report);
 
-        return response.ToString() + EntryNote(report, request, interrupted) + ScopeNote(report, request);
+        return response.ToString() + EntryNote(report, request, interrupted, Unbuilt(run)) + ScopeNote(report, request);
     }
 
     internal static string ScopeNote(TestRunReport report, TestRunRequest request)
@@ -1322,7 +1322,7 @@ public static partial class DotnetRunner
     private static bool Unindented(string output, string line) =>
         output.StartsWith(line, StringComparison.Ordinal) || output.Contains(string.Concat("\n", line), StringComparison.Ordinal);
 
-    internal static string EntryNote(TestRunReport report, TestRunRequest request, bool interrupted = false)
+    internal static string EntryNote(TestRunReport report, TestRunRequest request, bool interrupted = false, string? unbuilt = null)
     {
         if (interrupted || report.Total is 0 || request.Entries.IsDefaultOrEmpty || report.EntryRuns.Length != request.Entries.Length)
             return string.Empty;
@@ -1332,7 +1332,7 @@ public static partial class DotnetRunner
         for (var index = 0; index < report.EntryRuns.Length; index++)
         {
             if (report.EntryRuns[index] is 0)
-                note.Append(CultureInfo.InvariantCulture, $"\nWARNING tests= entry {index + 1} '{request.Entries[index]}' ran 0 tests - check the name; an [Explicit] or ignored test runs only when it is selected alone: test=\"{request.Entries[index]}\"");
+                AppendEmptyEntry(note, index, request.Entries[index], unbuilt);
         }
 
         return note.ToString();
@@ -1405,6 +1405,22 @@ public static partial class DotnetRunner
 
         return response.ToString();
     }
+
+    private static void AppendEmptyEntry(StringBuilder note, int index, string entry, string? unbuilt)
+    {
+        if (unbuilt is null)
+            note.Append(CultureInfo.InvariantCulture, $"\nWARNING tests= entry {index + 1} '{entry}' ran 0 tests - check the name; an [Explicit] or ignored test runs only when it is selected alone: test=\"{entry}\"");
+        else
+            note.Append(CultureInfo.InvariantCulture, $"\nWARNING tests= entry {index + 1} '{entry}' ran 0 tests - not run if it is in {unbuilt}, which did not build; fix the build before checking the name");
+    }
+
+    private static string? Unbuilt(ProcessRun run) => run.ExitCode is 0
+        ? null
+        : FailedProjects(Array.FindAll(Diagnostics(run.Output).Errors, line => Unindented(run.Output, line))) switch
+        {
+            [] => null,
+            var projects => string.Join(", ", projects),
+        };
 }
 
 internal sealed record ProcessRun(

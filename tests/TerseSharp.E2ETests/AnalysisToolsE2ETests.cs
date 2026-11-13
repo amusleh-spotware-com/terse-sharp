@@ -1,4 +1,6 @@
 
+using Microsoft.CodeAnalysis;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -813,5 +815,50 @@ public sealed class AnalysisToolsE2ETests(TerseServerFixture server)
         Assert.Contains("\nnext: analyze paths=[\"src/Fixture.Trading/OrderService.cs\"]", text, StringComparison.Ordinal);
         Assert.StartsWith("ERROR InvalidArgument", comma, StringComparison.Ordinal);
         Assert.Contains("carries a comma or a brace", comma, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Analyze_WithNoCheckedInPolicyAndABaseRef_ReportsTheAmbientCommentRuleOnTheLinesThisTreeAdded()
+    {
+        const string Probe = "src/Fixture.Trading/AmbientCommentProbe.cs";
+
+        await server.CallAsync("write_text", new()
+        {
+            ["path"] = Probe,
+            ["force"] = true,
+            ["content"] = "namespace Fixture.Trading;\n\npublic static class AmbientCommentProbe\n{\n    // explain the obvious\n    public static int Value => 1;\n}\n",
+        });
+
+        try
+        {
+            var narrowed = await server.CallAsync("analyze", new() { ["path"] = Probe, ["minSeverity"] = "info", ["baseRef"] = "HEAD", ["includeDeadCode"] = false });
+            var whole = await server.CallAsync("analyze", new() { ["path"] = Probe, ["minSeverity"] = "info", ["includeDeadCode"] = false });
+
+            Assert.Contains("TERSE112", narrowed, StringComparison.Ordinal);
+            Assert.Contains("AmbientCommentProbe.cs", narrowed, StringComparison.Ordinal);
+            Assert.DoesNotContain("TERSE112", whole, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task Analyze_WithAPathAndElevenPaths_ReservesASlotForThePathAndNamesTheLastTwoInNext()
+    {
+        string[] batch =
+        [
+            "src/Fixture.Trading/Awkward.cs", "src/Fixture.Trading/Compactness.cs", "src/Fixture.Trading/Composition.cs",
+            "src/Fixture.Trading/InMemoryOrderRepository.cs", "src/Fixture.Trading/IOrderRepository.cs", "src/Fixture.Trading/Localization.cs",
+            "src/Fixture.Trading/NullOrderRepository.cs", "src/Fixture.Trading/OrderBook.cs", "src/Fixture.Trading/OrderRouter.cs",
+            "src/Fixture.Trading/OrderService.cs", "src/Fixture.Trading/OrderSide.cs",
+        ];
+
+        var text = await server.CallAsync("analyze", new() { ["path"] = "src/Fixture.Trading/Order.cs", ["paths"] = batch, ["minSeverity"] = "warning" });
+
+        Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
+        Assert.Contains("\nPARTIAL 10 of 12 paths answered, 10 per call", text, StringComparison.Ordinal);
+        Assert.Contains("\nnext: analyze paths=[\"src/Fixture.Trading/OrderService.cs\", \"src/Fixture.Trading/OrderSide.cs\"]", text, StringComparison.Ordinal);
     }
 }

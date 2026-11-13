@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Text;
 using TerseSharp.Core;
 
 namespace TerseSharp.UnitTests;
@@ -571,5 +572,22 @@ public sealed class PolicyServiceTests
 
         Assert.Equal("4 nesting levels", finding.Measured);
         Assert.Equal("3", finding.Allowed);
+    }
+
+    [Fact]
+    public void Scanned_ForAScopedPassWithAnUnfinishedProject_KeepsOnlyTheFinishedProjectsDocuments()
+    {
+        using var workspace = new AdhocWorkspace();
+        var finishedId = workspace.AddProject("Finished", LanguageNames.CSharp).Id;
+        var kept = workspace.AddDocument(finishedId, "Kept.cs", SourceText.From("class Kept {}")).Id;
+        var unfinishedId = workspace.AddProject("Unfinished", LanguageNames.CSharp).Id;
+        var dropped = workspace.AddDocument(unfinishedId, "Dropped.cs", SourceText.From("class Dropped {}")).Id;
+        Project[] finished = [workspace.CurrentSolution.GetProject(finishedId)!];
+
+        var scoped = AnalysisService.Scanned(finished, [kept, dropped]);
+        var unscoped = AnalysisService.Scanned(finished, []);
+
+        Assert.Equal(kept, Assert.Single(scoped));
+        Assert.Equal(kept, Assert.Single(unscoped));
     }
 }

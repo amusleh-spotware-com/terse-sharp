@@ -244,8 +244,10 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
                 ? async (entered, token) => await action(entered with { Stale = await StaleAsync(workspace, pathHint, entered, token).ConfigureAwait(false) }, token).ConfigureAwait(false)
                 : action;
 
+            Func<CancellationToken, Task<Result<WorkspaceTarget>>>? requeued = changed ? token => TargetAsync(workspace, pathHint, changed: true, tests, token) : null;
+
             return target.IsOk
-                ? Noted(await SpawnedAsync(target.Value!, spawns, pathHint, run, wait, cancellationToken).ConfigureAwait(false), target.Value.Note)
+                ? Noted(await SpawnedAsync(target.Value!, spawns, pathHint, run, wait, requeued, cancellationToken).ConfigureAwait(false), target.Value.Note)
                 : target.Error!.Render();
         }).ConfigureAwait(false);
     }
@@ -544,25 +546,31 @@ public sealed class ToolContext(WorkspaceRegistry registry, bool readOnly, ToolS
         ? TestScope.TestProjectsOf(loaded.Solution, loaded.Load.TargetFramework is null or { Length: 0 })
         : default;
 
-    private static async Task<string> SpawnedAsync(
+    internal static async Task<string> SpawnedAsync(
         WorkspaceTarget target,
         string spawns,
         string? detail,
         Func<WorkspaceTarget, CancellationToken, Task<string>> action,
         TimeSpan wait,
+        Func<CancellationToken, Task<Result<WorkspaceTarget>>>? requeued,
         CancellationToken cancellationToken)
     {
         if (spawns.Length is 0)
             return await action(target, cancellationToken).ConfigureAwait(false);
 
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var waited = !ActiveRuns.TryEnter(target.SolutionPath, spawns, detail ?? string.Empty, out _, stop);
 
-        if (await ActiveRuns.EnterAsync(target.SolutionPath, spawns, detail ?? string.Empty, stop, wait, cancellationToken).ConfigureAwait(false) is { } holder)
+        if (waited && await ActiveRuns.EnterAsync(target.SolutionPath, spawns, detail ?? string.Empty, stop, wait, cancellationToken).ConfigureAwait(false) is { } holder)
             return Errors.RunInFlight(spawns, holder, wait).Render();
 
         try
         {
-            return await action(target, stop.Token).ConfigureAwait(false);
+            var current = waited && requeued is not null ? await requeued(stop.Token).ConfigureAwait(false) : Result.Ok(target);
+
+            return current.IsOk
+                ? await action(current.Value, stop.Token).ConfigureAwait(false)
+                : current.Error!.Render();
         }
         finally
         {

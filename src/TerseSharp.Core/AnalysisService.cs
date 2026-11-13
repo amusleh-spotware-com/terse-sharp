@@ -21,7 +21,7 @@ public static class AnalysisService
         TimeSpan? timeout = null,
         CancellationToken cancellationToken = default)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ids, exclude, timeout ?? Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, touched is not null, ids, exclude, timeout ?? Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
             return collected.Error!.Render();
@@ -56,7 +56,7 @@ public static class AnalysisService
         TouchedLines? touched,
         CancellationToken cancellationToken)
     {
-        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, [], null, Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        var collected = await CollectedAsync(workspace, path, includeDeadCode, changed, ambient: false, [], null, Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
 
         if (!collected.IsOk)
             return Result.Fail<GateFindings>(collected.Error!);
@@ -77,6 +77,7 @@ public static class AnalysisService
             string? path,
             bool includeDeadCode,
             bool changed,
+            bool ambient,
             IReadOnlyList<string> ids,
             string? exclude,
             TimeSpan timeout,
@@ -109,8 +110,8 @@ public static class AnalysisService
         var unfinished = new HashSet<ProjectId>(harvest.Unfinished);
         var finished = unfinished.Count is 0 ? targets : Array.FindAll(targets, project => !unfinished.Contains(project.Id));
         var (Findings, Finished) = await DeadCodeAsync(workspace, finished, scope, includeDeadCode, bound).ConfigureAwait(false);
-        var policy = await PolicyAsync(workspace, finished, documents, cancellationToken).ConfigureAwait(false);
-        var options = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
+        var options = await PolicyOptionsAsync(workspace, ambient, cancellationToken).ConfigureAwait(false);
+        var policy = await PolicyAsync(workspace, options, Scanned(finished, documents), cancellationToken).ConfigureAwait(false);
         var partial = new Partial(targets.Length, Unfinished(workspace, targets, documents, unfinished), !Finished, timeout);
 
         return Result.Ok(new Collected(harvest, [.. Findings, .. policy], ProjectDiagnostics.Unsupported(targets, ids, harvest.Found, options.EnforcedIds()), scope, partial));
@@ -277,18 +278,11 @@ public static class AnalysisService
     private static string[] Occurrences(DiagnosticFold.Finding[] findings, IReadOnlyList<string> extra) =>
         DiagnosticFold.PerOccurrence(findings.Select(finding => finding.Key).Concat(extra));
 
-    private static async Task<IReadOnlyList<string>> PolicyAsync(
-            LoadedWorkspace workspace,
-            Project[] targets,
-            DocumentId[] documents,
-            CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<string>> PolicyAsync(LoadedWorkspace workspace, PolicyOptions options, DocumentId[] scanned, CancellationToken cancellationToken)
     {
-        var options = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
-
         if (!options.Active)
             return [];
 
-        var scanned = documents.Length is 0 ? [.. targets.SelectMany(project => project.DocumentIds)] : documents;
         var found = await PolicyGate.ScanAsync(workspace, scanned, cancellationToken).ConfigureAwait(false);
 
         return [.. found.Select(finding => finding.Diagnostic())];
@@ -474,6 +468,18 @@ public static class AnalysisService
 
     private static DiagnosticDelta Recorded(string scope, IReadOnlyList<string> occurrences, Partial partial) =>
         partial.IsPartial ? new DiagnosticDelta(occurrences, [], 0, Baseline: true) : DiagnosticHistory.Record(scope, occurrences);
+
+    internal static DocumentId[] Scanned(Project[] finished, DocumentId[] documents) =>
+        documents.Length is 0
+            ? [.. finished.SelectMany(project => project.DocumentIds)]
+            : Array.FindAll(documents, document => Array.Exists(finished, project => project.Id == document.ProjectId));
+
+    private static async Task<PolicyOptions> PolicyOptionsAsync(LoadedWorkspace workspace, bool ambient, CancellationToken cancellationToken)
+    {
+        var loaded = await PolicyCache.ForAsync(workspace.Root, cancellationToken).ConfigureAwait(false);
+
+        return ambient ? loaded.Effective : loaded;
+    }
 }
 
 public static class DiagnosticFormat

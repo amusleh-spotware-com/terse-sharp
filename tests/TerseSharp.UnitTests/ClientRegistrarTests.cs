@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Microsoft.CodeAnalysis;
 using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
@@ -462,8 +463,21 @@ public sealed class ClientRegistrarTests : IDisposable
         var off = ClientRegistrar.Guarded(installed, folderRules: false).ToJsonString();
 
         Assert.Contains("--folder-rules", installed.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains("terse guard --post-batch", installed.ToJsonString(), StringComparison.Ordinal);
         Assert.DoesNotContain("--folder-rules", off, StringComparison.Ordinal);
-        Assert.Contains("terse guard --post-batch", off, StringComparison.Ordinal);
+        Assert.DoesNotContain("terse guard --post-batch", off, StringComparison.Ordinal);
+        Assert.Contains("\"terse guard\"", off, StringComparison.Ordinal);
         Assert.Equal(off, ClientRegistrar.Guarded(JsonNode.Parse(off)!.AsObject(), folderRules: false).ToJsonString());
+    }
+
+    [Fact]
+    public void Guarded_WithFolderRulesOff_KeepsAnotherToolsPostToolBatchHook()
+    {
+        var settings = JsonNode.Parse("""{"hooks":{"PostToolBatch":[{"hooks":[{"type":"command","command":"other-batch-tool"}]},{"hooks":[{"type":"command","command":"terse guard --post-batch"}]}]}}""")!.AsObject();
+
+        var batch = ClientRegistrar.Guarded(settings, folderRules: false)["hooks"]!["PostToolBatch"]!.AsArray();
+
+        Assert.Single(batch);
+        Assert.Equal("other-batch-tool", batch[0]!["hooks"]![0]!["command"]!.GetValue<string>());
     }
 }

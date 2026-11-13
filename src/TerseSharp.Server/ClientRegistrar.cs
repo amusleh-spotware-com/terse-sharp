@@ -326,7 +326,7 @@ public static class ClientRegistrar
 
         hooks["PreToolUse"] = Appended(hooks["PreToolUse"] as JsonArray, [GuardEntry(), .. FolderRulesEntries(TerseWriters(), folderRules)]);
         hooks["PostToolUse"] = Appended(hooks["PostToolUse"] as JsonArray, FolderRulesEntries(TerseCalls, folderRules));
-        hooks["PostToolBatch"] = Appended(hooks["PostToolBatch"] as JsonArray, BatchEntry());
+        hooks["PostToolBatch"] = Appended(hooks["PostToolBatch"] as JsonArray, BatchEntries(folderRules));
         hooks["SessionStart"] = Appended(hooks["SessionStart"] as JsonArray, FolderRulesEntries(Compaction, folderRules));
 
         return updated;
@@ -441,6 +441,8 @@ public static class ClientRegistrar
     private static string TerseWriters() => TerseCalls + "__(" + string.Join('|', FolderRules.Writers.Order(StringComparer.Ordinal)) + ")";
 
     private static JsonObject[] FolderRulesEntries(string matcher, bool enabled) => enabled ? [FolderRulesEntry(matcher)] : [];
+
+    private static JsonObject[] BatchEntries(bool enabled) => enabled ? [BatchEntry()] : [];
 }
 
 public sealed record ClientTarget(string Name, string ConfigPath);

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using Microsoft.CodeAnalysis;
 using TerseSharp.Server;
 
 namespace TerseSharp.E2ETests;
@@ -501,4 +502,13 @@ public sealed class InstallCommandE2ETests : IDisposable
         .Split('\n')
         .Select(line => line.TrimEnd('\r'))
         .Single(line => line.StartsWith("  " + tool + " ", StringComparison.Ordinal));
+
+    [Fact]
+    public async Task Call_WithAMisspelledParameterWhoseStringReadsAsAnArray_IsSteeredToTheArrayParameterExactlyAsTheServerWould()
+    {
+        var output = await RunAsync("call", "search_symbols", "--json", "{\"querys\": \"[\\\"OrderService\\\"]\"}");
+
+        Assert.Contains("unrecognized querys", output, StringComparison.Ordinal);
+        Assert.Contains("querys -> queries?", output, StringComparison.Ordinal);
+    }
 }

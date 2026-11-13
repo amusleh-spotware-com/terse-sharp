@@ -1,6 +1,7 @@
 ﻿using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -12,7 +13,7 @@ internal static class ToolArgumentFilter
 {
     ParameterAliases.Apply(request.Params?.Name, request.Params?.Arguments);
 
-    if (Unrecognized(request) is { } rejected)
+    if ((Unrecognized(request) ?? Destringified(request)) is { } rejected)
         return Failed(rejected);
     try
     {
@@ -344,4 +345,51 @@ internal static class ToolArgumentFilter
 
         return hints.Count is 0 ? string.Empty : "; did you mean " + string.Join(", ", hints) + "?";
     }
+
+    private static TerseError? Destringified(RequestContext<CallToolRequestParams> request)
+    {
+        if (request.Params?.Arguments is not { Count: > 0, IsReadOnly: false } supplied)
+            return null;
+
+        foreach (var name in Arrays(Schema(request)))
+        {
+            if (!supplied.TryGetValue(name, out var value) || value.ValueKind is not JsonValueKind.String)
+                continue;
+
+            if (Parsed(value) is not { } array)
+                return StringSent(request.Params.Name, name);
+
+            supplied[name] = array;
+        }
+
+        return null;
+    }
+
+    private static JsonElement? Parsed(JsonElement value)
+    {
+        if (!ArrayShaped(value))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(value.GetString() ?? string.Empty);
+
+            return document.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static TerseError StringSent(string? tool, string name) => Errors.Invalid(
+        string.Create(CultureInfo.InvariantCulture, $"{tool} rejected the call: {name} was sent as a string - pass a JSON array"),
+        string.Create(CultureInfo.InvariantCulture, $"send {name} as a JSON array, e.g. {name}=[\"first\", \"second\"], not as a string that holds one"));
+
+    internal static bool ArrayShaped(JsonNode? value) => value switch
+    {
+        JsonArray => true,
+        JsonValue scalar when scalar.TryGetValue<JsonElement>(out var element) => ArrayShaped(element),
+        _ => false,
+    };
 }

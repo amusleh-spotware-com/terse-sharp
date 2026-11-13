@@ -1518,7 +1518,7 @@ public static class ToolGuard
         if (RedirectOperatorLength(token) is > 0 and var length)
             return Redirected(command, index, length, operands);
 
-        if (patterned && IsSeparatedScriptFlag(token))
+        if ((patterned && IsSeparatedScriptFlag(token)) || IsFindPattern(command[0], token))
             return 1;
 
         if (Positional(token) && patterns-- <= 0 && IsPathLike(token))
@@ -2046,7 +2046,7 @@ public static class ToolGuard
         return (verdict.Denied, expanded.Denied) switch
         {
             (true, false) => expanded,
-            (true, true) when verdict.Rewrite is not null => Blocking(Stages(resolved), resolved, cwd),
+            (true, true) => Blocking(Stages(resolved), resolved, cwd),
             (false, true) when IntroducesSource(command, resolved) => Blocking(Stages(resolved), resolved, cwd),
             _ => verdict,
         };
@@ -2443,19 +2443,22 @@ public static class ToolGuard
         return lined < 0 ? command.Length : lined;
     }
 
-    private static GuardVerdict Unrolling(string command, string? cwd)
+    private static GuardVerdict Unrolling(string command, string? cwd, bool environed = false)
     {
         var verdict = Assigned(command, cwd);
 
         if (Unrolled(command, Joined) is not { } unrolled)
             return verdict;
 
+        if (!environed && Environed(command) is { } filled && Unrolling(filled, cwd, environed: true) is { Denied: false } literal)
+            return literal;
+
         if (verdict.Denied)
-            return Bound(command) && Iterating(command, cwd, Allowed) is { Denied: false } passes ? passes : verdict;
+            return Looped(command, cwd) ?? verdict;
 
         var looped = Blocking(Stages(unrolled), unrolled, cwd);
 
-        return looped.Denied ? Iterating(command, cwd, verdict) ?? looped : verdict;
+        return Iterating(command, cwd, verdict) ?? (looped.Denied ? looped : verdict);
     }
 
     private static readonly SearchValues<char> Unlisted = SearchValues.Create("$`()<>");
@@ -3229,6 +3232,18 @@ public static class ToolGuard
 
         return -1;
     }
+
+    private static readonly Dictionary<string, string> NoValues = [with(StringComparer.Ordinal)];
+
+    private static string? Environed(string command) =>
+        Filled(command, NoValues, command) is var filled && !filled.Equals(command, StringComparison.Ordinal) ? filled : null;
+
+    private static bool IsFindPattern(string program, string token) =>
+        token is "-name" or "-iname" or "-path" or "-ipath" or "-wholename" or "-iwholename" or "-regex" or "-iregex" or "-lname" or "-ilname"
+        && Path.GetFileNameWithoutExtension(program.AsSpan()) is "find";
+
+    private static GuardVerdict? Looped(string command, string? cwd) =>
+        Bound(command) && Iterating(command, cwd, Allowed) is { Denied: false } passes ? passes : null;
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

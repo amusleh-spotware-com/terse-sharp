@@ -531,4 +531,31 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
         Assert.Contains("unrecognized " + passed, text, StringComparison.Ordinal);
         Assert.Contains(passed + " -> " + expected + "?", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task GetTypeOutline_WithAnArrayParameterSentAsAStringHoldingAnArray_AnswersAsIfTheArrayWasSent()
+    {
+        await server.CallAsync("get_type_outline", new() { ["symbolIds"] = new[] { "OrderService" } });
+
+        var expected = await server.CallAsync("get_type_outline", new() { ["symbolIds"] = new[] { "OrderService" } });
+        var declared = await server.CallAsync("get_type_outline", new() { ["symbolIds"] = "[\"OrderService\"]" });
+        var aliased = await server.CallAsync("get_type_outline", new() { ["symbols"] = "[\"OrderService\"]" });
+
+        Assert.Contains("Submit", expected, StringComparison.Ordinal);
+        Assert.Equal(expected, declared);
+        Assert.Equal(expected, aliased);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithAnArrayParameterSentAsAStringThatIsNoArray_NamesTheParameterAndAsksForAJsonArray()
+    {
+        var plain = await server.CallAsync("get_type_outline", new() { ["symbolIds"] = "OrderService" });
+        var malformed = await server.CallAsync("get_type_outline", new() { ["symbols"] = "[OrderService]" });
+
+        Assert.Contains("ERROR InvalidArgument", plain, StringComparison.Ordinal);
+        Assert.Contains("symbolIds was sent as a string - pass a JSON array", plain, StringComparison.Ordinal);
+        Assert.Contains("remedy:", plain, StringComparison.Ordinal);
+        Assert.DoesNotContain("JsonException", plain, StringComparison.Ordinal);
+        Assert.Contains("symbolIds was sent as a string - pass a JSON array", malformed, StringComparison.Ordinal);
+    }
 }

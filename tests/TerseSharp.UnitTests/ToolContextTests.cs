@@ -587,4 +587,103 @@ public sealed class ToolContextTests
         Assert.Equal(scanned, shown);
         Assert.Equal(1, announced);
     }
+
+    [Fact]
+    public async Task SpawnedAsync_WhenItQueuedBehindAnInFlightRun_RunsOnTheTargetReselectedAfterEntering()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "terse-requeued-" + Guid.NewGuid().ToString("N") + ".slnx");
+        var queued = new WorkspaceTarget(solution, Path.GetTempPath(), TestProjects: ["Queued.Tests.csproj"]);
+        var reselected = queued with { TestProjects = ["Reselected.Tests.csproj"] };
+        using var holder = new CancellationTokenSource();
+        var reselections = 0;
+        string[] ran = [];
+
+        Assert.True(ActiveRuns.TryEnter(solution, "build", string.Empty, out _, holder));
+
+        var call = ToolContext.SpawnedAsync(
+            queued,
+            "run_tests",
+            null,
+            (target, _) =>
+            {
+                ran = [.. target.TestProjects];
+                return Task.FromResult("ran");
+            },
+            TimeSpan.FromMinutes(5),
+            _ =>
+            {
+                reselections++;
+                return Task.FromResult(Result.Ok(reselected));
+            },
+            CancellationToken.None);
+
+        Assert.False(call.IsCompleted);
+        ActiveRuns.Leave(solution);
+
+        Assert.Equal("ran", await call);
+        Assert.Equal(1, reselections);
+        Assert.Equal("Reselected.Tests.csproj", Assert.Single(ran));
+    }
+
+    [Fact]
+    public async Task SpawnedAsync_WhenNothingIsInFlight_NeverReselectsTheTarget()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "terse-unqueued-" + Guid.NewGuid().ToString("N") + ".slnx");
+        var target = new WorkspaceTarget(solution, Path.GetTempPath(), TestProjects: ["Queued.Tests.csproj"]);
+        var reselections = 0;
+        string[] ran = [];
+
+        var answer = await ToolContext.SpawnedAsync(
+            target,
+            "run_tests",
+            null,
+            (entered, _) =>
+            {
+                ran = [.. entered.TestProjects];
+                return Task.FromResult("ran");
+            },
+            TimeSpan.Zero,
+            _ =>
+            {
+                reselections++;
+                return Task.FromResult(Result.Ok(target));
+            },
+            CancellationToken.None);
+
+        Assert.Equal("ran", answer);
+        Assert.Equal(0, reselections);
+        Assert.Equal("Queued.Tests.csproj", Assert.Single(ran));
+        Assert.Null(ActiveRuns.Holding(solution));
+    }
+
+    [Fact]
+    public async Task SpawnedAsync_WhenItQueuedBehindAnInFlightRun_RunsTheActionOnlyOnceItHoldsTheSolution()
+    {
+        var solution = Path.Combine(Path.GetTempPath(), "terse-held-" + Guid.NewGuid().ToString("N") + ".slnx");
+        var target = new WorkspaceTarget(solution, Path.GetTempPath());
+        using var holder = new CancellationTokenSource();
+        string? heldBy = null;
+
+        Assert.True(ActiveRuns.TryEnter(solution, "build", string.Empty, out _, holder));
+
+        var call = ToolContext.SpawnedAsync(
+            target,
+            "run_tests",
+            "noBuild=true",
+            (_, _) =>
+            {
+                heldBy = ActiveRuns.Holding(solution)?.Tool;
+                return Task.FromResult("ran");
+            },
+            TimeSpan.FromMinutes(5),
+            null,
+            CancellationToken.None);
+
+        Assert.False(call.IsCompleted);
+        Assert.Null(heldBy);
+        ActiveRuns.Leave(solution);
+
+        Assert.Equal("ran", await call);
+        Assert.Equal("run_tests", heldBy);
+    }
 }

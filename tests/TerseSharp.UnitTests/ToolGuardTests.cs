@@ -2950,4 +2950,105 @@ public sealed class ToolGuardTests
         Assert.False(verdict.Routing?.StartsWith("edit_text", StringComparison.Ordinal) ?? false);
         Assert.False(verdict.Routing?.StartsWith("write_text", StringComparison.Ordinal) ?? false);
     }
+
+    [Fact]
+    public async Task Inspect_ForAReadAfterACdIntoAnotherDotNetTreeThroughAnAssignedVariable_NamesTheResolvedPathInsteadOfCallingItUnassigned()
+    {
+        var scratch = Directory.CreateTempSubdirectory("terse-guard-warm");
+
+        try
+        {
+            var warm = scratch.CreateSubdirectory("warm");
+            await File.WriteAllTextAsync(Path.Combine(warm.FullName, "Warm.csproj"), "<Project />", TestContext.Current.CancellationToken);
+            var literal = scratch.FullName.Replace('\\', '/');
+            var entered = "S=\"SCRATCH\"; cd \"$S/warm\" && cat \"$S/warm/out.txt\"".Replace("SCRATCH", literal, StringComparison.Ordinal);
+            var stayed = "S=\"SCRATCH\"; cat \"$S/warm/out.txt\"".Replace("SCRATCH", literal, StringComparison.Ordinal);
+
+            var denied = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = entered }, Fixtures.RepositoryRoot);
+
+            Assert.True(denied.Denied, entered);
+            Assert.DoesNotContain(ToolGuard.UnassignedMarker, denied.Reason, StringComparison.Ordinal);
+            Assert.DoesNotContain("$S/", denied.Routing, StringComparison.Ordinal);
+            Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = stayed }, Fixtures.RepositoryRoot).Denied, stayed);
+        }
+        finally
+        {
+            scratch.Delete(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("find \"SCRATCH\" -name \"*.trx\"")]
+    [InlineData("find \"SCRATCH\" -iname \"*.log\" | head")]
+    [InlineData("find \"SCRATCH\" -path \"*/ci/*.trx\"")]
+    [InlineData("find \"/c/terse-guard-scratch/ci/mac\" -name \"*.trx\"")]
+    [InlineData("S=\"SCRATCH\"; find \"$S\" -name \"*.trx\" | head")]
+    public void Inspect_ForAFindOutsideTheTreeWhosePatternLooksLikeAFile_AllowsItBecauseThePatternIsNotAPath(string template)
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch").Replace('\\', '/');
+        var command = template.Replace("SCRATCH", scratch, StringComparison.Ordinal);
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, root);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("find \"SCRATCH\" -name \"*.cs\"")]
+    [InlineData("find src -name \"*.trx\"")]
+    [InlineData("find \"SCRATCH\" -iname \"*.log\" -newer src/notes.md")]
+    [InlineData("find -name \"*.trx\"")]
+    public void Inspect_ForAFindWhoseRootOrComparedFileIsInTheTreeOrWhosePatternNamesSource_StillDeniesIt(string template)
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch").Replace('\\', '/');
+        var command = template.Replace("SCRATCH", scratch, StringComparison.Ordinal);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+    }
+
+    [Fact]
+    public void Inspect_ForALoopOverAPathAnExportedVariableHoldsOutsideTheTree_AllowsTheReadLikeItsLiteralSpelling()
+    {
+        var root = Path.GetDirectoryName(typeof(ToolGuardTests).Assembly.Location)!;
+        Environment.SetEnvironmentVariable("TERSE_GUARD_LOOP_SCRATCH", Path.Combine(Path.GetTempPath(), "terse-guard-scratch"));
+
+        try
+        {
+            var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "for f in \"$TERSE_GUARD_LOOP_SCRATCH/ci-ubuntu.log\"; do grep -n FAIL \"$f\"; done" }, root);
+
+            Assert.False(verdict.Denied, verdict.Reason);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TERSE_GUARD_LOOP_SCRATCH", null);
+        }
+    }
+
+    [Theory]
+    [InlineData("for f in \"$TERSE_GUARD_LOOP_SCRATCH2/OrderService.cs\"; do cat \"$f\"; done")]
+    [InlineData("TERSE_GUARD_LOOP_SCRATCH2=src; for f in \"$TERSE_GUARD_LOOP_SCRATCH2/notes.md\"; do cat \"$f\"; done")]
+    [InlineData("for f in \"$TERSE_GUARD_LOOP_SCRATCH2/notes.md\" src/notes.md; do cat \"$f\"; done")]
+    public void Inspect_ForALoopOverAnExportedVariableThatNamesSourceIsReassignedOrAlsoWalksTheTree_StillDeniesIt(string command)
+    {
+        Environment.SetEnvironmentVariable("TERSE_GUARD_LOOP_SCRATCH2", Path.Combine(Path.GetTempPath(), "terse-guard-scratch"));
+
+        try
+        {
+            Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TERSE_GUARD_LOOP_SCRATCH2", null);
+        }
+    }
+
+    [Theory]
+    [InlineData("for f in \"SCRATCH/notes.md\" src/notes.md; do cat \"$f\"; done")]
+    [InlineData("for f in SCRATCH/a.log src/OrderService.cs; do grep -n x \"$f\"; done")]
+    public void Inspect_ForALoopWhoseLaterWordNamesTheTree_DeniesItThoughItsFirstWordIsOutside(string template)
+    {
+        var command = template.Replace("SCRATCH", Path.Combine(Path.GetTempPath(), "terse-guard-scratch").Replace('\\', '/'), StringComparison.Ordinal);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+    }
 }

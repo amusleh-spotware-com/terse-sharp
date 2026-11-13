@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
 using TerseSharp.Core;
 using TerseSharp.Server;
 
@@ -1200,5 +1201,17 @@ public sealed class DotnetRunnerTests
         Assert.Contains("ran 0 tests - check the name", DotnetRunner.EntryNote(report, request), StringComparison.Ordinal);
         Assert.Equal(string.Empty, DotnetRunner.EntryNote(report, request, interrupted: true));
         Assert.DoesNotContain("ran 0 tests", DotnetRunner.RenderTest(new ProcessRun(0, string.Empty, 2000), report, request, "C:/repo", interrupted: true), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RenderTest_ForAnEntryThatRanNothingWhileAProjectFailedToBuild_BlamesTheBuildNotTheName()
+    {
+        var report = ScopedReport([new("Core.Tests", 2, 0, 0, 2, 40)]) with { EntryRuns = [0] };
+        var request = Searching(2) with { Entries = ["Ns.Tests.Unbuilt"] };
+
+        var text = DotnetRunner.RenderTest(new ProcessRun(1, XunitAnalyzerError + "\n", 5000), report, request, "C:/repo");
+
+        Assert.Contains("WARNING tests= entry 1 'Ns.Tests.Unbuilt' ran 0 tests - not run if it is in Foo, which did not build; fix the build before checking the name", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("check the name;", text, StringComparison.Ordinal);
     }
 }
