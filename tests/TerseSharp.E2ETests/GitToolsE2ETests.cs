@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.CodeAnalysis.Text;
 using TerseSharp.Core;
 
 namespace TerseSharp.E2ETests;
@@ -1125,6 +1126,30 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         });
 
         Assert.Contains("] ref=\"HEAD\" reads the rest in a second call", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DiffSymbols_ForAHunkInsideAFieldInitializer_NamesTheFieldAsAnExactId()
+    {
+        const string Probe = "src/Fixture.Trading/OrderBook.cs";
+        var path = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "OrderBook.cs");
+        var original = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+        var written = File.GetLastWriteTimeUtc(path);
+
+        try
+        {
+            await File.WriteAllTextAsync(path, original.Replace("[with(StringComparer.Ordinal)]", "[with(StringComparer.OrdinalIgnoreCase)]", StringComparison.Ordinal), TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("diff_symbols", new() { ["path"] = Probe });
+
+            Assert.Contains("  EXACT  F:Fixture.Trading.OrderBook.bySymbol", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("the declaration has no symbol", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(path, original, TestContext.Current.CancellationToken);
+            File.SetLastWriteTimeUtc(path, written);
+        }
     }
 }
 

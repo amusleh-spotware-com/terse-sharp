@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis.Text;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -288,5 +290,16 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
 
         Assert.StartsWith("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("fix=ci", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OnAToolchainWhoseSdkRoslynMatches_StatusCarriesNoGapAndCleanupVerifyStillAnswers()
+    {
+        var status = await server.CallAsync("workspace_status", new());
+        var verified = await server.CallAsync("cleanup", new() { ["path"] = StyleSample, ["fix"] = "ci", ["verify"] = true });
+
+        Assert.DoesNotContain("WARNING roslyn=", status, StringComparison.Ordinal);
+        Assert.DoesNotContain("ToolchainMismatch", verified, StringComparison.Ordinal);
+        Assert.Contains("StyleSample.cs", verified, StringComparison.Ordinal);
     }
 }

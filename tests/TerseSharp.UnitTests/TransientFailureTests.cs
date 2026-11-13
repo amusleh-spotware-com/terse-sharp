@@ -1,4 +1,6 @@
+using Microsoft.CodeAnalysis.Text;
 using TerseSharp.Core;
+using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;
 
@@ -170,4 +172,45 @@ public sealed class TransientFailureTests
     private sealed class RemoteInvocationException(string message) : Exception(message);
 
     private sealed class ConnectionLostException(string message) : Exception(message);
+
+    private const string HostfxrMessage = "A compatible .NET SDK was not found.\n\nRequested SDK version: 11.0.100\nglobal.json file: C:\\repo\\global.json\n\nInstalled SDKs:\n10.0.301 [C:\\Program Files\\dotnet\\sdk]\n9.0.300 [C:\\Program Files\\dotnet\\sdk]\n\nInstall the [11.0.100] .NET SDK or update [C:\\repo\\global.json] to match an installed SDK.\n\nLearn about SDK resolution:\nhttps://aka.ms/dotnet/sdk-not-found";
+
+    [Fact]
+    public void Boundary_ABuildHostFailureCarryingHostfxrsMessage_AnswersSdkNotFoundInsteadOfTransient()
+    {
+        var text = ToolBoundary.Run(() => throw new RemoteInvocationException(HostfxrMessage));
+
+        Assert.Contains("ERROR SdkNotFound: global.json pins .NET SDK 11.0.100", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR Transient", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Retry the same call", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingSdk_ForHostfxrsMessageInsideABuildHostFailure_NamesTheRequestedVersionTheGlobalJsonAndTheInstalledSdks()
+    {
+        var error = Errors.MissingSdk(new InvalidOperationException("apply failed", new RemoteInvocationException(HostfxrMessage)));
+
+        Assert.NotNull(error);
+        var rendered = error.Render();
+        Assert.StartsWith("ERROR SdkNotFound: global.json pins .NET SDK 11.0.100", rendered, StringComparison.Ordinal);
+        Assert.Contains(@"globalJson=C:\repo\global.json", rendered, StringComparison.Ordinal);
+        Assert.Contains("installed=10.0.301,9.0.300", rendered, StringComparison.Ordinal);
+        Assert.Contains("a retry cannot succeed", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingSdk_ForAMessageCarryingOnlyTheHeadline_SaysEachMissingFactIsUnknown()
+    {
+        var rendered = Errors.MissingSdk(new RemoteInvocationException("A compatible .NET SDK was not found."))!.Render();
+
+        Assert.Contains("pins .NET SDK unknown", rendered, StringComparison.Ordinal);
+        Assert.Contains("globalJson=unknown  installed=unknown", rendered, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MissingSdk_ForAnyOtherFailure_IsNull()
+    {
+        Assert.Null(Errors.MissingSdk(new RemoteInvocationException("the pipe is broken")));
+        Assert.Null(Errors.MissingSdk(new InvalidOperationException("plain", new IOException("locked"))));
+    }
 }

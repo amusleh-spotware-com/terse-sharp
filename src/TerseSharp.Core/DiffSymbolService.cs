@@ -73,15 +73,16 @@ public static class DiffSymbolService
         if (root is null || model is null || Span(text, hunk) is not { } span)
             return new Mapped(null, Raw(path, hunk, "the hunk covers no line of the current file"));
 
-        var containing = root.FindNode(span, getInnermostNodeForTie: true)
-            .AncestorsAndSelf()
-            .OfType<MemberDeclarationSyntax>()
-            .FirstOrDefault();
+        var innermost = root.FindNode(span, getInnermostNodeForTie: true);
+        var containing = innermost.AncestorsAndSelf().OfType<MemberDeclarationSyntax>().FirstOrDefault();
 
         if (containing is null)
             return new Mapped(null, Raw(path, hunk, "the hunk spans no single declaration"));
 
-        var symbol = model.GetDeclaredSymbol(containing, cancellationToken);
+        SyntaxNode declared = containing is BaseFieldDeclarationSyntax { Declaration.Variables: var variables }
+            ? variables is [var only] ? only : innermost.AncestorsAndSelf().OfType<VariableDeclaratorSyntax>().FirstOrDefault() ?? (SyntaxNode)containing
+            : containing;
+        var symbol = model.GetDeclaredSymbol(declared, cancellationToken);
 
         return symbol is null
             ? new Mapped(null, Raw(path, hunk, "the declaration has no symbol"))

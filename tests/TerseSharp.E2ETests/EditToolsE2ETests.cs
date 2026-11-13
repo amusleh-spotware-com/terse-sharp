@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis.Text;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -1977,5 +1979,37 @@ public sealed class RegionTail
 
         Assert.Contains("would be rolled back", preview, StringComparison.Ordinal);
         Assert.DoesNotContain("applies this preview", preview, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_DryRunOfAWholeType_AnswersOneLinePerFileWithoutTheDeletedTextUnlessVerbose()
+    {
+        const string Probe = "src/Fixture.Trading/TerseWithheldProbe.cs";
+        await server.WriteNewAsync(new() { ["path"] = Probe, ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TerseWithheldProbe\n{\n    public int First() => 1;\n\n    public int Second() => 2;\n}\n\npublic sealed class TerseWithheldProbeTwin\n{\n}\n", ["force"] = true });
+        try
+        {
+            var dry = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TerseWithheldProbe", ["dryRun"] = true });
+            var verbose = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "T:Fixture.Trading.TerseWithheldProbe", ["dryRun"] = true, ["verbose"] = true });
+
+            Assert.Contains("dryRun - the deleted text is withheld; verbose=true shows the diff", dry, StringComparison.Ordinal);
+            Assert.Contains(Probe.Replace('/', Path.DirectorySeparatorChar) + "  changedLines=", dry, StringComparison.Ordinal);
+            Assert.DoesNotContain("public int First() => 1;", dry, StringComparison.Ordinal);
+            Assert.DoesNotContain("@@", dry, StringComparison.Ordinal);
+            Assert.Contains("-    public int First() => 1;", verbose, StringComparison.Ordinal);
+            Assert.Contains("@@", verbose, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true, ["force"] = true });
+        }
+    }
+
+    [Fact]
+    public async Task DeleteSymbol_DryRunThatWouldBreakTheBuild_StillNamesTheErrorsWithoutTheDeletedText()
+    {
+        var text = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "T:Fixture.Trading.OrderService", ["force"] = true, ["dryRun"] = true });
+
+        Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("@@", text, StringComparison.Ordinal);
     }
 }

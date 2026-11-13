@@ -45,6 +45,7 @@ public static class EditGate
     {
         var response = new ResponseBuilder(options.Tool, state).Verbose(options.Verbose);
         var condensed = Condensed(options, diffs, report, policy);
+        var withheld = WithheldDeletion(options);
 
         if (!condensed)
             response.Summary(diffs.Length, diffs.Length, "files changed");
@@ -56,7 +57,7 @@ public static class EditGate
             response.Note(invisible);
 
         if (options.DryRun && !options.Verbose)
-            response.Note("dryRun");
+            response.Note(withheld ? "dryRun - the deleted text is withheld; verbose=true shows the diff" : "dryRun");
 
         if (report is not null)
             Announce(response, report, options.Verbose || options.DryRun, options.Tool, options.DryRun);
@@ -66,7 +67,7 @@ public static class EditGate
         if (!options.DryRun && report is { NewErrors.Length: 0 } && GateCoverage.Once() is { } coverage)
             response.Note(coverage);
 
-        if (condensed)
+        if (condensed || withheld)
             return Compact(response, diffs, root);
 
         foreach (var diff in diffs)
@@ -332,6 +333,8 @@ public static class EditGate
 
         return response.ToString();
     }
+
+    private static bool WithheldDeletion(EditOptions options) => options is { Tool: "delete_symbol", DryRun: true, Verbose: false };
 
     private static bool Condensed(EditOptions options, DocumentDiff[] diffs, GateReport? report, PolicyVerdict policy) => !options.Verbose
         && !options.DryRun

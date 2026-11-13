@@ -116,6 +116,9 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
         if (!mode.IsOk)
             return Task.FromResult(mode.Error!.Render());
 
+        if (Doctor.CleanupVerifyRefusal(verify, Doctor.RoslynGap()) is { } refused)
+            return Task.FromResult(refused);
+
         return GateSteered(
             Guarded(workspace, path ?? First(paths), async loaded =>
             {

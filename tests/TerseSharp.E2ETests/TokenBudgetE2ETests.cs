@@ -1,4 +1,6 @@
 
+using Microsoft.CodeAnalysis.Text;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -659,5 +661,14 @@ public sealed class TokenBudgetE2ETests(TerseServerFixture server)
         {
             await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
         }
+    }
+
+    [Fact]
+    public async Task DeleteSymbolDryRun_OnTheWidestType_StaysUnderItsBudget()
+    {
+        var text = await server.CallAsync("delete_symbol", new() { ["symbolId"] = "T:Fixture.Trading.OrderService", ["force"] = true, ["dryRun"] = true });
+
+        Assert.DoesNotContain("@@", text, StringComparison.Ordinal);
+        Assert.True(Tokens(text) <= 300, Report("delete_symbol", text));
     }
 }

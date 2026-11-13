@@ -450,4 +450,22 @@ public static class Doctor
                 false,
                 "an in-place map inside a project's own output is what makes an external dotnet build fail MSB3027 - delete that entry under the terse-analyzers cache, or restart the server after rebuilding that analyzer")
             : Check("shadow", "every analyzer assembly was loaded from the shadow cache", true, string.Empty);
+
+    private static Version? cachedSdkRoslyn;
+
+    public static string? RoslynGap() =>
+        RoslynGap(typeof(Microsoft.CodeAnalysis.Workspace).Assembly.GetName().Version, cachedSdkRoslyn ??= SdkRoslyn());
+
+    public static string? RoslynGap(Version? carried, Version? sdk) =>
+        carried is null || sdk is null || sdk <= carried
+            ? null
+            : string.Create(CultureInfo.InvariantCulture, $"WARNING roslyn={carried} < sdk={sdk} - C# the SDK accepts can parse as errors here and its IDE code fixers do not load, so edit-gate error counts are unreliable and cleanup verify=true is refused; pin the SDK feature band in global.json with rollForward=latestPatch, or update terse");
+
+    public static string? CleanupVerifyRefusal(bool verify, string? gap) =>
+        verify && gap is not null
+            ? new TerseError(
+                TerseErrorCode.ToolchainMismatch,
+                string.Create(CultureInfo.InvariantCulture, $"cleanup verify=true cannot answer clean from an older Roslyn than the SDK's: {gap}"),
+                "pin the SDK feature band in global.json with rollForward=latestPatch, or dotnet tool update -g TerseSharp and restart the client; workspace_status verbose=true names both versions").Render()
+            : null;
 }

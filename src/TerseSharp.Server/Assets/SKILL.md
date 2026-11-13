@@ -709,8 +709,8 @@ root=` takes `globs=` too; `search_text`/`search_regex` take `paths=[...]`, OR-e
    passed the path in; a `write_text` over a file that already had content opens with `overwrote existing  `, so an overwrite you took for a create is visible without the diff. A clean gate prints no counters at all; `errors=`/`warnings=` appear only when
    there is a non-zero count or delta to report. Pass `verbose=true` on any edit, refactor,
    `write_text`, `edit_text`, `xaml_*`, `razor_*`, `resx_*`, `project_*`, `package_*` or `solution_*`
-   write to get the full unified diff. **`dryRun: true` is never condensed** — there the diff *is* the
-   answer.
+   write for the full diff. **`dryRun: true` keeps the diff**, except `delete_symbol`'s (`verbose=true`
+   adds it).
    **Every caveat still prints in full**, condensed or not: the `errors=/warnings=` deltas, a rollback,
    a new compile error, `0 files changed` — which now also carries
    `NOTE no change - the result is identical to what is already there`, so a no-op is never

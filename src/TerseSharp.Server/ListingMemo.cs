@@ -15,7 +15,7 @@ public sealed class ListingMemo
         ? TimeSpan.FromMilliseconds(parsed)
         : TimeSpan.FromSeconds(10);
 
-    private readonly record struct Entry(string Stamp, string Response, long Timestamp);
+    private readonly record struct Entry(string? Stamp, string Response, long Timestamp);
 
     public string? Replay(string key, string stamp, long timestamp)
     {
@@ -29,16 +29,28 @@ public sealed class ListingMemo
         }
     }
 
-    public void Remember(string key, string stamp, string response, long timestamp)
+    public string? Remember(string key, string? stamp, string? unavailable, string response, long timestamp)
     {
         lock (gate)
         {
+            var note = listings.TryGetValue(key, out var previous) ? Moved(previous.Stamp, stamp, unavailable) : null;
+
             if (listings.Count >= MaxRemembered && !listings.ContainsKey(key))
                 listings.Clear();
 
             listings[key] = new Entry(stamp, response, timestamp);
+
+            return note;
         }
     }
 
     private static long Seconds(long ticks) => Math.Max(0, ticks) / Stopwatch.Frequency;
+
+    private static string? Moved(string? remembered, string? current, string? unavailable) => (remembered, current) switch
+    {
+        (_, null) => string.Concat("NOTE re-ran: no stamp ", unavailable),
+        (null, _) => "NOTE re-ran: the previous call took no stamp",
+        ({ } before, { } after) when !string.Equals(before, after, StringComparison.Ordinal) => string.Concat("NOTE re-ran: stamp moved ", StampMove.Named(before, after)),
+        _ => null,
+    };
 }

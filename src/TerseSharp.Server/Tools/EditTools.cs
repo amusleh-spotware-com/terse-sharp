@@ -238,7 +238,7 @@ public sealed class EditTools(ToolContext context)
     }
 
     [McpServerTool(Name = "delete_symbol", Destructive = true)]
-    [Description("Safe-delete a member, an enum member or a type. Refuses while references exist unless force is set, and lists them; allowErrors=true applies it anyway. symbolIds= removes up to 20 across files in ONE compile-gated edit. Replaces one call per member, and a reference sitting inside another removed member does not block it. A successful delete answers in one line per changed file; pass verbose=true for the diff.")]
+    [Description("Safe-delete a member, an enum member or a type. Refuses while references exist unless force is set, and lists them; allowErrors=true applies it anyway. symbolIds= removes up to 20 across files in ONE compile-gated edit. Replaces one call per member, and a reference sitting inside another removed member does not block it. A successful delete, and a dryRun of one, answers in one line per changed file; pass verbose=true for the diff.")]
     public Task<string> DeleteSymbol(
         [Description("Symbol id to delete.")] string? symbolId = null,
         [Description("Delete even when references exist. Default false.")] bool force = false,

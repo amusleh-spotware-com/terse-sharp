@@ -1,3 +1,5 @@
+using Microsoft.CodeAnalysis.Text;
+
 namespace TerseSharp.E2ETests;
 
 public sealed class WorktreeE2ETests : IAsyncLifetime
@@ -88,4 +90,25 @@ public sealed class WorktreeE2ETests : IAsyncLifetime
     private static Task<string> GitAsync(string directory, params string[] arguments) => GitToolsE2ETests.GitOutputAsync(
         directory,
         ["-c", "user.email=terse@example.com", "-c", "user.name=terse", "-c", "commit.gpgsign=false", .. arguments]);
+
+    [Fact]
+    public async Task ChangedFiles_InALinkedWorktreeRepeatedAfterAWrite_NamesWhyItReRan()
+    {
+        var arguments = new Dictionary<string, object?> { ["path"] = "moved.txt" };
+
+        await File.WriteAllTextAsync(Path.Combine(Linked, "moved.txt"), "a\n", TestContext.Current.CancellationToken);
+        await SettledAsync(arguments);
+        await File.WriteAllTextAsync(Path.Combine(Linked, "moved.txt"), "a\nb\n", TestContext.Current.CancellationToken);
+
+        var moved = await CallAsync(arguments);
+
+        for (var attempt = 0; attempt < 300 && moved.Contains("UNCHANGED", StringComparison.Ordinal); attempt++)
+        {
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            moved = await CallAsync(arguments);
+        }
+
+        Assert.Contains("moved.txt", moved, StringComparison.Ordinal);
+        Assert.Contains("NOTE re-ran: ", moved, StringComparison.Ordinal);
+    }
 }

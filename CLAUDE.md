@@ -648,7 +648,8 @@ Whatever is not in that answer does not go in the response. It goes behind `verb
    counters. Every tool with a short form must accept it, and it must be a real C# default
    (`bool verbose = false`), or the MCP SDK marks it required.
 3. **`dryRun=true` is never condensed.** There the diff *is* the answer — the whole reason the call
-   was made.
+   was made. One scoped exception: `delete_symbol`'s dry run withholds the deleted text (I872);
+   `verbose=true` restores it.
 4. **The short form is only ever emitted for a result that has nothing else to say.** Any failure, a
    rollback, a timeout, a zero-result run, a locked file, a `NOT rewritten` list, a stale-workspace
    note, **a "0 files changed" that means nothing landed** — all keep the full response. Condensing a

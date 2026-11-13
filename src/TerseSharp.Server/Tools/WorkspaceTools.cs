@@ -38,7 +38,7 @@ public sealed class WorkspaceTools(ToolContext context, ReplayGate replay)
                     ? await context.Registry.ReloadAsync(target, cancellationToken).ConfigureAwait(false)
                     : await context.Registry.LoadAsync(target, targetFramework, cancellationToken).ConfigureAwait(false);
 
-                var rendered = AssetBanner.Appended(Render(context.Registry, result, verbose) + Replaced(replace, result));
+                var rendered = AssetBanner.Appended(Render(context.Registry, result, verbose) + Replaced(replace, result) + RoslynGapLine());
 
                 await context.AnnounceAsync(before, cancellationToken).ConfigureAwait(false);
 
@@ -201,6 +201,10 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
 
         response.Note(Describe(workspace, relative: !verbose));
         response.Note(Counts(workspace, verbose));
+
+        if (Doctor.RoslynGap() is { } gap)
+            response.Note(gap);
+
         AppendSync(response, workspace.Sync, verbose);
 
         if (WorkspaceDivergence.Describe(divergence, verbose) is { } diverged)
@@ -731,4 +735,6 @@ Aliases.Clash(new ParameterSpelling("path", path), new ParameterSpelling("worksp
         if (await SiblingSolutions.WarningAsync(workspace, cancellationToken).ConfigureAwait(false) is { } subset)
             response.Line("  " + subset);
     }
+
+    private static string RoslynGapLine() => Doctor.RoslynGap() is { } gap ? "\n" + gap : string.Empty;
 }

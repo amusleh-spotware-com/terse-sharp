@@ -849,18 +849,17 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         var stamped = Stopwatch.GetElapsedTime(started);
         var key = string.Join('\u0001', loaded.Root, string.Join('\u0002', paths), exclude, maxResults.ToString(CultureInfo.InvariantCulture), scope.ToString(), capped.ToString());
 
-        if (stamp is not null && listings.Replay(key, stamp, started) is { } replay)
+        if (stamp.Value is not null && listings.Replay(key, stamp.Value, started) is { } replay)
             return replay;
 
         var listing = await ListTimedAsync(loaded.Root, null, paths, exclude, maxResults, null, scope, capped, cancellationToken).ConfigureAwait(false);
+        var note = listing.Text.StartsWith("ERROR", StringComparison.Ordinal) ? null : listings.Remember(key, stamp.Value, stamp.Unavailable, listing.Text, started);
+        var text = StampMove.Appended(listing.Text, note);
 
-        if (stamp is not null && !listing.Text.StartsWith("ERROR", StringComparison.Ordinal))
-            listings.Remember(key, stamp, listing.Text, started);
-
-        return listing.Timing == default ? listing.Text : (listing.Timing with { Stamp = stamped }).Appended(listing.Text, listings.SlowAfter);
+        return listing.Timing == default ? text : (listing.Timing with { Stamp = stamped }).Appended(text, listings.SlowAfter);
     }
 
-    private static async Task<string?> GitStampAsync(LoadedWorkspace loaded, CancellationToken cancellationToken)
+    private static async Task<GitStamp> GitStampAsync(LoadedWorkspace loaded, CancellationToken cancellationToken)
     {
         var sync = loaded.Sync;
 
@@ -870,31 +869,26 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return null;
+            return new GitStamp(null, string.Concat("sync failed ", exception.GetType().Name));
         }
 
         if (sync.State is not WatchState.Active || sync.Gaps > 0 || sync.PendingCount > 0)
-            return null;
+            return new GitStamp(null, string.Create(CultureInfo.InvariantCulture, $"watch={sync.State} gaps={sync.Gaps} pending={sync.PendingCount}"));
 
         if (await GitLayoutAsync(loaded.Root, cancellationToken).ConfigureAwait(false) is not { } git)
-            return null;
+            return new GitStamp(null, "no git layout");
 
-        var stamp = new StringBuilder(160);
+        var stamp = new StringBuilder(192);
 
-        stamp.Append(sync.Generations.ToString())
-            .Append('#')
-            .Append(sync.Events.ToString(CultureInfo.InvariantCulture))
-            .Append('#')
-            .Append(sync.Stirred.ToString(CultureInfo.InvariantCulture));
-
-        StatInto(stamp, Path.Combine(git.Own, "index"));
-        StatInto(stamp, Path.Combine(git.Own, "HEAD"));
-        StatInto(stamp, Path.Combine(git.Common, "packed-refs"));
+        stamp.Append(CultureInfo.InvariantCulture, $"generations={sync.Generations} events={sync.Events} stirred={sync.Stirred}");
+        StatInto(stamp, "index", Path.Combine(git.Own, "index"));
+        StatInto(stamp, "HEAD", Path.Combine(git.Own, "HEAD"));
+        StatInto(stamp, "packed-refs", Path.Combine(git.Common, "packed-refs"));
 
         if (await HeadTargetAsync(git.Own, cancellationToken).ConfigureAwait(false) is { } head)
-            StatInto(stamp, Path.Combine(git.Common, head));
+            StatInto(stamp, "ref", Path.Combine(git.Common, head));
 
-        return stamp.ToString();
+        return new GitStamp(stamp.ToString(), null);
     }
 
     private static async Task<string?> HeadTargetAsync(string git, CancellationToken cancellationToken)
@@ -911,21 +905,14 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
         }
     }
 
-    private static void StatInto(StringBuilder stamp, string path)
+    private static void StatInto(StringBuilder stamp, string name, string path)
     {
         var file = new FileInfo(path);
 
         if (file.Exists)
-        {
-            stamp.Append(' ')
-                .Append(file.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture))
-                .Append(':')
-                .Append(file.Length.ToString(CultureInfo.InvariantCulture));
-        }
+            stamp.Append(CultureInfo.InvariantCulture, $" {name}={file.LastWriteTimeUtc.Ticks}:{file.Length}");
         else
-        {
-            stamp.Append(" absent");
-        }
+            stamp.Append(' ').Append(name).Append("=absent");
     }
 
     private const string TagPrefix = "refs/tags/";
@@ -1334,4 +1321,6 @@ public sealed class GitTools(ToolContext context, ListingMemo listings)
 
         return null;
     }
+
+    private readonly record struct GitStamp(string? Value, string? Unavailable);
 }

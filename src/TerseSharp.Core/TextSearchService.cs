@@ -422,6 +422,9 @@ public static class TextSearchService
 
         private static Regex Compile(string pattern)
         {
+            if (pattern.Contains('$', StringComparison.Ordinal))
+                return new Regex(pattern, RegexOptions.CultureInvariant | RegexOptions.Multiline | RegexOptions.AnyNewLine, TimeSpan.FromSeconds(2));
+
             try
             {
                 return new Regex(pattern, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant | RegexOptions.Multiline);

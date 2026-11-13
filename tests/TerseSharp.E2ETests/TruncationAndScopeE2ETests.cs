@@ -1,4 +1,6 @@
 
+using Microsoft.CodeAnalysis.Text;
+
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -425,6 +427,32 @@ public sealed class TruncationAndScopeE2ETests(TerseServerFixture server)
             Assert.Contains("no .slnx, .sln, .slnf or .csproj directly in it", text, StringComparison.Ordinal);
             Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"load_workspace path={directory} discover=true"), text, StringComparison.Ordinal);
             Assert.DoesNotContain("search_symbols", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SearchRegex_OverACrlfFile_AnchorsDollarAtTheEndOfEachLineOnBothEngines()
+    {
+        var directory = Directory.CreateTempSubdirectory("terse-crlf-").FullName;
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(directory, "CHANGES.md"), "## [1.0.0]\r\n\r\n### Added\r\n\r\n- one\r\n\r\n### Fixed\r\n", TestContext.Current.CancellationToken);
+
+            var text = await server.CallAsync("search_regex", new()
+            {
+                ["queries"] = new[] { "^### (Added|Fixed)$", "^### (?=Fixed)Fixed$" },
+                ["root"] = directory,
+            });
+
+            Assert.Contains("### Added", text, StringComparison.Ordinal);
+            Assert.Contains("q1,q2", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("0 matches", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", text, StringComparison.Ordinal);
         }
         finally
         {

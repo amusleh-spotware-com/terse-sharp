@@ -197,6 +197,69 @@ public static class Errors
 
     private static string Detailed(string detail) => detail.Length is 0 ? string.Empty : " with " + detail;
 
+    public static TerseError? MissingSdk(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains(SdkNotFoundHeadline, StringComparison.Ordinal))
+                return SdkNotFound(SdkField(current.Message, "Requested SDK version:"), SdkField(current.Message, "global.json file:"), InstalledSdks(current.Message));
+        }
+
+        return null;
+    }
+
+    public static TerseError SdkNotFound(string requested, string globalJson, string installed) => new(
+        TerseErrorCode.SdkNotFound,
+        string.Create(CultureInfo.InvariantCulture, $"global.json pins .NET SDK {requested} and no installed SDK satisfies it  globalJson={globalJson}  installed={installed}"),
+        string.Create(CultureInfo.InvariantCulture, $"a retry cannot succeed while the installed SDKs stay the same - install .NET SDK {requested} (https://aka.ms/dotnet/download) or relax the pin in {globalJson} to an installed version, then load_workspace again; a file the edit was adding may already be on disk"));
+
+    private const string SdkNotFoundHeadline = "A compatible .NET SDK was not found";
+
+    private const string InstalledSdksLabel = "Installed SDKs:";
+
+    private static string SdkField(ReadOnlySpan<char> message, ReadOnlySpan<char> label)
+    {
+        var start = message.IndexOf(label, StringComparison.Ordinal);
+
+        if (start < 0)
+            return "unknown";
+
+        var rest = message[(start + label.Length)..];
+        var end = rest.IndexOfAny('\r', '\n');
+        var value = (end < 0 ? rest : rest[..end]).Trim();
+
+        return value.IsEmpty ? "unknown" : value.ToString();
+    }
+
+    private static string InstalledSdks(ReadOnlySpan<char> message)
+    {
+        var start = message.IndexOf(InstalledSdksLabel, StringComparison.Ordinal);
+        List<string> versions = start < 0 ? [] : SdkVersions(message[(start + InstalledSdksLabel.Length)..]);
+
+        return versions is [] ? "unknown" : string.Join(',', versions);
+    }
+
+    private static List<string> SdkVersions(ReadOnlySpan<char> listing)
+    {
+        List<string> versions = [];
+
+        foreach (var line in listing.EnumerateLines())
+        {
+            var entry = line.Trim();
+
+            if (entry.IsEmpty && versions is [])
+                continue;
+
+            if (entry.IsEmpty || !char.IsAsciiDigit(entry[0]))
+                break;
+
+            var space = entry.IndexOf(' ');
+            versions.Add((space < 0 ? entry : entry[..space]).ToString());
+        }
+
+        return versions;
+    }
+
     public static bool IsBuildHostFailure(Exception exception)
     {
         for (var current = exception; current is not null; current = current.InnerException)
