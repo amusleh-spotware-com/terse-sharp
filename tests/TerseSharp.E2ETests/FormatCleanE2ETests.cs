@@ -1,5 +1,3 @@
-using Microsoft.CodeAnalysis.Text;
-
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -295,7 +293,7 @@ public sealed class FormatCleanE2ETests(TerseServerFixture server)
     [Fact]
     public async Task OnAToolchainWhoseSdkRoslynMatches_StatusCarriesNoGapAndCleanupVerifyStillAnswers()
     {
-        var status = await server.CallAsync("workspace_status", new());
+        var status = await server.CallAsync("workspace_status", []);
         var verified = await server.CallAsync("cleanup", new() { ["path"] = StyleSample, ["fix"] = "ci", ["verify"] = true });
 
         Assert.DoesNotContain("WARNING roslyn=", status, StringComparison.Ordinal);

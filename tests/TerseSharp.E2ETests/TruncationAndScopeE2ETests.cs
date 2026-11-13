@@ -1,5 +1,4 @@
 
-using Microsoft.CodeAnalysis.Text;
 
 namespace TerseSharp.E2ETests;
 

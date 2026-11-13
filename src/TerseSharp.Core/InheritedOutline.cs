@@ -13,7 +13,7 @@ public static class InheritedOutline
             return own;
 
         var outline = new StringBuilder(own.Value!.TrimEnd('\n'));
-        INamedTypeSymbol? current = first;
+        var current = first;
 
         while (current is { SpecialType: not (SpecialType.System_Object or SpecialType.System_ValueType or SpecialType.System_Enum) } type)
         {

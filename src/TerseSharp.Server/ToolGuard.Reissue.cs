@@ -4,7 +4,7 @@ public static partial class ToolGuard
 {
     private static (string Text, Placement[] Placed) Placing(Stage[] judged, string command, string? origin)
     {
-        Stage[] stages = origin is null ? [] : Detached(Stages(origin));
+        var stages = origin is null ? [] : Detached(Stages(origin));
 
         return origin is { } source && stages.Length == judged.Length
             ? (source, Placed(stages, source))
@@ -95,6 +95,36 @@ public static partial class ToolGuard
         var balanced = token.AsSpan().Count('{') > token.AsSpan().Count('}') ? token + "}" : token;
 
         BraceExpansion.Into(balanced, expansions);
+
+        if (!token.Contains('{', StringComparison.Ordinal) && token.Contains(',', StringComparison.Ordinal))
+            BraceExpansion.Into("{" + token + "}", expansions);
         operands.AddRange(expansions.FindAll(expansion => expansion is "." || IsPathLike(expansion)));
+    }
+}
+
+public static partial class ToolGuard
+{
+    private static GuardVerdict? Spread(string command, string? cwd)
+    {
+        var unquoted = command;
+
+        foreach (var pipeline in Pipelines(command))
+        {
+            if (Tokenized(Unkeyworded(pipeline.Text)) is ["for", var name, "in", ..])
+                unquoted = unquoted.Replace("\"$" + name + "\"", "$" + name, StringComparison.Ordinal).Replace("\"${" + name + "}\"", "${" + name + "}", StringComparison.Ordinal);
+        }
+
+        return Unrolled(unquoted, Joined) is { } spread && Blocking(Stages(spread), spread, cwd, command) is { Denied: true } denied ? denied : null;
+    }
+
+    private static bool Rebinding(string command, string name)
+    {
+        for (var at = command.IndexOf(name, StringComparison.Ordinal); at >= 0; at = command.IndexOf(name, at + name.Length, StringComparison.Ordinal))
+        {
+            if (Binds(command, at, name.Length))
+                return true;
+        }
+
+        return Sources(command);
     }
 }

@@ -1,5 +1,3 @@
-using Microsoft.CodeAnalysis.Text;
-
 namespace TerseSharp.E2ETests;
 
 [Collection(nameof(TerseServerCollection))]
@@ -1366,6 +1364,7 @@ public sealed class RegionTail
         {
             ["symbolIds"] = new[] { "OrderService.Unused", "OrderService.NeverCalled" },
             ["dryRun"] = true,
+            ["verbose"] = true,
         });
 
         Assert.Contains("1 files changed", text, StringComparison.Ordinal);

@@ -36,7 +36,7 @@ internal static class ShiftedSearch
         var headEnd = SnippetSearch.LineEnd(text, start);
         var line = text[start..headEnd].TrimEnd();
 
-        if (head.IsEmpty || !line.EndsWith(head, StringComparison.Ordinal))
+        if (head.IsEmpty || !line.EndsWith(head, StringComparison.Ordinal) || !line[..^head.Length].IsWhiteSpace())
             return ShiftedRegion.None;
 
         var (end, delta, indentAt) = Rest(text, headEnd, body[(split + 1)..]);

@@ -190,7 +190,7 @@ the consumer you broke elsewhere in the solution.
 - **Folder rules.** Nested `CLAUDE.md` files reach the agent the first time it touches that folder.
 - **Read-only mode.** `terse serve --read-only` makes every write refuse.
 - **A smaller surface.** A solution with no XAML, Razor or `.resx` advertises **55 tools, ≤25,700 tokens**.
-  The full list stays under a **30,900-token ceiling**, checked on every push. `--tools core` narrows
+  The full list stays under a **31,100-token ceiling**, checked on every push. `--tools core` narrows
   it further, and `.terse.json` can hide any group or tool.
 
 <details>

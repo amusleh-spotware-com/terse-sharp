@@ -2458,7 +2458,7 @@ public static partial class ToolGuard
 
         var looped = Blocking(Stages(unrolled), unrolled, cwd, command);
 
-        return Iterating(command, cwd, verdict) ?? (looped.Denied ? looped : verdict);
+        return Iterating(command, cwd, verdict) ?? (looped.Denied ? looped : Spread(command, cwd) ?? verdict);
     }
 
     private static readonly SearchValues<char> Unlisted = SearchValues.Create("$`()<>");
@@ -2761,7 +2761,7 @@ public static partial class ToolGuard
 
     private static string? Environmental(ReadOnlySpan<char> name, string command)
     {
-        if (!IsExportedName(name) || command.Contains(string.Concat(name, "="), StringComparison.Ordinal))
+        if (!IsExportedName(name) || command.Contains(string.Concat(name, "="), StringComparison.Ordinal) || Rebinding(command, name.ToString()))
             return null;
 
         return Environment.GetEnvironmentVariable(name.ToString()) is { } value && IsPlainPath(value) ? value.Replace('\\', '/') : null;

@@ -3028,6 +3028,9 @@ public sealed class ToolGuardTests
     [InlineData("for f in \"$TERSE_GUARD_LOOP_SCRATCH2/OrderService.cs\"; do cat \"$f\"; done")]
     [InlineData("TERSE_GUARD_LOOP_SCRATCH2=src; for f in \"$TERSE_GUARD_LOOP_SCRATCH2/notes.md\"; do cat \"$f\"; done")]
     [InlineData("for f in \"$TERSE_GUARD_LOOP_SCRATCH2/notes.md\" src/notes.md; do cat \"$f\"; done")]
+    [InlineData("read TERSE_GUARD_LOOP_SCRATCH2 <<< src; for f in \"$TERSE_GUARD_LOOP_SCRATCH2/notes.md\"; do cat \"$f\"; done")]
+    [InlineData("printf -v TERSE_GUARD_LOOP_SCRATCH2 %s src; for f in \"$TERSE_GUARD_LOOP_SCRATCH2/notes.md\"; do cat \"$f\"; done")]
+    [InlineData("TERSE_GUARD_LOOP_SCRATCH2+=/../src; for f in \"$TERSE_GUARD_LOOP_SCRATCH2/notes.md\"; do cat \"$f\"; done")]
     public void Inspect_ForALoopOverAnExportedVariableThatNamesSourceIsReassignedOrAlsoWalksTheTree_StillDeniesIt(string command)
     {
         Environment.SetEnvironmentVariable("TERSE_GUARD_LOOP_SCRATCH2", Path.Combine(Path.GetTempPath(), "terse-guard-scratch"));
@@ -3045,6 +3048,7 @@ public sealed class ToolGuardTests
     [Theory]
     [InlineData("for f in \"SCRATCH/notes.md\" src/notes.md; do cat \"$f\"; done")]
     [InlineData("for f in SCRATCH/a.log src/OrderService.cs; do grep -n x \"$f\"; done")]
+    [InlineData("for x in a; do echo \"$x\"; done; for f in SCRATCH/notes.md README.md; do cat \"$f\"; done")]
     public void Inspect_ForALoopWhoseLaterWordNamesTheTree_DeniesItThoughItsFirstWordIsOutside(string template)
     {
         var command = template.Replace("SCRATCH", Path.Combine(Path.GetTempPath(), "terse-guard-scratch").Replace('\\', '/'), StringComparison.Ordinal);
@@ -3132,6 +3136,8 @@ public sealed class ToolGuardTests
     [InlineData("cat {0}/{{terse-x,{1}/README.md}}")]
     [InlineData("head -n 3 {0}/{{terse-x,{1}/README.md}}")]
     [InlineData("for f in /tmp/terse-loop-a; do cat {0}/{{terse-x,{1}/README.md}}; done")]
+    [InlineData("cat {{{0}/terse-x.txt,{0}/{1}/README.md}}")]
+    [InlineData("cat {{/tmp/terse-x,README.md}}")]
     public void Guard_ForABraceListOneOfWhoseAlternativesLandsInTheTree_DeniesTheRead(string shape)
     {
         var root = Path.TrimEndingDirectorySeparator(Fixtures.RepositoryRoot);
@@ -3160,6 +3166,16 @@ public sealed class ToolGuardTests
         var root = Path.TrimEndingDirectorySeparator(Fixtures.RepositoryRoot);
         var posix = OperatingSystem.IsWindows() ? "/" + char.ToLowerInvariant(root[0]) + root[2..].Replace('\\', '/') : root;
         var command = string.Format(CultureInfo.InvariantCulture, shape, posix);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+    }
+
+    [Fact]
+    public void Inspect_ForALoopTooLongToJudgeWordByWord_StillJudgesEveryWordOnItsOwn()
+    {
+        var scratch = Path.Combine(Path.GetTempPath(), "terse-guard-scratch").Replace('\\', '/');
+        var words = string.Join(' ', Enumerable.Range(0, 70).Select(index => string.Create(CultureInfo.InvariantCulture, $"{scratch}/a{index}.log")));
+        var command = "for f in " + words + " README.md; do cat \"$f\"; done";
 
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
     }

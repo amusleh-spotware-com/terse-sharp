@@ -30,7 +30,7 @@ public static class ReferenceService
             ? Array.FindAll(all, location => string.Equals(TestScope.Of(location.Document.Project), scope, StringComparison.Ordinal))
             : all;
         var markup = await RazorUsageService.MarkupAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<RazorUsage> razor = scope is { Length: > 0 } ? [.. markup.Where(usage => InHalf(workspace, usage.Path, scope))] : markup;
+        var razor = scope is { Length: > 0 } ? [.. markup.Where(usage => InHalf(workspace, usage.Path, scope))] : markup;
         var half = new Half(scope, all.Length - locations.Length + markup.Count - razor.Count);
 
         return await RenderAsync(workspace, symbol, locations, razor, maxResults, containers, chosen, half, cancellationToken)

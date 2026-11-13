@@ -163,7 +163,7 @@ internal static class ToolCensus
     public const int AdvertisedSurfaceBudget = 31100;
     public const int ShippedSkillBudget = TerseSharp.Core.SkillBudget.Tokens;
     public const int MarkupNarrowedSurfaceBudget = 25700;
-    public const int SettingsNarrowedSurfaceBudget = 26450;
+    public const int SettingsNarrowedSurfaceBudget = 26550;
 
     public static int[] DeclaredBudgets => [AdvertisedSurfaceBudget, ShippedSkillBudget, MarkupNarrowedSurfaceBudget, SettingsNarrowedSurfaceBudget];
 

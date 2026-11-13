@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using Microsoft.CodeAnalysis.Text;
 using TerseSharp.Server;
 
 namespace TerseSharp.UnitTests;

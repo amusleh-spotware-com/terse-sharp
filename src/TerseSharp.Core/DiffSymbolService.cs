@@ -79,7 +79,7 @@ public static class DiffSymbolService
         if (containing is null)
             return new Mapped(null, Raw(path, hunk, "the hunk spans no single declaration"));
 
-        SyntaxNode declared = containing is BaseFieldDeclarationSyntax { Declaration.Variables: var variables }
+        var declared = containing is BaseFieldDeclarationSyntax { Declaration.Variables: var variables }
             ? variables is [var only] ? only : innermost.AncestorsAndSelf().OfType<VariableDeclaratorSyntax>().FirstOrDefault() ?? (SyntaxNode)containing
             : containing;
         var symbol = model.GetDeclaredSymbol(declared, cancellationToken);

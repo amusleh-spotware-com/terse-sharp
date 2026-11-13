@@ -707,7 +707,7 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
             ["paths"] = new[] { "src/Fixture.Trading/OrderSide.cs", "src/Fixture.Trading/NoSuchType.cs" },
         });
 
-        Assert.StartsWith("2 files", text, StringComparison.Ordinal);
+        Assert.StartsWith("1/2 files", text, StringComparison.Ordinal);
         Assert.Contains("NOT_FOUND src/Fixture.Trading/NoSuchType.cs", text, StringComparison.Ordinal);
         Assert.Contains("OrderSide", text, StringComparison.Ordinal);
     }

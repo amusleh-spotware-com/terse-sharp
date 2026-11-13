@@ -296,4 +296,12 @@ public sealed class SnippetSearchTests
         Assert.Equal("    ", match.Indent);
         Assert.Equal("var a = 1;\r\n        var b = 2;\r\n        var c = 3;", text[match.Start..(match.Start + match.Length)]);
     }
+
+    [Fact]
+    public void Find_ForAnAnchorWhoseFirstLineIsASuffixOfALongerIdentifier_IsNotMatchedByTheShiftedStage()
+    {
+        var match = SnippetSearch.Find("  foo_enabled: true\n  bar: 1\n", "enabled: true\n    bar: 1", 1);
+
+        Assert.False(match.Shifted);
+    }
 }

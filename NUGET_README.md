@@ -107,7 +107,7 @@ in one call.
   hands the agent the exact TerseSharp call to make instead, with the `ToolSearch select:` that loads its schema.
 - **Read-only mode.** `terse serve --read-only` makes every write refuse.
 - **A smaller surface.** A solution with no XAML, Razor or `.resx` advertises **55 tools, ≤25,700 tokens**.
-  The full list stays under a **30,900-token ceiling**, checked on every push.
+  The full list stays under a **31,100-token ceiling**, checked on every push.
 
 ## 🧩 Your stack
 

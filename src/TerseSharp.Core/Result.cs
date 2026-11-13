@@ -234,7 +234,7 @@ public static class Errors
     private static string InstalledSdks(ReadOnlySpan<char> message)
     {
         var start = message.IndexOf(InstalledSdksLabel, StringComparison.Ordinal);
-        List<string> versions = start < 0 ? [] : SdkVersions(message[(start + InstalledSdksLabel.Length)..]);
+        var versions = start < 0 ? [] : SdkVersions(message[(start + InstalledSdksLabel.Length)..]);
 
         return versions is [] ? "unknown" : string.Join(',', versions);
     }

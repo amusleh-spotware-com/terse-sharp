@@ -1,5 +1,3 @@
-using Microsoft.CodeAnalysis.Text;
-
 namespace TerseSharp.E2ETests;
 
 public sealed class WorktreeE2ETests : IAsyncLifetime
