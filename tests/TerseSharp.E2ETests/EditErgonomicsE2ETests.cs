@@ -2031,4 +2031,36 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
             await server.CallAsync("write_text", new() { ["path"] = Target, ["delete"] = true });
         }
     }
+
+    [Fact]
+    public async Task EditText_ForAnchorsDeeperThanTheFileOrWithADeeperFirstLine_AppliesEachReindentedByItsOwnShift()
+    {
+        const string Probe = "terse-shifted-probe.md";
+        await server.CallAsync("write_text", new() { ["path"] = Probe, ["content"] = "# Probe\n\n    void A()\n    {\n        var a = 1;\n        var b = 2;\n    }\n\n    void B()\n    {\n        var c = 3;\n        var d = 4;\n    }\n" });
+        try
+        {
+            var applied = await server.CallAsync("edit_text", new()
+            {
+                ["path"] = Probe,
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["oldText"] = "            var a = 1;\n    var b = 2;", ["newText"] = "            var a = 10;\n    var b = 20;" },
+                    new Dictionary<string, object?> { ["oldText"] = "            var c = 3;\n            var d = 4;", ["newText"] = "            var c = 30;\n            var d = 40;" },
+                },
+            });
+
+            Assert.DoesNotContain("FAILED", applied, StringComparison.Ordinal);
+            Assert.DoesNotContain("ERROR", applied, StringComparison.Ordinal);
+
+            var written = await File.ReadAllTextAsync(Path.Combine(TerseServerFixture.FixtureRoot, Probe), TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                "# Probe\n\n    void A()\n    {\n        var a = 10;\n        var b = 20;\n    }\n\n    void B()\n    {\n        var c = 30;\n        var d = 40;\n    }\n",
+                written.ReplaceLineEndings("\n"));
+        }
+        finally
+        {
+            await server.CallAsync("write_text", new() { ["path"] = Probe, ["delete"] = true });
+        }
+    }
 }

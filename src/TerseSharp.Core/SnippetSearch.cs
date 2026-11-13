@@ -11,6 +11,10 @@ public readonly record struct SnippetMatch(int Start, int Length, int Occurrence
     public bool MidLine { get; init; }
 
     public bool Interior { get; init; }
+
+    public int Outdent { get; init; }
+
+    public bool Shifted { get; init; }
 }
 
 public static class SnippetSearch
@@ -38,6 +42,7 @@ public static class SnippetSearch
 
         return reindented.Occurrences > 0 ? reindented
             : Loose(haystack, needle, occurrence) is { Occurrences: > 0 } loose ? loose
+            : ShiftedSearch.Find(haystack, needle, occurrence) is { Occurrences: > 0 } shifted ? shifted
             : relaxed;
     }
 
@@ -77,7 +82,7 @@ public static class SnippetSearch
         return found.Start >= 0 ? Mapped(haystack, found) : found with { Normalized = true };
     }
 
-    private static SnippetMatch Mapped(string haystack, SnippetMatch found)
+    internal static SnippetMatch Mapped(string haystack, SnippetMatch found)
     {
         var start = LineEndings.OriginalOffset(haystack, found.Start);
         var end = LineEndings.OriginalOffset(haystack, found.Start + found.Length);
@@ -181,7 +186,7 @@ public static class SnippetSearch
         return text[start..(end < 0 ? text.Length : at + end)].TrimEnd('\r');
     }
 
-    private static int LineEnd(ReadOnlySpan<char> text, int at) =>
+    internal static int LineEnd(ReadOnlySpan<char> text, int at) =>
         text[at..].IndexOf('\n') is var offset and >= 0 ? at + offset : text.Length;
 
     private static bool Adopted(ReadOnlySpan<char> line, ReadOnlySpan<char> text, ref int pad)
@@ -214,7 +219,7 @@ public static class SnippetSearch
             && line.EndsWith(text, StringComparison.Ordinal);
     }
 
-    private static int Closed(ReadOnlySpan<char> text, int end, bool trailing) =>
+    internal static int Closed(ReadOnlySpan<char> text, int end, bool trailing) =>
         trailing && end < text.Length ? end + 1 : end;
 
     private static SnippetMatch LocateReindented(ReadOnlySpan<char> text, ReadOnlySpan<char> value, int occurrence)

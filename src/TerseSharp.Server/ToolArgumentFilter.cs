@@ -220,7 +220,7 @@ internal static class ToolArgumentFilter
             ? null
             : Errors.Invalid(
                 tool + " rejected the call: unrecognized " + string.Join(", ", unknown),
-                Remedy(required(), accepted) + NearestHint(unknown, accepted, arrays, arrayed) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + Drift(unknown) + ToolExamples.Suffix(tool));
+                Remedy(required(), accepted) + NearestHint(unknown, accepted, arrays, arrayed) + ParameterAliases.Steer(tool, unknown) + PluralHint(unknown, arrays) + GlobHint(unknown, accepted) + Drift(unknown) + ToolExamples.Suffix(tool));
     }
 
     private static readonly FrozenSet<string> KnownPlurals =
@@ -351,13 +351,15 @@ internal static class ToolArgumentFilter
         if (request.Params?.Arguments is not { Count: > 0, IsReadOnly: false } supplied)
             return null;
 
-        foreach (var name in Arrays(Schema(request)))
+        var schema = Schema(request);
+
+        foreach (var name in Arrays(schema))
         {
             if (!supplied.TryGetValue(name, out var value) || value.ValueKind is not JsonValueKind.String)
                 continue;
 
             if (Parsed(value) is not { } array)
-                return StringSent(request.Params.Name, name);
+                return StringSent(request.Params.Name, name, Remedy(Required(schema), Accepted(schema)) + ToolExamples.Suffix(request.Params.Name));
 
             supplied[name] = array;
         }
@@ -382,9 +384,9 @@ internal static class ToolArgumentFilter
         }
     }
 
-    private static TerseError StringSent(string? tool, string name) => Errors.Invalid(
+    private static TerseError StringSent(string? tool, string name, string remedy) => Errors.Invalid(
         string.Create(CultureInfo.InvariantCulture, $"{tool} rejected the call: {name} was sent as a string - pass a JSON array"),
-        string.Create(CultureInfo.InvariantCulture, $"send {name} as a JSON array, e.g. {name}=[\"first\", \"second\"], not as a string that holds one"));
+        string.Create(CultureInfo.InvariantCulture, $"send {name} as a JSON array, e.g. {name}=[\"first\", \"second\"], not as a string that holds one; ") + remedy);
 
     internal static bool ArrayShaped(JsonNode? value) => value switch
     {

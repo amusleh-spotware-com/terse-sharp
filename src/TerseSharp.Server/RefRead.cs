@@ -163,17 +163,17 @@ internal static class RefRead
         CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("get_file_outline", string.Empty);
-
-        response.Summary(paths.Count, paths.Count, "files");
+        var answered = 0;
 
         foreach (var path in paths)
         {
-            var (text, _) = await OutlineTextAsync(workspace, path, reference, options, cancellationToken).ConfigureAwait(false);
+            var (text, read) = await OutlineTextAsync(workspace, path, reference, options, cancellationToken).ConfigureAwait(false);
 
+            answered += read ? 1 : 0;
             response.Line(NavigationTools.Outlined(path, text));
         }
 
-        return response.ToString() + "\n" + Historical(reference);
+        return response.Answered(answered, paths.Count, "files").ToString() + "\n" + Historical(reference);
     }
 
     internal readonly record struct SymbolBatch(string[] SymbolIds, SourceFormat Format);

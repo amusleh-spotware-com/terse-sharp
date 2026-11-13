@@ -468,7 +468,7 @@ public sealed class ToolEdgeCaseE2ETests(TerseServerFixture server)
     [InlineData("search_text", "globe", "glob")]
     [InlineData("find_registrations", "symbolId", "symbol")]
     [InlineData("edit_text", "find", "oldText")]
-    [InlineData("list_tests", "filter", "contains")]
+    [InlineData("list_tests", "contain", "contains")]
     public async Task ARejectedParameterName_NamesTheAcceptedOneItMeant(string tool, string passed, string expected)
     {
         var text = await server.CallAsync(tool, new() { [passed] = "x" });

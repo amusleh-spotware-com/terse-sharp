@@ -437,7 +437,7 @@ public sealed class XamlToolsE2ETests(TerseServerFixture server)
         var view = text.IndexOf(View + "\n", StringComparison.Ordinal);
         var bound = text.IndexOf(BoundView + "\n", StringComparison.Ordinal);
 
-        Assert.StartsWith("3 files", text, StringComparison.Ordinal);
+        Assert.StartsWith("2/3 files", text, StringComparison.Ordinal);
         Assert.True(view >= 0 && bound > view, text);
         Assert.Contains("MissingBrush", text[view..bound], StringComparison.Ordinal);
         Assert.Contains("XAML001", text[view..bound], StringComparison.Ordinal);

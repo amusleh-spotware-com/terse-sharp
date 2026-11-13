@@ -14,6 +14,8 @@ internal enum AliasShape
 
 internal sealed record ParameterAlias(string Tool, string Alias, string Canonical, FrozenDictionary<string, bool>? Values = null, AliasShape Shape = AliasShape.Renamed);
 
+internal sealed record ParameterSteer(string Tool, string Name, string Text);
+
 internal static class ParameterAliases
 {
     private static readonly FrozenDictionary<string, bool> OutputModes = new Dictionary<string, bool>(StringComparer.Ordinal)
@@ -55,6 +57,12 @@ internal static class ParameterAliases
         new("search_regex", "output_mode", "countOnly", OutputModes),
         new("search_regex", "globs", "paths"),
         new("search_regex", "patterns", "queries"),
+        new("search_regex", "onlyMatching", "matchesOnly"),
+        new("read_text", "range", "lines"),
+        new("add_member", "typeId", "typeSymbolId"),
+        new("find_files", "patterns", "globs"),
+        new("edit_text", "old", "oldText"),
+        new("edit_text", "new", "newText"),
     ];
 
     private static readonly FrozenDictionary<string, ParameterAlias[]> ByTool = All
@@ -138,4 +146,20 @@ internal static class ParameterAliases
     private static JsonElement Flag(bool on) => JsonElement.Parse(on ? "true" : "false");
 
     private static JsonElement Quoted(string text) => JsonElement.Parse(string.Concat("\"", JsonEncodedText.Encode(text).Value, "\""));
+
+    public static ImmutableArray<ParameterSteer> Steers { get; } =
+        [
+            new("get_file_outline", "verbose", "read_text path=<file> verbose=true returns a .cs file's text; get_file_outline has no verbose form"),
+        ];
+
+    public static string Steer(string? tool, string[] unknown)
+    {
+        foreach (var steer in Steers)
+        {
+            if (string.Equals(steer.Tool, tool, StringComparison.Ordinal) && unknown.Contains(steer.Name, StringComparer.Ordinal))
+                return "; " + steer.Text;
+        }
+
+        return string.Empty;
+    }
 }

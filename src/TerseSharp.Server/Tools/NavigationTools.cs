@@ -11,14 +11,14 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     private static readonly FrozenSet<string> TypeKinds = FrozenSet.Create(StringComparer.OrdinalIgnoreCase, "type", "namedtype", "class", "interface", "enum", "struct", "record", "delegate");
 
     [McpServerTool(Name = "search_symbols", ReadOnly = true)]
-    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). queries= searches up to 10 names in ONE call. Replaces one call per name: every record is tagged q1..qN by position, and a symbol several match is ONE record. scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none. Use instead of Grep for anything that is a type or member.")]
+    [Description("Find declarations by name across the solution. Supports substring and CamelHump ('OSvc' finds OrderService). queries= searches up to 10 names in ONE call. Replaces one call per name: every record is tagged q1..qN by position, and a symbol several match is ONE record. scope=src or scope=test keeps only the projects of that half, which is how a name the tests declare dozens of times stops burying the one production declaration. path= answers the matches that file declares first and searches the solution only when it declares none; a directory or project name keeps only the declarations under it. Use instead of Grep for anything that is a type or member.")]
     public Task<string> SearchSymbols(
             [Description("Name or CamelHump pattern.")] string? query = null,
             [Description("Optional kind filter: type (any class, struct, record, interface, enum or delegate), class, record, struct, interface, enum, delegate, method, ctor, property, field, event, namespace. Any other kind is refused.")] string? kind = null,
             [Description("Workspace or worktree name.")] string? workspace = null,
             [Description("Max results (50).")] int maxResults = 0,
             [Description("Keep only one half of the solution: src for the production projects, test for the ones that reference a test framework. Empty searches both.")] string? scope = null,
-            [Description("File the declarations are expected in. Its matches are answered first and the solution is searched only when it declares none; a path naming no document answers DocumentNotFound.")] string? path = null,
+            [Description("File the declarations are expected in, answered first - or a directory or project name, keeping only the declarations under it.")] string? path = null,
             [Description("Several names searched in one call, at most 10, every record tagged q1..qN by position. Combines with query, taken first; Razor components answer query= alone.")] string?[]? queries = null,
             CancellationToken cancellationToken = default)
     {
@@ -79,7 +79,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     }
 
     [McpServerTool(Name = "get_type_outline", ReadOnly = true)]
-    [Description("Every member of one type with signatures and line ranges, without the bodies. Pass symbolIds to outline up to 20 types in ONE response. Replaces one call per type. An unfiltered outline lists at most 40 members and counts the rest as 'N of M members - contains= or all=true'. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
+    [Description("Every member of one type with signatures and line ranges, without the bodies. Pass symbolIds to outline up to 20 types in ONE response. Replaces one call per type; past 20 the rest are named in a PARTIAL next: call. An unfiltered outline lists at most 40 members and counts the rest as 'N of M members - contains= or all=true'. parameterNames=false prints parameter types without their names, which is about an eighth of the response. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
     public Task<string> GetTypeOutline(
         [Description("Symbol id of the type.")] string? symbolId = null,
         [Description("Include member signatures. false gives ids and line ranges only.")] bool signatures = true,
@@ -91,16 +91,19 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Keep only the members whose name contains this text, case-insensitively, with an 'N of M members' line so nothing is dropped silently.")] string? contains = null,
         [Description("List every member instead of the first 40; the default counts the rest.")] bool all = false,
         [Description("Several types in ONE response, at most 20. Replaces one call per type: each under its own header line, an id that does not resolve reported inline as NOT_RESOLVED.")] string[]? symbolIds = null,
-        CancellationToken cancellationToken = default) =>
-        Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash
-            ? Task.FromResult(clash)
-            : Outlined(
-            Requested(symbolId ?? symbol, symbolIds),
-            symbolIds is { Length: > 0 },
-            workspace,
-            new OutlineService.TypeOutlineFormat(signatures, ids ?? "short", parameterNames, contains, all),
-            path,
-            cancellationToken);
+        [Description("Also outline every base class up to System.Object, each under an 'inherited from' line, so an inherited member needs no second call. Default false.")] bool inherited = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash)
+            return Task.FromResult(clash);
+
+        var requested = Requested(symbolId ?? symbol, symbolIds);
+        var format = new OutlineService.TypeOutlineFormat(signatures, ids ?? "short", parameterNames, contains, all, inherited);
+
+        return PluralPaths.TrailedAsync(
+            Outlined(requested, symbolIds is { Length: > 0 }, workspace, format, path, cancellationToken),
+            BatchTrailer("get_type_outline", requested, PluralPaths.Argument("path", path)));
+    }
 
     [McpServerTool(Name = "get_symbol", ReadOnly = true)]
     [Description("Signature, kind, accessibility, location and XML doc of one symbol. Pass symbolIds to describe several in ONE response. Replaces one call per symbol: each under its own block, an id that does not resolve reported inline as NOT_RESOLVED, and a summary counting the ids that RESOLVED. usages=true answers what the symbol IS in one call instead of an outline-then-source-then-usages chain: the signature plus how many usages it has in src and in tests, how many implementations and XAML sites, and the files it is used in. path= resolves a NAME inside that file first, so a name an outline just printed round-trips even when the solution holds others like it; a full documentation id already addresses one symbol, so path= does not apply to it.")]
@@ -199,17 +202,23 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         [Description("Answer the blast radius instead of the reference list: referencing files, XAML sites and every project that would recompile, then up to 5 files git history co-changed with the declaring file in 2+ of the last 200 commits, tagged HEURISTIC co-changed. Default false.")] bool impact = false,
         [Description("With impact=true, also list the test classes that reference this symbol, each as a ready run_tests test= argument. They are the DIRECT references only, so they narrow a run rather than replacing one. Default false.")] bool tests = false,
         [Description("Up to 20 symbol ids, each under its own id line; an unresolved one answers NOT_RESOLVED.")] string[]? symbolIds = null,
+        [Description("Keep only one half of the solution: src for the production projects, test for the ones that reference a test framework; how many usages it hid is counted. Not with impact=true. Empty keeps both.")] string? scope = null,
         CancellationToken cancellationToken = default)
     {
         if (Aliases.Clash(new ParameterSpelling("symbolId", symbolId), new ParameterSpelling("symbol", symbol)) is { } clash)
             return Task.FromResult(clash);
 
+        var half = scope is { Length: > 0 } ? scope.ToLowerInvariant() : null;
+
+        if (UsageScopeRefusal(half, scope, impact) is { } refused)
+            return Task.FromResult(refused);
+
         if (symbolIds is { Length: > 0 })
-            return UsagesOfManyAsync(Requested(symbolId ?? symbol, symbolIds), workspace, new UsageQuery(maxResults, containers, impact, tests), cancellationToken);
+            return UsagesOfManyAsync(Requested(symbolId ?? symbol, symbolIds), workspace, new UsageQuery(maxResults, containers, impact, tests, half), cancellationToken);
 
         return context.WithSymbolAsync(workspace, symbolId ?? symbol, (loaded, resolved) => SiblingSolutions.NotedAsync(loaded, impact
             ? ImpactAsync(loaded, resolved, Cap(maxResults, 200), tests, cancellationToken)
-            : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken), cancellationToken), cancellationToken);
+            : ReferenceService.FindUsagesAsync(loaded, resolved, Cap(maxResults, 100), containers, maxResults > 0, cancellationToken, half), cancellationToken), cancellationToken);
     }
 
     [McpServerTool(Name = "find_registrations", ReadOnly = true)]
@@ -289,19 +298,22 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             string? path,
             CancellationToken cancellationToken)
     {
-        var scoped = await ScopedFileAsync(workspace, path, cancellationToken).ConfigureAwait(false);
+        var target = await ScopedFileAsync(workspace, path, cancellationToken).ConfigureAwait(false);
 
-        if (!scoped.IsOk)
-            return scoped.Error!.Render();
+        if (!target.IsOk)
+            return target.Error!.Render();
 
-        var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken, foldTests: true, inFile: scoped.Value).ConfigureAwait(false);
+        var found = await SymbolSearch.FindAsync(workspace, query, kind, scope, maxResults, cancellationToken, foldTests: true, inFile: target.Value.File, under: target.Value.Under?.Under).ConfigureAwait(false);
+
+        if (target.Value.Under is { } within && found.Total is 0)
+            return Unmatched(query, within.Label);
 
         var components = found.Scoped
             ? []
             : await RazorUsageService.DeclarationsAsync(workspace, query, cancellationToken).ConfigureAwait(false);
 
         var declared = scope is "test" ? 0 : components.Count;
-        var unscoped = scoped.Value is { Length: > 0 } && !found.Scoped;
+        var unscoped = target.Value.File is { Length: > 0 } && !found.Scoped;
 
         if (declared + found.Total is 0)
             return await NoneAsync(workspace, query, kind, scope, maxResults, unscoped, cancellationToken).ConfigureAwait(false);
@@ -315,6 +327,9 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
         if (unscoped)
             response.Note(FellBack);
+
+        if (target.Value.Under is { } under)
+            response.Note(Within(under.Label));
 
         if (!found.TotalIsExact)
             response.Note("WARNING total counts duplicate declarations across projects; narrow query= for an exact count");
@@ -384,17 +399,17 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
         CancellationToken cancellationToken)
     {
         var response = new ResponseBuilder("get_file_outline", string.Empty);
-
-        response.Summary(paths.Length, paths.Length, "files");
+        var answered = 0;
 
         foreach (var path in paths)
         {
             var answer = await OutlinedAsync(path, signatures, ids, usings, parameterNames, contains, all, workspace, cancellationToken).ConfigureAwait(false);
 
+            answered += answer.StartsWith("ERROR", StringComparison.Ordinal) ? 0 : 1;
             response.Line(Outlined(path, answer));
         }
 
-        return response.ToString();
+        return response.Answered(answered, paths.Length, "files").ToString();
     }
 
     internal static string Outlined(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)
@@ -453,11 +468,23 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
     private static bool NamesAType(string? kind) => string.IsNullOrWhiteSpace(kind) || TypeKinds.Contains(kind);
 
-    private static async Task<Result<string?>> ScopedFileAsync(LoadedWorkspace workspace, string? path, CancellationToken cancellationToken) => path is { Length: > 0 }
-        ? DocumentLookup.Find(workspace, path) is { } document
-            ? Result.Ok<string?>(document.FilePath)
-            : Result.Fail<string?>(await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false))
-        : Result.Ok<string?>(null);
+    private static async Task<Result<SearchTarget>> ScopedFileAsync(LoadedWorkspace workspace, string? path, CancellationToken cancellationToken)
+    {
+        if (path is not { Length: > 0 })
+            return Result.Ok(default(SearchTarget));
+
+        if (DocumentLookup.Find(workspace, path) is { } document)
+            return Result.Ok(new SearchTarget(document.FilePath, null));
+
+        if (SearchScope.Resolve(workspace, path) is { } under)
+            return Result.Ok(new SearchTarget(null, under));
+
+        var missing = await MissingDocument.ReadAsync(workspace, path, cancellationToken).ConfigureAwait(false);
+
+        return Result.Fail<SearchTarget>(SearchScope.Closest(workspace, path) is { } closest
+            ? new TerseError(missing.Code, missing.Message, string.Create(CultureInfo.InvariantCulture, $"{missing.Remedy}; path= also takes a directory under the root or a project name - the closest project is {closest}"))
+            : missing);
+    }
 
     private const string FellBack = "NOTE path= declared no match - the whole solution was searched";
 
@@ -490,7 +517,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
             {
                 [] => Task.FromResult(Errors.Blank("symbolId", "symbol", "symbolIds").Render()),
                 [var only] when !batched => context.WithSymbolAsync(workspace, only, async (loaded, resolved) =>
-                Unwrap(await OutlineService.TypeAsync(loaded, resolved, format.Signatures, format.Ids, cancellationToken, format.ParameterNames, format.Contains, format.All).ConfigureAwait(false)),
+                Unwrap(await InheritedOutline.WithBasesAsync(loaded, resolved, format, cancellationToken).ConfigureAwait(false)),
                 cancellationToken,
                 path,
                 referenced: true),
@@ -522,14 +549,15 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
     private static async Task<string> SearchManyAsync(LoadedWorkspace workspace, ImmutableArray<string> queries, SymbolQuery shape, CancellationToken cancellationToken)
     {
-        var scoped = await ScopedFileAsync(workspace, shape.Path, cancellationToken).ConfigureAwait(false);
+        var target = await ScopedFileAsync(workspace, shape.Path, cancellationToken).ConfigureAwait(false);
 
-        if (!scoped.IsOk)
-            return scoped.Error!.Render();
+        if (!target.IsOk)
+            return target.Error!.Render();
 
-        var found = await Task.WhenAll(queries.Select(query => SymbolSearch.FindAsync(workspace, query, shape.Kind, shape.Scope, shape.MaxResults, cancellationToken, foldTests: true, inFile: scoped.Value))).ConfigureAwait(false);
+        var found = await Task.WhenAll(queries.Select(query => SymbolSearch.FindAsync(workspace, query, shape.Kind, shape.Scope, shape.MaxResults, cancellationToken, foldTests: true, inFile: target.Value.File, under: target.Value.Under?.Under))).ConfigureAwait(false);
+        var rendered = RenderedMany(workspace, queries, found, shape.MaxResults, target.Value.File is { Length: > 0 });
 
-        return RenderedMany(workspace, queries, found, shape.MaxResults, scoped.Value is { Length: > 0 });
+        return target.Value.Under is { } under ? rendered + "\n" + Within(under.Label) : rendered;
     }
 
     private static string RenderedMany(LoadedWorkspace workspace, ImmutableArray<string> queries, SymbolMatches[] found, int maxResults, bool inFile)
@@ -608,7 +636,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     private static string[] Declaring(string root, ISymbol symbol) =>
         [.. symbol.Locations.Where(location => location.IsInSource).Select(location => PositionFormat.Relative(root, location.SourceTree!.FilePath).Replace('\\', '/')).Distinct(StringComparer.Ordinal)];
 
-    private readonly record struct UsageQuery(int MaxResults, bool Containers, bool Impact, bool Tests);
+    private readonly record struct UsageQuery(int MaxResults, bool Containers, bool Impact, bool Tests, string? Scope = null);
 
     private Task<string> UsagesOfManyAsync(string[] requested, string? workspace, UsageQuery query, CancellationToken cancellationToken) => requested switch
     {
@@ -648,7 +676,7 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
 
         var answer = query.Impact
             ? await ImpactAsync(loaded, symbol, Cap(query.MaxResults, 200), query.Tests, cancellationToken).ConfigureAwait(false)
-            : await ReferenceService.FindUsagesAsync(loaded, symbol, Cap(query.MaxResults, 100), query.Containers, query.MaxResults > 0, cancellationToken).ConfigureAwait(false);
+            : await ReferenceService.FindUsagesAsync(loaded, symbol, Cap(query.MaxResults, 100), query.Containers, query.MaxResults > 0, cancellationToken, query.Scope).ConfigureAwait(false);
 
         return (noted.Note is { Length: > 0 } note ? string.Concat(id, "\n", answer, "\n", note) : string.Concat(id, "\n", answer), true);
     }
@@ -656,4 +684,34 @@ public sealed class NavigationTools(ToolContext context, ReplayGate replay)
     private static string SymbolTrailer(string[] requested, string? path, string? reference) => requested.Length <= MaxBatchedSymbols
         ? string.Empty
         : PluralPaths.Trailer("get_symbol_source", "symbolIds", MaxBatchedSymbols, requested[MaxBatchedSymbols..], PluralPaths.Argument("path", path) + PluralPaths.Argument("ref", reference));
+
+    private readonly record struct SearchTarget(string? File, SearchScope? Under);
+
+    private static string Within(string label) => string.Create(CultureInfo.InvariantCulture, $"scope path={label}: only the declarations under it were searched");
+
+    private static string Unmatched(string query, string label)
+    {
+        var response = new ResponseBuilder("search_symbols", query);
+
+        response.Summary(0, 0, "symbols");
+        response.Note(string.Create(CultureInfo.InvariantCulture, $"no declaration under {label} matched - drop path= to search the whole solution"));
+
+        return response.ToString();
+    }
+
+    private static string BatchTrailer(string tool, string[] requested, string extra) => requested.Length <= MaxBatchedSymbols
+        ? string.Empty
+        : PluralPaths.Trailer(tool, "symbolIds", MaxBatchedSymbols, requested[MaxBatchedSymbols..], extra);
+
+    private static string? UsageScopeRefusal(string? half, string? scope, bool impact) => (half, impact) switch
+    {
+        (null, _) => null,
+        (not ("src" or "test"), _) => Errors.Invalid(
+            string.Create(CultureInfo.InvariantCulture, $"scope='{scope}' is not a known half of the solution"),
+            "pass scope=src, scope=test, or leave it empty to keep both").Render(),
+        (_, true) => Errors.Invalid(
+            "scope= filters the reference list, and impact=true already marks every file src or test",
+            "drop scope= with impact=true, or drop impact=true").Render(),
+        _ => null,
+    };
 }

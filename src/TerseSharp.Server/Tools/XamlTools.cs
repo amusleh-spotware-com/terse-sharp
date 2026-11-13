@@ -171,12 +171,16 @@ public sealed class XamlTools(ToolContext context)
     private static string ValidatedMany(LoadedWorkspace loaded, ImmutableArray<string> paths)
     {
         var response = new ResponseBuilder("xaml_validate", string.Empty);
-
-        response.Summary(paths.Length, paths.Length, "files");
+        var answered = 0;
 
         foreach (var path in paths)
-            response.Line(NavigationTools.Outlined(path, NavigationTools.Unwrap(XamlService.Validate(loaded, path))));
+        {
+            var answer = NavigationTools.Unwrap(XamlService.Validate(loaded, path));
 
-        return response.ToString();
+            answered += answer.StartsWith("ERROR", StringComparison.Ordinal) ? 0 : 1;
+            response.Line(NavigationTools.Outlined(path, answer));
+        }
+
+        return response.Answered(answered, paths.Length, "files").ToString();
     }
 }

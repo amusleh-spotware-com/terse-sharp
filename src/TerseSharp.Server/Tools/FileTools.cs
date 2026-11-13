@@ -75,13 +75,13 @@ public sealed class FileTools(ToolContext context)
             && columns is null
             && ranges is not { Length: > 0 };
 
-        var taken = combined.Value.Taken;
+        var spilled = combined.Value;
         var site = new ReadSite(workspace, @ref);
-        var answer = taken is [var single]
-            ? ReadEntryAsync(single, request, whole, site, cancellationToken)
-            : ReadManyAsync(taken, request, whole, site, cancellationToken);
+        var trailer = spilled.Trailer("read_text", "paths", PluralPaths.Argument("ref", @ref));
 
-        return PluralPaths.TrailedAsync(answer, combined.Value.Trailer("read_text", "paths", PluralPaths.Argument("ref", @ref)));
+        return spilled.Taken is [var single]
+            ? PluralPaths.TrailedAsync(ReadEntryAsync(single, request, whole, site, cancellationToken), trailer)
+            : ReadManyAsync(spilled, request, whole, site, trailer, cancellationToken);
     }
     private static bool WholeRead(
 int startLine,
@@ -775,12 +775,14 @@ context.RejectWrite() is { } rejection
             };
 
     private async Task<string> ReadManyAsync(
-    ImmutableArray<string> paths,
-    FileService.ReadRequest request,
-    bool whole,
-    ReadSite site,
-    CancellationToken cancellationToken)
+        PluralPaths.Spilled spilled,
+        FileService.ReadRequest request,
+        bool whole,
+        ReadSite site,
+        string trailer,
+        CancellationToken cancellationToken)
     {
+        var paths = spilled.Taken;
         var rendered = new List<string>(paths.Length);
         var remaining = request.Range.Budget;
 
@@ -793,10 +795,10 @@ context.RejectWrite() is { } rejection
             remaining -= answer.Length;
 
             if (remaining <= 0 && index < paths.Length - 1)
-                return Batched(rendered, paths.Length, paths[index], ImmutableArray.Create(paths, index + 1, paths.Length - index - 1), site.Reference);
+                return Batched(rendered, paths.Length + spilled.Overflow.Length, paths[index], ImmutableArray.Create(paths, index + 1, paths.Length - index - 1).AddRange(spilled.Overflow), site.Reference);
         }
 
-        return Batched(rendered, paths.Length, string.Empty, [], site.Reference);
+        return Batched(rendered, paths.Length, string.Empty, [], site.Reference) + trailer;
     }
 
     private static string Entry(string path, string answer) => answer.StartsWith("ERROR", StringComparison.Ordinal)

@@ -15,7 +15,8 @@ public static class SymbolSearch
             int maxResults,
             CancellationToken cancellationToken,
             bool foldTests = false,
-            string? inFile = null)
+            string? inFile = null,
+            string? under = null)
     {
         var ceiling = Math.Max(Math.Min(maxResults, 1024) * 8, 256);
         var projects = Scoped(workspace, scope);
@@ -37,7 +38,7 @@ public static class SymbolSearch
                         .Select(candidate => new Identified(candidate, SymbolId.From(candidate).Value, test))];
             }).ConfigureAwait(false);
 
-        var narrowed = InFile(perProject, inFile);
+        var narrowed = Narrowed(perProject, inFile, under);
 
         return Summarize(narrowed.Matches, ceiling, maxResults, foldTests && scope is not { Length: > 0 }) with { Scoped = narrowed.Scoped };
     }
@@ -121,5 +122,30 @@ public static class SymbolSearch
         }
 
         return [.. kept];
+    }
+
+    private static (Identified[][] Matches, bool Scoped) Narrowed(Identified[][] perProject, string? inFile, string? under) => under is { Length: > 0 } directory
+        ? (Under(perProject, directory), true)
+        : InFile(perProject, inFile);
+
+    private static Identified[][] Under(Identified[][] perProject, string directory)
+    {
+        var narrowed = new Identified[perProject.Length][];
+
+        for (var index = 0; index < perProject.Length; index++)
+            narrowed[index] = Array.FindAll(perProject[index], candidate => DeclaredUnder(candidate.Symbol, directory));
+
+        return narrowed;
+    }
+
+    private static bool DeclaredUnder(ISymbol symbol, string directory)
+    {
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            if (reference.SyntaxTree.FilePath.AsSpan().StartsWith(directory, PathBoundary.Comparison))
+                return true;
+        }
+
+        return false;
     }
 }

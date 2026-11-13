@@ -140,7 +140,7 @@ public static class FileService
 
         return Result.Ok(string.Concat(
             before.AsSpan(0, start),
-            LineEndings.Adopt(Reindented(before, newText, match, oldText, notes), ending),
+            LineEndings.Adopt(Repositioned(before, newText, match, oldText, notes), ending),
             before.AsSpan(match.Start + match.Length)));
     }
 
@@ -225,7 +225,7 @@ public static class FileService
             : Errors.Invalid(
                 "oldText matched 0 times, expected exactly 1 (line endings and whitespace were already normalized before this verdict)",
                 MatchesDedented(before, oldText)
-                    ? "it matches only once indentation and blank lines are ignored, but no one re-indentation offset fits every line - the file sits shallower than the anchor or its lines drift to different depths - re-read the lines with read_text verbose=true and copy the anchor from there"
+                    ? "it matches only once indentation and blank lines are ignored, but no one re-indentation offset fits every line - its lines drift to different depths - re-read the lines with read_text verbose=true and copy the anchor from there"
                     : Nearest(before, oldText));
     }
 
@@ -773,6 +773,7 @@ public static class FileService
 
     private static string BatchResponse(
         string path,
+        ReadOnlySpan<char> label,
         string before,
         string after,
         List<string> failures,
@@ -786,7 +787,7 @@ public static class FileService
         var report = full ? UnifiedDiff.Report(path, before, after) : new DiffReport(string.Empty, UnifiedDiff.ChangedLines(before, after));
         var summary = string.Create(
             CultureInfo.InvariantCulture,
-            $"{Path.GetFileName(path.AsSpan())}  changedLines={report.ChangedLines}  edits={applied}/{total}{SkillBudget.Trailer(path, after)}");
+            $"{label}  changedLines={report.ChangedLines}  edits={applied}/{total}{SkillBudget.Trailer(path, after)}");
 
         if (!request.DryRun && !request.Verbose && failures.Count is 0 && notes.Count is 0)
             return Windowed(response.Line(summary), before, after, request.Context);
@@ -1751,6 +1752,56 @@ public static class FileService
         return builder.ToString();
     }
 
+    private static string Repositioned(string before, string newText, SnippetMatch match, string oldText, List<string> notes) =>
+        match.Shifted ? Rebased(newText, match, oldText, notes) : Reindented(before, newText, match, oldText, notes);
+
+    private static string Rebased(string newText, SnippetMatch match, string oldText, List<string> notes)
+    {
+        var head = HeadLength(newText, midLine: true);
+        var line = newText.AsSpan(0, head);
+        var rest = newText.AsSpan(head);
+        var moved = Reshifted(rest, oldText.AsSpan(HeadLength(oldText, midLine: true)), match);
+
+        notes.Add(moved is null
+            ? "NOTE oldText matched with its first line at the file's own column, and newText was written as given below it"
+            : string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched with its first line at the file's own column and every other line shifted by {(match.Outdent > 0 ? -match.Outdent : match.Indent?.Length ?? 0)} column(s), and newText was re-indented the same way"));
+
+        return string.Concat(line[(line.IndexOfAnyExcept(' ', '\t') is var at and >= 0 ? at : line.Length)..], moved is null ? rest : moved.AsSpan());
+    }
+
+    private static string? Reshifted(ReadOnlySpan<char> rest, ReadOnlySpan<char> oldRest, SnippetMatch match)
+    {
+        var anchored = SnippetSearch.Lead(oldRest).Length;
+
+        return rest.IsWhiteSpace() ? null : match switch
+        {
+            { Outdent: > 0 and var outdent } when SnippetSearch.Lead(rest).Length >= anchored => Outdented(rest, outdent),
+            { Indent: { Length: > 0 } indent } when !AtDepth(rest, indent.Length + anchored) => Indented(rest, indent),
+            _ => null,
+        };
+    }
+
+    private static string? Outdented(ReadOnlySpan<char> text, int columns)
+    {
+        var builder = new StringBuilder(text.Length);
+        var first = true;
+
+        foreach (var line in text.EnumerateLines())
+        {
+            if (!first)
+                builder.Append('\n');
+
+            first = false;
+
+            if (!line.IsWhiteSpace() && SnippetSearch.Depth(line) < columns)
+                return null;
+
+            builder.Append(line.IsWhiteSpace() ? line : line[columns..]);
+        }
+
+        return builder.ToString();
+    }
+
     private static string Realigned(int columns, bool loose, bool shifted) => (loose, shifted) switch
     {
         (true, true) => string.Create(CultureInfo.InvariantCulture, $"NOTE oldText matched ignoring indentation and blank lines, and newText was re-indented by {columns} column(s) to the matched block; blank lines inside the match were replaced too"),
@@ -2282,7 +2333,7 @@ public static class FileService
             var match = SnippetSearch.Find(before, oldText, index);
             var head = Math.Max(at, SplitCarriageReturn(before, match.Start) ? match.Start - 1 : match.Start);
 
-            built.Append(before, at, head - at).Append(LineEndings.Adopt(Reindented(before, newText, match, oldText, seen), ending));
+            built.Append(before, at, head - at).Append(LineEndings.Adopt(Repositioned(before, newText, match, oldText, seen), ending));
             at = match.Start + match.Length;
         }
 
@@ -2402,6 +2453,7 @@ public static class FileService
         LoadedWorkspace workspace,
         Result<BatchEdit> rewrite,
         List<PendingWrite> gatedWrites,
+        bool qualified,
         CancellationToken cancellationToken)
     {
         if (!rewrite.IsOk)
@@ -2410,12 +2462,12 @@ public static class FileService
         var (write, tally, request) = rewrite.Value;
 
         if (gatedWrites.Exists(entry => string.Equals(entry.Full, write.Full, StringComparison.Ordinal)))
-            return Result.Ok(GatedTally(write.Path, tally, request));
+            return Result.Ok(GatedTally(Label(workspace, write, qualified), tally, request));
 
         if (tally.Applied > 0 && !request.DryRun && await StoredIfUnchangedAsync(workspace, write.Full, write.Before, write.After, cancellationToken).ConfigureAwait(false) is { } overtaken)
             return Result.Fail<string>(overtaken);
 
-        return Result.Ok(BatchResponse(write.Path, write.Before, write.After, tally.Failed, tally.Notes, tally.Applied, tally.Total, request));
+        return Result.Ok(BatchResponse(write.Path, Label(workspace, write, qualified), write.Before, write.After, tally.Failed, tally.Notes, tally.Applied, tally.Total, request));
     }
 
     private static async Task<string> AnsweredAsync(
@@ -2433,7 +2485,7 @@ public static class FileService
             applied.Add(verdict.Value!);
 
         foreach (var (path, rewrite) in rewrites)
-            Sort(await StoredBatchAsync(workspace, rewrite, gatedWrites, cancellationToken).ConfigureAwait(false), path, applied, refused, failures);
+            Sort(await StoredBatchAsync(workspace, rewrite, gatedWrites, SharesFileName(rewrites, path), cancellationToken).ConfigureAwait(false), path, applied, refused, failures);
 
         applied.RemoveAll(line => line.Length is 0);
 
@@ -2442,14 +2494,31 @@ public static class FileService
             : string.Join('\n', applied.Concat(refused));
     }
 
-    private static string GatedTally(string path, BatchTally tally, EditRequest request)
+    private static bool SharesFileName(List<(string Path, Result<BatchEdit> Rewrite)> rewrites, string path)
+    {
+        var name = Path.GetFileName(path.AsSpan());
+        var count = 0;
+
+        foreach (var (other, _) in rewrites)
+        {
+            if (Path.GetFileName(other.AsSpan()).Equals(name, StringComparison.OrdinalIgnoreCase) && ++count > 1)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static ReadOnlySpan<char> Label(LoadedWorkspace workspace, PendingWrite write, bool qualified) =>
+        qualified ? PositionFormat.Relative(workspace.Root, write.Full) : Path.GetFileName(write.Path.AsSpan());
+
+    private static string GatedTally(ReadOnlySpan<char> label, BatchTally tally, EditRequest request)
     {
         if (tally.Failed.Count is 0 && tally.Notes.Count is 0)
             return string.Empty;
 
         var response = new ResponseBuilder("edit_text", request.DryRun ? "dryRun" : "applied").Verbose(request.Verbose);
 
-        response.Line(string.Create(CultureInfo.InvariantCulture, $"{Path.GetFileName(path.AsSpan())}  edits={tally.Applied}/{tally.Total}"));
+        response.Line(string.Create(CultureInfo.InvariantCulture, $"{label}  edits={tally.Applied}/{tally.Total}"));
 
         foreach (var note in tally.Notes)
             response.Note(note);

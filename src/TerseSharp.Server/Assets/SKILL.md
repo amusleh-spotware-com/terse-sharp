@@ -38,22 +38,21 @@ tool returns, its parameters and its defaults live in the tool's own advertised 
 | **Navigate** | `Read` a `.cs` file | `get_file_outline(path)` |
 | **Navigate** | `read_text` a `.cs` file no project compiles | `get_file_outline(path)` — parsed from its own text, tagged `HEURISTIC` |
 | **Navigate** | `Read` **several** `.cs` files | `get_file_outline(paths: [...])` |
-| **Navigate** | outlining a 45-member file to find five members | `get_file_outline(path, contains: "Total")` |
 | **Navigate** | a type wider than the 40-member cap | `get_file_outline(path)` — answers the grouped member NAMES per accessibility, which is what `contains=` (members, fields and constants alike) or a `symbolIds=` batch is chosen from |
 | **Navigate** | `read_text` a whole `.cs` file | it already answers the outline; `verbose: true` or a line range for the text — and a verbose whole-file read prices itself against the outline it skipped |
 | **Navigate** | `Read` a whole class's source | `get_symbol_source(symbolId, verbose: true)` on a **type** id — the default answers its member outline |
 | **Navigate** | `Read` to see one method | `get_symbol_source(symbolId)` |
 | **Navigate** | `Read` to see **several** methods | `get_symbol_source(symbolIds: [...])` |
 | **Navigate** | one `get_type_outline` call per type | `get_type_outline(symbolIds: [...])` |
-| **Navigate** | `Read` to learn a class's API | `get_type_outline(symbolId)` |
+| **Navigate** | `Read` to learn a class's API | `get_type_outline(symbolId)` · `inherited: true` adds base classes |
 | **Navigate** | — | `get_symbol(symbolId)` |
 | **Navigate** | one `get_symbol` call per symbol | `get_symbol(symbolIds: [...])` |
 | **Navigate** | a name an outline printed that answers `SaturatedName` or `AmbiguousSymbol` | `get_symbol_source(symbolId, path: "src/Trading/OrderService.cs")` — `get_symbol`, `get_type_outline`, `replace_symbol` and `replace_symbol_body` take `path=` too |
 | **Navigate** | `Grep` for a type or member name | `search_symbols(query)` or `(queries: [...])` — CamelHump works, `OSvc` finds `OrderService` |
 | **Navigate** | asking the model whether a framework or NuGet member exists | `search_symbols` · `get_type_outline` · `get_symbol` · `get_symbol_source` — an exact type name no source declares falls back to the referenced assemblies |
 | **Navigate** | a name the tests declare dozens of times | `search_symbols(query, scope: "src")` |
-| **Navigate** | a common name that buries the one declaration you meant | `search_symbols(query, path: "src/Trading/OrderBook.cs")` |
-| **Navigate** | `Grep` to find callers | `find_usages(symbolId)` · `symbolIds=` |
+| **Navigate** | a common name burying the declaration you meant | `search_symbols(query, path: "src/Trading/OrderBook.cs")` · a folder or project keeps only what is under it |
+| **Navigate** | `Grep` to find callers | `find_usages(symbolId)` · `symbolIds=` · `scope: "src"` |
 | **Navigate** | `Grep` for implementers | `find_implementations(symbolId)` |
 | **Navigate** | the outline → source → usages chain, when learning what a symbol IS | `get_symbol(symbolId, usages: true)` — ONE call |
 | **Navigate** | judging a rename before doing it | `find_usages(symbolId, impact: true)` |

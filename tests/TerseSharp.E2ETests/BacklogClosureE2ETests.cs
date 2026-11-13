@@ -2736,4 +2736,152 @@ public sealed class BacklogClosureE2ETests(TerseServerFixture server)
         Assert.DoesNotContain("NameTaken", replayed, StringComparison.Ordinal);
         Assert.DoesNotContain("Unused() => 7", replayed, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task EditText_WithEntriesNamingFilesThatShareAName_PrintsEachSharedNameAsItsRelativePath()
+    {
+        var nested = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "terse-dup.json");
+        var outer = Path.Combine(TerseServerFixture.FixtureRoot, "src", "terse-dup.json");
+        var solo = Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "terse-solo.json");
+
+        foreach (var file in new[] { nested, outer, solo })
+            await File.WriteAllTextAsync(file, "{ \"probe\": 1 }", TestContext.Current.CancellationToken);
+
+        try
+        {
+            var text = await server.CallAsync("edit_text", new()
+            {
+                ["edits"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["oldText"] = "1", ["newText"] = "2", ["path"] = "src/Fixture.Trading/terse-dup.json" },
+                    new Dictionary<string, object?> { ["oldText"] = "1", ["newText"] = "3", ["path"] = "src/terse-dup.json" },
+                    new Dictionary<string, object?> { ["oldText"] = "1", ["newText"] = "4", ["path"] = "src/Fixture.Trading/terse-solo.json" },
+                },
+            });
+
+            Assert.Equal(
+                string.Create(CultureInfo.InvariantCulture, $"{Path.Combine("src", "Fixture.Trading", "terse-dup.json")}  changedLines=1  edits=1/1\n{Path.Combine("src", "terse-dup.json")}  changedLines=1  edits=1/1\nterse-solo.json  changedLines=1  edits=1/1"),
+                text);
+        }
+        finally
+        {
+            File.Delete(nested);
+            File.Delete(outer);
+            File.Delete(solo);
+        }
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithADirectoryPath_KeepsOnlyTheDeclarationsUnderItAndNeverFallsBackToMetadata()
+    {
+        var label = Path.Combine("src", "Fixture.Trading");
+        var scoped = await server.CallAsync("search_symbols", new() { ["query"] = "OrderService", ["path"] = "src/Fixture.Trading" });
+        var empty = await server.CallAsync("search_symbols", new() { ["query"] = "StringBuilder", ["path"] = "src/Fixture.Trading" });
+
+        Assert.DoesNotContain("DocumentNotFound", scoped, StringComparison.Ordinal);
+        Assert.Contains("T:Fixture.Trading.OrderService", scoped, StringComparison.Ordinal);
+        Assert.Contains("scope path=" + label, scoped, StringComparison.Ordinal);
+        Assert.StartsWith("0 symbols", empty, StringComparison.Ordinal);
+        Assert.Contains("no declaration under " + label, empty, StringComparison.Ordinal);
+        Assert.DoesNotContain("from referenced assemblies", empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchSymbols_WithAProjectNamePath_ScopesToThatProjectAndAnUnknownOneNamesTheClosestProject()
+    {
+        var byProject = await server.CallAsync("search_symbols", new() { ["query"] = "OrderService", ["path"] = "Fixture.Trading" });
+        var unknown = await server.CallAsync("search_symbols", new() { ["query"] = "OrderService", ["path"] = "Fixture.Tradng" });
+
+        Assert.Contains("T:Fixture.Trading.OrderService", byProject, StringComparison.Ordinal);
+        Assert.Contains("scope path=", byProject, StringComparison.Ordinal);
+        Assert.Contains("ERROR DocumentNotFound", unknown, StringComparison.Ordinal);
+        Assert.Contains("the closest project is Fixture.Trading", unknown, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithMoreThanTwentySymbolIds_NamesTheRestInAPartialNextCall()
+    {
+        var ids = Enumerable.Repeat("OrderService", 20).Append("OrderBook").ToArray();
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolIds"] = ids, ["signatures"] = false });
+
+        Assert.StartsWith("20 types", text, StringComparison.Ordinal);
+        Assert.Contains("PARTIAL 20 of 21 symbolIds answered", text, StringComparison.Ordinal);
+        Assert.Contains("get_type_outline symbolIds=", text, StringComparison.Ordinal);
+        Assert.Contains("\"OrderBook\"", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FindUsages_WithScope_KeepsOneHalfAndCountsWhatItHid()
+    {
+        var both = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderService" });
+        var src = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderService", ["scope"] = "src" });
+        var test = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderService", ["scope"] = "test" });
+        var withImpact = await server.CallAsync("find_usages", new() { ["symbolId"] = "OrderService", ["scope"] = "src", ["impact"] = true });
+
+        Assert.DoesNotContain("ERROR", src, StringComparison.Ordinal);
+        Assert.Equal(both.Split('\n')[0], src.Split('\n')[0]);
+        Assert.StartsWith("0 usages", test, StringComparison.Ordinal);
+        Assert.Contains("scope=test hid ", test, StringComparison.Ordinal);
+        Assert.Contains("ERROR InvalidArgument", withImpact, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetTypeOutline_WithInherited_OutlinesEveryBaseClassButObject()
+    {
+        var text = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:System.IO.MemoryStream", ["inherited"] = true, ["contains"] = "CopyTo" });
+        var plain = await server.CallAsync("get_type_outline", new() { ["symbolId"] = "T:System.IO.MemoryStream", ["contains"] = "CopyTo" });
+
+        Assert.Contains("inherited from T:System.IO.Stream", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("inherited from T:System.Object", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("inherited from", plain, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetFileOutline_WithVerbose_IsRefusedWithASteerToReadText()
+    {
+        var text = await server.CallAsync("get_file_outline", new() { ["path"] = "src/Fixture.Trading/OrderBook.cs", ["verbose"] = true });
+
+        Assert.Contains("unrecognized verbose", text, StringComparison.Ordinal);
+        Assert.Contains("read_text path=<file> verbose=true", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SameMeaningSpellings_BindToTheirCanonicalParameter()
+    {
+        var lines = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs", ["lines"] = "1-3" });
+        var range = await server.CallAsync("read_text", new() { ["path"] = "src/Fixture.Trading/OrderSide.cs", ["range"] = "1-3" });
+        var globs = await server.CallAsync("find_files", new() { ["globs"] = new[] { "src/**/*.cs" } });
+        var patterns = await server.CallAsync("find_files", new() { ["patterns"] = new[] { "src/**/*.cs" } });
+
+        Assert.DoesNotContain("ERROR", range, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", patterns, StringComparison.Ordinal);
+        Assert.Equal(lines.Split('\n')[0], range.Split('\n')[0]);
+        Assert.Equal(globs.Split('\n')[0], patterns.Split('\n')[0]);
+    }
+
+    [Fact]
+    public async Task BatchedReads_CountOnlyTheEntriesTheyAnswered()
+    {
+        string[] mixed = ["src/Fixture.Trading/OrderBook.cs", "src/Fixture.Trading/Missing.cs"];
+        var outline = await server.CallAsync("get_file_outline", new() { ["paths"] = mixed, ["signatures"] = false });
+        var historical = await server.CallAsync("get_file_outline", new() { ["paths"] = mixed, ["ref"] = "HEAD", ["signatures"] = false });
+        var xaml = await server.CallAsync("xaml_validate", new() { ["paths"] = new[] { "Missing1.xaml", "Missing2.xaml" } });
+
+        Assert.StartsWith("1/2 files", outline, StringComparison.Ordinal);
+        Assert.StartsWith("1/2 files", historical, StringComparison.Ordinal);
+        Assert.StartsWith("0/2 files", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadText_WhenTheBudgetAndTheSpillBothFire_NeverClaimsMoreThanItRendered()
+    {
+        var paths = new[] { "src/Fixture.Trading/OrderBook.cs" }
+            .Concat(Enumerable.Range(1, 11).Select(index => string.Create(CultureInfo.InvariantCulture, $"src/Fixture.Trading/Missing{index:00}.cs")))
+            .ToArray();
+        var text = await server.CallAsync("read_text", new() { ["paths"] = paths, ["lines"] = "1-200", ["maxChars"] = 200 });
+
+        Assert.StartsWith("1/12 files", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PARTIAL 10 of 12", text, StringComparison.Ordinal);
+        Assert.Contains("Missing11.cs", text, StringComparison.Ordinal);
+    }
 }

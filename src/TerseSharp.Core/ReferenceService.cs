@@ -11,13 +11,14 @@ public static class ReferenceService
         int maxResults,
         bool containers,
         bool chosen,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? scope = null)
     {
         var references = await SymbolFinder
             .FindReferencesAsync(symbol, workspace.Solution, cancellationToken)
             .ConfigureAwait(false);
 
-        var locations = references
+        var all = references
             .SelectMany(reference => reference.Locations)
             .Where(location => !location.IsImplicit && !HiddenInGenerated(location))
             .OrderBy(location => location.Document.FilePath, StringComparer.OrdinalIgnoreCase)
@@ -25,10 +26,14 @@ public static class ReferenceService
             .ThenBy(location => location.IsCandidateLocation ? 1 : 0)
             .Distinct(SourcePosition.Instance)
             .ToArray();
+        var locations = scope is { Length: > 0 }
+            ? Array.FindAll(all, location => string.Equals(TestScope.Of(location.Document.Project), scope, StringComparison.Ordinal))
+            : all;
+        var markup = await RazorUsageService.MarkupAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<RazorUsage> razor = scope is { Length: > 0 } ? [.. markup.Where(usage => InHalf(workspace, usage.Path, scope))] : markup;
+        var half = new Half(scope, all.Length - locations.Length + markup.Count - razor.Count);
 
-        var razor = await RazorUsageService.MarkupAsync(workspace, symbol, cancellationToken).ConfigureAwait(false);
-
-        return await RenderAsync(workspace, symbol, locations, razor, maxResults, containers, chosen, cancellationToken)
+        return await RenderAsync(workspace, symbol, locations, razor, maxResults, containers, chosen, half, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -82,6 +87,7 @@ public static class ReferenceService
             int maxResults,
             bool containers,
             bool chosen,
+            Half half,
             CancellationToken cancellationToken)
     {
         var shown = chosen ? ResultCap.Shown(locations.Length, maxResults) : ResultCap.Whole(locations.Length, maxResults);
@@ -90,6 +96,8 @@ public static class ReferenceService
             .Concat(razor.Select(usage => usage.Path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
+        var sites = XamlUsageService.Find(workspace, symbol, symbol.Name).ToArray();
+        var xaml = Array.FindAll(sites, usage => InHalf(workspace, usage.File, half.Scope));
         var response = new ResponseBuilder("find_usages", SymbolId.From(symbol).Value).Chosen(chosen);
         var records = new List<string>();
 
@@ -102,6 +110,8 @@ public static class ReferenceService
         if (ProjectLoadScope(workspace) is { } scope)
             response.Note(scope);
 
+        HiddenNote(response, half, sites.Length - xaml.Length);
+
         var grouped = await GroupAsync(workspace.Root, locations.Take(shown), containers, cancellationToken).ConfigureAwait(false);
 
         foreach (var group in grouped.GroupBy(entry => entry.Group))
@@ -110,7 +120,7 @@ public static class ReferenceService
         foreach (var usage in razor)
             records.Add(RazorUsageService.Describe(usage));
 
-        foreach (var usage in XamlUsageService.Find(workspace, symbol, symbol.Name))
+        foreach (var usage in xaml)
             records.Add(DescribeXaml(usage));
 
         foreach (var record in records)
@@ -226,5 +236,20 @@ public static class ReferenceService
         return location is null
             ? (string.Empty, 0)
             : (PositionFormat.Relative(root, PositionFormat.Source(location).Path), location.GetLineSpan().StartLinePosition.Line);
+    }
+
+    private readonly record struct Half(string? Scope, int Hidden);
+
+    private static Project? OwnerOf(LoadedWorkspace workspace, string full) => workspace.Solution.Projects
+        .Where(project => Path.GetDirectoryName(project.FilePath) is { Length: > 0 } directory && PathBoundary.Contains(directory, full))
+        .MaxBy(project => project.FilePath!.Length);
+
+    private static bool InHalf(LoadedWorkspace workspace, string path, string? scope) => scope is not { Length: > 0 }
+        || OwnerOf(workspace, Path.GetFullPath(Path.Combine(workspace.Root, path))) is { } owner && string.Equals(TestScope.Of(owner), scope, StringComparison.Ordinal);
+
+    private static void HiddenNote(ResponseBuilder response, Half half, int hiddenXaml)
+    {
+        if (half is { Scope: { } kept } && half.Hidden + hiddenXaml is > 0 and var hidden)
+            response.Note(string.Create(CultureInfo.InvariantCulture, $"scope={kept} hid {hidden} usages in the other half - drop scope= to see them"));
     }
 }

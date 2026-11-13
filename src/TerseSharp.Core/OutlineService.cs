@@ -438,7 +438,7 @@ public static class OutlineService
 
     private readonly record struct MemberTally(int Total, int Omitted);
 
-    public readonly record struct TypeOutlineFormat(bool Signatures, string Ids, bool ParameterNames, string? Contains, bool All);
+    public readonly record struct TypeOutlineFormat(bool Signatures, string Ids, bool ParameterNames, string? Contains, bool All, bool Inherited = false);
 
     public static async Task<string> TypesAsync(
         LoadedWorkspace workspace,
@@ -475,15 +475,7 @@ public static class OutlineService
         if (noted.Symbol is not { IsOk: true, Value: { } symbol })
             return "NOT_RESOLVED " + symbolId + "  " + noted.Symbol.Error!.Message;
 
-        var outline = await TypeAsync(
-            workspace,
-            symbol,
-            format.Signatures,
-            format.Ids,
-            cancellationToken,
-            format.ParameterNames,
-            format.Contains,
-            format.All).ConfigureAwait(false);
+        var outline = await InheritedOutline.WithBasesAsync(workspace, symbol, format, cancellationToken).ConfigureAwait(false);
 
         return (outline.IsOk, noted.Note) switch
         {

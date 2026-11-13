@@ -236,4 +236,64 @@ public sealed class SnippetSearchTests
 
         Assert.Empty(differing);
     }
+
+    private const string Block = "class A\n{\n    void M()\n    {\n        var a = 1;\n        var b = 2;\n        var c = 3;\n    }\n}\n";
+
+    [Fact]
+    public void Find_ForAnAnchorWhoseFirstLineSitsDeeperThanTheFile_MatchesTheRestAtTheirCommonShift()
+    {
+        var match = SnippetSearch.Find(Block, "            var a = 1;\n    var b = 2;\n    var c = 3;", 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.True(match.Shifted);
+        Assert.True(match.MidLine);
+        Assert.Equal("    ", match.Indent);
+        Assert.Equal(0, match.Outdent);
+        Assert.Equal("var a = 1;\n        var b = 2;\n        var c = 3;", Block[match.Start..(match.Start + match.Length)]);
+    }
+
+    [Fact]
+    public void Find_ForAnAnchorDeeperThanTheFileThroughout_MatchesWithAnOutdent()
+    {
+        var match = SnippetSearch.Find(Block, "            var a = 1;\n            var b = 2;", 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.True(match.Shifted);
+        Assert.Null(match.Indent);
+        Assert.Equal(4, match.Outdent);
+        Assert.Equal("var a = 1;\n        var b = 2;", Block[match.Start..(match.Start + match.Length)]);
+    }
+
+    [Fact]
+    public void Find_ForADeeperAnchorWhoseLinesDrift_StillMatchesNothing()
+    {
+        var match = SnippetSearch.Find(Block, "            var a = 1;\n    var b = 2;\n  var c = 3;", 1);
+
+        Assert.Equal(0, match.Occurrences);
+        Assert.Equal(-1, match.Start);
+    }
+
+    [Fact]
+    public void Find_ForADeeperAnchorThatOccursTwice_CountsBothAndAnswersTheSecondOnRequest()
+    {
+        const string Text = "class A\n{\n    void M()\n    {\n        var a = 1;\n        var b = 2;\n    }\n\n    void N()\n    {\n        var a = 1;\n        var b = 2;\n    }\n}\n";
+        var first = SnippetSearch.Find(Text, "            var a = 1;\n            var b = 2;", 1);
+        var second = SnippetSearch.Find(Text, "            var a = 1;\n            var b = 2;", 2);
+
+        Assert.Equal(2, first.Occurrences);
+        Assert.False(first.IsUnique);
+        Assert.Equal(Text.LastIndexOf("var a = 1;", StringComparison.Ordinal), second.Start);
+    }
+
+    [Fact]
+    public void Find_ForACrlfFileAndADeeperFirstLine_MapsBackOntoTheOriginalOffsets()
+    {
+        var text = Block.ReplaceLineEndings("\r\n");
+        var match = SnippetSearch.Find(text, "            var a = 1;\n    var b = 2;\n    var c = 3;", 1);
+
+        Assert.Equal(1, match.Occurrences);
+        Assert.True(match.Shifted);
+        Assert.Equal("    ", match.Indent);
+        Assert.Equal("var a = 1;\r\n        var b = 2;\r\n        var c = 3;", text[match.Start..(match.Start + match.Length)]);
+    }
 }

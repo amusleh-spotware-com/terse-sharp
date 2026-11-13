@@ -266,8 +266,17 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         [Description("Timeout seconds, 1-3600 (600).")] int timeoutSeconds = 600,
         [Description("Workspace or worktree name.")] string? workspace = null,
         [Description("Up to 10 test project names or paths, listed in turn; not with project=.")] string?[]? projects = null,
-        CancellationToken cancellationToken = default) =>
-        context.WithTargetAsync(workspace, project, (target, stopping) =>
+        [Description("A dotnet test filter: FullyQualifiedName~X is read as contains=X, anything else is refused naming contains=. Not with contains.")] string? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        var wanted = FilterAsContains(filter, contains);
+
+        if (!wanted.IsOk)
+            return Task.FromResult(wanted.Error!.Render());
+
+        contains = wanted.Value;
+
+        return context.WithTargetAsync(workspace, project, (target, stopping) =>
         {
             if (SelfBuilt(target, projects is not { Length: > 0 } && Whole(project, configuration)) is { } refused)
                 return Task.FromResult(refused);
@@ -295,6 +304,7 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
         cancellationToken: cancellationToken,
         spawns: "list_tests",
         wait: Seconds(timeoutSeconds));
+    }
 
     private static Task<string> Each(WorkspaceTarget target, string? project, string?[]? projects, string tool, Func<string?, Task<string>> action)
     {
@@ -876,4 +886,21 @@ public sealed class BuildTools(ToolContext context, LastTestRun lastRun, Unchang
     private static string Unremembered(ImmutableArray<string> elsewhere) => elsewhere.IsDefaultOrEmpty
         ? "no failing test is remembered for this workspace"
         : string.Create(CultureInfo.InvariantCulture, $"no failing test is remembered for this workspace; failures are remembered for {string.Join(", ", elsewhere)} - pass workspace= to replay them there");
+
+    internal static Result<string?> FilterAsContains(string? filter, string? contains)
+    {
+        const string Prefix = "FullyQualifiedName~";
+
+        return (filter, contains) switch
+        {
+            (null or "", _) => Result.Ok(contains),
+            (_, { Length: > 0 }) => Result.Fail<string?>(Errors.Invalid("filter= and contains= were both passed", "pass contains=<a substring of the test name> alone")),
+            ({ } text, _) when text.StartsWith(Prefix, StringComparison.Ordinal) && text.Length > Prefix.Length && text.AsSpan(Prefix.Length).IndexOfAny(FilterOperators) < 0 => Result.Ok<string?>(text[Prefix.Length..]),
+            _ => Result.Fail<string?>(Errors.Invalid(
+                string.Create(CultureInfo.InvariantCulture, $"filter='{filter}' is a dotnet test filter expression list_tests cannot evaluate"),
+                "list_tests filters by name with contains=<substring>; filter=FullyQualifiedName~X is read as contains=X")),
+        };
+    }
+
+    private static readonly SearchValues<char> FilterOperators = SearchValues.Create("|&=!~()");
 }
