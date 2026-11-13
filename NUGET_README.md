@@ -83,7 +83,7 @@ CodeScene's Code Health. A file starts at 10 and each smell takes points off:
 | Large File | *(the file)* is over 1,000 lines | 1.0 |
 
 The default bar is **9**. An edit that creates a file below it, takes a file below it, or makes an
-unhealthy file worse, is reported as `TERSE114`, naming each smell and the method that carries it. Like every policy rule it
+unhealthy file worse, is reported as `TERSE114`, naming each smell and the method that carries it. `analyze` alone adds developer congestion and change coupling from the last 200 commits as `HEURISTIC` `TERSE114` lines; an edit never runs git. Like every policy rule it
 **warns by default**. Make it a hard stop, move the bar or switch it off in `.terse.json`:
 
 ```json

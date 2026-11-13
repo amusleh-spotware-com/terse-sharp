@@ -26,7 +26,8 @@ public static class AnalysisService
         if (!collected.IsOk)
             return collected.Error!.Render();
 
-        var value = collected.Value;
+        var history = await HistoryHealth.FindingsAsync(workspace, collected.Value.Scope, cancellationToken).ConfigureAwait(false);
+        var value = collected.Value with { Extra = [.. collected.Value.Extra, .. history] };
         var all = Filter(value.Found, value.Scope, minimum, ids);
         var split = touched is null ? default : BaselineFold.Split(all, touched);
         var found = touched is null ? all : split.Kept;

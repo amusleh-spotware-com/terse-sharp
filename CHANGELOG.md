@@ -8,6 +8,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+### Added
+
+- **`analyze` scores CodeScene's two history biomarkers under `TERSE114` (I895): developer congestion (more than 3 authors in the last 200 commits) and change coupling (another C# file changed in at least 3 and at least half of a file's commits).** Each is its own `HEURISTIC` line, `<file> - developer congestion HEURISTIC: N authors in the last 200 commits exceeds 3` / `<file> - change coupling HEURISTIC: co-changed with <path> in N of its M commits reaches 50%`, at position 1:1. One `git log` per workspace, cached against HEAD; the edit gate and `gate` never read history, so edits pay no process spawn. Covered by `HistoryHealthTests` and `HistoryHealthE2ETests`.
+
 ### Changed
 
 - **TerseSharp targets .NET 11 and needs the .NET 11 runtime** (`net11.0`, `global.json` pins SDK `11.0.100`). 0.83.0 already rolled forward onto the .NET 11 runtime wherever one was installed (`RollForward=latestMajor`), so what SDK 11 users were missing is the compiler, below. Forced onto the .NET 10 runtime, a server cannot host SDK 11's MSBuild and silently evaluates an SDK 11 solution with an older SDK (observed: 10.0.400 instead of 11.0.100, one document fewer). A solution pinned to the .NET 10 SDK still loads. A machine with only the .NET 10 runtime can no longer run the tool: install the .NET 11 runtime, or stay on 0.83.x. `terse doctor`'s `server runtime` check now requires 11.

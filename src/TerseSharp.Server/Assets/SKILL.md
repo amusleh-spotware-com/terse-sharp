@@ -899,10 +899,9 @@ Fifteen rules, `TERSE100`-`TERSE114`: cognitive complexity, method statements, m
 constructor dependencies, parameter count, method-name length, meaningless suffixes, naming per
 declaration kind (a `[Fact]`-style method uses the `testMethod` key), `async void`, condition operands, chained references (off), nesting (3),
 comments (`TERSE112`) and XML docs (`TERSE113`) - ON at `warn` with no `.terse.json` - and **code health
-(`TERSE114`)**: each file scored 1-10 from Brain Method, Deep Nested Complexity, Complex Method, Large
-Method, Bumpy Road, Excess Function Arguments, Complex Conditional, Code Duplication, Low Cohesion and
-Large File; a file the edit leaves below `limit` (9) is flagged when new, newly below, or lower,
-naming each smell.
+(`TERSE114`)**: each file scored 1-10 from ten CodeScene biomarkers; a file the edit leaves below
+`limit` (9) is flagged when new, newly below, or lower, naming each smell. `analyze` alone adds
+HEURISTIC developer-congestion and change-coupling lines from 200 commits; an edit never runs git.
 Each is `reject`, `warn` or `off` and every one DEFAULTS to `warn`, so a rule only refuses an edit
 where a `.terse.json` asked it to; a `warn` rule lets the edit land and answers `WARNING policy  ...` above the one-line success; the diff stays behind `verbose=true`.
 Cognitive complexity is a **percentage of a threshold** - default `150`% of `10`, so a score above 15

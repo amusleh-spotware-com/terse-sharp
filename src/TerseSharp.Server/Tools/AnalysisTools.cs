@@ -48,6 +48,8 @@ public sealed class AnalysisTools(ToolContext context, ReplayGate replay)
                 if (Error is { } failure)
                     return failure.Render();
 
+                await HistoryRefresh.RunAsync(loaded.Root, Split(ids), cancellationToken).ConfigureAwait(false);
+
                 return await GateSteered(
                     Steered(
                         AnalysisService.AnalyzeAsync(

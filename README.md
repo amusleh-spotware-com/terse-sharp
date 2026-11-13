@@ -168,7 +168,7 @@ A `policy` section in `.terse.json` checks every edit against your team's rules.
 | `TERSE111` nesting depth | 3 |
 | `TERSE112` comments | on, even with no `.terse.json` |
 | `TERSE113` XML doc comments | on, even with no `.terse.json` |
-| `TERSE114` code health | 9 |
+| `TERSE114` code health (`analyze` adds history: congestion, change coupling) | 9 |
 
 Every rule can be `reject`, `warn` or `off`, and every rule that is on by default warns rather than rejects. Only what an edit
 **introduces** counts, so an old file never blocks a clean change. `allowPolicy=true` pushes one edit
