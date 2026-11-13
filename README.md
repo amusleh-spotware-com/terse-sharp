@@ -200,7 +200,7 @@ It blocks built-in reads and edits of `.cs`, `.razor`, `.xaml`, `.axaml`, `.resx
 and friends. It blocks shell text tools (`grep`, `cat`, `sed`, `ls`…) inside a .NET tree. It blocks
 `dotnet build`, `test`, `format`, `clean` and `list package`, a bare `sleep`, and `git status`, `diff`,
 `log`, `ls-files`, tag listings and `ls-remote --tags`. Each denial names the replacing call with your own
-arguments filled in. A compound command keeps running with only the replaced part removed, when that
+arguments filled in, and the `ToolSearch select:` string that loads its schema. A compound command keeps running with only the replaced part removed, when that
 is provably safe. `dotnet restore`/`pack`/`publish`/`run`, `git blame` and every git command that
 changes history still run. `terse uninstall` removes it, and `TERSE_GUARD_LOG=<path>` logs each
 decision.

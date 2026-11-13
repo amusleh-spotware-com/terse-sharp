@@ -9,18 +9,13 @@ TerseSharp answers C# and XAML questions **semantically**, from a Roslyn workspa
 loaded. Reading a `.cs` file whole, or grepping for a type name, costs 10-30x more tokens and returns
 matches that are not references.
 
-## Route every question by its target
-
-**Every C#/.NET question has a tool, and the table below names it.** Read the left column, take the
-tool on the right, call it. It holds for `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`,
-`.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx` and `.resw`, and for every question about
-C# symbols, references, diagnostics, builds, tests or the working tree.
+Load these schemas in ONE call, before the first: `ToolSearch select:mcp__terse-sharp__read_text,mcp__terse-sharp__search_text,mcp__terse-sharp__get_symbol_source,mcp__terse-sharp__search_symbols,mcp__terse-sharp__get_file_outline,mcp__terse-sharp__workspace_status,mcp__terse-sharp__find_usages,mcp__terse-sharp__changed_files,mcp__terse-sharp__diff_text,mcp__terse-sharp__find_files,mcp__terse-sharp__diff_symbols,mcp__terse-sharp__analyze,mcp__terse-sharp__search_regex,mcp__terse-sharp__edit_text,mcp__terse-sharp__run_tests`
 
 ## The whole surface — one row per job
 
-Read the **Job** column for what you want, the **Instead of** column for the built-in it retires, and
-call what is in **Use**. Every tool the server advertises is in this table exactly once. What each
-tool returns, its parameters and its defaults live in the tool's own advertised description, so this table is the job-to-tool map and nothing else.
+Every C#/.NET question has a tool - `.cs`, `.razor`, `.cshtml`, `.csproj`, `.props`, `.targets`,
+`.sln`/`.slnx`/`.slnf`, `.xaml`, `.axaml`, `.paml`, `.resx`, `.resw` - and every advertised tool is in
+this table once.
 
 | Job | Instead of | Use |
 |---|---|---|

@@ -7,7 +7,7 @@ namespace TerseSharp.Server;
 
 public sealed record GuardVerdict(bool Denied, string Reason, string? Routing = null, string? Replaces = null, string? Rewrite = null, string? Allowance = null);
 
-public static class ToolGuard
+public static partial class ToolGuard
 {
     private static readonly string[] Extensions =
         [".cs", ".razor", ".cshtml", ".csproj", ".props", ".targets", ".sln", ".slnx", ".slnf", ".xaml", ".axaml", ".paml", ".resx", ".resw"];
@@ -533,7 +533,7 @@ public static class ToolGuard
             if (Unrolled(command, pass) is not { } unrolled)
                 return allowed;
 
-            if (Blocking(Stages(unrolled), unrolled, cwd) is { Denied: true } denied)
+            if (Blocking(Stages(unrolled), unrolled, cwd, command) is { Denied: true } denied)
                 return denied;
         }
 
@@ -1057,13 +1057,13 @@ public static class ToolGuard
         };
     }
 
-    private static GuardVerdict Blocking(Stage[] stages, string command, string? cwd)
+    private static GuardVerdict Blocking(Stage[] stages, string command, string? cwd, string? origin = null)
     {
         var judged = Detached(stages);
         var compound = judged.Length > 1;
         var unfenceable = compound ? Unfenceable(command) : string.Empty;
         var directories = Directories(command, cwd, judged.Length);
-        var placed = Placed(judged, command);
+        var (text, placed) = Placing(judged, command, origin);
         var allowed = new List<Placement>(judged.Length);
         var calls = new List<string>();
         var attached = false;
@@ -1092,7 +1092,7 @@ public static class ToolGuard
         }
 
         return refused is not null
-            ? refused with { Routing = Reissue(calls, allowed.ConvertAll(entry => command[entry.Span].Trim()), OnlyAnded(command)) }
+            ? refused with { Routing = Reissue(calls, Grouped(allowed, placed, text).ConvertAll(entry => text[entry.Span].Trim()), OnlyAnded(command)) }
             : Unreplaced(allowance);
     }
 
@@ -1106,7 +1106,7 @@ public static class ToolGuard
         };
 
         if (verdict.Routing is { Length: > 0 } routing)
-            hook["additionalContext"] = "Call this instead: " + routing;
+            hook["additionalContext"] = "Call this instead: " + routing + SchemaLoad.For(routing);
 
         return hook;
     }
@@ -1119,7 +1119,7 @@ public static class ToolGuard
     };
 
     private static string Calling(string? routing) =>
-            routing is { Length: > 0 } ? " Call this instead: " + routing : string.Empty;
+            routing is { Length: > 0 } ? " Call this instead: " + routing + SchemaLoad.For(routing) : string.Empty;
 
     private static bool Escaping(ReadOnlySpan<char> command)
     {
@@ -1521,8 +1521,8 @@ public static class ToolGuard
         if ((patterned && IsSeparatedScriptFlag(token)) || IsFindPattern(command[0], token))
             return 1;
 
-        if (Positional(token) && patterns-- <= 0 && IsPathLike(token))
-            operands.Add(token);
+        if (Positional(token) && patterns-- <= 0)
+            PathExpansions(token, operands);
 
         return 0;
     }
@@ -1615,7 +1615,7 @@ public static class ToolGuard
             return false;
 
         if (OperatingSystem.IsWindows() && path.StartsWith('/') && !path.StartsWith("//", StringComparison.Ordinal))
-            return PosixOnWindows(path) is { } native && PathBoundary.Contains(root, native);
+            return PosixOnWindows(BraceExpansion.Climbed(path)) is { } native && PathBoundary.Contains(root, native);
 
         return !Path.IsPathFullyQualified(path) || PathBoundary.Contains(root, path);
     }
@@ -2046,8 +2046,8 @@ public static class ToolGuard
         return (verdict.Denied, expanded.Denied) switch
         {
             (true, false) => expanded,
-            (true, true) => Blocking(Stages(resolved), resolved, cwd),
-            (false, true) when IntroducesSource(command, resolved) => Blocking(Stages(resolved), resolved, cwd),
+            (true, true) => Blocking(Stages(resolved), resolved, cwd, command),
+            (false, true) when IntroducesSource(command, resolved) => Blocking(Stages(resolved), resolved, cwd, command),
             _ => verdict,
         };
     }
@@ -2456,7 +2456,7 @@ public static class ToolGuard
         if (verdict.Denied)
             return Looped(command, cwd) ?? verdict;
 
-        var looped = Blocking(Stages(unrolled), unrolled, cwd);
+        var looped = Blocking(Stages(unrolled), unrolled, cwd, command);
 
         return Iterating(command, cwd, verdict) ?? (looped.Denied ? looped : verdict);
     }
@@ -2503,15 +2503,15 @@ public static class ToolGuard
 
     private static bool Rebound(string command, string name)
     {
-        var bare = 0;
+        var bound = 0;
 
         for (var at = command.IndexOf(name, StringComparison.Ordinal); at >= 0; at = command.IndexOf(name, at + name.Length, StringComparison.Ordinal))
         {
-            if (Bounded(command, at, name.Length) && !Inert(command.AsSpan(0, at)))
-                bare++;
+            if (Binds(command, at, name.Length))
+                bound++;
         }
 
-        return bare > 1;
+        return bound > 1 || Sources(command);
     }
 
     private static bool Inert(ReadOnlySpan<char> before) => before is [.., '$' or '-'] or [.., '$', '{'];
@@ -3244,6 +3244,12 @@ public static class ToolGuard
 
     private static GuardVerdict? Looped(string command, string? cwd) =>
         Bound(command) && Iterating(command, cwd, Allowed) is { Denied: false } passes ? passes : null;
+
+    private static bool Binds(string command, int at, int length) =>
+        Bounded(command, at, length) ? !Inert(command.AsSpan(0, at)) : AttachedFlag.Binds(command.AsSpan(0, at), command.AsSpan(at + length));
+
+    private static bool Sources(string command) =>
+        Pipelines(command).Exists(pipeline => Tokenized(Unkeyworded(pipeline.Text)) is ["source" or "." or "eval", ..]);
 }
 
 public readonly record struct GuardCoverage(string Detail, bool Complete);

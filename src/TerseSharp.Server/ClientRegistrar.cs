@@ -6,7 +6,7 @@ namespace TerseSharp.Server;
 
 public static class ClientRegistrar
 {
-    private const string ServerName = "terse-sharp";
+    internal const string ServerName = "terse-sharp";
     private const string ClaudeCode = "claude-code";
 
     private const string TerseCalls = "mcp__.*[Tt]erse.*";

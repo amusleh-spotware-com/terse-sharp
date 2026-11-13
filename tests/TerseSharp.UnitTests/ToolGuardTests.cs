@@ -2968,7 +2968,7 @@ public sealed class ToolGuardTests
 
             Assert.True(denied.Denied, entered);
             Assert.DoesNotContain(ToolGuard.UnassignedMarker, denied.Reason, StringComparison.Ordinal);
-            Assert.DoesNotContain("$S/", denied.Routing, StringComparison.Ordinal);
+            Assert.DoesNotContain("$S/", denied.Routing!.Split("  |  ")[0], StringComparison.Ordinal);
             Assert.False(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = stayed }, Fixtures.RepositoryRoot).Denied, stayed);
         }
         finally
@@ -3048,6 +3048,118 @@ public sealed class ToolGuardTests
     public void Inspect_ForALoopWhoseLaterWordNamesTheTree_DeniesItThoughItsFirstWordIsOutside(string template)
     {
         var command = template.Replace("SCRATCH", Path.Combine(Path.GetTempPath(), "terse-guard-scratch").Replace('\\', '/'), StringComparison.Ordinal);
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+    }
+
+    [Fact]
+    public void Render_ForADenial_NamesTheToolSearchLoadOfEveryToolItRoutesTo()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build && cat src/OrderService.cs" }, Fixtures.RepositoryRoot);
+
+        var context = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!["additionalContext"]!.GetValue<string>();
+
+        Assert.EndsWith("ToolSearch select:mcp__" + ClientRegistrar.ServerName + "__build,mcp__" + ClientRegistrar.ServerName + "__get_file_outline", context, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForARoutingThatQuotesTheWordThen_LoadsOnlyTheToolItCalls()
+    {
+        var verdict = ToolGuard.Inspect("Grep", new JsonObject { ["pattern"] = "if x then cat", ["glob"] = "*.cs" });
+
+        var context = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!["additionalContext"]!.GetValue<string>();
+
+        Assert.EndsWith("ToolSearch select:mcp__terse-sharp__search_text", context, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_ForADenialWithAReissuedRemainder_LoadsNoToolFromTheShellText()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build; echo then cat" }, Fixtures.RepositoryRoot);
+
+        var context = JsonNode.Parse(ToolGuard.Render(verdict))!["hookSpecificOutput"]!["additionalContext"]!.GetValue<string>();
+
+        Assert.EndsWith("ToolSearch select:mcp__terse-sharp__build", context, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForADeniedChainAfterAnAssignment_ReissuesTheRemainderAsTheCommandSpelledIt()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "X=1; dotnet build; echo $X" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.EndsWith("as it stands: X=1  |  echo $X", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Guard_ForADeniedSegmentInsideALoop_ReissuesNoFragmentOfTheLoop()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "for r in /tmp/terse-loop-a /tmp/terse-loop-b; do dotnet build; done" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.Equal("build", verdict.Routing);
+    }
+
+    [Fact]
+    public void Guard_ForAnAllowedLoopBesideADeniedSegment_ReissuesTheWholeLoopAsOneSegment()
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = "dotnet build; for f in a b; do echo $f; done" }, Fixtures.RepositoryRoot);
+
+        Assert.True(verdict.Denied);
+        Assert.EndsWith("as it stands: for f in a b; do echo $f; done", verdict.Routing, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("for r in /tmp/terse-loop-a; do printf -vr src; find \"$r\"; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do . /tmp/terse-set.sh; find \"$r\"; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do source /tmp/terse-set.sh; find \"$r\"; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do read -ar < /tmp/terse-list; find \"$r\"; done")]
+    [InlineData("for f in /tmp/terse-loop-a; do printf -vf .; cat \"$f\"/README.md; done")]
+    public void Guard_ForALoopThatRebindsItsVariableThroughAnAttachedFlagOrASourcedFile_StillDeniesTheRead(string command) =>
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+
+    [Theory]
+    [InlineData("for r in /tmp/terse-loop-a; do printf -v other x; find \"$r\"; done")]
+    [InlineData("for r in /tmp/terse-loop-a; do echo -v; find \"$r\" | wc -l; done")]
+    public void Guard_ForALoopWhoseVariableNoFlagOrSourcedFileRebinds_StillAllowsTheRead(string command)
+    {
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("cat {0}/{{terse-x,{1}/README.md}}")]
+    [InlineData("head -n 3 {0}/{{terse-x,{1}/README.md}}")]
+    [InlineData("for f in /tmp/terse-loop-a; do cat {0}/{{terse-x,{1}/README.md}}; done")]
+    public void Guard_ForABraceListOneOfWhoseAlternativesLandsInTheTree_DeniesTheRead(string shape)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Fixtures.RepositoryRoot);
+        var command = string.Format(CultureInfo.InvariantCulture, shape, Path.GetDirectoryName(root)!.Replace('\\', '/'), Path.GetFileName(root));
+
+        Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
+    }
+
+    [Theory]
+    [InlineData("cat {0}/{{terse-x,terse-y}}")]
+    [InlineData("cat /tmp/{{terse-a,terse-b}}")]
+    public void Guard_ForABraceListWhoseEveryAlternativeLiesOutsideTheTree_AllowsTheRead(string shape)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Fixtures.RepositoryRoot);
+        var command = string.Format(CultureInfo.InvariantCulture, shape, Path.GetDirectoryName(root)!.Replace('\\', '/'));
+        var verdict = ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot);
+
+        Assert.False(verdict.Denied, verdict.Reason);
+    }
+
+    [Theory]
+    [InlineData("cat /tmp/..{0}/README.md")]
+    [InlineData("cat /tmp/{{terse-x,..{0}/README.md}}")]
+    public void Guard_ForAPosixPathThatClimbsOutOfTmpBackIntoTheTree_JudgesItInsideTheTree(string shape)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Fixtures.RepositoryRoot);
+        var posix = OperatingSystem.IsWindows() ? "/" + char.ToLowerInvariant(root[0]) + root[2..].Replace('\\', '/') : root;
+        var command = string.Format(CultureInfo.InvariantCulture, shape, posix);
 
         Assert.True(ToolGuard.Inspect("Bash", new JsonObject { ["command"] = command }, Fixtures.RepositoryRoot).Denied, command);
     }
