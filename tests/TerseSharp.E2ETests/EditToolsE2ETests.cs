@@ -1592,7 +1592,7 @@ public sealed class RegionTail
         const string Probe = "src/Fixture.Trading/UsageListProbe.cs";
         var file = Path.Combine("src", "Fixture.Trading", "UsageListProbe.cs");
 
-        Assert.DoesNotContain("ERROR", await server.WriteAsync(new()
+        Assert.DoesNotContain("ERROR", await server.WriteNewAsync(new()
         {
             ["path"] = Probe,
             ["content"] = "namespace Fixture.Trading;\n\npublic static class UsageListProbe\n{\n    private static int Helper() => 1;\n    public static int A() => Helper();\n    public static int B() => Helper();\n    public static int C() => Helper();\n    public static int D() => Helper();\n    public static int E() => Helper();\n    public static int F() => Helper();\n    public static int G() => Helper();\n}\n",
@@ -1790,8 +1790,10 @@ public sealed class RegionTail
         });
 
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
-        Assert.Contains("is a C# file", text, StringComparison.Ordinal);
-        Assert.Contains("replace_symbol_body", text, StringComparison.Ordinal);
+        Assert.Contains("is a C# file no loaded project compiles", text, StringComparison.Ordinal);
+        Assert.Contains("pass force=true to edit it as plain text", text, StringComparison.Ordinal);
+        Assert.Contains("load_workspace the solution whose project compiles it", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("use replace_symbol_body, replace_symbol, add_member or rename_symbol", text, StringComparison.Ordinal);
     }
 
     [Theory]

@@ -2468,7 +2468,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
     {
         const string Probe = "src/Fixture.Trading/GateProbe.cs";
 
-        var written = await server.WriteAsync(new()
+        var written = await server.WriteNewAsync(new()
         {
             ["path"] = Probe,
             ["force"] = true,
@@ -2513,7 +2513,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         const string CallerFile = "src/Fixture.Trading/GateProbeCaller.cs";
         const string NotesFile = "gate-probe-notes.md";
 
-        Assert.DoesNotContain("ERROR", await server.WriteAsync(new()
+        Assert.DoesNotContain("ERROR", await server.WriteNewAsync(new()
         {
             ["force"] = true,
             ["files"] = new object[]
@@ -2566,7 +2566,7 @@ public sealed class FileToolsE2ETests(TerseServerFixture server)
         const string FirstFile = "src/Fixture.Trading/GateTallyFirst.cs";
         const string SecondFile = "src/Fixture.Trading/GateTallySecond.cs";
 
-        Assert.DoesNotContain("ERROR", await server.WriteAsync(new()
+        Assert.DoesNotContain("ERROR", await server.WriteNewAsync(new()
         {
             ["force"] = true,
             ["files"] = new object[]

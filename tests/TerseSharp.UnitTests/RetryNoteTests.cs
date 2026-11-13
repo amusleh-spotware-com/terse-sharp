@@ -98,4 +98,14 @@ public sealed partial class RetryNoteTests
 
         return map;
     }
+
+    [Fact]
+    public void WriteText_SingleFileRefusalNote_NamesTheTokenAndTheFlagAndForbidsReSendingContent()
+    {
+        var note = RetryNote.For("write_text", TerseErrorCode.InvalidArgument, 1);
+
+        Assert.Contains("retryWith=<the token below> plus the one flag the remedy names", note, StringComparison.Ordinal);
+        Assert.Contains("force=true for a new or uncompiled .cs file", note, StringComparison.Ordinal);
+        Assert.Contains("content= again re-sends the whole file", note, StringComparison.Ordinal);
+    }
 }

@@ -98,7 +98,10 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("ERROR InvalidArgument", text, StringComparison.Ordinal);
         Assert.Contains("is a C# file", text, StringComparison.Ordinal);
-        Assert.Contains("write_text(path, content, force=true)", text, StringComparison.Ordinal);
+        Assert.Contains("create it with write_text force=true", text, StringComparison.Ordinal);
+        Assert.Contains("the retry is retryWith=<the token below> plus the one flag the remedy names", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("write_text(path, content", text, StringComparison.Ordinal);
+        Assert.Contains("\nretryWith=r", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -398,5 +401,24 @@ public sealed class RemainingToolsE2ETests(TerseServerFixture server)
 
         Assert.Contains("NOTE exclude= scopes this pass to the documents it keeps", text, StringComparison.Ordinal);
         Assert.DoesNotContain("NOTE exclude= scopes this pass", scoped, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WriteText_ANewCsFileRefusedForWantOfForce_IsReplayedByTheTokenPlusForceAlone()
+    {
+        var refused = await server.CallAsync("write_text", new()
+        {
+            ["path"] = "src/Fixture.Trading/TokenForcedProbe.cs",
+            ["content"] = "namespace Fixture.Trading;\n\npublic sealed class TokenForcedProbe;\n",
+        });
+        var token = refused[(refused.LastIndexOf("retryWith=", StringComparison.Ordinal) + "retryWith=".Length)..].Trim();
+
+        var replayed = await server.CallAsync("write_text", new() { ["retryWith"] = token, ["force"] = true, ["dryRun"] = true });
+
+        Assert.StartsWith("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.DoesNotContain("ERROR", replayed, StringComparison.Ordinal);
+        Assert.Contains("TokenForcedProbe.cs", replayed, StringComparison.Ordinal);
+        Assert.Contains("+public sealed class TokenForcedProbe;", replayed, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(TerseServerFixture.FixtureRoot, "src", "Fixture.Trading", "TokenForcedProbe.cs")));
     }
 }

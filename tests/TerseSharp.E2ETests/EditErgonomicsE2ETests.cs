@@ -994,7 +994,7 @@ public sealed class EditErgonomicsE2ETests(TerseServerFixture server)
 
         try
         {
-            var applied = await server.WriteAsync(new()
+            var applied = await server.WriteNewAsync(new()
             {
                 ["files"] = new List<Dictionary<string, object?>>
                 {

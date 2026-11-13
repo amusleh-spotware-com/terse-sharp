@@ -670,4 +670,17 @@ public sealed class FileServiceTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Tallied_ABatchWithARefusedEntry_OpensWithHowManyWereWrittenAndRefused()
+    {
+        var answer = FileService.Tallied(["a.md  changedLines=1", "ERROR EditConflict: b.md changed after this call read it", string.Empty], refused: 1, total: 2);
+
+        Assert.StartsWith("1 of 2 written - 1 refused\n", answer, StringComparison.Ordinal);
+        Assert.Contains("\nERROR EditConflict: b.md", answer, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tallied_ABatchWithNothingRefused_IsTheLinesAlone() =>
+        Assert.Equal("a.md  changedLines=1\nb.md  changedLines=2", FileService.Tallied(["a.md  changedLines=1", string.Empty, "b.md  changedLines=2"], refused: 0, total: 2));
 }

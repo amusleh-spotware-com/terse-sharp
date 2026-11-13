@@ -974,8 +974,14 @@ public static class FileService
         if (gated is { } applied)
             rendered.Add(applied.Value!);
 
+        var refused = 0;
+
         foreach (var entry in pending)
-            rendered.Add(await PlainAsync(workspace, entry, dryRun, verbose, cancellationToken).ConfigureAwait(false));
+        {
+            var line = await PlainAsync(workspace, entry, dryRun, verbose, cancellationToken).ConfigureAwait(false);
+            refused += line.StartsWith("ERROR ", StringComparison.Ordinal) ? 1 : 0;
+            rendered.Add(line);
+        }
 
         foreach (var entry in pending)
         {
@@ -983,7 +989,7 @@ public static class FileService
             rendered.Add(entry.Ending is { } ending ? entry.Path + "  " + ending : string.Empty);
         }
 
-        return Result.Ok(string.Join('\n', rendered.FindAll(line => line.Length > 0)));
+        return Result.Ok(Tallied(rendered, refused, pending.Count));
     }
 
     private static async Task<string> PlainAsync(
@@ -2578,5 +2584,15 @@ public static class FileService
                 CultureInfo.InvariantCulture,
                 $"outline: read_text path={Located(path)} headings=true, then section=\"## Heading\" - paging costs one call per page, the heading map costs one"));
         }
+    }
+
+    internal static string Tallied(List<string> rendered, int refused, int total)
+    {
+        var lines = rendered.FindAll(line => line.Length > 0);
+
+        if (refused > 0)
+            lines.Insert(0, string.Create(CultureInfo.InvariantCulture, $"{total - refused} of {total} written - {refused} refused"));
+
+        return string.Join('\n', lines);
     }
 }

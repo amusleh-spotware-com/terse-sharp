@@ -41,7 +41,7 @@ internal static class RetryNote
         (TerseErrorCode.InvalidArgument, > 1) => "every file of the batch is held, so the retry is the token plus force=true or overwrite=true, whichever the remedy names, and nothing else",
         (_, > 1) => "every file of the batch is held, so the retry names the token - with usings= or allowErrors=true - instead of re-sending them",
         (TerseErrorCode.CompileRegression, _) => "the rejected content and its usings= are held, so the retry names the token plus force=true instead of re-sending the file - a content= you pass replaces the held one",
-        (TerseErrorCode.InvalidArgument, _) => "the content is held, so the retry is the token plus the flag the remedy names - force=true or overwrite=true - or a corrected path=, and nothing else",
+        (TerseErrorCode.InvalidArgument, _) => "the content is held, so the retry is retryWith=<the token below> plus the one flag the remedy names - force=true for a new or uncompiled .cs file, overwrite=true for a rewrite - or a corrected path=; content= again re-sends the whole file",
         _ => "the content is held, so the retry is the token plus a corrected path= and nothing else",
     };
 }
