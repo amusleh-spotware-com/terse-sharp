@@ -497,6 +497,8 @@ persisted_n = persisted_bytes = spill_files = spill_bytes = 0
 delegations = delegated_tokens = 0; delegated_ms = 0
 mcp_structured = mcp_structured_chars = 0
 records = with_message = cycles = 0
+replayed_records = replayed_uses = repeated_uses = anonymous_uses = 0
+counted_use = set()
 emitted_lines = emitted_chars = edits_scanned = 0
 prompts = interventions = 0
 cache_read_total = cache_write_total = cache_churn = 0
@@ -565,6 +567,12 @@ for path, project, spilled in walk():
         seq += 1
         kind = record.get('type', 'none')
         types[kind] += 1
+        if kind in ('api-request', 'api-request-blob'):
+            replayed_records += 1
+            body = record.get('message')
+            if isinstance(body, dict) and isinstance(body.get('content'), list):
+                replayed_uses += sum(1 for b in body['content'] if isinstance(b, dict) and b.get('type') == 'tool_use')
+            continue
         at = stamp(record)
         if record.get('interruptedMessageId'):
             interrupted += 1
@@ -665,7 +673,8 @@ for path, project, spilled in walk():
                         session_steers += 1
                         before[last_tool or 'none'] += 1
         mid = message.get('id')
-        fanout = sum(1 for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use')
+        fanout = sum(1 for b in blocks if isinstance(b, dict) and b.get('type') == 'tool_use'
+                     and b.get('id') not in counted_use)
         if fanout:
             by_message[mid] += fanout
             if mid not in msg_calls:
@@ -682,6 +691,14 @@ for path, project, spilled in walk():
                 if not body:
                     think_sealed += 1
             elif shape == 'tool_use':
+                use_id = block.get('id')
+                if use_id is not None and use_id in counted_use:
+                    repeated_uses += 1
+                    continue
+                if use_id is None:
+                    anonymous_uses += 1
+                else:
+                    counted_use.add(use_id)
                 tool = short(block.get('name') or 'none')
                 arguments = block.get('input') or {}
                 last_tool = tool
@@ -938,6 +955,8 @@ for path, project, spilled in walk():
 
 payloads.sort(reverse=True)
 total_calls = sum(calls.values())
+assert total_calls == len(counted_use) + anonymous_uses, (
+    f'a tool_use id was counted twice: calls={total_calls} ids={len(counted_use)} anonymous={anonymous_uses}')
 total_chars = sum(result_chars.values())
 builtin = sum(c for t, c in calls.items() if t in BUILTIN)
 tool_ms = sum(sum(v) for v in durations.values())
@@ -953,6 +972,8 @@ def show(label, value):
 print(f'== SECTION A  PAYLOAD  window {WEEKS} week(s)  transcripts={len(sessions)}  roots={len(roots)}')
 show('records', f'{records:,} ({with_message:,} carry a message, '
                 f'{(records - with_message) * 100 // max(records, 1)}% do not)')
+show('replayed (skipped)', f'{replayed_records:,} api-request records carrying {replayed_uses:,} tool_use blocks, '
+                           f'{repeated_uses:,} repeated tool_use ids dropped')
 show('record types', dict(types.most_common(8)))
 show('tool calls', f'{total_calls:,}  builtin={builtin * 100 // max(total_calls, 1)}%')
 show('tool-result chars', f'{total_chars:,} (~{total_chars // 4:,} tok)')
@@ -1208,7 +1229,7 @@ for row in sorted(per_session, reverse=True)[:10]:
     print(f'  {steers:>3} interventions user={user_turns:>3} asst={assistant_turns:>4} '
           f'edits={edits:>4} gates={gates:>3} {project[:44]}')
 
-print(f'\n== CORPUS weeks={WEEKS} transcripts={len(sessions)} records={records} calls={total_calls} '
+print(f'\n== CORPUS weeks={WEEKS} transcripts={len(sessions)} records={records} skipped={replayed_uses + repeated_uses} calls={total_calls} '
       f'builtin={builtin * 100 // max(total_calls, 1)}% resulttok={total_chars // 4} '
       f'attachtok={sum(attach.values()) // 4} trimtok={sum(trim.values())} '
       f'chains={sum(chains.values())} runcalls={sum(runs.values())}')
@@ -1234,7 +1255,7 @@ Run it as `python <script> <WEEKS>` **in the background**, and read the **whole*
 lands. **Do not** re-derive any number by hand afterwards — the script is the measurement of record,
 and the next run must be comparable.
 
-**Nine corrections this script encodes, each one a measured mis-report in a version before it:**
+**Ten corrections this script encodes, each one a measured mis-report in a version before it:**
 
 1. **It reads every record class, not just the ones with a `message.content` list.** That guard alone
    dropped **73 915 of 282 061 records (26.2%)** — every `turn_duration` (348.0 h of wall clock),
@@ -1343,6 +1364,17 @@ and the next run must be comparable.
    skipped, each message records the user-turn index it fell in so only same-turn messages pair, and a
    `read_text` run counts toward `BATCH` only when no entry carries a range. A trend across this fix is
    not comparable on those three counters - say so rather than reporting an improvement.
+
+10. **It counts every `tool_use` once, and skips the records that only replay one.** Claude Code now
+    re-logs a request in `api-request` and `api-request-blob` records whose `message` carries
+    `tool_use` and `tool_result` blocks already seen. The 1-week scan to 2026-11-13 read **9 453 of
+    35 063 `tool_use` blocks (27%)** twice: calls read 34 997 against a true 25 620, the redundant
+    share **19.1%** against **4.9%**, and no-write read duplicates 2 626 against 5 (`I908`). The
+    script skips both record types before it reads `message`, drops any `tool_use` whose id it has
+    already counted, prints both counts beside `records` and as `skipped=` on the `CORPUS` line, and
+    asserts that no id was counted twice. The 2026-11-07 run (`c84aa03`) may already carry part of
+    the inflation, so a trend across this fix is not comparable on calls, fan-out, the redundant
+    share or the duplicate rows - say so rather than reporting an improvement.
 
 **Two refinements, so the script does not over-claim either:**
 

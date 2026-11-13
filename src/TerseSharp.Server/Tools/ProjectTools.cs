@@ -98,7 +98,7 @@ public sealed class ProjectTools(ToolContext context)
         Guarded(workspace, project, dryRun, loaded => ProjectFile.RemoveReference(Resolve(loaded, project), Resolve(loaded, target), dryRun, verbose));
 
     [McpServerTool(Name = "package_list", ReadOnly = true)]
-    [Description("Replaces Bash dotnet list package. Lists the package and project references a project declares; vulnerable=true or outdated=true answers from the restored graph instead, which is the question the project file cannot answer - a known advisory or a newer version - so the last dependency question needs no shell. The two are mutually exclusive, exactly as the CLI's own flags are.")]
+    [Description("Replaces Bash dotnet list package. Lists the package and project references a project declares; vulnerable=true or outdated=true answers from the restored graph instead, which is the question the project file cannot answer - a known advisory or a newer version - so the last dependency question needs no shell. If the CLI fails, outdated=true falls back to the nuget.org flat container, tagged HEURISTIC. The two are mutually exclusive, exactly as the CLI's own flags are.")]
     public Task<string> PackageList(
         [Description("Path to the .csproj.")] string project,
         [Description("Report packages with a known security advisory, read from the restored graph including transitive ones. Needs a restore. Cannot be combined with outdated. Default false.")] bool vulnerable = false,

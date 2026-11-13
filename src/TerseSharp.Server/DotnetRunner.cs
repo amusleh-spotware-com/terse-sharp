@@ -370,7 +370,7 @@ public static partial class DotnetRunner
             response.Line(Relative(line, root));
     }
 
-    private static IEnumerable<string> Tail(string output) =>
+    internal static IEnumerable<string> Tail(string output) =>
         output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).TakeLast(MaxTailLines);
 
     private static Task<ProcessRun> RunAsync(
@@ -653,15 +653,7 @@ public static partial class DotnetRunner
         var response = new ResponseBuilder("package_list", PositionFormat.Relative(root, projectPath));
 
         if (run.ExitCode is not 0 || !run.Drained)
-        {
-            response.Summary(0, 0, "packages examined");
-            response.Note(Unexamined(run, flag));
-
-            foreach (var line in Tail(run.Output))
-                response.Line(line);
-
-            return response.ToString();
-        }
+            return await PackageAudit.AnsweredAsync(response, new AuditFailure(run, flag, root, projectPath, vulnerable), cancellationToken).ConfigureAwait(false);
 
         var lines = Audited(run.Output);
 
@@ -926,7 +918,7 @@ public static partial class DotnetRunner
 
     private static bool Answered(ProcessRun run) => run.ExitCode is 0 && run.Drained;
 
-    private static string Unexamined(ProcessRun run, string flag) => run.Drained
+    internal static string Unexamined(ProcessRun run, string flag) => run.Drained
         ? string.Create(CultureInfo.InvariantCulture, $"FAILED dotnet list package {flag} exited {run.ExitCode}; nothing was examined, so this is not a clean bill of health")
         : string.Create(CultureInfo.InvariantCulture, $"FAILED dotnet list package {flag} exited but its output stream stayed open, so the listing is incomplete; this is not a clean bill of health");
 

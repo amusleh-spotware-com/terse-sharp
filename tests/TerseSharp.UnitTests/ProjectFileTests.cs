@@ -255,4 +255,43 @@ public sealed class ProjectFileTests : IDisposable
         Assert.Equal("ItemGroup", parent.Name.LocalName);
         Assert.Null(parent.Attribute("Condition"));
     }
+
+    [Fact]
+    public async Task PinsAsync_ResolvesEveryDeclaredReferenceToItsOverriddenOrCentralVersion()
+    {
+        File.WriteAllText(Path.Combine(root, "Directory.Packages.props"), """
+        <Project>
+          <PropertyGroup>
+            <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+          </PropertyGroup>
+          <ItemGroup>
+            <PackageVersion Include="Alpha" Version="1.0.0" />
+            <PackageVersion Include="Beta" Version="2.0.0" />
+            <GlobalPackageReference Include="Gamma" Version="3.0.0" />
+          </ItemGroup>
+        </Project>
+        """);
+        File.WriteAllText(Path.Combine(root, "Directory.Build.props"), """
+        <Project>
+          <ItemGroup>
+            <PackageReference Include="Beta" />
+          </ItemGroup>
+        </Project>
+        """);
+        var project = Path.Combine(Directory.CreateDirectory(Path.Combine(root, "app")).FullName, "App.csproj");
+        File.WriteAllText(project, """
+        <Project Sdk="Microsoft.NET.Sdk">
+          <ItemGroup>
+            <PackageReference Include="Alpha" />
+            <PackageReference Include="Delta" VersionOverride="4.1.0" />
+            <PackageReference Include="Epsilon" Version="$(EpsilonVersion)" />
+          </ItemGroup>
+        </Project>
+        """);
+
+        var pins = await ProjectFile.PinsAsync(root, project);
+
+        PackagePin[] expected = [new("Alpha", "1.0.0"), new("Delta", "4.1.0"), new("Epsilon", "$(EpsilonVersion)"), new("Beta", "2.0.0"), new("Gamma", "3.0.0")];
+        Assert.Equal(expected, pins);
+    }
 }

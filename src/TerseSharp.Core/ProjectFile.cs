@@ -85,6 +85,23 @@ public static class ProjectFile
         return Result.Ok(response.ToString());
     }
 
+    public static async Task<IReadOnlyList<PackagePin>> PinsAsync(string root, string projectPath)
+    {
+        var central = CentralVersionsFile(root, projectPath) is { } path ? await SourceAsync(path).ConfigureAwait(false) : null;
+        List<PackagePin> pins = [];
+
+        foreach (var file in BuildPropertyFiles(root, projectPath).Prepend(Path.GetFullPath(projectPath)))
+        {
+            if (await SourceAsync(file).ConfigureAwait(false) is { } source)
+                pins.AddRange(PackagePins.From(source.Document.Descendants("PackageReference"), central?.Document));
+        }
+
+        if (central is { } versions)
+            pins.AddRange(PackagePins.From(versions.Document.Descendants("GlobalPackageReference"), null));
+
+        return [.. pins.DistinctBy(pin => pin.Id, StringComparer.OrdinalIgnoreCase)];
+    }
+
     public static Result<string> GetProperties(string projectPath, string? name)
     {
         var document = Load(projectPath);
