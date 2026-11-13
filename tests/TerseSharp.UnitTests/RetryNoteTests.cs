@@ -108,4 +108,21 @@ public sealed partial class RetryNoteTests
         Assert.Contains("force=true for a new or uncompiled .cs file", note, StringComparison.Ordinal);
         Assert.Contains("content= again re-sends the whole file", note, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void TheRolledBackPreviewAndUnplacedNotes_NameOnlyParametersTheirToolsDeclare()
+    {
+        var declared = Advertised();
+
+        foreach (var tool in new[] { "replace_symbol", "add_member" })
+        {
+            foreach (var named in Named(RetryNote.RolledBack))
+                Assert.True(declared[tool].Contains(named), tool + " names " + named + "=, which it does not declare: " + RetryNote.RolledBack);
+        }
+
+        foreach (var named in Named(RetryNote.Unplaced))
+            Assert.True(declared["add_member"].Contains(named), "add_member names " + named + "=, which it does not declare: " + RetryNote.Unplaced);
+
+        Assert.Contains("before=", RetryNote.Unplaced, StringComparison.Ordinal);
+    }
 }

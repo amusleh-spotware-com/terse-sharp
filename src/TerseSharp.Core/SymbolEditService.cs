@@ -2107,6 +2107,31 @@ public static class SymbolEditService
             lastLeadingDirective.IsDirective ? lastLeadingDirective.FullSpan.End : node.FullSpan.Start,
             firstTrailingDirective.IsDirective ? firstTrailingDirective.FullSpan.Start : node.FullSpan.End);
     }
+
+    private static readonly SymbolDisplayFormat ContainerFormat = new(
+        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+        genericsOptions: SymbolDisplayGenericsOptions.None);
+
+    public static async Task<string?> SharedContainerAsync(LoadedWorkspace workspace, IReadOnlyList<string> symbolIds, CancellationToken cancellationToken)
+    {
+        string? shared = null;
+
+        foreach (var symbolId in symbolIds)
+        {
+            var resolved = await SymbolLookup.ResolveAsync(workspace, symbolId, cancellationToken).ConfigureAwait(false);
+            var container = resolved.Value?.ContainingType?.ToDisplayString(ContainerFormat);
+
+            if (container is null || (shared is not null && !string.Equals(shared, container, StringComparison.Ordinal)))
+                return null;
+
+            shared = container;
+        }
+
+        return shared;
+    }
+
+    public static bool IsMisplaced(TerseError error) =>
+        error.Code is TerseErrorCode.InvalidArgument && error.Message.Contains(" names no member of ", StringComparison.Ordinal);
 }
 
 internal sealed record EditTarget(Document Document, SyntaxNode Node, ISymbol Symbol);

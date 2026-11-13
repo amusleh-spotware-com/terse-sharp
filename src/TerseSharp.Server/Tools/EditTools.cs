@@ -117,7 +117,8 @@ public sealed class EditTools(ToolContext context)
                 held.Root,
                 helpers,
                 container,
-                imports);
+                imports,
+                HeldAnchor.For(add, container, held));
         }
 
         if (held is { Targets.Count: > 1 })
@@ -358,7 +359,8 @@ public sealed class EditTools(ToolContext context)
         string? heldRoot = null,
         string[]? add = null,
         string? addTo = null,
-        string[]? usings = null)
+        string[]? usings = null,
+        IReadOnlyList<string>? anchored = null)
     {
         var rejection = context.RejectWrite();
         var carry = new Carry("replace_symbol", symbolIds, declarations, add, addTo, usings, options.Rename, options.Placement, Preview: options.DryRun);
@@ -368,8 +370,7 @@ public sealed class EditTools(ToolContext context)
             : context.WithWorkspaceAsync(
                 workspace,
                 null,
-                async loaded => Elsewhere(heldRoot, loaded.Root) ?? Carried(await SymbolEditService.ReplaceDeclarationsAsync(
-                    loaded, symbolIds, declarations, options, cancellationToken).ConfigureAwait(false), carry, loaded.Root),
+                async loaded => Elsewhere(heldRoot, loaded.Root) ?? await ReplacedAsync(loaded, carry, options, anchored, cancellationToken).ConfigureAwait(false),
                 cancellationToken: cancellationToken);
     }
 
@@ -390,10 +391,12 @@ public sealed class EditTools(ToolContext context)
     internal static string Carried(Result<string> result, Carry carry, string root) =>
         result.IsOk ? Previewed(result.Value!, carry, root) : Rejected(result.Error!, carry, root);
 
-    private static string Previewed(string preview, Carry carry, string root) =>
-            carry is { Preview: true, Tool: { Length: > 0 } tool } && Worth(carry) && FileTools.Lands(preview)
-                ? preview + "\nretryWith=" + Remember(tool, carry, root) + " applies this preview"
-                : preview;
+    private static string Previewed(string preview, Carry carry, string root) => carry switch
+    {
+        { Preview: true, Tool: { Length: > 0 } tool } when Worth(carry) && FileTools.Lands(preview) => preview + "\nretryWith=" + Remember(tool, carry, root) + " applies this preview",
+        { Tool: { } held } when RolledBack(preview, carry) => preview + "\n" + RetryNote.RolledBack + "\nretryWith=" + Remember(held, carry, root),
+        _ => preview,
+    };
 
     private static string Remember(string tool, Carry carry, string root) => RejectedEdits.Remember(
             root, tool, carry.Targets ?? [], carry.Payloads ?? [], carry.Add, carry.AddTo, carry.Usings, carry.Rename, carry.Placement, carry.Edits);
@@ -469,9 +472,9 @@ public sealed class EditTools(ToolContext context)
         : held is { Count: > 0 } ? [.. held] : null;
 
     private static string Rejected(TerseError error, Carry carry, string root) =>
-            carry.Tool is { Length: > 0 } tool && Holdable(carry, error) && Worth(carry)
-                ? error.Render() + "\n" + RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0) + "\nretryWith=" + Remember(tool, carry, root)
-                : error.Render();
+        carry.Tool is { Length: > 0 } tool && Holdable(carry, error) && Worth(carry)
+            ? error.Render() + "\n" + Note(tool, error, carry) + "\nretryWith=" + Remember(tool, Unplaced(carry, error), root)
+            : error.Render();
 
     private static bool Holdable(Carry carry, TerseError error) => carry switch
     {
@@ -842,4 +845,26 @@ public sealed class EditTools(ToolContext context)
     };
 
     private const string Resend = "re-send the text; a token is lost once newer rejections push it out of the held window or the server restarts";
+
+    private static async Task<string> ReplacedAsync(LoadedWorkspace loaded, Carry carry, EditOptions options, IReadOnlyList<string>? anchored, CancellationToken cancellationToken)
+    {
+        var container = carry.AddTo ?? (anchored is { Count: > 0 } ? await SymbolEditService.SharedContainerAsync(loaded, anchored, cancellationToken).ConfigureAwait(false) : null);
+        var result = await SymbolEditService.ReplaceDeclarationsAsync(loaded, carry.Targets ?? [], carry.Payloads ?? [], options with { AddTo = container }, cancellationToken).ConfigureAwait(false);
+
+        return Carried(result, carry with { AddTo = container }, loaded.Root);
+    }
+
+    private static bool RolledBack(string preview, Carry carry) =>
+        carry is { Preview: true, Tool: "replace_symbol" or "add_member", Targets: [{ Length: > 0 }, ..] }
+        && Worth(carry)
+        && preview.Contains("would be rolled back", StringComparison.Ordinal);
+
+    private static bool Misplaced(Carry carry, TerseError error) =>
+        carry is { Tool: "add_member", Placement: not null } && SymbolEditService.IsMisplaced(error);
+
+    private static Carry Unplaced(Carry carry, TerseError error) =>
+        Misplaced(carry, error) ? carry with { Placement = null } : carry;
+
+    private static string Note(string tool, TerseError error, Carry carry) =>
+        Misplaced(carry, error) ? RetryNote.Unplaced : RetryNote.For(tool, error.Code, carry.Payloads?.Length ?? 0);
 }

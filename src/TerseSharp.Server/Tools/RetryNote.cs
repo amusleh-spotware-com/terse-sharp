@@ -44,4 +44,7 @@ internal static class RetryNote
         (TerseErrorCode.InvalidArgument, _) => "the content is held, so the retry is retryWith=<the token below> plus the one flag the remedy names - force=true for a new or uncompiled .cs file, overwrite=true for a rewrite - or a corrected path=; content= again re-sends the whole file",
         _ => "the content is held, so the retry is the token plus a corrected path= and nothing else",
     };
+
+    public const string RolledBack = "the previewed batch is held, but replaying the token alone would be rolled back as well - replace_symbol takes it with append set, the members the errors name as its symbolIds and their new text as its declarations, and lands everything in ONE edit";
+    public const string Unplaced = "the token holds the declarations WITHOUT the placement this refusal names, so retryWith alone appends them at the end of each type - pass before=, after= or position= beside it to place them instead";
 }

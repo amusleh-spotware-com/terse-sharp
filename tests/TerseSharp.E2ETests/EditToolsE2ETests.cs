@@ -2012,4 +2012,111 @@ public sealed class RegionTail
         Assert.Contains("would be rolled back", text, StringComparison.Ordinal);
         Assert.DoesNotContain("@@", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task ReplaceSymbol_AppendingATargetOfAnotherType_KeepsTheHeldAddOnTheHeldContainer()
+    {
+        var preview = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "OrderService.Unused",
+            ["declaration"] = "public int Unused() => UnusedSeed();",
+            ["add"] = new[] { "private static int UnusedSeed() => 7;" },
+            ["dryRun"] = true,
+        });
+
+        var appended = await server.CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = PreviewToken(preview),
+            ["append"] = true,
+            ["symbolIds"] = new[] { "OrderBook.SymbolCount" },
+            ["declarations"] = new[] { "public int SymbolCount => bySymbol.Count + 0;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", appended, StringComparison.Ordinal);
+        Assert.Contains("bySymbol.Count + 0", appended, StringComparison.Ordinal);
+        Assert.Contains("applies this preview", appended, StringComparison.Ordinal);
+        var section = appended.Split("--- ", StringSplitOptions.None).Single(part => part.Contains("UnusedSeed() => 7", StringComparison.Ordinal));
+        Assert.Contains("OrderService.cs", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReplaceSymbol_ADryRunThatWouldBeRolledBack_HoldsItSoAppendLandsItWithItsCallers()
+    {
+        var preview = await server.CallAsync("replace_symbol", new()
+        {
+            ["symbolId"] = "Reconciler.Reconcile(Order)",
+            ["declaration"] = "public int Reconcile(Order order, bool strict) => strict && order.Volume > 0 ? 1 : 0;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", preview, StringComparison.Ordinal);
+        Assert.DoesNotContain("applies this preview", preview, StringComparison.Ordinal);
+        var token = preview.Split('\n').Select(line => line.TrimEnd('\r')).Single(line => line.StartsWith("retryWith=r", StringComparison.Ordinal))["retryWith=".Length..];
+
+        var landed = await server.CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = token,
+            ["append"] = true,
+            ["symbolIds"] = new[] { "Reconcile(Dictionary<string,int>, Order)" },
+            ["declarations"] = new[] { "public int Reconcile(Dictionary<string, int> pending, Order order) => pending.Count + Reconcile(order, true);" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("would be rolled back", landed, StringComparison.Ordinal);
+        Assert.Contains("Reconcile(order, true)", landed, StringComparison.Ordinal);
+        Assert.Contains("applies this preview", landed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_ADryRunThatWouldBeRolledBack_HoldsItSoReplaceSymbolAppendLandsIt()
+    {
+        var preview = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolId"] = "OrderService",
+            ["declaration"] = "public int DoubledProbe() => Unused() * ProbeFactor;",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("would be rolled back", preview, StringComparison.Ordinal);
+        var token = preview.Split('\n').Select(line => line.TrimEnd('\r')).Single(line => line.StartsWith("retryWith=r", StringComparison.Ordinal))["retryWith=".Length..];
+
+        var landed = await server.CallAsync("replace_symbol", new()
+        {
+            ["retryWith"] = token,
+            ["append"] = true,
+            ["symbolIds"] = new[] { "OrderService.Unused" },
+            ["declarations"] = new[] { "public int Unused() => 7;" },
+            ["add"] = new[] { "private const int ProbeFactor = 2;" },
+            ["dryRun"] = true,
+        });
+
+        Assert.DoesNotContain("ERROR", landed, StringComparison.Ordinal);
+        Assert.DoesNotContain("would be rolled back", landed, StringComparison.Ordinal);
+        Assert.Contains("DoubledProbe()", landed, StringComparison.Ordinal);
+        Assert.Contains("ProbeFactor = 2", landed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddMember_ABatchRefusedForAnAnchorOneTypeLacks_HoldsItWithoutThePlacementSoTheTokenAloneLands()
+    {
+        var refused = await server.CallAsync("add_member", new()
+        {
+            ["typeSymbolIds"] = new[] { "OrderBook", "OrderService" },
+            ["declarations"] = new[] { "public int BookProbe() => 1;", "public int ServiceProbe() => 2;" },
+            ["after"] = "SubmitTwice",
+            ["dryRun"] = true,
+        });
+
+        Assert.Contains("ERROR InvalidArgument", refused, StringComparison.Ordinal);
+        Assert.Contains("after=SubmitTwice names no member of OrderBook", refused, StringComparison.Ordinal);
+        Assert.Contains("WITHOUT the placement", refused, StringComparison.Ordinal);
+        var token = refused.Split('\n').Select(line => line.TrimEnd('\r')).Single(line => line.StartsWith("retryWith=r", StringComparison.Ordinal))["retryWith=".Length..];
+
+        var replayed = await server.CallAsync("add_member", new() { ["retryWith"] = token, ["dryRun"] = true });
+
+        Assert.DoesNotContain("ERROR", replayed, StringComparison.Ordinal);
+        Assert.Contains("BookProbe", replayed, StringComparison.Ordinal);
+        Assert.Contains("ServiceProbe", replayed, StringComparison.Ordinal);
+    }
 }
