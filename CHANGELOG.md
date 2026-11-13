@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions are deri
 
 ## [Unreleased]
 
+## [0.84.1] - 2026-11-13
+
 ### Fixed
 
 - **A long-running server no longer keeps every workspace a reload replaced (I919).** Since 0.81.0 the I853 write ledger stored each call's read mark in an `AsyncLocal` that referenced the `LoadedWorkspace`, and overlapped I/O started inside a call and still pending after it - the build-host pipe a reload or an add-file edit opens - captures that `ExecutionContext`, so every reload pinned the workspace it replaced, with its whole Roslyn solution and compilations, for the life of the process. A heap dump of a 0.83.0 server at 11 GB held 36 `LoadedWorkspace` and 1 945 `CSharpCompilation` objects while its registry held one, each rooted `strong handle -> ThreadPoolBoundHandleOverlapped -> ExecutionContext -> WriteLedger+ReadMark -> LoadedWorkspace`; another server reached 24.7 GB. Over 8 add-file-then-reload cycles on the fixture, 0.83.0 kept 9 workspaces and 17 compilations alive after a forced collection, this build 1 and 1. The mark now references the workspace's own write ledger, which holds a few path stamps, so a captured context no longer roots a solution; the overtaken-write check is unchanged because each workspace owns exactly one ledger. Covered by `ReloadAsync_WhileAContextCapturedDuringACallIsStillAlive_LetsTheReplacedWorkspaceBeCollected`, which fails on the old ledger and passes on the new, with a control case that captures no mark.
@@ -7951,7 +7953,8 @@ XAML tooling, ReSharper command-line-tools integration, project/solution/package
 content-addressed index, the trigram text index, debug and profiling modules, and the token/latency
 benchmark harnesses are specified but not implemented.
 
-[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.84.0...HEAD
+[Unreleased]: https://github.com/amusleh-spotware-com/terse-sharp/compare/v0.84.1...HEAD
+[0.84.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.84.1
 [0.84.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.84.0
 [0.83.0]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.83.0
 [0.82.1]: https://github.com/amusleh-spotware-com/terse-sharp/releases/tag/v0.82.1
