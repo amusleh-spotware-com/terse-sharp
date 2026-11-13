@@ -114,4 +114,42 @@ public sealed class LoadedWorkspaceOvertakeTests
         Assert.Single(answers, answer => answer is null);
         Assert.Equal(answers[0] is null ? "first\n" : "second\n", await File.ReadAllTextAsync(notes, TestContext.Current.CancellationToken));
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReloadAsync_WhileAContextCapturedDuringACallIsStillAlive_LetsTheReplacedWorkspaceBeCollected(bool markedRead)
+    {
+        using var temporary = TemporarySolution.Create();
+        using var registry = new WorkspaceRegistry(watch: false);
+
+        await registry.LoadAsync(temporary.SolutionPath, TestContext.Current.CancellationToken);
+
+        var (captured, replaced) = await CaptureDuringACallAsync(registry, markedRead);
+
+        await registry.ReloadAsync(temporary.SolutionPath, TestContext.Current.CancellationToken);
+        Collect();
+
+        Assert.False(replaced.TryGetTarget(out _));
+        GC.KeepAlive(captured);
+    }
+
+    private static async Task<(ExecutionContext? Captured, WeakReference<LoadedWorkspace> Replaced)> CaptureDuringACallAsync(WorkspaceRegistry registry, bool markedRead)
+    {
+        await Task.Yield();
+
+        using var lease = registry.Resolve(null, null).Value!;
+
+        if (markedRead)
+            lease.Workspace.MarkRead();
+
+        return (ExecutionContext.Capture(), new WeakReference<LoadedWorkspace>(lease.Workspace));
+    }
+
+    private static void Collect()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
 }

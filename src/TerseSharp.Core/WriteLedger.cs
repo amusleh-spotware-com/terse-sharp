@@ -7,11 +7,11 @@ internal sealed class WriteLedger
     private readonly Dictionary<string, Stamp> written = [with(PathBoundary.Comparer)];
     private long generation;
 
-    public void MarkRead(LoadedWorkspace owner) => Current.Value = new ReadMark(owner, Interlocked.Read(ref generation));
+    public void MarkRead() => Current.Value = new ReadMark(this, Interlocked.Read(ref generation));
 
-    public string[] Overtaken(LoadedWorkspace owner, IReadOnlyList<string> paths)
+    public string[] Overtaken(IReadOnlyList<string> paths)
     {
-        if (Mark(owner) is not { } mark)
+        if (Mark() is not { } mark)
             return [];
 
         var overtaken = new List<string>(paths.Count);
@@ -27,17 +27,17 @@ internal sealed class WriteLedger
         return mark.Overtaken;
     }
 
-    public void Wrote(LoadedWorkspace owner, IEnumerable<string> paths)
+    public void Wrote(IEnumerable<string> paths)
     {
-        var stamp = new Stamp(Interlocked.Increment(ref generation), Mark(owner));
+        var stamp = new Stamp(Interlocked.Increment(ref generation), Mark());
 
         foreach (var path in paths)
             written[path] = stamp;
     }
 
-    public static string[] TakeOvertaken(LoadedWorkspace owner)
+    public string[] TakeOvertaken()
     {
-        if (Mark(owner) is not { } mark)
+        if (Mark() is not { } mark)
             return [];
 
         var overtaken = mark.Overtaken;
@@ -47,14 +47,14 @@ internal sealed class WriteLedger
         return overtaken;
     }
 
-    private static ReadMark? Mark(LoadedWorkspace owner) =>
-        Current.Value is { } mark && ReferenceEquals(mark.Owner, owner) ? mark : null;
+    private ReadMark? Mark() =>
+        Current.Value is { } mark && ReferenceEquals(mark.Ledger, this) ? mark : null;
 
     private readonly record struct Stamp(long Generation, ReadMark? Writer);
 
-    private sealed class ReadMark(LoadedWorkspace owner, long generation)
+    private sealed class ReadMark(WriteLedger ledger, long generation)
     {
-        public LoadedWorkspace Owner { get; } = owner;
+        public WriteLedger Ledger { get; } = ledger;
 
         public long Generation { get; } = generation;
 

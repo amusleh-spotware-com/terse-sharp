@@ -139,9 +139,9 @@ public sealed class LoadedWorkspace : IDisposable
         return new WorkspaceLease(this);
     }
 
-    public void MarkRead() => writes.MarkRead(this);
+    public void MarkRead() => writes.MarkRead();
 
-    public string[] TakeOvertaken() => WriteLedger.TakeOvertaken(this);
+    public string[] TakeOvertaken() => writes.TakeOvertaken();
 
     private static IEnumerable<string> ChangedPaths(Solution before, Solution after) =>
         after.GetChanges(before)
@@ -277,13 +277,13 @@ public sealed class LoadedWorkspace : IDisposable
     {
         lock (historyGate)
         {
-            if (writes.Overtaken(this, entry.Paths).Length > 0 || !Applied(rebased))
+            if (writes.Overtaken(entry.Paths).Length > 0 || !Applied(rebased))
                 return false;
 
             Record(entry);
 
             Solution = forked;
-            writes.Wrote(this, entry.Paths);
+            writes.Wrote(entry.Paths);
 
             return true;
         }
@@ -325,7 +325,7 @@ public sealed class LoadedWorkspace : IDisposable
                 return "the workspace refused the revert";
 
             Solution = restored;
-            writes.Wrote(this, entry.Paths);
+            writes.Wrote(entry.Paths);
 
             if (history.Count > 0 && ReferenceEquals(history[^1], entry))
                 history.RemoveAt(history.Count - 1);
@@ -800,7 +800,7 @@ public sealed class LoadedWorkspace : IDisposable
                 return false;
 
             Solution = solution;
-            writes.Wrote(this, ChangedPaths(previous, solution));
+            writes.Wrote(ChangedPaths(previous, solution));
 
             return true;
         }
