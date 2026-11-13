@@ -148,7 +148,7 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
         }
     }
     private static string[] Records(string listing) =>
-        [.. listing.Split('\n').Skip(1).Where(line => line.Length > 0 && !line.StartsWith("paths=", StringComparison.Ordinal) && !line.StartsWith("next:", StringComparison.Ordinal))];
+        [.. listing.Split('\n').Skip(1).Where(line => line.Length > 0 && !Framing(line))];
 
     [Fact]
     public async Task ChangedFiles_WithExclude_DropsThePathsAPathspecCannotLeaveOut()
@@ -1150,6 +1150,9 @@ public sealed class GitToolsE2ETests(TerseServerFixture server)
             File.SetLastWriteTimeUtc(path, written);
         }
     }
+
+    private static bool Framing(string line) =>
+        line.StartsWith("paths=", StringComparison.Ordinal) || line.StartsWith("next:", StringComparison.Ordinal) || line.StartsWith("NOTE ", StringComparison.Ordinal);
 }
 
 internal static class DiffSymbolProbe
